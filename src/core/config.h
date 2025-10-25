@@ -22,9 +22,9 @@ inline constexpr float kShadowCascadeRadiusMargin = 10.0f;
 inline constexpr float kShadowClipBaseRadius = 30.0f;
 // When using dynamic pullback, compute it from the covered XY range of each level.
 // pullback = max(kShadowClipPullbackMin, cover * kShadowClipPullbackFactor)
-inline constexpr float kShadowClipPullbackFactor = 1.5f;   // fraction of XY half-size behind center
-inline constexpr float kShadowClipForwardFactor  = 1.5f;   // fraction of XY half-size in front of center for zFar
-inline constexpr float kShadowClipPullbackMin    = 10.0f;   // lower bound on pullback so near levels don’t collapse
+inline constexpr float kShadowClipPullbackFactor = 2.5f;   // fraction of XY half-size behind center
+inline constexpr float kShadowClipForwardFactor  = 2.5f;   // fraction of XY half-size in front of center for zFar
+inline constexpr float kShadowClipPullbackMin    = 160.0f;   // lower bound on pullback so near levels don’t collapse
 // Additional Z padding for the orthographic frustum along light direction
 inline constexpr float kShadowClipZPadding = 40.0f;
 

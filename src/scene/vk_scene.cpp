@@ -110,6 +110,7 @@ void SceneManager::update_scene()
     // Clipmap shadow setup (directional). Each level i covers a square region
     // around the camera in the light's XY plane with radius R_i = R0 * 2^i.
     // The region center is snapped to the light-space texel grid for stability.
+    static const float kAheadBlend[kShadowCascadeCount] = {0.2f, 0.5f, 0.75f, 1.0f};
     {
         const glm::mat4 invView = glm::inverse(view);
         const glm::vec3 camPos = glm::vec3(invView[3]);
@@ -139,8 +140,10 @@ void SceneManager::update_scene()
             const float fu = glm::dot(camFwd, right);
             const float fv = glm::dot(camFwd, up);
 
-            const float u = glm::dot(camPos, right) + fu * ahead;
-            const float v = glm::dot(camPos, up) + fv * ahead;
+            const glm::vec3 aheadXY = right * (fu * ahead) + up * (fv * ahead);
+
+            const float u = glm::dot(camPos + aheadXY, right) + fu * ahead;
+            const float v = glm::dot(camPos + aheadXY, up) + fv * ahead;
 
             const float texel = (2.0f * cover) / float(kShadowMapResolution);
             const float uSnapped = floorf(u / texel) * texel;
@@ -148,7 +151,7 @@ void SceneManager::update_scene()
             const float du = uSnapped - u;
             const float dv = vSnapped - v;
 
-            const glm::vec3 center = camPos + right * du + up * dv;
+            const glm::vec3 center = camPos + aheadXY * kAheadBlend[ci] + right * du + up * dv;
 
             const float pullback = glm::max(kShadowClipPullbackMin, cover * kShadowClipPullbackFactor);
             const glm::vec3 eye = center - L * pullback;
