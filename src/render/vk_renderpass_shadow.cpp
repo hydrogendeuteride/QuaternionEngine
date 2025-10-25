@@ -17,6 +17,7 @@
 #include "core/asset_manager.h"
 #include "render/vk_pipelines.h"
 #include "core/vk_types.h"
+#include "core/config.h"
 
 void ShadowPass::init(EngineContext *context)
 {
@@ -51,8 +52,8 @@ void ShadowPass::init(EngineContext *context)
 
         // Static depth bias to help with surface acne (tune later)
         b._rasterizer.depthBiasEnable = VK_TRUE;
-        b._rasterizer.depthBiasConstantFactor = 2.0f;
-        b._rasterizer.depthBiasSlopeFactor = 2.0f;
+        b._rasterizer.depthBiasConstantFactor = kShadowDepthBiasConstant;
+        b._rasterizer.depthBiasSlopeFactor = kShadowDepthBiasSlope;
         b._rasterizer.depthBiasClamp = 0.0f;
     };
 

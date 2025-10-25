@@ -113,6 +113,7 @@ void SceneManager::update_scene()
     {
         const glm::mat4 invView = glm::inverse(view);
         const glm::vec3 camPos = glm::vec3(invView[3]);
+        const glm::vec3 camFwd  = -glm::vec3(invView[2]);
 
         glm::vec3 L = glm::normalize(-glm::vec3(sceneData.sunlightDirection));
         if (glm::length(L) < 1e-5f) L = glm::vec3(0.0f, -1.0f, 0.0f);
@@ -126,37 +127,37 @@ void SceneManager::update_scene()
             return kShadowClipBaseRadius * powf(2.0f, float(level));
         };
 
-        // Keep a copy of level radii in cascadeSplitsView for debug/visualization
         sceneData.cascadeSplitsView = glm::vec4(
             level_radius(0), level_radius(1), level_radius(2), level_radius(3));
 
         for (int ci = 0; ci < kShadowCascadeCount; ++ci)
         {
             const float radius = level_radius(ci);
+            const float cover = radius * kShadowCascadeRadiusScale + kShadowCascadeRadiusMargin;
 
-            // Compute camera coordinates in light's orthonormal basis (world -> light XY)
-            const float u = glm::dot(camPos, right);
-            const float v = glm::dot(camPos, up);
+            const float ahead = radius * 0.5;
+            const float fu = glm::dot(camFwd, right);
+            const float fv = glm::dot(camFwd, up);
 
-            // Texel size in light-space at this level
-            const float texel = (2.0f * radius) / float(kShadowMapResolution);
+            const float u = glm::dot(camPos, right) + fu * ahead;
+            const float v = glm::dot(camPos, up) + fv * ahead;
+
+            const float texel = (2.0f * cover) / float(kShadowMapResolution);
             const float uSnapped = floorf(u / texel) * texel;
             const float vSnapped = floorf(v / texel) * texel;
             const float du = uSnapped - u;
             const float dv = vSnapped - v;
 
-            // World-space snapped center of this clip level
             const glm::vec3 center = camPos + right * du + up * dv;
 
-            // Build light view matrix looking at the snapped center
-            const glm::vec3 eye = center - L * kShadowClipLightPullback;
+            const float pullback = glm::max(kShadowClipPullbackMin, cover * kShadowClipPullbackFactor);
+            const glm::vec3 eye = center - L * pullback;
             const glm::mat4 V = glm::lookAtRH(eye, center, up);
 
-            // Conservative Z range along light direction
             const float zNear = 0.1f;
-            const float zFar = kShadowClipLightPullback + kShadowClipZPadding;
+            const float zFar = pullback + cover * kShadowClipForwardFactor + kShadowClipZPadding;
 
-            const glm::mat4 P = glm::orthoRH_ZO(-radius, radius, -radius, radius, zNear, zFar);
+            const glm::mat4 P = glm::orthoRH_ZO(-cover, cover, -cover, cover, zNear, zFar);
             const glm::mat4 lightVP = P * V;
 
             sceneData.lightViewProjCascades[ci] = lightVP;
