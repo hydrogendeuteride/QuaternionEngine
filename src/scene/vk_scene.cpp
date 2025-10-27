@@ -104,128 +104,62 @@ void SceneManager::update_scene()
     sceneData.proj = projection;
     sceneData.viewproj = projection * view;
 
-    // Mixed Near + CSM shadow setup
-    // - Cascade 0: legacy/simple shadow (near range around camera)
-    // - Cascades 1..N-1: cascaded shadow maps covering farther ranges up to kShadowCSMFar
-
-    // ---- Mixed Near + CSM shadow setup (fixed) ----
     {
-        const glm::mat4 invView = glm::inverse(view);
-        const glm::vec3 camPos = glm::vec3(invView[3]);
-
-        // Sun direction and light basis (robust)
+        const glm::vec3 camPos = glm::vec3(glm::inverse(view)[3]);
         glm::vec3 L = glm::normalize(-glm::vec3(sceneData.sunlightDirection));
         if (glm::length(L) < 1e-5f) L = glm::vec3(0.0f, -1.0f, 0.0f);
+
         const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-        glm::vec3 right = glm::cross(L, worldUp);
-        if (glm::length2(right) < 1e-6f) right = glm::vec3(1, 0, 0);
-        right = glm::normalize(right);
-        glm::vec3 up = glm::normalize(glm::cross(right, L));
-
-        // 0) Legacy near/simple shadow (cascade 0 그대로)
+        glm::vec3 right = glm::normalize(glm::cross(worldUp, L));
+        glm::vec3 up = glm::normalize(glm::cross(L, right));
+        if (glm::length2(right) < 1e-6f)
         {
-            const float orthoRange = 10.0f;
-            const float nearDist = 0.1f;
-            const float farDist = 200.0f;
-            const glm::vec3 lightPos = camPos - L * 180.0f;
-            const glm::mat4 viewLight = glm::lookAtRH(lightPos, camPos, up);
-
-            // ⚠️ API에 맞게 ZO/NO를 고르세요 (Vulkan/D3D: ZO, OpenGL 기본: NO)
-            const glm::mat4 projLight = glm::orthoRH_ZO(-orthoRange, orthoRange, -orthoRange, orthoRange,
-                                                        nearDist, farDist);
-
-            const glm::mat4 lightVP = projLight * viewLight;
-            sceneData.lightViewProj = lightVP;
-            sceneData.lightViewProjCascades[0] = lightVP;
+            right = glm::vec3(1, 0, 0);
+            up = glm::normalize(glm::cross(L, right));
         }
 
-        // 1) Cascade split distances (뷰공간 +Z를 "전방 거리"로 사용)
-        const float farView = kShadowCSMFar;
-        const float nearSplit = 5.0f; // 0번(레거시)와 CSM 경계
-        const float lambda = 0.7f; // practical split
-        float splits[3]{};
-        for (int i = 1; i <= 3; ++i)
+        // Simple 2-stage CSM using existing shadow setup (no frustum box fitting)
+        const float baseOrtho = tan(fov);
+        const float lightNear = kShadowLightNear;
+
+        // Configure split distances in view space from central config
+        const float csmFar = kShadowCSMFar;
+        const float split0 = kShadowSplitRatio * csmFar;
+        sceneData.cascadeSplitsView = glm::vec4(split0, csmFar, csmFar, csmFar);
+
+        // Scale XY coverage with aspect so wide screens don't clip (from central config)
+        const float orthoY0 = baseOrtho * kShadowCascade0XYScale;
+        const float orthoX0 = orthoY0 * aspect;
+        const float orthoY1 = baseOrtho * kShadowCascade1XYScale;
+        const float orthoX1 = orthoY1 * aspect;
+
+        // Cascade 0 (near): larger XY footprint, push light back and extend far plane
         {
-            float si = float(i) / 3.0f;
-            float logd = nearSplit * powf(farView / nearSplit, si);
-            float lind = glm::mix(nearSplit, farView, si);
-            splits[i - 1] = glm::mix(lind, logd, lambda);
+            const float lightFar0 = kShadowCascade0Far;
+            const glm::vec3 lightPos0 = camPos - L * kShadowCascade0LightOffset;
+            const glm::mat4 viewLight0 = glm::lookAtRH(lightPos0, camPos, up);
+            const glm::mat4 projLight0 = glm::orthoRH_ZO(-orthoX0, orthoX0,
+                                                         -orthoY0, orthoY0,
+                                                         lightNear, lightFar0);
+            sceneData.lightViewProjCascades[0] = projLight0 * viewLight0;
+            sceneData.lightViewProj = sceneData.lightViewProjCascades[0];
         }
-        sceneData.cascadeSplitsView = glm::vec4(nearSplit, splits[0], splits[1], farView);
 
-        // 2) 뷰공간 슬라이스 [zn, zf]의 월드 코너 계산
-        auto frustum_corners_world = [&](float zn, float zf) {
-            // 카메라는 뷰공간 -Z를 바라봄. 우리는 "전방거리"를 양수로 넣고 z는 -zn, -zf.
-            const float tanHalfFov = tanf(fov * 0.5f);
-            const float yN = tanHalfFov * zn;
-            const float xN = yN * aspect;
-            const float yF = tanHalfFov * zf;
-            const float xF = yF * aspect;
-
-            glm::vec3 vs[8] = {
-                {-xN, -yN, -zn}, {+xN, -yN, -zn}, {+xN, +yN, -zn}, {-xN, +yN, -zn},
-                {-xF, -yF, -zf}, {+xF, -yF, -zf}, {+xF, +yF, -zf}, {-xF, +yF, -zf}
-            };
-            std::array<glm::vec3, 8> ws{};
-            for (int i = 0; i < 8; ++i)
-                ws[i] = glm::vec3(invView * glm::vec4(vs[i], 1.0f));
-            return ws;
-        };
-
-        auto build_light_matrix_for_slice = [&](float zNearVS, float zFarVS) {
-            auto ws = frustum_corners_world(zNearVS, zFarVS);
-
-            // 라이트 뷰: 슬라이스 센터를 본다
-            glm::vec3 center(0.0f);
-            for (auto &p: ws) center += p;
-            center *= (1.0f / 8.0f);
-            const float lightPullback = 50.0f; // 충분히 뒤로 빼서 안정화
-            glm::mat4 V = glm::lookAtRH(center - L * lightPullback, center, up);
-
-            // 라이트 공간으로 투영 후 AABB
-            glm::vec3 minLS(FLT_MAX), maxLS(-FLT_MAX);
-            for (auto &p: ws)
-            {
-                glm::vec3 q = glm::vec3(V * glm::vec4(p, 1.0f));
-                minLS = glm::min(minLS, q);
-                maxLS = glm::max(maxLS, q);
-            }
-
-            // XY 반경/센터, 살짝 여유
-            glm::vec2 extXY = glm::vec2(maxLS.x - minLS.x, maxLS.y - minLS.y);
-            float radius = 0.5f * glm::max(extXY.x, extXY.y);
-            radius = radius * kShadowCascadeRadiusScale + kShadowCascadeRadiusMargin;
-
-            glm::vec2 centerXY = 0.5f * glm::vec2(maxLS.x + minLS.x, maxLS.y + minLS.y);
-
-            // Texel snapping (안정화)
-            const float texel = (2.0f * radius) / float(kShadowMapResolution);
-            centerXY.x = floorf(centerXY.x / texel) * texel;
-            centerXY.y = floorf(centerXY.y / texel) * texel;
-
-            // 스냅된 XY 센터를 반영하도록 라이트 뷰를 라이트공간에서 평행이동
-            glm::mat4 Vsnapped = glm::translate(glm::mat4(1.0f),
-                                                -glm::vec3(centerXY.x, centerXY.y, 0.0f)) * V;
-
-            // 깊이 범위(표준 Z, reversed-Z 안 씀)
-            // lookAtRH는 -Z 쪽을 앞(카메라 전방)으로 둔다: 가까운 점 z는 덜 음수(값이 큰 쪽), 먼 점은 더 음수(값이 작은 쪽)
-            const float zPad = 50.0f; // 슬라이스 앞뒤 여유
-            float zNear = glm::max(0.1f, -maxLS.z - zPad); // "가까움": -z(덜음수) → 양수 거리
-            float zFar = -minLS.z + zPad; // "멀리":   -z(더음수) → 더 큰 양수
-
-            // ⚠️ API에 맞게 ZO/NO를 선택
-            glm::mat4 P = glm::orthoRH_ZO(-radius, radius, -radius, radius, zNear, zFar);
-
-            return P * Vsnapped;
-        };
-
-        // 3) Cascades 1..3 채우기
-        float prev = nearSplit;
-        for (int ci = 1; ci < kShadowCascadeCount; ++ci)
+        // Cascade 1 (far): much larger XY footprint and longer depth range
         {
-            float end = (ci < kShadowCascadeCount - 1) ? splits[ci - 1] : farView;
-            sceneData.lightViewProjCascades[ci] = build_light_matrix_for_slice(prev, end);
-            prev = end;
+            const float lightFar1 = kShadowCascade1Far;     // much farther reach for distant shadows
+            const glm::vec3 lightPos1 = camPos - L * kShadowCascade1LightOffset;
+            const glm::mat4 viewLight1 = glm::lookAtRH(lightPos1, camPos, up);
+            const glm::mat4 projLight1 = glm::orthoRH_ZO(-orthoX1, orthoX1,
+                                                         -orthoY1, orthoY1,
+                                                         lightNear, lightFar1);
+            sceneData.lightViewProjCascades[1] = projLight1 * viewLight1;
+        }
+
+        // Fill remaining slots with the far cascade to keep data valid
+        for (int c = 2; c < 4; ++c)
+        {
+            sceneData.lightViewProjCascades[c] = sceneData.lightViewProjCascades[1];
         }
     }
 

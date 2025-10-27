@@ -125,7 +125,7 @@ void VulkanEngine::init()
     auto imguiPass = std::make_unique<ImGuiPass>();
     _renderPassManager->setImGuiPass(std::move(imguiPass));
 
-    const std::string structurePath = _assetManager->modelPath("seoul_high.glb");
+    const std::string structurePath = _assetManager->modelPath("resi.glb");
     const auto structureFile = _assetManager->loadGLTF(structurePath);
 
     assert(structureFile.has_value());
@@ -316,9 +316,9 @@ void VulkanEngine::draw()
         RGImageHandle hGBufferAlbedo = _renderGraph->import_gbuffer_albedo();
         RGImageHandle hSwapchain = _renderGraph->import_swapchain_image(swapchainImageIndex);
 
-        // Create a transient shadow depth target (fixed resolution for now)
-        // Create transient depth targets for cascaded shadow maps
-        const VkExtent2D shadowExtent{2048, 2048};
+        // Create transient depth targets for cascaded shadow maps using central config
+        const uint32_t sres = static_cast<uint32_t>(kShadowMapResolution);
+        const VkExtent2D shadowExtent{sres, sres};
         std::array<RGImageHandle, kShadowCascadeCount> hShadowCascades{};
         for (int i = 0; i < kShadowCascadeCount; ++i)
         {

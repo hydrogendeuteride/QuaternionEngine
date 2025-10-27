@@ -1,5 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#include "shadow_config.glsl"
 #include "input_structures.glsl"
 
 layout(location=0) in vec2 inUV;
@@ -9,7 +10,7 @@ layout(set=1, binding=0) uniform sampler2D posTex;
 layout(set=1, binding=1) uniform sampler2D normalTex;
 layout(set=1, binding=2) uniform sampler2D albedoTex;
 // Mixed near + CSM: shadowTex[0] is the near/simple map, 1..N-1 are cascades
-layout(set=2, binding=0) uniform sampler2D shadowTex[4];
+layout(set=2, binding=0) uniform sampler2D shadowTex[SHADOW_CASCADE_COUNT];
 
 const float PI = 3.14159265359;
 
@@ -35,11 +36,8 @@ uint selectCascadeIndex(vec3 worldPos)
     // Compute view-space positive depth
     vec4 vpos = sceneData.view * vec4(worldPos, 1.0);
     float depthVS = -vpos.z;
-    // Near/simple map covers [0, sceneData.cascadeSplitsView.x)
-    if (depthVS < sceneData.cascadeSplitsView.x) return 0u;
-    if (depthVS < sceneData.cascadeSplitsView.y) return 1u;
-    if (depthVS < sceneData.cascadeSplitsView.z) return 2u;
-    return 3u; // last cascade extends to w
+    // 2-cascade split: [0, x) -> 0, [x, far] -> 1
+    return depthVS < sceneData.cascadeSplitsView.x ? 0u : 1u;
 }
 
 float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
@@ -67,9 +65,9 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
     ivec2 dim       = textureSize(shadowTex[ci], 0);
     vec2  texelSize = 1.0 / vec2(dim);
 
-    float baseRadius = 1.25;
-    // Slightly increase filter for farther cascades
-    float radius     = mix(baseRadius, baseRadius * 3.0, float(ci) / 3.0);
+    float baseRadius = SHADOW_PCF_BASE_RADIUS;
+    // Increase filter for farther cascade
+    float radius     = mix(baseRadius, baseRadius * SHADOW_PCF_FAR_MULT, float(ci));
 
     float ang = hash12(suv * 4096.0) * 6.2831853;
     vec2  r   = vec2(cos(ang), sin(ang));

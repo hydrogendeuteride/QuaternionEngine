@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_buffer_reference : require
 
+#include "shadow_config.glsl"
 #include "input_structures.glsl"
 
 struct Vertex {
@@ -26,8 +27,8 @@ void main()
 {
     Vertex v = PC.vertexBuffer.vertices[gl_VertexIndex];
     vec4 worldPos = PC.render_matrix * vec4(v.position, 1.0);
-    // Use cascaded matrix; cascade 0 is the legacy near/simple map
-    uint ci = min(PC.cascadeIndex, uint(3));
+    // Use cascaded matrix; clamp to available cascades
+    uint ci = min(PC.cascadeIndex, SHADOW_CASCADE_COUNT - 1u);
     gl_Position = sceneData.lightViewProjCascades[ci] * worldPos;
 }
 
