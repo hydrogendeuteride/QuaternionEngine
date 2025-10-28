@@ -1,5 +1,6 @@
-#version 450
+#version 460
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_ray_query : require
 #include "input_structures.glsl"
 
 layout(location=0) in vec2 inUV;
@@ -9,6 +10,10 @@ layout(set=1, binding=0) uniform sampler2D posTex;
 layout(set=1, binding=1) uniform sampler2D normalTex;
 layout(set=1, binding=2) uniform sampler2D albedoTex;
 layout(set=2, binding=0) uniform sampler2D shadowTex[4];
+// TLAS for ray query (optional, guarded by sceneData.rtOptions.x)
+#ifdef GL_EXT_ray_query
+layout(set=0, binding=1) uniform accelerationStructureEXT topLevelAS;
+#endif
 
 // Tunables for shadow quality and blending
 // Border smoothing width in light-space NDC (0..1). Larger = wider cross-fade.
@@ -23,6 +28,9 @@ const float SHADOW_NORMAL_OFFSET = 0.0025;
 const float SHADOW_RPDB_SCALE = 1.0;
 // Minimum clamp to keep a tiny bias even on perpendicular receivers
 const float SHADOW_MIN_BIAS = 1e-5;
+// Ray query safety params
+const float SHADOW_RAY_TMIN = 0.02;      // start a bit away from the surface
+const float SHADOW_RAY_ORIGIN_BIAS = 0.01; // world units
 
 const float PI = 3.14159265359;
 
@@ -182,13 +190,76 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
 {
     vec3 wp = worldPos + N * SHADOW_NORMAL_OFFSET * (0.5 + 0.5 * (1.0 - max(dot(N, L), 0.0)));
 
+    // RT-only mode: cast a ray and skip clipmap sampling entirely
+    if (sceneData.rtOptions.z == 2u) {
+        #ifdef GL_EXT_ray_query
+        float farR = max(max(sceneData.cascadeSplitsView.x, sceneData.cascadeSplitsView.y),
+                         max(sceneData.cascadeSplitsView.z, sceneData.cascadeSplitsView.w));
+        rayQueryEXT rq;
+        rayQueryInitializeEXT(rq, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+                              0xFF, wp + N * SHADOW_RAY_ORIGIN_BIAS, SHADOW_RAY_TMIN, L, farR);
+        while (rayQueryProceedEXT(rq)) { }
+        bool hit = (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT);
+        return hit ? 0.0 : 1.0;
+        #else
+        // Fallback to clipmap PCF if ray query is not available at compile time
+        ;
+        #endif
+    }
+
     CascadeMix cm = computeCascadeMix(wp);
     float v0 = sampleCascadeShadow(cm.i0, wp, N, L);
     if (cm.w1 <= 0.0)
+    {
+        // Hybrid ray query assist (terminate-on-first-hit along -L)
+        #ifdef GL_EXT_ray_query
+        if (sceneData.rtOptions.x == 1u)
+        {
+            float NoL = max(dot(N, L), 0.0);
+            uint mask = sceneData.rtOptions.y;
+            bool cascadeEnabled = ((mask >> cm.i0) & 1u) == 1u;
+            if (cascadeEnabled && NoL < sceneData.rtParams.x)
+            {
+                float maxT = sceneData.cascadeSplitsView[cm.i0];
+                rayQueryEXT rq;
+                // tmin: small offset to avoid self-hits
+                rayQueryInitializeEXT(rq, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+                                      0xFF, wp + N * SHADOW_RAY_ORIGIN_BIAS, SHADOW_RAY_TMIN, L, maxT);
+                bool hit = false;
+                while (rayQueryProceedEXT(rq)) { }
+                hit = (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT);
+                if (hit) v0 = min(v0, 0.0);
+            }
+        }
+        #endif
         return v0;
+    }
 
     float v1 = sampleCascadeShadow(cm.i1, wp, N, L);
-    return mix(v0, v1, clamp(cm.w1, 0.0, 1.0));
+    float vis = mix(v0, v1, clamp(cm.w1, 0.0, 1.0));
+    // Hybrid assist across blended border: take min if a ray hits in either cascade
+    #ifdef GL_EXT_ray_query
+    if (sceneData.rtOptions.x == 1u)
+    {
+        float NoL = max(dot(N, L), 0.0);
+        uint mask = sceneData.rtOptions.y;
+        bool e0 = ((mask >> cm.i0) & 1u) == 1u;
+        bool e1 = ((mask >> cm.i1) & 1u) == 1u;
+        if (NoL < sceneData.rtParams.x && (e0 || e1))
+        {
+            float maxT0 = sceneData.cascadeSplitsView[cm.i0];
+            float maxT1 = sceneData.cascadeSplitsView[cm.i1];
+            float maxT = max(maxT0, maxT1);
+            rayQueryEXT rq;
+            rayQueryInitializeEXT(rq, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+                                  0xFF, wp + N * SHADOW_RAY_ORIGIN_BIAS, SHADOW_RAY_TMIN, L, maxT);
+            while (rayQueryProceedEXT(rq)) { }
+            bool hit = (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT);
+            if (hit) vis = min(vis, 0.0);
+        }
+    }
+    #endif
+    return vis;
 }
 
 vec3 fresnelSchlick(float cosTheta, vec3 F0)

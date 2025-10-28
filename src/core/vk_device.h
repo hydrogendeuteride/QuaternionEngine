@@ -19,6 +19,10 @@ public:
     VmaAllocator allocator() const { return _allocator; }
     VkDebugUtilsMessengerEXT debugMessenger() { return _debug_messenger; }
 
+    // Ray tracing capabilities (queried at init; not necessarily enabled)
+    bool supportsRayQuery() const { return _rayQuerySupported; }
+    bool supportsAccelerationStructure() const { return _accelStructSupported; }
+
 private:
     VkInstance _instance = nullptr;
     VkDebugUtilsMessengerEXT _debug_messenger = nullptr;
@@ -30,4 +34,8 @@ private:
     VmaAllocator _allocator = nullptr;
 
     DeletionQueue _deletionQueue;
+
+    // Cached feature support flags
+    bool _rayQuerySupported{false};
+    bool _accelStructSupported{false};
 };

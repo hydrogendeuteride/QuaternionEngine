@@ -100,6 +100,14 @@ void VulkanEngine::init()
     _assetManager->init(this);
     _context->assets = _assetManager.get();
 
+    // Optional ray tracing manager if supported and extensions enabled
+    if (_deviceManager->supportsRayQuery() && _deviceManager->supportsAccelerationStructure())
+    {
+        _rayManager = std::make_unique<RayTracingManager>();
+        _rayManager->init(_deviceManager.get(), _resourceManager.get());
+        _context->ray = _rayManager.get();
+    }
+
     _sceneManager = std::make_unique<SceneManager>();
     _sceneManager->init(_context.get());
     _context->scene = _sceneManager.get();
@@ -128,7 +136,7 @@ void VulkanEngine::init()
     auto imguiPass = std::make_unique<ImGuiPass>();
     _renderPassManager->setImGuiPass(std::move(imguiPass));
 
-    const std::string structurePath = _assetManager->modelPath("resi.glb");
+    const std::string structurePath = _assetManager->modelPath("police_office.glb");
     const auto structureFile = _assetManager->loadGLTF(structurePath);
 
     assert(structureFile.has_value());
@@ -258,6 +266,11 @@ void VulkanEngine::cleanup()
 void VulkanEngine::draw()
 {
     _sceneManager->update_scene();
+    // Build or update TLAS for current frame if RT mode enabled (1 or 2)
+    if (_rayManager && _context->shadowSettings.mode != 0u)
+    {
+        _rayManager->buildTLASFromDrawContext(_context->getMainDrawContext());
+    }
     //> frame_clear
     //wait until the gpu has finished rendering the last frame. Timeout of 1 second
     VK_CHECK(vkWaitForFences(_deviceManager->device(), 1, &get_current_frame()._renderFence, true, 1000000000));
@@ -324,8 +337,7 @@ void VulkanEngine::draw()
         RGImageHandle hGBufferAlbedo = _renderGraph->import_gbuffer_albedo();
         RGImageHandle hSwapchain = _renderGraph->import_swapchain_image(swapchainImageIndex);
 
-        // Create a transient shadow depth target (fixed resolution for now)
-        // Create transient depth targets for cascaded shadow maps
+        // Create transient depth targets for cascaded shadow maps (even if RT-only, to keep descriptors stable)
         const VkExtent2D shadowExtent{2048, 2048};
         std::array<RGImageHandle, kShadowCascadeCount> hShadowCascades{};
         for (int i = 0; i < kShadowCascadeCount; ++i)
@@ -345,9 +357,12 @@ void VulkanEngine::draw()
             {
                 background->register_graph(_renderGraph.get(), hDraw, hDepth);
             }
-            if (auto *shadow = _renderPassManager->getPass<ShadowPass>())
+            if (_context->shadowSettings.mode != 2u)
             {
-                shadow->register_graph(_renderGraph.get(), std::span<RGImageHandle>(hShadowCascades.data(), hShadowCascades.size()), shadowExtent);
+                if (auto *shadow = _renderPassManager->getPass<ShadowPass>())
+                {
+                    shadow->register_graph(_renderGraph.get(), std::span<RGImageHandle>(hShadowCascades.data(), hShadowCascades.size()), shadowExtent);
+                }
             }
             if (auto *geometry = _renderPassManager->getPass<GeometryPass>())
             {
@@ -508,6 +523,50 @@ void VulkanEngine::run()
             ImGui::End();
         }
 
+        // Shadows / Ray Query settings
+        if (ImGui::Begin("Shadows"))
+        {
+            const bool rq = _deviceManager->supportsRayQuery();
+            const bool as = _deviceManager->supportsAccelerationStructure();
+            ImGui::Text("RayQuery: %s", rq ? "supported" : "not available");
+            ImGui::Text("AccelStruct: %s", as ? "supported" : "not available");
+            ImGui::Separator();
+
+            auto &ss = _context->shadowSettings;
+            // Mode selection
+            int mode = static_cast<int>(ss.mode);
+            ImGui::TextUnformatted("Shadow Mode");
+            ImGui::RadioButton("Clipmap only", &mode, 0); ImGui::SameLine();
+            ImGui::RadioButton("Clipmap + RT", &mode, 1); ImGui::SameLine();
+            ImGui::RadioButton("RT only", &mode, 2);
+            // If device lacks RT support, force mode 0
+            if (!(rq && as) && mode != 0) mode = 0;
+            ss.mode = static_cast<uint32_t>(mode);
+            ss.hybridRayQueryEnabled = (ss.mode != 0);
+
+            // Hybrid controls (mode 1)
+            ImGui::BeginDisabled(ss.mode != 1u);
+            ImGui::TextUnformatted("Cascades using ray assist:");
+            for (int i = 0; i < 4; ++i)
+            {
+                bool on = (ss.hybridRayCascadesMask >> i) & 1u;
+                std::string label = std::string("C") + std::to_string(i);
+                if (ImGui::Checkbox(label.c_str(), &on))
+                {
+                    if (on) ss.hybridRayCascadesMask |= (1u << i);
+                    else    ss.hybridRayCascadesMask &= ~(1u << i);
+                }
+                if (i != 3) ImGui::SameLine();
+            }
+            ImGui::SliderFloat("N·L threshold", &ss.hybridRayNoLThreshold, 0.0f, 1.0f, "%.2f");
+            ImGui::EndDisabled();
+
+            ImGui::Separator();
+            ImGui::TextWrapped("Clipmap only: raster PCF+RPDB. Clipmap+RT: PCF assisted by ray query at low N·L. RT only: skip shadow maps and use ray tests only.");
+
+            ImGui::End();
+        }
+
         // Render Graph debug window
         if (ImGui::Begin("Render Graph"))
         {
@@ -660,7 +719,7 @@ void VulkanEngine::run()
             ImGui::End();
         }
 
-        // Draw targets window
+    // Draw targets window
         if (ImGui::Begin("Targets"))
         {
             ImGui::Text("Draw extent: %ux%u", _drawExtent.width, _drawExtent.height);
@@ -719,6 +778,7 @@ void VulkanEngine::init_frame_resources()
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3},
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3},
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4},
+        {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1},
     };
 
     for (int i = 0; i < FRAME_OVERLAP; i++)

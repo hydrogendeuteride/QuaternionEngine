@@ -18,6 +18,8 @@
 #include "render/rg_graph.h"
 #include <array>
 
+#include "vk_raytracing.h"
+
 void LightingPass::init(EngineContext *context)
 {
     _context = context;
@@ -166,6 +168,15 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
         deviceManager->device(), descriptorLayouts->gpuSceneDataLayout());
     DescriptorWriter writer;
     writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    // If TLAS available and feature enabled, bind it at (set=0,binding=1)
+    if (ctxLocal->ray && ctxLocal->getDevice()->supportsAccelerationStructure() && ctxLocal->shadowSettings.mode != 0u)
+    {
+        VkAccelerationStructureKHR tlas = ctxLocal->ray->tlas();
+        if (tlas != VK_NULL_HANDLE)
+        {
+            writer.write_acceleration_structure(1, tlas);
+        }
+    }
     writer.update_set(deviceManager->device(), globalDescriptor);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipeline);

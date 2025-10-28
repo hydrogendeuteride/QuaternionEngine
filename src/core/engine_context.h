@@ -29,6 +29,16 @@ struct FrameResources;
 struct SDL_Window;
 class AssetManager;
 class RenderGraph;
+class RayTracingManager;
+
+struct ShadowSettings
+{
+    // 0 = Clipmap only, 1 = Clipmap + RT assist, 2 = RT only
+    uint32_t mode = 0;
+    bool hybridRayQueryEnabled = false;   // derived convenience: (mode != 0)
+    uint32_t hybridRayCascadesMask = 0b1110; // bit i => cascade i uses ray query assist (default: 1..3)
+    float hybridRayNoLThreshold = 0.25f;  // trigger when N·L below this (mode==1)
+};
 
 class EngineContext
 {
@@ -59,6 +69,12 @@ public:
 
     // Assets
     AssetManager* assets = nullptr;              // non-owning pointer to central AssetManager
+
+    // Runtime settings visible to passes/shaders
+    ShadowSettings shadowSettings{};
+
+    // Ray tracing manager (optional, nullptr if unsupported)
+    RayTracingManager* ray = nullptr;
 
     // Accessors
     DeviceManager *getDevice() const { return device.get(); }

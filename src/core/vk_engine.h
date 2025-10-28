@@ -30,6 +30,7 @@
 #include "core/vk_pipeline_manager.h"
 #include "core/asset_manager.h"
 #include "render/rg_graph.h"
+#include "core/vk_raytracing.h"
 
 constexpr unsigned int FRAME_OVERLAP = 2;
 
@@ -63,6 +64,7 @@ public:
     std::unique_ptr<PipelineManager> _pipelineManager;
     std::unique_ptr<AssetManager> _assetManager;
     std::unique_ptr<RenderGraph> _renderGraph;
+    std::unique_ptr<RayTracingManager> _rayManager;
 
 	struct SDL_Window *_window{nullptr};
 
@@ -85,8 +87,6 @@ public:
 
     VkPipelineLayout _meshPipelineLayout;
     VkPipeline _meshPipeline;
-
-	GPUMeshBuffers rectangle;
 
 	std::shared_ptr<MeshAsset> cubeMesh;
 	std::shared_ptr<MeshAsset> sphereMesh;

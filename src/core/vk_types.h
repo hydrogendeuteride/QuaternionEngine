@@ -78,6 +78,9 @@ struct GPUSceneData {
 
     glm::mat4 lightViewProjCascades[4];
     glm::vec4 cascadeSplitsView;
+    // Hybrid ray-query options (match shaders/input_structures.glsl)
+    glm::uvec4 rtOptions; // x: enabled (1/0), y: cascade mask, z,w: reserved
+    glm::vec4  rtParams;  // x: N·L threshold, yzw: reserved
 };
 
 enum class MaterialPass :uint8_t {
@@ -112,6 +115,9 @@ struct GPUMeshBuffers {
     AllocatedBuffer indexBuffer;
     AllocatedBuffer vertexBuffer;
     VkDeviceAddress vertexBufferAddress;
+    VkDeviceAddress indexBufferAddress;
+    uint32_t vertexCount{0};
+    uint32_t indexCount{0};
 };
 
 // push constants for our mesh object draws

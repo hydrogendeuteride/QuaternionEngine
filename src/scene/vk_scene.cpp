@@ -171,6 +171,15 @@ void SceneManager::update_scene()
         }
     }
 
+    // Publish shadow/RT settings to SceneData
+    if (_context)
+    {
+        const auto &ss = _context->shadowSettings;
+        const uint32_t rtEnabled = (ss.mode != 0) ? 1u : 0u;
+        sceneData.rtOptions = glm::uvec4(rtEnabled, ss.hybridRayCascadesMask, ss.mode, 0u);
+        sceneData.rtParams  = glm::vec4(ss.hybridRayNoLThreshold, 0.0f, 0.0f, 0.0f);
+    }
+
     auto end = std::chrono::system_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     stats.scene_update_time = elapsed.count() / 1000.f;

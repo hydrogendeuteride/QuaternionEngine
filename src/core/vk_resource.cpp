@@ -179,8 +179,10 @@ GPUMeshBuffers ResourceManager::uploadMesh(std::span<uint32_t> indices, std::spa
 
     //create vertex buffer
     newSurface.vertexBuffer = create_buffer(vertexBufferSize,
-                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
                                             VMA_MEMORY_USAGE_GPU_ONLY);
 
     //find the adress of the vertex buffer
@@ -191,8 +193,20 @@ GPUMeshBuffers ResourceManager::uploadMesh(std::span<uint32_t> indices, std::spa
 
     //create index buffer
     newSurface.indexBuffer = create_buffer(indexBufferSize,
-                                           VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                           VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                           VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                           VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
                                            VMA_MEMORY_USAGE_GPU_ONLY);
+    // index buffer device address (needed for acceleration structure builds)
+    {
+        VkBufferDeviceAddressInfo indexAddrInfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
+        indexAddrInfo.buffer = newSurface.indexBuffer.buffer;
+        newSurface.indexBufferAddress = vkGetBufferDeviceAddress(_deviceManager->device(), &indexAddrInfo);
+    }
+    // store counts for AS builds
+    newSurface.vertexCount = static_cast<uint32_t>(vertices.size());
+    newSurface.indexCount  = static_cast<uint32_t>(indices.size());
 
     AllocatedBuffer staging = create_buffer(vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                             VMA_MEMORY_USAGE_CPU_ONLY);

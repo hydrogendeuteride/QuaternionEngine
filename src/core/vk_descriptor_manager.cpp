@@ -13,6 +13,11 @@ void DescriptorManager::init(DeviceManager *deviceManager)
     } {
         DescriptorLayoutBuilder builder;
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        if (_deviceManager->supportsAccelerationStructure())
+        {
+            // TLAS for ray query (set=0,binding=1)
+            builder.add_binding(1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR);
+        }
         _gpuSceneDataDescriptorLayout = builder.build(
             _deviceManager->device(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
     }

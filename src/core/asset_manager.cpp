@@ -282,6 +282,11 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const std::string &name,
     auto mesh = std::make_shared<MeshAsset>();
     mesh->name = name;
     mesh->meshBuffers = _engine->_resourceManager->uploadMesh(indices, vertices);
+    // Build BLAS for the mesh if ray tracing manager is available
+    if (_engine->_rayManager)
+    {
+        _engine->_rayManager->getOrBuildBLAS(mesh);
+    }
 
     GeoSurface surf{};
     surf.startIndex = 0;

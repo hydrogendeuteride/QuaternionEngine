@@ -35,6 +35,8 @@ add_executable (vulkan_engine
   core/config.h
   core/vk_engine.h
   core/vk_engine.cpp
+  core/vk_raytracing.h
+  core/vk_raytracing.cpp
   # render
   render/vk_pipelines.h
   render/vk_pipelines.cpp

@@ -488,6 +488,10 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         }
 
         newmesh->meshBuffers = engine->_resourceManager->uploadMesh(indices, vertices);
+        if (engine->_rayManager)
+        {
+            engine->_rayManager->getOrBuildBLAS(newmesh);
+        }
     }
     //> load_nodes
     // load all nodes and their meshes
