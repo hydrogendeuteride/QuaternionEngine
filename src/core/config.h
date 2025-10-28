@@ -19,7 +19,7 @@ inline constexpr float kShadowCascadeRadiusScale = 1.1f;
 inline constexpr float kShadowCascadeRadiusMargin = 10.0f;
 // Clipmap shadow configuration (used when cascades operate in clipmap mode)
 // Base coverage radius of level 0 around the camera (world units). Each level doubles the radius.
-inline constexpr float kShadowClipBaseRadius = 30.0f;
+inline constexpr float kShadowClipBaseRadius = 20.0f;
 // When using dynamic pullback, compute it from the covered XY range of each level.
 // pullback = max(kShadowClipPullbackMin, cover * kShadowClipPullbackFactor)
 inline constexpr float kShadowClipPullbackFactor = 2.5f;   // fraction of XY half-size behind center

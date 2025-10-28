@@ -19,6 +19,10 @@ const float SHADOW_PCF_BASE_RADIUS = 1.35;
 const float SHADOW_PCF_CASCADE_GAIN = 2.0; // extra radius at far end
 // Receiver normal-based offset to reduce acne (in world units)
 const float SHADOW_NORMAL_OFFSET = 0.0025;
+// Scale for receiver-plane depth bias term (tweak if over/under biased)
+const float SHADOW_RPDB_SCALE = 1.0;
+// Minimum clamp to keep a tiny bias even on perpendicular receivers
+const float SHADOW_MIN_BIAS = 1e-5;
 
 const float PI = 3.14159265359;
 
@@ -85,6 +89,35 @@ CascadeMix computeCascadeMix(vec3 worldPos)
     return cm;
 }
 
+// Compute receiver-plane depth gradient dz/duv using derivatives of shadow NDC
+// Reference: Akenine-Möller et al., "Receiver Plane Depth Bias" (PCF-friendly)
+vec2 receiverPlaneDepthGradient(vec3 ndc, vec3 dndc_dx, vec3 dndc_dy)
+{
+    // Convert XY to shadow map UV derivatives (ndc -> uv: u = 0.5*x + 0.5)
+    vec2 duv_dx = 0.5 * dndc_dx.xy;
+    vec2 duv_dy = 0.5 * dndc_dy.xy;
+
+    // Build Jacobian J = [du/dx du/dy; dv/dx dv/dy] (column-major)
+    mat2 J = mat2(duv_dx.x, duv_dy.x,
+                  duv_dx.y, duv_dy.y);
+
+    // Depth derivatives w.r.t screen pixels
+    vec2 dz_dxdy = vec2(dndc_dx.z, dndc_dy.z);
+
+    // Invert J to obtain dz/du and dz/dv. Guard against near-singular Jacobian.
+    float det = J[0][0] * J[1][1] - J[1][0] * J[0][1];
+    if (abs(det) < 1e-8)
+    {
+        // Degenerate mapping; return zero gradient so only slope/const bias applies
+        return vec2(0.0);
+    }
+
+    // Manual inverse for stability/perf on some drivers
+    mat2 invJ = (1.0 / det) * mat2( J[1][1], -J[0][1],
+                                    -J[1][0],  J[0][0]);
+    return invJ * dz_dxdy; // (dz/du, dz/dv)
+}
+
 float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
 {
     mat4 lightMat = sceneData.lightViewProjCascades[ci];
@@ -98,13 +131,14 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
 
     float current = clamp(ndc.z, 0.0, 1.0);
 
+    // Slope-based tiny baseline bias (cheap safety net)
     float NoL       = max(dot(N, L), 0.0);
-    float slopeBias = max(0.0006 * (1.0 - NoL), 0.0001);
+    float slopeBias = max(0.0006 * (1.0 - NoL), SHADOW_MIN_BIAS);
 
-    float dzdx = dFdx(current);
-    float dzdy = dFdy(current);
-    float ddz  = max(abs(dzdx), abs(dzdy));
-    float bias = slopeBias + ddz * 0.75;
+    // Receiver-plane depth gradient in shadow UV space
+    vec3 dndc_dx = dFdx(ndc);
+    vec3 dndc_dy = dFdy(ndc);
+    vec2 dz_duv  = receiverPlaneDepthGradient(ndc, dndc_dx, dndc_dy);
 
     ivec2 dim       = textureSize(shadowTex[ci], 0);
     vec2  texelSize = 1.0 / vec2(dim);
@@ -123,13 +157,18 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
     for (int i = 0; i < TAP_COUNT; ++i)
     {
         vec2  pu   = rot * POISSON_16[i];
-        vec2  off  = pu * radius * texelSize;
+        vec2  off  = pu * radius * texelSize; // uv-space offset of this tap
 
         float pr   = length(pu);
         float w    = 1.0 - smoothstep(0.0, 0.65, pr);
 
         float mapD = texture(shadowTex[ci], suv + off).r;
-        float vis  = step(mapD, current + bias);
+
+        // Receiver-plane depth bias: conservative depth delta over this tap's offset
+        // Approximate |Δz| ≈ |dz/du|*|Δu| + |dz/dv|*|Δv|
+        float rpdb = dot(abs(dz_duv), abs(off)) * SHADOW_RPDB_SCALE;
+
+        float vis  = step(mapD, current + slopeBias + rpdb);
 
         visible += vis * w;
         wsum    += w;

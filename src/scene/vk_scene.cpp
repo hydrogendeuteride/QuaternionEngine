@@ -157,7 +157,7 @@ void SceneManager::update_scene()
             const glm::vec3 eye = center - L * pullback;
             const glm::mat4 V = glm::lookAtRH(eye, center, up);
 
-            const float zNear = 0.1f;
+            const float zNear = 0.2f;
             const float zFar = pullback + cover * kShadowClipForwardFactor + kShadowClipZPadding;
 
             const glm::mat4 P = glm::orthoRH_ZO(-cover, cover, -cover, cover, zNear, zFar);
