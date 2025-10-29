@@ -25,6 +25,9 @@ struct GraphicsPipelineCreateInfo
     std::function<void(PipelineBuilder &)> configure;
 };
 
+// Graphics pipeline registry with hot-reload support.
+// Stores specs keyed by name, builds on demand, and can rebuild when shader
+// timestamps change. Also forwards a minimal Compute API to ComputeManager.
 class PipelineManager
 {
 public:

@@ -47,3 +47,7 @@ Central allocator and uploader built on VMA. Provides creation helpers, an immed
 - For tooling and one‑off setup, use `immediate_submit(lambda)` to avoid per‑frame queuing.
 - When creating transient images/buffers used only inside a pass, prefer the Render Graph’s `create_*` so destruction is automatic at frame end.
 
+### Known Issue (transition after mip generation)
+
+- In the Render Graph upload pass, the mipmap path should leave the image in `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL` after `vkutil::generate_mipmaps(...)`. If you see an extra transition back to `TRANSFER_DST_OPTIMAL` after mip generation, remove it. The helper already transitions to the final sampled layout.
+

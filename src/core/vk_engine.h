@@ -32,6 +32,8 @@
 #include "render/rg_graph.h"
 #include "core/vk_raytracing.h"
 
+// Number of frames-in-flight. Affects per-frame command buffers, fences,
+// semaphores, and transient descriptor pools in FrameResources.
 constexpr unsigned int FRAME_OVERLAP = 2;
 
 // Compute push constants and effects are declared in compute/vk_compute.h now.

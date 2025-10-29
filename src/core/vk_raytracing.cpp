@@ -307,3 +307,21 @@ VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const Dra
 
     return _tlas.handle;
 }
+
+void RayTracingManager::removeBLASForBuffer(VkBuffer vertexBuffer)
+{
+    if (!vertexBuffer) return;
+    VkDevice dv = _device->device();
+    auto it = _blasByVB.find(vertexBuffer);
+    if (it == _blasByVB.end()) return;
+
+    if (it->second.handle)
+    {
+        _vkDestroyAccelerationStructureKHR(dv, it->second.handle, nullptr);
+    }
+    if (it->second.storage.buffer)
+    {
+        _resources->destroy_buffer(it->second.storage);
+    }
+    _blasByVB.erase(it);
+}

@@ -15,18 +15,24 @@
      VkDeviceAddress deviceAddress{0};
  };
  
- class RayTracingManager {
- public:
-     void init(DeviceManager* dev, ResourceManager* res);
-     void cleanup();
+// Ray tracing helper that caches BLAS per mesh and rebuilds TLAS per frame
+// for hybrid/full ray query shadows. See docs/RayTracing.md.
+class RayTracingManager {
+public:
+    void init(DeviceManager* dev, ResourceManager* res);
+    void cleanup();
  
      // Build (or get) BLAS for a mesh. Safe to call multiple times.
      AccelStructureHandle getOrBuildBLAS(const std::shared_ptr<MeshAsset>& mesh);
  
      // Rebuild TLAS from current draw context; returns TLAS handle (or null if unavailable)
-     VkAccelerationStructureKHR buildTLASFromDrawContext(const DrawContext& dc);
-     VkAccelerationStructureKHR tlas() const { return _tlas.handle; }
-     VkDeviceAddress tlasAddress() const { return _tlas.deviceAddress; }
+    VkAccelerationStructureKHR buildTLASFromDrawContext(const DrawContext& dc);
+    VkAccelerationStructureKHR tlas() const { return _tlas.handle; }
+    VkDeviceAddress tlasAddress() const { return _tlas.deviceAddress; }
+
+    // Remove and destroy a cached BLAS associated with a vertex buffer.
+    // Safe to call even if no BLAS exists for the buffer.
+    void removeBLASForBuffer(VkBuffer vertexBuffer);
  
  private:
      // function pointers (resolved on init)

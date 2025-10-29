@@ -1,11 +1,17 @@
 #include "vk_swapchain.h"
 
 #include <SDL_video.h>
+#include "SDL2/SDL_vulkan.h"
 
 #include "vk_device.h"
 #include "vk_initializers.h"
 #include "vk_resource.h"
 
+// Swapchain + per-frame targets (HDR draw, depth, GBuffer) management.
+//
+// Create/resize/destroy logic keeps per-frame images in a local deletion queue
+// so they are cleaned up with the swapchain. The engine imports those images
+// into the Render Graph each frame.
 void SwapchainManager::init_swapchain()
 {
     create_swapchain(_windowExtent.width, _windowExtent.height);
@@ -115,12 +121,13 @@ void SwapchainManager::create_swapchain(uint32_t width, uint32_t height)
 
 void SwapchainManager::destroy_swapchain() const
 {
-    vkDestroySwapchainKHR(_deviceManager->device(), _swapchain, nullptr);
-
-    for (auto _swapchainImageView: _swapchainImageViews)
+    // Destroy image views before the swapchain for stricter driver orderliness.
+    // (Most drivers tolerate either order, but views reference swapchain images.)
+    for (auto view : _swapchainImageViews)
     {
-        vkDestroyImageView(_deviceManager->device(), _swapchainImageView, nullptr);
+        vkDestroyImageView(_deviceManager->device(), view, nullptr);
     }
+    vkDestroySwapchainKHR(_deviceManager->device(), _swapchain, nullptr);
 }
 
 void SwapchainManager::resize_swapchain(struct SDL_Window *window)
@@ -133,7 +140,8 @@ void SwapchainManager::resize_swapchain(struct SDL_Window *window)
     _deletionQueue.flush();
 
     int w, h;
-    SDL_GetWindowSize(window, &w, &h);
+    // HiDPI-aware drawable size for correct pixel dimensions
+    SDL_Vulkan_GetDrawableSize(window, &w, &h);
     _windowExtent.width = w;
     _windowExtent.height = h;
 

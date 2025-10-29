@@ -15,6 +15,8 @@
 #include "vk_swapchain.h"
 #include "render/rg_graph.h"
 
+// Basic conservative frustum test against RenderObject AABB.
+// Clip space uses Vulkan Z0 (0..w). Returns true if any part of the box is inside.
 bool is_visible(const RenderObject &obj, const glm::mat4 &viewproj)
 {
     const std::array<glm::vec3, 8> corners{

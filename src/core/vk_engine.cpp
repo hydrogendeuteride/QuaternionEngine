@@ -1,3 +1,17 @@
+// Engine bootstrap, frame loop, and render-graph wiring.
+//
+// Responsibilities
+// - Initialize SDL + Vulkan managers (device, resources, descriptors, samplers, pipelines).
+// - Create swapchain + default images and build the Render Graph each frame.
+// - Publish an EngineContext so passes and subsystems access per‑frame state uniformly.
+// - Drive ImGui + debug UIs and optional ray‑tracing TLAS rebuilds.
+//
+// See also:
+//  - docs/EngineContext.md
+//  - docs/RenderGraph.md
+//  - docs/FrameResources.md
+//  - docs/RayTracing.md
+//
 //> includes
 #include "vk_engine.h"
 #include <core/vk_images.h>

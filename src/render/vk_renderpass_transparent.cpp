@@ -92,7 +92,9 @@ void TransparentPass::draw_transparent(VkCommandBuffer cmd,
     writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
     writer.update_set(deviceManager->device(), globalDescriptor);
 
-    // Sort transparent back-to-front using camera-space depth
+    // Sort transparent back-to-front using camera-space depth.
+    // We approximate object depth by transforming the mesh bounds origin.
+    // For better results consider using per-object center or per-draw depth range.
     std::vector<const RenderObject *> draws;
     draws.reserve(dc.TransparentSurfaces.size());
     for (const auto &r: dc.TransparentSurfaces) draws.push_back(&r);

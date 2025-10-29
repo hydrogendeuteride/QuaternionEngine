@@ -309,6 +309,11 @@ bool AssetManager::removeMesh(const std::string &name)
 {
     auto it = _meshCache.find(name);
     if (it == _meshCache.end()) return false;
+    if (_engine && _engine->_rayManager)
+    {
+        // Clean up BLAS cached for this mesh (if ray tracing is enabled)
+        _engine->_rayManager->removeBLASForBuffer(it->second->meshBuffers.vertexBuffer.buffer);
+    }
     if (_engine && _engine->_resourceManager)
     {
         _engine->_resourceManager->destroy_buffer(it->second->meshBuffers.indexBuffer);

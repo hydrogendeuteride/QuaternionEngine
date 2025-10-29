@@ -3,6 +3,9 @@
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_vulkan.h"
 
+// Create Vulkan instance/device, enable debug/validation (in Debug), pick a GPU,
+// and set up VMA with buffer device address. If available, enable Ray Query and
+// Acceleration Structure extensions + features.
 void DeviceManager::init_vulkan(SDL_Window *window)
 {
    vkb::InstanceBuilder builder;

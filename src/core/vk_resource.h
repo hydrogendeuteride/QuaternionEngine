@@ -7,6 +7,9 @@ class DeviceManager;
 class RenderGraph;
 struct FrameResources;
 
+// VMA-backed allocator + upload helper.
+// Creates buffers/images, offers an immediate-submit path, and supports
+// deferring uploads into a single Render Graph transfer pass per frame.
 class ResourceManager
 {
 public:

@@ -59,6 +59,15 @@ RGBufferHandle RenderGraph::create_buffer(const RGBufferDesc &desc)
 	return _resources.add_transient(desc);
 }
 
+// Render Graph: builds a per-frame DAG from declared image/buffer accesses,
+// inserts precise barriers and layouts, and records passes using dynamic rendering.
+//
+// Key steps:
+//  - add_pass(): store declarations and callbacks (build to declare, record to issue commands)
+//  - compile():  topologically sort by read/write hazards and generate Vk*Barrier2 sequences
+//  - execute():  emit pre-pass barriers, begin dynamic rendering if attachments exist, invoke record()
+//
+// See docs/RenderGraph.md for API overview and pass patterns.
 void RenderGraph::add_pass(const char *name, RGPassType type, BuildCallback build, RecordCallback record)
 {
 	Pass p{};

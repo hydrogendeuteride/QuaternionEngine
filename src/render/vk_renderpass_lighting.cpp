@@ -185,7 +185,9 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 1, 1,
                             &_gBufferInputDescriptorSet, 0, nullptr);
 
-    // Allocate and write shadow descriptor set for this frame (set = 2)
+    // Allocate and write shadow descriptor set for this frame (set = 2).
+    // When RT is enabled, TLAS is bound in the global set at (set=0, binding=1)
+    // via DescriptorManager::gpuSceneDataLayout(). See docs/RayTracing.md.
     VkDescriptorSet shadowSet = ctxLocal->currentFrame->_frameDescriptors.allocate(
         deviceManager->device(), _shadowDescriptorLayout);
     {

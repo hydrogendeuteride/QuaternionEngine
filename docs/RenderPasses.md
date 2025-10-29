@@ -70,6 +70,8 @@ addPass(std::move(myPass));
 - Background (compute): Declares `ComputeWrite(drawImage)` and dispatches a selected effect instance.
 - Geometry (G-Buffer): Declares 3 color attachments and `DepthAttachment`, plus buffer reads for shared index/vertex buffers.
 - Lighting (deferred): Reads G‑Buffer as sampled images and writes to `drawImage`.
+- Shadows: Cascaded shadow maps render to per-frame transient depth images (four cascades). If Ray Query is enabled,
+  the lighting pass additionally samples TLAS to evaluate shadow visibility according to the selected mode.
 - Transparent (forward): Writes to `drawImage` with depth test against `depthImage` after lighting.
 - ImGui: Inserted just before present to draw on the swapchain image.
 

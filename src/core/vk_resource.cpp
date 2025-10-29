@@ -48,7 +48,12 @@ AllocatedBuffer ResourceManager::create_buffer(size_t allocSize, VkBufferUsageFl
 
     VmaAllocationCreateInfo vmaallocInfo = {};
     vmaallocInfo.usage = memoryUsage;
-    vmaallocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    // Map buffers only when CPU-visible memory is requested
+    if (memoryUsage == VMA_MEMORY_USAGE_CPU_TO_GPU ||
+        memoryUsage == VMA_MEMORY_USAGE_CPU_ONLY)
+    {
+        vmaallocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    }
 
     AllocatedBuffer newBuffer{};
     VK_CHECK(vmaCreateBuffer(_deviceManager->allocator(), &bufferInfo, &vmaallocInfo,
@@ -129,11 +134,33 @@ AllocatedImage ResourceManager::create_image(VkExtent3D size, VkFormat format, V
     return newImage;
 }
 
+// Returns byte size per texel for a subset of common formats.
+static inline size_t bytes_per_texel(VkFormat fmt)
+{
+    switch (fmt)
+    {
+        case VK_FORMAT_R8_UNORM:
+        case VK_FORMAT_R8_SRGB:
+            return 1;
+        case VK_FORMAT_R8G8_UNORM:
+        case VK_FORMAT_R8G8_SRGB:
+            return 2;
+        case VK_FORMAT_R8G8B8A8_UNORM:
+        case VK_FORMAT_R8G8B8A8_SRGB:
+        case VK_FORMAT_B8G8R8A8_UNORM:
+        case VK_FORMAT_B8G8R8A8_SRGB:
+            return 4;
+        default:
+            return 4; // STB path uploads 4 channels
+    }
+}
+
 AllocatedImage ResourceManager::create_image(const void *data, VkExtent3D size, VkFormat format,
                                              VkImageUsageFlags usage,
                                              bool mipmapped)
 {
-    size_t data_size = size.depth * size.width * size.height * 4;
+    size_t bpp = bytes_per_texel(format);
+    size_t data_size = static_cast<size_t>(size.depth) * size.width * size.height * bpp;
     AllocatedBuffer uploadbuffer = create_buffer(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                                  VMA_MEMORY_USAGE_CPU_TO_GPU);
 
@@ -480,8 +507,10 @@ void ResourceManager::register_upload_pass(RenderGraph &graph, FrameResources &f
 
                 if (upload.generateMips)
                 {
+                    // NOTE: generate_mipmaps() transitions the image to
+                    // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL at the end.
+                    // Do not transition back to TRANSFER here. See docs/ResourceManager.md.
                     vkutil::generate_mipmaps(cmd, image, VkExtent2D{upload.extent.width, upload.extent.height});
-                    vkutil::transition_image(cmd, image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
                 }
             }
         });

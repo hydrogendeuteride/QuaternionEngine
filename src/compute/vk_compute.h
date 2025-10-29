@@ -120,6 +120,9 @@ private:
     void cleanup();
 };
 
+// Small compute manager for one-off pipelines and persistent instances.
+// It owns a dedicated descriptor allocator and provides helpers to build
+// pipelines, set bindings, and dispatch work (immediate or on a provided cmd).
 class ComputeManager
 {
 public:

@@ -5,6 +5,9 @@
 
 class DeviceManager;
 
+// Per-frame state used by the renderer and passes.
+// Owns a command buffer, sync primitives, a transient descriptor pool, and a
+// deletion queue for resources that should be destroyed when the frame is done.
 struct FrameResources
 {
     VkSemaphore _swapchainSemaphore = VK_NULL_HANDLE;
