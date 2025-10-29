@@ -570,7 +570,8 @@ bool RenderGraph::compile()
                 const RGBufferRecord *rec = _resources.get_buffer(RGBufferHandle{id});
                 barrier.buffer = rec ? rec->buffer : VK_NULL_HANDLE;
                 barrier.offset = 0;
-                barrier.size = rec ? rec->size : VK_WHOLE_SIZE;
+                // If size is unknown or 0 for imported buffers, use WHOLE_SIZE to satisfy VUID 01188
+                barrier.size = (rec && rec->size > 0) ? rec->size : VK_WHOLE_SIZE;
                 pass.preBufferBarriers.push_back(barrier);
 
                 if (rec && !rec->imported)

@@ -572,14 +572,21 @@ void ComputeManager::insertBarriers(VkCommandBuffer cmd, const ComputeDispatchIn
         return;
     }
 
-    VkDependencyInfo dependencyInfo = {};
+    // Copy and sanitize buffer barriers: replace size=0 with VK_WHOLE_SIZE (VUID 01188)
+    std::vector<VkBufferMemoryBarrier2> fixedBufferBarriers = dispatchInfo.bufferBarriers;
+    for (auto &b : fixedBufferBarriers)
+    {
+        if (b.size == 0) b.size = VK_WHOLE_SIZE;
+    }
+
+    VkDependencyInfo dependencyInfo{};
     dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    dependencyInfo.memoryBarrierCount = dispatchInfo.memoryBarriers.size();
-    dependencyInfo.pMemoryBarriers = dispatchInfo.memoryBarriers.data();
-    dependencyInfo.bufferMemoryBarrierCount = dispatchInfo.bufferBarriers.size();
-    dependencyInfo.pBufferMemoryBarriers = dispatchInfo.bufferBarriers.data();
-    dependencyInfo.imageMemoryBarrierCount = dispatchInfo.imageBarriers.size();
-    dependencyInfo.pImageMemoryBarriers = dispatchInfo.imageBarriers.data();
+    dependencyInfo.memoryBarrierCount = static_cast<uint32_t>(dispatchInfo.memoryBarriers.size());
+    dependencyInfo.pMemoryBarriers = dispatchInfo.memoryBarriers.empty() ? nullptr : dispatchInfo.memoryBarriers.data();
+    dependencyInfo.bufferMemoryBarrierCount = static_cast<uint32_t>(fixedBufferBarriers.size());
+    dependencyInfo.pBufferMemoryBarriers = fixedBufferBarriers.empty() ? nullptr : fixedBufferBarriers.data();
+    dependencyInfo.imageMemoryBarrierCount = static_cast<uint32_t>(dispatchInfo.imageBarriers.size());
+    dependencyInfo.pImageMemoryBarriers = dispatchInfo.imageBarriers.empty() ? nullptr : dispatchInfo.imageBarriers.data();
 
     vkCmdPipelineBarrier2(cmd, &dependencyInfo);
 }

@@ -72,7 +72,7 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
         return it->second;
     }
 
-    // Build BLAS with one geometry per surface
+    // Build BLAS with one geometry per surface (skip empty primitives)
     std::vector<VkAccelerationStructureGeometryKHR> geoms;
     std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges;
     geoms.reserve(mesh->surfaces.size());
@@ -84,6 +84,11 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
 
     for (const auto &s: mesh->surfaces)
     {
+        // Compute primitive count from index count; skip empty surfaces
+        const uint32_t primitiveCount = s.count / 3u;
+        if (primitiveCount == 0)
+            continue;
+
         VkAccelerationStructureGeometryTrianglesDataKHR tri{
             VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR
         };
@@ -103,11 +108,17 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
         geoms.push_back(g);
 
         VkAccelerationStructureBuildRangeInfoKHR r{};
-        r.primitiveCount = s.count / 3;
+        r.primitiveCount = primitiveCount;
         r.primitiveOffset = 0; // encoded through indexData deviceAddress
         r.firstVertex = 0;
         r.transformOffset = 0;
         ranges.push_back(r);
+    }
+
+    // If no valid geometries, skip BLAS build
+    if (geoms.empty())
+    {
+        return {};
     }
 
     VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
@@ -149,10 +160,10 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     buildInfo.scratchData.deviceAddress = scratchAddr;
 
     // build with immediate submit
-    std::vector<const VkAccelerationStructureBuildRangeInfoKHR *> pRanges(geoms.size());
-    for (size_t i = 0; i < geoms.size(); ++i) pRanges[i] = &ranges[i];
+    const VkAccelerationStructureBuildRangeInfoKHR* pRange = ranges.data();
     _resources->immediate_submit([&](VkCommandBuffer cmd) {
-        _vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, pRanges.data());
+        // ppBuildRangeInfos is an array of infoCount pointers; we have 1 build info
+        _vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
     });
 
     // destroy scratch
