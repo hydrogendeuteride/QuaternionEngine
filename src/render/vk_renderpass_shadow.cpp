@@ -47,6 +47,7 @@ void ShadowPass::init(EngineContext *context)
         b.set_multisampling_none();
         b.disable_blending();
 
+        // Keep reverse-Z convention for shadow maps to match engine depth usage
         b.enable_depthtest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
         b.set_depth_format(VK_FORMAT_D32_SFLOAT);
 

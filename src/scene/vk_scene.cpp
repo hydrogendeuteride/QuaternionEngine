@@ -198,6 +198,13 @@ std::shared_ptr<LoadedGLTF> SceneManager::getScene(const std::string &name)
 
 void SceneManager::cleanup()
 {
+    // Explicitly clear dynamic instances first to drop any extra shared_ptrs
+    // that could keep GPU resources alive.
+    clearMeshInstances();
+    clearGLTFInstances();
+
+    // Drop our references to GLTF scenes. Their destructors call clearAll()
+    // exactly once to release GPU resources.
     loadedScenes.clear();
     loadedNodes.clear();
 }

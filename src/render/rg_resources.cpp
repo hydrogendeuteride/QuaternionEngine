@@ -1,8 +1,11 @@
 #include <render/rg_resources.h>
 #include <core/engine_context.h>
 #include <core/vk_resource.h>
+#include <vk_mem_alloc.h>
+#include <core/config.h>
 
 #include "frame_resources.h"
+#include "vk_device.h"
 
 void RGResourceRegistry::reset()
 {
@@ -53,7 +56,13 @@ RGImageHandle RGResourceRegistry::add_transient(const RGImageDesc& d)
     rec.creationUsage = d.usage;
 
 	VkExtent3D size{ d.extent.width, d.extent.height, 1 };
-	rec.allocation = _ctx->getResources()->create_image(size, d.format, d.usage);
+    rec.allocation = _ctx->getResources()->create_image(size, d.format, d.usage);
+    // Name the allocation for diagnostics (optional)
+    if (vmaDebugEnabled() && _ctx && _ctx->getDevice())
+    {
+        std::string nm = std::string("rg.image:") + d.name;
+        vmaSetAllocationName(_ctx->getDevice()->allocator(), rec.allocation.allocation, nm.c_str());
+    }
 	rec.image = rec.allocation.image;
 	rec.imageView = rec.allocation.imageView;
 

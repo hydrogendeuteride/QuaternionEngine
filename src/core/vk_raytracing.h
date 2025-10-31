@@ -25,8 +25,9 @@ public:
      // Build (or get) BLAS for a mesh. Safe to call multiple times.
      AccelStructureHandle getOrBuildBLAS(const std::shared_ptr<MeshAsset>& mesh);
  
-     // Rebuild TLAS from current draw context; returns TLAS handle (or null if unavailable)
-    VkAccelerationStructureKHR buildTLASFromDrawContext(const DrawContext& dc);
+    // Rebuild TLAS from current draw context; returns TLAS handle (or null if unavailable)
+    // Destruction of previous TLAS resources is deferred via the provided frame deletion queue
+    VkAccelerationStructureKHR buildTLASFromDrawContext(const DrawContext& dc, DeletionQueue& frameDQ);
     VkAccelerationStructureKHR tlas() const { return _tlas.handle; }
     VkDeviceAddress tlasAddress() const { return _tlas.deviceAddress; }
 
@@ -34,7 +35,7 @@ public:
     // Safe to call even if no BLAS exists for the buffer.
     void removeBLASForBuffer(VkBuffer vertexBuffer);
  
- private:
+private:
      // function pointers (resolved on init)
      PFN_vkCreateAccelerationStructureKHR            _vkCreateAccelerationStructureKHR{};
      PFN_vkDestroyAccelerationStructureKHR           _vkDestroyAccelerationStructureKHR{};
@@ -42,17 +43,20 @@ public:
      PFN_vkCmdBuildAccelerationStructuresKHR         _vkCmdBuildAccelerationStructuresKHR{};
      PFN_vkGetAccelerationStructureDeviceAddressKHR  _vkGetAccelerationStructureDeviceAddressKHR{};
  
-     DeviceManager* _device{nullptr};
-     ResourceManager* _resources{nullptr};
+    DeviceManager* _device{nullptr};
+    ResourceManager* _resources{nullptr};
  
      // BLAS cache by vertex buffer handle
      std::unordered_map<VkBuffer, AccelStructureHandle> _blasByVB;
  
-     // TLAS + scratch / instance buffer (rebuilt per frame)
-     AccelStructureHandle _tlas{};
-     AllocatedBuffer _tlasInstanceBuffer{};
-     size_t _tlasInstanceCapacity{0};
+    // TLAS + scratch / instance buffer (rebuilt per frame)
+    AccelStructureHandle _tlas{};
+    AllocatedBuffer _tlasInstanceBuffer{};
+    size_t _tlasInstanceCapacity{0};
+
+    // Properties
+    VkDeviceSize _minScratchAlignment{256};
  
-     void ensure_tlas_storage(VkDeviceSize requiredASSize, VkDeviceSize requiredScratch);
- };
+    void ensure_tlas_storage(VkDeviceSize requiredASSize, VkDeviceSize requiredScratch, DeletionQueue& frameDQ);
+};
  

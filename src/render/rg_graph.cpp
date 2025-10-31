@@ -809,13 +809,16 @@ void RenderGraph::add_present_chain(RGImageHandle sourceDraw,
 
 RGImageHandle RenderGraph::import_draw_image()
 {
-	RGImportedImageDesc d{};
-	d.name = "drawImage";
-	d.image = _context->getSwapchain()->drawImage().image;
-	d.imageView = _context->getSwapchain()->drawImage().imageView;
-	d.format = _context->getSwapchain()->drawImage().imageFormat;
-	d.extent = _context->getDrawExtent();
-	d.currentLayout = VK_IMAGE_LAYOUT_GENERAL;
+    RGImportedImageDesc d{};
+    d.name = "drawImage";
+    d.image = _context->getSwapchain()->drawImage().image;
+    d.imageView = _context->getSwapchain()->drawImage().imageView;
+    d.format = _context->getSwapchain()->drawImage().imageFormat;
+    d.extent = _context->getDrawExtent();
+    // Treat layout as unknown at frame start to force an explicit barrier
+    // into the first declared usage (compute write / color attach). This
+    // avoids mismatches when the previous frame ended in a different layout.
+    d.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     return import_image(d);
 }
 
@@ -942,8 +945,10 @@ RGImageHandle RenderGraph::import_swapchain_image(uint32_t index)
 	d.imageView = views[index];
 	d.format = _context->getSwapchain()->swapchainImageFormat();
 	d.extent = _context->getSwapchain()->swapchainExtent();
-	d.currentLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-	return import_image(d);
+    // On first use after swapchain creation, images are in UNDEFINED layout.
+    // Start from UNDEFINED so the graph inserts the necessary transition.
+    d.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    return import_image(d);
 }
 
 void RenderGraph::resolve_timings()
@@ -960,7 +965,7 @@ void RenderGraph::resolve_timings()
         _context->getDevice()->device(), _timestampPool,
         0, queryCount,
         sizeof(uint64_t) * results.size(), results.data(), sizeof(uint64_t),
-        VK_QUERY_RESULT_64_BIT);
+        VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
     // Convert ticks to ms
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(_context->getDevice()->physicalDevice(), &props);
@@ -983,6 +988,8 @@ void RenderGraph::resolve_timings()
         }
     }
 
+    // Ensure any pending work that might still reference the pool is complete
+    vkQueueWaitIdle(_context->getDevice()->graphicsQueue());
     vkDestroyQueryPool(_context->getDevice()->device(), _timestampPool, nullptr);
     _timestampPool = VK_NULL_HANDLE;
 }

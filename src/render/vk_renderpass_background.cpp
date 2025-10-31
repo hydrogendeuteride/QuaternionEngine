@@ -94,6 +94,6 @@ void BackgroundPass::cleanup()
         _context->pipelines->destroyComputePipeline("gradient");
         _context->pipelines->destroyComputePipeline("sky");
     }
-    fmt::print("RenderPassManager::cleanup()\n");
+    fmt::print("BackgroundPass::cleanup()\n");
     _backgroundEffects.clear();
 }

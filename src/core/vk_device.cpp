@@ -30,8 +30,16 @@ void DeviceManager::init_vulkan(SDL_Window *window)
     features.synchronization2 = true;
 
     VkPhysicalDeviceVulkan12Features features12{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
-    features12.bufferDeviceAddress = true;
-    features12.descriptorIndexing = true;
+    features12.bufferDeviceAddress = VK_TRUE;
+    features12.descriptorIndexing = VK_TRUE;
+    // Enable update-after-bind related toggles for graphics/compute descriptors
+    features12.descriptorBindingPartiallyBound = VK_TRUE;
+    features12.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
+    features12.runtimeDescriptorArray = VK_TRUE;
+    features12.descriptorBindingUniformBufferUpdateAfterBind = VK_TRUE;
+    features12.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
+    features12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+    features12.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
 
     //use vkbootstrap to select a gpu.
     //We want a gpu that can write to the SDL surface and supports vulkan 1.3
@@ -72,14 +80,16 @@ void DeviceManager::init_vulkan(SDL_Window *window)
     //create the final vulkan device
     vkb::DeviceBuilder deviceBuilder{physicalDevice};
 
-    // Enable ray query + accel struct features in device create pNext if supported
+    // Ray features are optional and enabled only if supported on the chosen GPU
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelReq{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
+    VkPhysicalDeviceRayQueryFeaturesKHR rayqReq{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
     if (_rayQuerySupported && _accelStructSupported)
     {
-        VkPhysicalDeviceAccelerationStructureFeaturesKHR accelReq{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
         accelReq.accelerationStructure = VK_TRUE;
-        VkPhysicalDeviceRayQueryFeaturesKHR rayqReq{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
-        rayqReq.pNext = &accelReq;
         rayqReq.rayQuery = VK_TRUE;
+        rayqReq.pNext = &accelReq;
+    }
+    if (_rayQuerySupported && _accelStructSupported) {
         deviceBuilder.add_pNext(&rayqReq);
     }
 
@@ -111,6 +121,18 @@ void DeviceManager::init_vulkan(SDL_Window *window)
 
 void DeviceManager::cleanup()
 {
+    // Optional VMA stats print
+    if (_allocator && vmaDebugEnabled())
+    {
+        VmaTotalStatistics stats{};
+        vmaCalculateStatistics(_allocator, &stats);
+        const VmaStatistics& s = stats.total.statistics;
+        fmt::print("[VMA] Blocks: {} | Allocations: {} | BlockBytes: {} | AllocationBytes: {}\n",
+                   (size_t)s.blockCount,
+                   (size_t)s.allocationCount,
+                   (unsigned long long)s.blockBytes,
+                   (unsigned long long)s.allocationBytes);
+    }
     vkDestroySurfaceKHR(_instance, _surface, nullptr);
     _deletionQueue.flush();
     vkDestroyDevice(_device, nullptr);

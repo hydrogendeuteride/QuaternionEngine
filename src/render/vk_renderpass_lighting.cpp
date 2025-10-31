@@ -30,7 +30,9 @@ void LightingPass::init(EngineContext *context)
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        _gBufferInputDescriptorLayout = builder.build(_context->getDevice()->device(), VK_SHADER_STAGE_FRAGMENT_BIT);
+        _gBufferInputDescriptorLayout = builder.build(
+            _context->getDevice()->device(), VK_SHADER_STAGE_FRAGMENT_BIT,
+            nullptr, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
     }
 
     // Allocate and write GBuffer descriptor set
@@ -51,21 +53,22 @@ void LightingPass::init(EngineContext *context)
     {
         DescriptorLayoutBuilder builder;
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kShadowCascadeCount);
-        _shadowDescriptorLayout = builder.build(_context->getDevice()->device(), VK_SHADER_STAGE_FRAGMENT_BIT);
+        _shadowDescriptorLayout = builder.build(
+            _context->getDevice()->device(), VK_SHADER_STAGE_FRAGMENT_BIT,
+            nullptr, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
     }
 
-    // Build lighting pipeline through PipelineManager
+    // Build lighting pipelines (RT and non-RT) through PipelineManager
     VkDescriptorSetLayout layouts[] = {
         _context->getDescriptorLayouts()->gpuSceneDataLayout(),
         _gBufferInputDescriptorLayout,
         _shadowDescriptorLayout
     };
 
-    GraphicsPipelineCreateInfo info{};
-    info.vertexShaderPath = _context->getAssets()->shaderPath("fullscreen.vert.spv");
-    info.fragmentShaderPath = _context->getAssets()->shaderPath("deferred_lighting.frag.spv");
-    info.setLayouts.assign(std::begin(layouts), std::end(layouts));
-    info.configure = [this](PipelineBuilder &b) {
+    GraphicsPipelineCreateInfo baseInfo{};
+    baseInfo.vertexShaderPath = _context->getAssets()->shaderPath("fullscreen.vert.spv");
+    baseInfo.setLayouts.assign(std::begin(layouts), std::end(layouts));
+    baseInfo.configure = [this](PipelineBuilder &b) {
         b.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
         b.set_polygon_mode(VK_POLYGON_MODE_FILL);
         b.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
@@ -74,13 +77,16 @@ void LightingPass::init(EngineContext *context)
         b.disable_depthtest();
         b.set_color_attachment_format(_context->getSwapchain()->drawImage().imageFormat);
     };
-    _context->pipelines->createGraphicsPipeline("deferred_lighting", info);
 
-    // fetch the handles so current frame uses latest versions
-    MaterialPipeline mp{};
-    _context->pipelines->getMaterialPipeline("deferred_lighting", mp);
-    _pipeline = mp.pipeline;
-    _pipelineLayout = mp.layout;
+    // Non-RT variant (no TLAS required)
+    auto infoNoRT = baseInfo;
+    infoNoRT.fragmentShaderPath = _context->getAssets()->shaderPath("deferred_lighting_nort.frag.spv");
+    _context->pipelines->createGraphicsPipeline("deferred_lighting.nort", infoNoRT);
+
+    // RT variant (requires GL_EXT_ray_query and TLAS bound at set=0,binding=1)
+    auto infoRT = baseInfo;
+    infoRT.fragmentShaderPath = _context->getAssets()->shaderPath("deferred_lighting.frag.spv");
+    _context->pipelines->createGraphicsPipeline("deferred_lighting.rt", infoRT);
 
     _deletionQueue.push_function([&]() {
         // Pipelines are owned by PipelineManager; only destroy our local descriptor set layout
@@ -145,8 +151,20 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
     VkImageView drawView = resources.image_view(drawHandle);
     if (drawView == VK_NULL_HANDLE) return;
 
-    // Re-fetch pipeline in case it was hot-reloaded
-    pipelineManager->getGraphics("deferred_lighting", _pipeline, _pipelineLayout);
+    // Choose RT only if TLAS is valid; otherwise fall back to non-RT.
+    const bool haveRTFeatures = ctxLocal->getDevice()->supportsAccelerationStructure();
+    const VkAccelerationStructureKHR tlas = (ctxLocal->ray ? ctxLocal->ray->tlas() : VK_NULL_HANDLE);
+    const VkDeviceAddress tlasAddr = (ctxLocal->ray ? ctxLocal->ray->tlasAddress() : 0);
+    const bool useRT = haveRTFeatures && (ctxLocal->shadowSettings.mode != 0u) && (tlas != VK_NULL_HANDLE) && (tlasAddr != 0);
+
+    const char* pipeName = useRT ? "deferred_lighting.rt" : "deferred_lighting.nort";
+    if (!pipelineManager->getGraphics(pipeName, _pipeline, _pipelineLayout))
+    {
+        // Try the other variant as a fallback
+        const char* fallback = useRT ? "deferred_lighting.nort" : "deferred_lighting.rt";
+        if (!pipelineManager->getGraphics(fallback, _pipeline, _pipelineLayout))
+            return; // Neither pipeline is ready
+    }
 
     // Dynamic rendering is handled by the RenderGraph using the declared draw attachment.
 
@@ -168,14 +186,10 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
         deviceManager->device(), descriptorLayouts->gpuSceneDataLayout());
     DescriptorWriter writer;
     writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    // If TLAS available and feature enabled, bind it at (set=0,binding=1)
-    if (ctxLocal->ray && ctxLocal->getDevice()->supportsAccelerationStructure() && ctxLocal->shadowSettings.mode != 0u)
+    // Only write TLAS when using the RT pipeline and we have a valid TLAS
+    if (useRT)
     {
-        VkAccelerationStructureKHR tlas = ctxLocal->ray->tlas();
-        if (tlas != VK_NULL_HANDLE)
-        {
-            writer.write_acceleration_structure(1, tlas);
-        }
+        writer.write_acceleration_structure(1, tlas);
     }
     writer.update_set(deviceManager->device(), globalDescriptor);
 

@@ -6,6 +6,7 @@
 #include "render/vk_materials.h"
 #include "core/vk_initializers.h"
 #include "core/vk_types.h"
+#include "core/config.h"
 #include <glm/gtx/quaternion.hpp>
 
 #include <fastgltf/glm_element_traits.hpp>
@@ -42,6 +43,9 @@ std::optional<AllocatedImage> load_image(VulkanEngine *engine, fastgltf::Asset &
                     VkFormat fmt = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
                     newImage = engine->_resourceManager->create_image(
                         data, imagesize, fmt, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+                    // Name the allocation for diagnostics
+                    if (vmaDebugEnabled())
+                        vmaSetAllocationName(engine->_deviceManager->allocator(), newImage.allocation, path.c_str());
 
                     stbi_image_free(data);
                 }
@@ -59,6 +63,8 @@ std::optional<AllocatedImage> load_image(VulkanEngine *engine, fastgltf::Asset &
                     VkFormat fmt = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
                     newImage = engine->_resourceManager->create_image(
                         data, imagesize, fmt, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+                    if (vmaDebugEnabled())
+                        vmaSetAllocationName(engine->_deviceManager->allocator(), newImage.allocation, "gltf.vector.image");
 
                     stbi_image_free(data);
                 }
@@ -86,8 +92,10 @@ std::optional<AllocatedImage> load_image(VulkanEngine *engine, fastgltf::Asset &
                                        imagesize.depth = 1;
 
                                        VkFormat fmt = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-                                       newImage = engine->_resourceManager->create_image(
+                    newImage = engine->_resourceManager->create_image(
                                            data, imagesize, fmt, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+                                       if (vmaDebugEnabled())
+                                           vmaSetAllocationName(engine->_deviceManager->allocator(), newImage.allocation, "gltf.bufferview.image");
 
                                        stbi_image_free(data);
                                    }
@@ -256,22 +264,33 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
     //< load_arrays
 
     // load all textures
-    for (fastgltf::Image &image: gltf.images)
+    for (size_t i = 0; i < gltf.images.size(); ++i)
     {
+        fastgltf::Image &image = gltf.images[i];
         // Default-load GLTF images as linear; baseColor is reloaded as sRGB when bound
         std::optional<AllocatedImage> img = load_image(engine, gltf, image, false);
 
         if (img.has_value())
         {
             images.push_back(*img);
-            file.images[image.name.c_str()] = *img;
+            // Use a unique, stable key so every allocation is tracked and later freed.
+            std::string key = image.name.empty() ? (std::string("gltf.image.") + std::to_string(i))
+                                                 : std::string(image.name.c_str());
+            // Avoid accidental collisions from duplicate names
+            int suffix = 1;
+            while (file.images.find(key) != file.images.end())
+            {
+                key = (image.name.empty() ? std::string("gltf.image.") + std::to_string(i)
+                                          : std::string(image.name.c_str())) + std::string("#") + std::to_string(suffix++);
+            }
+            file.images[key] = *img;
         }
         else
         {
             // we failed to load, so lets give the slot a default white texture to not
             // completely break loading
             images.push_back(engine->_errorCheckerboardImage);
-            std::cout << "gltf failed to load texture " << image.name << std::endl;
+            std::cout << "gltf failed to load texture index " << i << " (name='" << image.name << "')" << std::endl;
         }
     }
 

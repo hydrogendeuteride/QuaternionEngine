@@ -20,6 +20,8 @@ struct DescriptorWriter
     std::deque<VkDescriptorImageInfo> imageInfos;
     std::deque<VkDescriptorBufferInfo> bufferInfos;
     std::deque<VkWriteDescriptorSetAccelerationStructureKHR> accelInfos;
+    // Keep AS handles alive so pAccelerationStructures points to valid memory
+    std::deque<VkAccelerationStructureKHR> accelHandles;
     std::vector<VkWriteDescriptorSet> writes;
 
     void write_image(int binding, VkImageView image, VkSampler sampler, VkImageLayout layout, VkDescriptorType type);

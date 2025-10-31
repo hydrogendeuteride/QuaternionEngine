@@ -6,6 +6,7 @@
 
 #include "vk_device.h"
 #include "core/vk_resource.h"
+#include "frame_resources.h"
 
 ComputeBinding ComputeBinding::uniformBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size, VkDeviceSize offset)
 {
@@ -354,9 +355,22 @@ void ComputeManager::dispatchInstance(VkCommandBuffer cmd, const std::string &in
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getPipeline());
 
-    updateDescriptorSet(it->second.descriptorSet, it->second.bindings);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), 0, 1, &it->second.descriptorSet,
-                            0, nullptr);
+    // Allocate a transient per-frame descriptor set to avoid updating a set
+    // that might still be in use by a previous in-flight frame.
+    VkDescriptorSet transientSet = context->currentFrame
+        ? context->currentFrame->_frameDescriptors.allocate(context->getDevice()->device(), pipeline.descriptorLayout)
+        : VK_NULL_HANDLE;
+    if (transientSet == VK_NULL_HANDLE)
+    {
+        // Fallback to instance-owned set if per-frame allocator unavailable
+        updateDescriptorSet(it->second.descriptorSet, it->second.bindings);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), 0, 1, &it->second.descriptorSet, 0, nullptr);
+    }
+    else
+    {
+        updateDescriptorSet(transientSet, it->second.bindings);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), 0, 1, &transientSet, 0, nullptr);
+    }
 
     if (dispatchInfo.pushConstants && dispatchInfo.pushConstantSize > 0)
     {
@@ -459,9 +473,22 @@ bool ComputeManager::createPipeline(const std::string &name, const ComputePipeli
         DescriptorLayoutBuilder layoutBuilder;
         for (size_t i = 0; i < createInfo.descriptorTypes.size(); ++i)
         {
-            layoutBuilder.add_binding(i, createInfo.descriptorTypes[i]);
+            layoutBuilder.add_binding(static_cast<uint32_t>(i), createInfo.descriptorTypes[i]);
         }
-        computePipeline.descriptorLayout = layoutBuilder.build(context->getDevice()->device(), VK_SHADER_STAGE_COMPUTE_BIT);
+
+        // Mark all compute bindings as UPDATE_AFTER_BIND so we can update
+        // persistent instance descriptor sets while a previous frame is in-flight.
+        std::vector<VkDescriptorBindingFlags> bindingFlags(createInfo.descriptorTypes.size(),
+                                                          VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT);
+        VkDescriptorSetLayoutBindingFlagsCreateInfo flagsCI{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO };
+        flagsCI.bindingCount = static_cast<uint32_t>(bindingFlags.size());
+        flagsCI.pBindingFlags = bindingFlags.data();
+
+        computePipeline.descriptorLayout = layoutBuilder.build(
+            context->getDevice()->device(),
+            VK_SHADER_STAGE_COMPUTE_BIT,
+            &flagsCI,
+            VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
     }
 
     VkPipelineLayoutCreateInfo layoutInfo = vkinit::pipeline_layout_create_info();

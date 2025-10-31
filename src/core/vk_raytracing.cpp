@@ -21,6 +21,12 @@ void RayTracingManager::init(DeviceManager *dev, ResourceManager *res)
         vkGetDeviceProcAddr(_device->device(), "vkCmdBuildAccelerationStructuresKHR"));
     _vkGetAccelerationStructureDeviceAddressKHR = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
         vkGetDeviceProcAddr(_device->device(), "vkGetAccelerationStructureDeviceAddressKHR"));
+
+    // Query AS properties for scratch alignment
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR };
+    VkPhysicalDeviceProperties2 props2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &asProps };
+    vkGetPhysicalDeviceProperties2(_device->physicalDevice(), &props2);
+    _minScratchAlignment = std::max<VkDeviceSize>(asProps.minAccelerationStructureScratchOffsetAlignment, 256);
 }
 
 void RayTracingManager::cleanup()
@@ -150,11 +156,15 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     asci.size = sizes.accelerationStructureSize;
     VK_CHECK(_vkCreateAccelerationStructureKHR(_device->device(), &asci, nullptr, &blas.handle));
 
-    AllocatedBuffer scratch = _resources->create_buffer(sizes.buildScratchSize,
+    // Allocate scratch with padding to satisfy alignment requirements
+    const VkDeviceSize align = _minScratchAlignment;
+    const VkDeviceSize padded = sizes.buildScratchSize + (align - 1);
+    AllocatedBuffer scratch = _resources->create_buffer(padded,
                                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                                         VMA_MEMORY_USAGE_GPU_ONLY);
-    VkDeviceAddress scratchAddr = get_buffer_address(_device->device(), scratch.buffer);
+    VkDeviceAddress scratchBase = get_buffer_address(_device->device(), scratch.buffer);
+    VkDeviceAddress scratchAddr = (scratchBase + (align - 1)) & ~VkDeviceAddress(align - 1);
 
     buildInfo.dstAccelerationStructure = blas.handle;
     buildInfo.scratchData.deviceAddress = scratchAddr;
@@ -178,18 +188,20 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     return blas;
 }
 
-void RayTracingManager::ensure_tlas_storage(VkDeviceSize requiredASSize, VkDeviceSize /*requiredScratch*/)
+void RayTracingManager::ensure_tlas_storage(VkDeviceSize requiredASSize, VkDeviceSize /*requiredScratch*/, DeletionQueue& dq)
 {
-    // Simple: recreate TLAS storage if size grows
-    if (_tlas.handle)
+    // Recreate TLAS storage if size grows. Defer destruction to the frame DQ to
+    // avoid freeing while referenced by in-flight frames.
+    if (_tlas.handle || _tlas.storage.buffer)
     {
-        _vkDestroyAccelerationStructureKHR(_device->device(), _tlas.handle, nullptr);
-        _tlas.handle = VK_NULL_HANDLE;
-    }
-    if (_tlas.storage.buffer)
-    {
-        _resources->destroy_buffer(_tlas.storage);
-        _tlas.storage = {};
+        AccelStructureHandle old = _tlas;
+        dq.push_function([this, old]() {
+            if (old.handle)
+                _vkDestroyAccelerationStructureKHR(_device->device(), old.handle, nullptr);
+            if (old.storage.buffer)
+                _resources->destroy_buffer(old.storage);
+        });
+        _tlas = {};
     }
     _tlas.storage = _resources->create_buffer(requiredASSize,
                                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
@@ -203,7 +215,7 @@ void RayTracingManager::ensure_tlas_storage(VkDeviceSize requiredASSize, VkDevic
     VK_CHECK(_vkCreateAccelerationStructureKHR(_device->device(), &asci, nullptr, &_tlas.handle));
 }
 
-VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const DrawContext &dc)
+VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const DrawContext &dc, DeletionQueue& dq)
 {
     // Collect instances; one per render object (opaque only).
     std::vector<VkAccelerationStructureInstanceKHR> instances;
@@ -239,8 +251,19 @@ VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const Dra
 
     if (instances.empty())
     {
-        // nothing to build
-        return _tlas.handle;
+        // No instances this frame: defer TLAS destruction to avoid racing with previous frames
+        if (_tlas.handle || _tlas.storage.buffer)
+        {
+            AccelStructureHandle old = _tlas;
+            dq.push_function([this, old]() {
+                if (old.handle)
+                    _vkDestroyAccelerationStructureKHR(_device->device(), old.handle, nullptr);
+                if (old.storage.buffer)
+                    _resources->destroy_buffer(old.storage);
+            });
+            _tlas = {};
+        }
+        return VK_NULL_HANDLE;
     }
 
     // Ensure instance buffer capacity
@@ -293,15 +316,18 @@ VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const Dra
     _vkGetAccelerationStructureBuildSizesKHR(_device->device(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                                              &buildInfo, &primCount, &sizes);
 
-    ensure_tlas_storage(sizes.accelerationStructureSize, sizes.buildScratchSize);
+    ensure_tlas_storage(sizes.accelerationStructureSize, sizes.buildScratchSize, dq);
 
     buildInfo.dstAccelerationStructure = _tlas.handle;
-    AllocatedBuffer scratch = _resources->create_buffer(sizes.buildScratchSize,
+    const VkDeviceSize align2 = _minScratchAlignment;
+    const VkDeviceSize padded2 = sizes.buildScratchSize + (align2 - 1);
+    AllocatedBuffer scratch = _resources->create_buffer(padded2,
                                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                                         VMA_MEMORY_USAGE_GPU_ONLY);
-    VkDeviceAddress scratchAddr = get_buffer_address(_device->device(), scratch.buffer);
-    buildInfo.scratchData.deviceAddress = scratchAddr;
+    VkDeviceAddress scratchBase2 = get_buffer_address(_device->device(), scratch.buffer);
+    VkDeviceAddress scratchAddr2 = (scratchBase2 + (align2 - 1)) & ~VkDeviceAddress(align2 - 1);
+    buildInfo.scratchData.deviceAddress = scratchAddr2;
 
     VkAccelerationStructureBuildRangeInfoKHR range{};
     range.primitiveCount = primCount;

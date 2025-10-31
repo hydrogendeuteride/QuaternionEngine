@@ -53,6 +53,46 @@
 
 VulkanEngine *loadedEngine = nullptr;
 
+static void print_vma_stats(DeviceManager* dev, const char* tag)
+{
+    if (!vmaDebugEnabled()) return;
+    if (!dev) return;
+    VmaAllocator alloc = dev->allocator();
+    if (!alloc) return;
+    VmaTotalStatistics stats{};
+    vmaCalculateStatistics(alloc, &stats);
+    const VmaStatistics &s = stats.total.statistics;
+    fmt::print("[VMA][{}] Blocks:{} Allocs:{} BlockBytes:{} AllocBytes:{}\n",
+               tag,
+               (size_t)s.blockCount,
+               (size_t)s.allocationCount,
+               (unsigned long long)s.blockBytes,
+               (unsigned long long)s.allocationBytes);
+}
+
+static void dump_vma_json(DeviceManager* dev, const char* tag)
+{
+    if (!vmaDebugEnabled()) return;
+    if (!dev) return;
+    VmaAllocator alloc = dev->allocator();
+    if (!alloc) return;
+    char* json = nullptr;
+    vmaBuildStatsString(alloc, &json, VK_TRUE);
+    if (json)
+    {
+        // Write to a small temp file beside the binary
+        std::string fname = std::string("vma_") + tag + ".json";
+        FILE* f = fopen(fname.c_str(), "wb");
+        if (f)
+        {
+            fwrite(json, 1, strlen(json), f);
+            fclose(f);
+            fmt::print("[VMA] Wrote {}\n", fname);
+        }
+        vmaFreeStatsString(alloc, json);
+    }
+}
+
 void VulkanEngine::init()
 {
     // We initialize SDL and create a window with it.
@@ -150,7 +190,7 @@ void VulkanEngine::init()
     auto imguiPass = std::make_unique<ImGuiPass>();
     _renderPassManager->setImGuiPass(std::move(imguiPass));
 
-    const std::string structurePath = _assetManager->modelPath("police_office.glb");
+    const std::string structurePath = _assetManager->modelPath("seoul_high.glb");
     const auto structureFile = _assetManager->loadGLTF(structurePath);
 
     assert(structureFile.has_value());
@@ -233,7 +273,11 @@ void VulkanEngine::cleanup()
 {
     vkDeviceWaitIdle(_deviceManager->device());
 
+    print_vma_stats(_deviceManager.get(), "begin");
+
     _sceneManager->cleanup();
+    print_vma_stats(_deviceManager.get(), "after SceneManager");
+    dump_vma_json(_deviceManager.get(), "after_SceneManager");
 
     if (_isInitialized)
     {
@@ -253,24 +297,53 @@ void VulkanEngine::cleanup()
         metalRoughMaterial.clear_resources(_deviceManager->device());
 
         _mainDeletionQueue.flush();
+        print_vma_stats(_deviceManager.get(), "after MainDQ flush");
+        dump_vma_json(_deviceManager.get(), "after_MainDQ");
 
     _renderPassManager->cleanup();
+        print_vma_stats(_deviceManager.get(), "after RenderPassManager");
+        dump_vma_json(_deviceManager.get(), "after_RenderPassManager");
 
         _pipelineManager->cleanup();
+        print_vma_stats(_deviceManager.get(), "after PipelineManager");
+        dump_vma_json(_deviceManager.get(), "after_PipelineManager");
 
         compute.cleanup();
+        print_vma_stats(_deviceManager.get(), "after Compute");
+        dump_vma_json(_deviceManager.get(), "after_Compute");
 
         _swapchainManager->cleanup();
+        print_vma_stats(_deviceManager.get(), "after Swapchain");
+        dump_vma_json(_deviceManager.get(), "after_Swapchain");
 
         if (_assetManager) _assetManager->cleanup();
+        print_vma_stats(_deviceManager.get(), "after AssetManager");
+        dump_vma_json(_deviceManager.get(), "after_AssetManager");
+
+        // Ensure ray tracing resources (BLAS/TLAS/instance buffers) are freed before VMA is destroyed
+        if (_rayManager) { _rayManager->cleanup(); }
+        print_vma_stats(_deviceManager.get(), "after RTManager");
+        dump_vma_json(_deviceManager.get(), "after_RTManager");
 
         _resourceManager->cleanup();
+        print_vma_stats(_deviceManager.get(), "after ResourceManager");
+        dump_vma_json(_deviceManager.get(), "after_ResourceManager");
 
         _samplerManager->cleanup();
         _descriptorManager->cleanup();
+        print_vma_stats(_deviceManager.get(), "after Samplers+Descriptors");
+        dump_vma_json(_deviceManager.get(), "after_Samplers_Descriptors");
 
         _context->descriptors->destroy_pools(_deviceManager->device());
 
+        // Extra safety: flush frame deletion queues once more before destroying VMA
+        for (int i = 0; i < FRAME_OVERLAP; i++)
+        {
+            _frames[i]._deletionQueue.flush();
+        }
+
+        print_vma_stats(_deviceManager.get(), "before DeviceManager");
+        dump_vma_json(_deviceManager.get(), "before_DeviceManager");
         _deviceManager->cleanup();
 
         SDL_DestroyWindow(_window);
@@ -280,11 +353,6 @@ void VulkanEngine::cleanup()
 void VulkanEngine::draw()
 {
     _sceneManager->update_scene();
-    // Build or update TLAS for current frame if RT mode enabled (1 or 2)
-    if (_rayManager && _context->shadowSettings.mode != 0u)
-    {
-        _rayManager->buildTLASFromDrawContext(_context->getMainDrawContext());
-    }
     //> frame_clear
     //wait until the gpu has finished rendering the last frame. Timeout of 1 second
     VK_CHECK(vkWaitForFences(_deviceManager->device(), 1, &get_current_frame()._renderFence, true, 1000000000));
@@ -318,6 +386,12 @@ void VulkanEngine::draw()
 
     //now that we are sure that the commands finished executing, we can safely reset the command buffer to begin recording again.
     VK_CHECK(vkResetCommandBuffer(get_current_frame()._mainCommandBuffer, 0));
+
+    // Build or update TLAS for current frame now that the previous frame is idle
+    if (_rayManager && _context->shadowSettings.mode != 0u)
+    {
+        _rayManager->buildTLASFromDrawContext(_context->getMainDrawContext(), get_current_frame()._deletionQueue);
+    }
 
     //naming it cmd for shorter writing
     VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;

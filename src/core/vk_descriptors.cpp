@@ -77,10 +77,13 @@ void DescriptorWriter::write_image(int binding, VkImageView image, VkSampler sam
 
 void DescriptorWriter::write_acceleration_structure(int binding, VkAccelerationStructureKHR as)
 {
+    // Store the handle to ensure the pointer we give to Vulkan stays valid
+    VkAccelerationStructureKHR &storedAS = accelHandles.emplace_back(as);
+
     VkWriteDescriptorSetAccelerationStructureKHR &acc = accelInfos.emplace_back(
         VkWriteDescriptorSetAccelerationStructureKHR{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR });
     acc.accelerationStructureCount = 1;
-    acc.pAccelerationStructures = &as;
+    acc.pAccelerationStructures = &storedAS;
 
     VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     write.dstBinding = binding;
@@ -95,6 +98,8 @@ void DescriptorWriter::clear()
     imageInfos.clear();
     writes.clear();
     bufferInfos.clear();
+    accelInfos.clear();
+    accelHandles.clear();
 }
 
 void DescriptorWriter::update_set(VkDevice device, VkDescriptorSet set)
@@ -118,7 +123,10 @@ void DescriptorAllocator::init_pool(VkDevice device, uint32_t maxSets, std::span
     }
 
     VkDescriptorPoolCreateInfo pool_info = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-    pool_info.flags = 0;
+    // Enable update-after-bind so descriptors used by previous frame can be
+    // safely rewritten (e.g., compute instances). It is valid to allocate
+    // non-update-after-bind sets from such a pool.
+    pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
     pool_info.maxSets = maxSets;
     pool_info.poolSizeCount = (uint32_t) poolSizes.size();
     pool_info.pPoolSizes = poolSizes.data();
@@ -187,7 +195,8 @@ VkDescriptorPool DescriptorAllocatorGrowable::create_pool(VkDevice device, uint3
 
     VkDescriptorPoolCreateInfo pool_info = {};
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_info.flags = 0;
+    // Use update-after-bind pools to support cross-frame rewrites.
+    pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
     pool_info.maxSets = setCount;
     pool_info.poolSizeCount = (uint32_t) poolSizes.size();
     pool_info.pPoolSizes = poolSizes.data();
