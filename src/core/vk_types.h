@@ -107,6 +107,8 @@ struct Vertex {
     glm::vec3 normal;
     float uv_y;
     glm::vec4 color;
+    // Tangent.xyz = tangent direction; Tangent.w = handedness sign for B = sign * cross(N, T)
+    glm::vec4 tangent;
 };
 
 // holds the resources needed for a mesh

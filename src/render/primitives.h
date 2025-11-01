@@ -24,10 +24,10 @@ inline void buildCube(std::vector<Vertex>& vertices, std::vector<uint32_t>& indi
 
     for (auto& f : faces) {
         uint32_t start = (uint32_t)vertices.size();
-        Vertex v0{f.v0, 0, f.normal, 0, glm::vec4(1.0f)};
-        Vertex v1{f.v1, 1, f.normal, 0, glm::vec4(1.0f)};
-        Vertex v2{f.v2, 0, f.normal, 1, glm::vec4(1.0f)};
-        Vertex v3{f.v3, 1, f.normal, 1, glm::vec4(1.0f)};
+        Vertex v0{f.v0, 0, f.normal, 0, glm::vec4(1.0f), glm::vec4(1,0,0,1)};
+        Vertex v1{f.v1, 1, f.normal, 0, glm::vec4(1.0f), glm::vec4(1,0,0,1)};
+        Vertex v2{f.v2, 0, f.normal, 1, glm::vec4(1.0f), glm::vec4(1,0,0,1)};
+        Vertex v3{f.v3, 1, f.normal, 1, glm::vec4(1.0f), glm::vec4(1,0,0,1)};
         vertices.push_back(v0);
         vertices.push_back(v1);
         vertices.push_back(v2);
@@ -61,6 +61,7 @@ inline void buildSphere(std::vector<Vertex>& vertices, std::vector<uint32_t>& in
             vert.uv_x = u;
             vert.uv_y = 1.0f - v;
             vert.color = glm::vec4(1.0f);
+            vert.tangent = glm::vec4(1,0,0,1);
             vertices.push_back(vert);
         }
     }

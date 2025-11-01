@@ -7,6 +7,7 @@
 #include <core/vk_resource.h>
 #include <render/vk_materials.h>
 #include <render/primitives.h>
+#include <scene/tangent_space.h>
 #include <stb_image.h>
 #include "asset_locator.h"
 
@@ -142,6 +143,12 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
             break;
     }
 
+    // Ensure tangents exist for primitives (and provided geometry if needed)
+    if (!tmpVerts.empty() && !tmpInds.empty())
+    {
+        geom::generate_tangents(tmpVerts, tmpInds);
+    }
+
     if (info.material.kind == MeshMaterialDesc::Kind::Default)
     {
         return createMesh(info.name, vertsSpan, indsSpan, {});
@@ -151,9 +158,11 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
 
     auto [albedo, createdAlbedo] = loadImageFromAsset(opt.albedoPath, opt.albedoSRGB);
     auto [mr, createdMR] = loadImageFromAsset(opt.metalRoughPath, opt.metalRoughSRGB);
+    auto [normal, createdNormal] = loadImageFromAsset(opt.normalPath, opt.normalSRGB);
 
     const AllocatedImage &albedoRef = createdAlbedo ? albedo : _engine->_errorCheckerboardImage;
     const AllocatedImage &mrRef = createdMR ? mr : _engine->_whiteImage;
+    const AllocatedImage &normRef = createdNormal ? normal : _engine->_flatNormalImage;
 
     AllocatedBuffer matBuffer = createMaterialBufferWithConstants(opt.constants);
 
@@ -162,6 +171,8 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
     res.colorSampler = _engine->_samplerManager->defaultLinear();
     res.metalRoughImage = mrRef;
     res.metalRoughSampler = _engine->_samplerManager->defaultLinear();
+    res.normalImage = normRef;
+    res.normalSampler = _engine->_samplerManager->defaultLinear();
     res.dataBuffer = matBuffer.buffer;
     res.dataBufferOffset = 0;
 
@@ -171,6 +182,7 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
     _meshMaterialBuffers.emplace(info.name, matBuffer);
     if (createdAlbedo) _meshOwnedImages[info.name].push_back(albedo);
     if (createdMR) _meshOwnedImages[info.name].push_back(mr);
+    if (createdNormal) _meshOwnedImages[info.name].push_back(normal);
     return mesh;
 }
 
@@ -212,6 +224,10 @@ AllocatedBuffer AssetManager::createMaterialBufferWithConstants(
     if (matConstants->colorFactors == glm::vec4(0))
     {
         matConstants->colorFactors = glm::vec4(1.0f);
+    }
+    if (matConstants->extra[0].x == 0.0f)
+    {
+        matConstants->extra[0].x = 1.0f; // normal scale default
     }
     // Ensure writes are visible on non-coherent memory
     vmaFlushAllocation(_engine->_deviceManager->allocator(), matBuffer.allocation, 0,
@@ -270,6 +286,8 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const std::string &name,
         matResources.colorSampler = _engine->_samplerManager->defaultLinear();
         matResources.metalRoughImage = _engine->_whiteImage;
         matResources.metalRoughSampler = _engine->_samplerManager->defaultLinear();
+        matResources.normalImage = _engine->_flatNormalImage;
+        matResources.normalSampler = _engine->_samplerManager->defaultLinear();
 
         AllocatedBuffer matBuffer = createMaterialBufferWithConstants({});
         matResources.dataBuffer = matBuffer.buffer;

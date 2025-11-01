@@ -6,6 +6,7 @@ layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec3 inColor;
 layout(location = 2) in vec2 inUV;
 layout(location = 3) in vec3 inWorldPos;
+layout(location = 4) in vec4 inTangent;
 
 layout(location = 0) out vec4 outPos;
 layout(location = 1) out vec4 outNorm;
@@ -20,7 +21,17 @@ void main() {
     float roughness = clamp(mrTex.x * materialData.metal_rough_factors.y, 0.04, 1.0);
     float metallic  = clamp(mrTex.y * materialData.metal_rough_factors.x, 0.0, 1.0);
 
+    // Normal mapping: decode tangent-space normal and transform to world space
+    // Expect UNORM normal map (not sRGB). Flat fallback is (0.5, 0.5, 1.0).
+    vec3 Nm = texture(normalMap, inUV).xyz * 2.0 - 1.0;
+    float normalScale = max(materialData.extra[0].x, 0.0);
+    Nm.xy *= normalScale;
+    vec3 N = normalize(inNormal);
+    vec3 T = normalize(inTangent.xyz);
+    vec3 B = normalize(cross(N, T)) * inTangent.w;
+    vec3 Nw = normalize(T * Nm.x + B * Nm.y + N * Nm.z);
+
     outPos = vec4(inWorldPos, 1.0);
-    outNorm = vec4(normalize(inNormal), roughness);
+    outNorm = vec4(Nw, roughness);
     outAlbedo = vec4(albedo, metallic);
 }

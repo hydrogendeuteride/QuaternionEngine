@@ -18,6 +18,12 @@
   - Name SPIR‑V files with full extension, e.g. `fullscreen.vert.spv`, `deferred_lighting.frag.spv`.
   - Use `EngineContext::getAssets()->shaderPath("<name>.spv")` when registering pipelines.
   - Use sRGB formats for albedo textures and UNORM for PBR control textures (see `docs/asset_manager.md`).
+  - Material UBO layout (`GLTFMaterialData`):
+    - `vec4 colorFactors;`
+    - `vec4 metal_rough_factors; // x = metallic, y = roughness`
+    - `vec4 extra[14];            // extra[0].x = normalScale`
+  - Material texture bindings (set=1):
+    - binding=1 `colorTex`, binding=2 `metalRoughTex`, binding=3 `normalMap`.
 
 - Adding a pipeline (graphics)
   - Fill `GraphicsPipelineCreateInfo` with shader paths, descriptor set layouts, optional push constants, and a `configure(PipelineBuilder&)` callback to set topology, raster, depth/blend, and attachment formats.

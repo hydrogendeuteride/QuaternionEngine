@@ -72,6 +72,8 @@ add_executable (vulkan_engine
   scene/vk_scene.cpp
   scene/vk_loader.h
   scene/vk_loader.cpp
+  scene/tangent_space.h
+  scene/tangent_space.cpp
   scene/camera.h
   scene/camera.cpp
   # compute
@@ -89,7 +91,13 @@ target_include_directories(vulkan_engine PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/compute"
 )
 
+option(ENABLE_MIKKTS "Use MikkTSpace for tangent generation" ON)
+
 target_link_libraries(vulkan_engine PUBLIC vma glm Vulkan::Vulkan fmt::fmt stb_image SDL2::SDL2 vkbootstrap imgui fastgltf::fastgltf)
+if (ENABLE_MIKKTS)
+  target_link_libraries(vulkan_engine PUBLIC mikktspace)
+  target_compile_definitions(vulkan_engine PUBLIC MIKKTS_ENABLE=1)
+endif()
 
 add_library(vma_impl OBJECT vma_impl.cpp)
 target_include_directories(vma_impl PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/vma")

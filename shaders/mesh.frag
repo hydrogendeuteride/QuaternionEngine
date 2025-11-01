@@ -7,6 +7,7 @@ layout (location = 0) in vec3 inNormal;
 layout (location = 1) in vec3 inColor;
 layout (location = 2) in vec2 inUV;
 layout (location = 3) in vec3 inWorldPos;
+layout (location = 4) in vec4 inTangent;
 
 layout (location = 0) out vec4 outFragColor;
 
@@ -57,7 +58,14 @@ void main()
     float roughness = clamp(mrTex.x * materialData.metal_rough_factors.y, 0.04, 1.0);
     float metallic  = clamp(mrTex.y * materialData.metal_rough_factors.x, 0.0, 1.0);
 
-    vec3 N = normalize(inNormal);
+    // Normal mapping path for forward/transparent pipeline
+    vec3 Nm = texture(normalMap, inUV).xyz * 2.0 - 1.0;
+    float normalScale = max(materialData.extra[0].x, 0.0);
+    Nm.xy *= normalScale;
+    vec3 Nn = normalize(inNormal);
+    vec3 T = normalize(inTangent.xyz);
+    vec3 B = normalize(cross(Nn, T)) * inTangent.w;
+    vec3 N = normalize(T * Nm.x + B * Nm.y + Nn * Nm.z);
     vec3 camPos = vec3(inverse(sceneData.view)[3]);
     vec3 V = normalize(camPos - inWorldPos);
     vec3 L = normalize(-sceneData.sunlightDirection.xyz);

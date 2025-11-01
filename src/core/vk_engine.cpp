@@ -51,6 +51,268 @@
 #include "core/vk_pipeline_manager.h"
 #include "core/config.h"
 
+//
+// ImGui helpers: keep UI code tidy and grouped in small functions.
+// These render inside a single consolidated Debug window using tab items.
+//
+namespace {
+    // Background / compute playground
+    static void ui_background(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_renderPassManager) return;
+        auto *background_pass = eng->_renderPassManager->getPass<BackgroundPass>();
+        if (!background_pass) { ImGui::TextUnformatted("Background pass not available"); return; }
+
+        ComputeEffect &selected = background_pass->_backgroundEffects[background_pass->_currentEffect];
+
+        ImGui::Text("Selected effect: %s", selected.name);
+        ImGui::SliderInt("Effect Index", &background_pass->_currentEffect, 0,
+                         (int)background_pass->_backgroundEffects.size() - 1);
+        ImGui::InputFloat4("data1", reinterpret_cast<float *>(&selected.data.data1));
+        ImGui::InputFloat4("data2", reinterpret_cast<float *>(&selected.data.data2));
+        ImGui::InputFloat4("data3", reinterpret_cast<float *>(&selected.data.data3));
+        ImGui::InputFloat4("data4", reinterpret_cast<float *>(&selected.data.data4));
+
+        ImGui::Separator();
+        ImGui::SliderFloat("Render Scale", &eng->renderScale, 0.3f, 1.f);
+    }
+
+    // Quick stats & targets overview
+    static void ui_overview(VulkanEngine *eng)
+    {
+        if (!eng) return;
+        ImGui::Text("frametime %.2f ms", eng->stats.frametime);
+        ImGui::Text("draw time %.2f ms", eng->stats.mesh_draw_time);
+        ImGui::Text("update time %.2f ms", eng->_sceneManager->stats.scene_update_time);
+        ImGui::Text("triangles %i", eng->stats.triangle_count);
+        ImGui::Text("draws %i", eng->stats.drawcall_count);
+
+        ImGui::Separator();
+        ImGui::Text("Draw extent: %ux%u", eng->_drawExtent.width, eng->_drawExtent.height);
+        auto scExt = eng->_swapchainManager->swapchainExtent();
+        ImGui::Text("Swapchain:   %ux%u", scExt.width, scExt.height);
+        ImGui::Text("Draw fmt:    %s", string_VkFormat(eng->_swapchainManager->drawImage().imageFormat));
+        ImGui::Text("Swap fmt:    %s", string_VkFormat(eng->_swapchainManager->swapchainImageFormat()));
+    }
+
+    // Shadows / Ray Query controls
+    static void ui_shadows(VulkanEngine *eng)
+    {
+        if (!eng) return;
+        const bool rq = eng->_deviceManager->supportsRayQuery();
+        const bool as = eng->_deviceManager->supportsAccelerationStructure();
+        ImGui::Text("RayQuery: %s", rq ? "supported" : "not available");
+        ImGui::Text("AccelStruct: %s", as ? "supported" : "not available");
+        ImGui::Separator();
+
+        auto &ss = eng->_context->shadowSettings;
+        int mode = static_cast<int>(ss.mode);
+        ImGui::TextUnformatted("Shadow Mode");
+        ImGui::RadioButton("Clipmap only", &mode, 0); ImGui::SameLine();
+        ImGui::RadioButton("Clipmap + RT", &mode, 1); ImGui::SameLine();
+        ImGui::RadioButton("RT only", &mode, 2);
+        if (!(rq && as) && mode != 0) mode = 0; // guard for unsupported HW
+        ss.mode = static_cast<uint32_t>(mode);
+        ss.hybridRayQueryEnabled = (ss.mode != 0);
+
+        ImGui::BeginDisabled(ss.mode != 1u);
+        ImGui::TextUnformatted("Cascades using ray assist:");
+        for (int i = 0; i < 4; ++i)
+        {
+            bool on = (ss.hybridRayCascadesMask >> i) & 1u;
+            std::string label = std::string("C") + std::to_string(i);
+            if (ImGui::Checkbox(label.c_str(), &on))
+            {
+                if (on) ss.hybridRayCascadesMask |= (1u << i);
+                else    ss.hybridRayCascadesMask &= ~(1u << i);
+            }
+            if (i != 3) ImGui::SameLine();
+        }
+        ImGui::SliderFloat("N·L threshold", &ss.hybridRayNoLThreshold, 0.0f, 1.0f, "%.2f");
+        ImGui::EndDisabled();
+
+        ImGui::Separator();
+        ImGui::TextWrapped("Clipmap only: raster PCF+RPDB. Clipmap+RT: PCF assisted by ray query at low N·L. RT only: skip shadow maps and use ray tests only.");
+    }
+
+    // Render Graph inspection (passes, images, buffers)
+    static void ui_render_graph(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_renderGraph) { ImGui::TextUnformatted("RenderGraph not available"); return; }
+        auto &graph = *eng->_renderGraph;
+
+        std::vector<RenderGraph::RGDebugPassInfo> passInfos;
+        graph.debug_get_passes(passInfos);
+        if (ImGui::Button("Reload Pipelines")) { eng->_pipelineManager->hotReloadChanged(); }
+        ImGui::SameLine();
+        ImGui::Text("%zu passes", passInfos.size());
+
+        if (ImGui::BeginTable("passes", 8, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+        {
+            ImGui::TableSetupColumn("Enable", ImGuiTableColumnFlags_WidthFixed, 70);
+            ImGui::TableSetupColumn("Name");
+            ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 80);
+            ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_WidthFixed, 70);
+            ImGui::TableSetupColumn("CPU rec ms", ImGuiTableColumnFlags_WidthFixed, 90);
+            ImGui::TableSetupColumn("Imgs", ImGuiTableColumnFlags_WidthFixed, 55);
+            ImGui::TableSetupColumn("Bufs", ImGuiTableColumnFlags_WidthFixed, 55);
+            ImGui::TableSetupColumn("Attachments", ImGuiTableColumnFlags_WidthFixed, 100);
+            ImGui::TableHeadersRow();
+
+            auto typeName = [](RGPassType t){
+                switch (t) {
+                    case RGPassType::Graphics: return "Graphics";
+                    case RGPassType::Compute:  return "Compute";
+                    case RGPassType::Transfer: return "Transfer";
+                    default: return "?";
+                }
+            };
+
+            for (size_t i = 0; i < passInfos.size(); ++i)
+            {
+                auto &pi = passInfos[i];
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                bool enabled = true;
+                if (auto it = eng->_rgPassToggles.find(pi.name); it != eng->_rgPassToggles.end()) enabled = it->second;
+                std::string chkId = std::string("##en") + std::to_string(i);
+                if (ImGui::Checkbox(chkId.c_str(), &enabled))
+                {
+                    eng->_rgPassToggles[pi.name] = enabled;
+                }
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextUnformatted(pi.name.c_str());
+                ImGui::TableSetColumnIndex(2);
+                ImGui::TextUnformatted(typeName(pi.type));
+                ImGui::TableSetColumnIndex(3);
+                if (pi.gpuMillis >= 0.0f) ImGui::Text("%.2f", pi.gpuMillis); else ImGui::TextUnformatted("-");
+                ImGui::TableSetColumnIndex(4);
+                if (pi.cpuMillis >= 0.0f) ImGui::Text("%.2f", pi.cpuMillis); else ImGui::TextUnformatted("-");
+                ImGui::TableSetColumnIndex(5);
+                ImGui::Text("%u/%u", pi.imageReads, pi.imageWrites);
+                ImGui::TableSetColumnIndex(6);
+                ImGui::Text("%u/%u", pi.bufferReads, pi.bufferWrites);
+                ImGui::TableSetColumnIndex(7);
+                ImGui::Text("%u%s", pi.colorAttachmentCount, pi.hasDepth ? "+D" : "");
+            }
+            ImGui::EndTable();
+        }
+
+        if (ImGui::CollapsingHeader("Images", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            std::vector<RenderGraph::RGDebugImageInfo> imgs;
+            graph.debug_get_images(imgs);
+            if (ImGui::BeginTable("images", 7, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+            {
+                ImGui::TableSetupColumn("Id", ImGuiTableColumnFlags_WidthFixed, 40);
+                ImGui::TableSetupColumn("Name");
+                ImGui::TableSetupColumn("Fmt", ImGuiTableColumnFlags_WidthFixed, 120);
+                ImGui::TableSetupColumn("Extent", ImGuiTableColumnFlags_WidthFixed, 120);
+                ImGui::TableSetupColumn("Imported", ImGuiTableColumnFlags_WidthFixed, 70);
+                ImGui::TableSetupColumn("Usage", ImGuiTableColumnFlags_WidthFixed, 80);
+                ImGui::TableSetupColumn("Life", ImGuiTableColumnFlags_WidthFixed, 80);
+                ImGui::TableHeadersRow();
+                for (const auto &im : imgs)
+                {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0); ImGui::Text("%u", im.id);
+                    ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(im.name.c_str());
+                    ImGui::TableSetColumnIndex(2); ImGui::TextUnformatted(string_VkFormat(im.format));
+                    ImGui::TableSetColumnIndex(3); ImGui::Text("%ux%u", im.extent.width, im.extent.height);
+                    ImGui::TableSetColumnIndex(4); ImGui::TextUnformatted(im.imported ? "yes" : "no");
+                    ImGui::TableSetColumnIndex(5); ImGui::Text("0x%x", (unsigned)im.creationUsage);
+                    ImGui::TableSetColumnIndex(6); ImGui::Text("%d..%d", im.firstUse, im.lastUse);
+                }
+                ImGui::EndTable();
+            }
+        }
+
+        if (ImGui::CollapsingHeader("Buffers"))
+        {
+            std::vector<RenderGraph::RGDebugBufferInfo> bufs;
+            graph.debug_get_buffers(bufs);
+            if (ImGui::BeginTable("buffers", 6, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+            {
+                ImGui::TableSetupColumn("Id", ImGuiTableColumnFlags_WidthFixed, 40);
+                ImGui::TableSetupColumn("Name");
+                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 100);
+                ImGui::TableSetupColumn("Imported", ImGuiTableColumnFlags_WidthFixed, 70);
+                ImGui::TableSetupColumn("Usage", ImGuiTableColumnFlags_WidthFixed, 100);
+                ImGui::TableSetupColumn("Life", ImGuiTableColumnFlags_WidthFixed, 80);
+                ImGui::TableHeadersRow();
+                for (const auto &bf : bufs)
+                {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0); ImGui::Text("%u", bf.id);
+                    ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(bf.name.c_str());
+                    ImGui::TableSetColumnIndex(2); ImGui::Text("%zu", (size_t)bf.size);
+                    ImGui::TableSetColumnIndex(3); ImGui::TextUnformatted(bf.imported ? "yes" : "no");
+                    ImGui::TableSetColumnIndex(4); ImGui::Text("0x%x", (unsigned)bf.usage);
+                    ImGui::TableSetColumnIndex(5); ImGui::Text("%d..%d", bf.firstUse, bf.lastUse);
+                }
+                ImGui::EndTable();
+            }
+        }
+    }
+
+    // Pipeline manager (graphics)
+    static void ui_pipelines(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_pipelineManager) { ImGui::TextUnformatted("PipelineManager not available"); return; }
+        std::vector<PipelineManager::GraphicsPipelineDebugInfo> pipes;
+        eng->_pipelineManager->debug_get_graphics(pipes);
+        if (ImGui::Button("Reload Changed")) { eng->_pipelineManager->hotReloadChanged(); }
+        ImGui::SameLine(); ImGui::Text("%zu graphics pipelines", pipes.size());
+        if (ImGui::BeginTable("gfxpipes", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+        {
+            ImGui::TableSetupColumn("Name");
+            ImGui::TableSetupColumn("VS");
+            ImGui::TableSetupColumn("FS");
+            ImGui::TableSetupColumn("Valid", ImGuiTableColumnFlags_WidthFixed, 60);
+            ImGui::TableHeadersRow();
+            for (const auto &p : pipes)
+            {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0); ImGui::TextUnformatted(p.name.c_str());
+                ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(p.vertexShaderPath.c_str());
+                ImGui::TableSetColumnIndex(2); ImGui::TextUnformatted(p.fragmentShaderPath.c_str());
+                ImGui::TableSetColumnIndex(3); ImGui::TextUnformatted(p.valid ? "yes" : "no");
+            }
+            ImGui::EndTable();
+        }
+    }
+
+    // Post-processing
+    static void ui_postfx(VulkanEngine *eng)
+    {
+        if (!eng) return;
+        if (auto *tm = eng->_renderPassManager ? eng->_renderPassManager->getPass<TonemapPass>() : nullptr)
+        {
+            float exp = tm->exposure();
+            int mode = tm->mode();
+            if (ImGui::SliderFloat("Exposure", &exp, 0.05f, 8.0f)) { tm->setExposure(exp); }
+            ImGui::TextUnformatted("Operator");
+            ImGui::SameLine();
+            if (ImGui::RadioButton("Reinhard", mode == 0)) { mode = 0; tm->setMode(mode); }
+            ImGui::SameLine();
+            if (ImGui::RadioButton("ACES", mode == 1)) { mode = 1; tm->setMode(mode); }
+        }
+        else
+        {
+            ImGui::TextUnformatted("Tonemap pass not available");
+        }
+    }
+
+    // Scene debug bits
+    static void ui_scene(VulkanEngine *eng)
+    {
+        if (!eng) return;
+        const DrawContext &dc = eng->_context->getMainDrawContext();
+        ImGui::Text("Opaque draws: %zu", dc.OpaqueSurfaces.size());
+        ImGui::Text("Transp draws: %zu", dc.TransparentSurfaces.size());
+    }
+} // namespace
+
 VulkanEngine *loadedEngine = nullptr;
 
 static void print_vma_stats(DeviceManager* dev, const char* tag)
@@ -190,7 +452,7 @@ void VulkanEngine::init()
     auto imguiPass = std::make_unique<ImGuiPass>();
     _renderPassManager->setImGuiPass(std::move(imguiPass));
 
-    const std::string structurePath = _assetManager->modelPath("seoul_high.glb");
+    const std::string structurePath = _assetManager->modelPath("mirage.glb");
     const auto structureFile = _assetManager->loadGLTF(structurePath);
 
     assert(structureFile.has_value());
@@ -218,6 +480,11 @@ void VulkanEngine::init_default_data()
     uint32_t black = glm::packUnorm4x8(glm::vec4(0, 0, 0, 0));
     _blackImage = _resourceManager->create_image((void *) &black, VkExtent3D{1, 1, 1}, VK_FORMAT_R8G8B8A8_UNORM,
                                                  VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    // Flat normal (0.5, 0.5, 1.0) for missing normal maps
+    uint32_t flatN = glm::packUnorm4x8(glm::vec4(0.5f, 0.5f, 1.0f, 1.0f));
+    _flatNormalImage = _resourceManager->create_image((void *) &flatN, VkExtent3D{1, 1, 1}, VK_FORMAT_R8G8B8A8_UNORM,
+                                                      VK_IMAGE_USAGE_SAMPLED_BIT);
 
     //checkerboard image
     uint32_t magenta = glm::packUnorm4x8(glm::vec4(1, 0, 1, 1));
@@ -265,6 +532,7 @@ void VulkanEngine::init_default_data()
         _resourceManager->destroy_image(_greyImage);
         _resourceManager->destroy_image(_blackImage);
         _resourceManager->destroy_image(_errorCheckerboardImage);
+        _resourceManager->destroy_image(_flatNormalImage);
     });
     //< default_img
 }
@@ -581,270 +849,49 @@ void VulkanEngine::run()
 
         ImGui::NewFrame();
 
-        if (ImGui::Begin("background"))
+        // Consolidated debug window with tabs
+        if (ImGui::Begin("Debug"))
         {
-            auto background_pass = _renderPassManager->getPass<BackgroundPass>();
-            ComputeEffect &selected = background_pass->_backgroundEffects[background_pass->_currentEffect];
-
-            ImGui::Text("Selected effect: %s", selected.name);
-
-            ImGui::SliderInt("Effect Index", &background_pass->_currentEffect, 0,
-                             background_pass->_backgroundEffects.size() - 1);
-
-            ImGui::InputFloat4("data1", reinterpret_cast<float *>(&selected.data.data1));
-            ImGui::InputFloat4("data2", reinterpret_cast<float *>(&selected.data.data2));
-            ImGui::InputFloat4("data3", reinterpret_cast<float *>(&selected.data.data3));
-            ImGui::InputFloat4("data4", reinterpret_cast<float *>(&selected.data.data4));
-
-            ImGui::SliderFloat("Render Scale", &renderScale, 0.3f, 1.f);
-
-            ImGui::End();
-        }
-
-        if (ImGui::Begin("Stats"))
-        {
-            ImGui::Text("frametime %f ms", stats.frametime);
-            ImGui::Text("draw time %f ms", stats.mesh_draw_time);
-            ImGui::Text("update time %f ms", _sceneManager->stats.scene_update_time);
-            ImGui::Text("triangles %i", stats.triangle_count);
-            ImGui::Text("draws %i", stats.drawcall_count);
-            ImGui::End();
-        }
-
-        // Shadows / Ray Query settings
-        if (ImGui::Begin("Shadows"))
-        {
-            const bool rq = _deviceManager->supportsRayQuery();
-            const bool as = _deviceManager->supportsAccelerationStructure();
-            ImGui::Text("RayQuery: %s", rq ? "supported" : "not available");
-            ImGui::Text("AccelStruct: %s", as ? "supported" : "not available");
-            ImGui::Separator();
-
-            auto &ss = _context->shadowSettings;
-            // Mode selection
-            int mode = static_cast<int>(ss.mode);
-            ImGui::TextUnformatted("Shadow Mode");
-            ImGui::RadioButton("Clipmap only", &mode, 0); ImGui::SameLine();
-            ImGui::RadioButton("Clipmap + RT", &mode, 1); ImGui::SameLine();
-            ImGui::RadioButton("RT only", &mode, 2);
-            // If device lacks RT support, force mode 0
-            if (!(rq && as) && mode != 0) mode = 0;
-            ss.mode = static_cast<uint32_t>(mode);
-            ss.hybridRayQueryEnabled = (ss.mode != 0);
-
-            // Hybrid controls (mode 1)
-            ImGui::BeginDisabled(ss.mode != 1u);
-            ImGui::TextUnformatted("Cascades using ray assist:");
-            for (int i = 0; i < 4; ++i)
+            const ImGuiTabBarFlags tf = ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_AutoSelectNewTabs;
+            if (ImGui::BeginTabBar("DebugTabs", tf))
             {
-                bool on = (ss.hybridRayCascadesMask >> i) & 1u;
-                std::string label = std::string("C") + std::to_string(i);
-                if (ImGui::Checkbox(label.c_str(), &on))
+                if (ImGui::BeginTabItem("Overview"))
                 {
-                    if (on) ss.hybridRayCascadesMask |= (1u << i);
-                    else    ss.hybridRayCascadesMask &= ~(1u << i);
+                    ui_overview(this);
+                    ImGui::EndTabItem();
                 }
-                if (i != 3) ImGui::SameLine();
-            }
-            ImGui::SliderFloat("N·L threshold", &ss.hybridRayNoLThreshold, 0.0f, 1.0f, "%.2f");
-            ImGui::EndDisabled();
-
-            ImGui::Separator();
-            ImGui::TextWrapped("Clipmap only: raster PCF+RPDB. Clipmap+RT: PCF assisted by ray query at low N·L. RT only: skip shadow maps and use ray tests only.");
-
-            ImGui::End();
-        }
-
-        // Render Graph debug window
-        if (ImGui::Begin("Render Graph"))
-        {
-            if (_renderGraph)
-            {
-                auto &graph = *_renderGraph;
-                std::vector<RenderGraph::RGDebugPassInfo> passInfos;
-                graph.debug_get_passes(passInfos);
-                if (ImGui::Button("Reload Pipelines")) { _pipelineManager->hotReloadChanged(); }
-                ImGui::SameLine();
-                ImGui::Text("%zu passes", passInfos.size());
-
-                if (ImGui::BeginTable("passes", 8, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+                if (ImGui::BeginTabItem("Background"))
                 {
-                    ImGui::TableSetupColumn("Enable", ImGuiTableColumnFlags_WidthFixed, 70);
-                    ImGui::TableSetupColumn("Name");
-                    ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 80);
-                    ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_WidthFixed, 70);
-                    ImGui::TableSetupColumn("CPU rec ms", ImGuiTableColumnFlags_WidthFixed, 90);
-                    ImGui::TableSetupColumn("Imgs", ImGuiTableColumnFlags_WidthFixed, 55);
-                    ImGui::TableSetupColumn("Bufs", ImGuiTableColumnFlags_WidthFixed, 55);
-                    ImGui::TableSetupColumn("Attachments", ImGuiTableColumnFlags_WidthFixed, 100);
-                    ImGui::TableHeadersRow();
-
-                    auto typeName = [](RGPassType t){
-                        switch (t) {
-                            case RGPassType::Graphics: return "Graphics";
-                            case RGPassType::Compute:  return "Compute";
-                            case RGPassType::Transfer: return "Transfer";
-                            default: return "?";
-                        }
-                    };
-
-                    for (size_t i = 0; i < passInfos.size(); ++i)
-                    {
-                        auto &pi = passInfos[i];
-                        ImGui::TableNextRow();
-                        ImGui::TableSetColumnIndex(0);
-                        bool enabled = true;
-                        if (auto it = _rgPassToggles.find(pi.name); it != _rgPassToggles.end()) enabled = it->second;
-                        std::string chkId = std::string("##en") + std::to_string(i);
-                        if (ImGui::Checkbox(chkId.c_str(), &enabled))
-                        {
-                            _rgPassToggles[pi.name] = enabled;
-                        }
-                        ImGui::TableSetColumnIndex(1);
-                        ImGui::TextUnformatted(pi.name.c_str());
-                        ImGui::TableSetColumnIndex(2);
-                        ImGui::TextUnformatted(typeName(pi.type));
-                        ImGui::TableSetColumnIndex(3);
-                        if (pi.gpuMillis >= 0.0f) ImGui::Text("%.2f", pi.gpuMillis); else ImGui::TextUnformatted("-");
-                        ImGui::TableSetColumnIndex(4);
-                        if (pi.cpuMillis >= 0.0f) ImGui::Text("%.2f", pi.cpuMillis); else ImGui::TextUnformatted("-");
-                        ImGui::TableSetColumnIndex(5);
-                        ImGui::Text("%u/%u", pi.imageReads, pi.imageWrites);
-                        ImGui::TableSetColumnIndex(6);
-                        ImGui::Text("%u/%u", pi.bufferReads, pi.bufferWrites);
-                        ImGui::TableSetColumnIndex(7);
-                        ImGui::Text("%u%s", pi.colorAttachmentCount, pi.hasDepth ? "+D" : "");
-                    }
-                    ImGui::EndTable();
+                    ui_background(this);
+                    ImGui::EndTabItem();
                 }
-
-                if (ImGui::CollapsingHeader("Images", ImGuiTreeNodeFlags_DefaultOpen))
+                if (ImGui::BeginTabItem("Shadows"))
                 {
-                    std::vector<RenderGraph::RGDebugImageInfo> imgs;
-                    graph.debug_get_images(imgs);
-                    if (ImGui::BeginTable("images", 7, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
-                    {
-                        ImGui::TableSetupColumn("Id", ImGuiTableColumnFlags_WidthFixed, 40);
-                        ImGui::TableSetupColumn("Name");
-                        ImGui::TableSetupColumn("Fmt", ImGuiTableColumnFlags_WidthFixed, 120);
-                        ImGui::TableSetupColumn("Extent", ImGuiTableColumnFlags_WidthFixed, 120);
-                        ImGui::TableSetupColumn("Imported", ImGuiTableColumnFlags_WidthFixed, 70);
-                        ImGui::TableSetupColumn("Usage", ImGuiTableColumnFlags_WidthFixed, 80);
-                        ImGui::TableSetupColumn("Life", ImGuiTableColumnFlags_WidthFixed, 80);
-                        ImGui::TableHeadersRow();
-                        for (const auto &im : imgs)
-                        {
-                            ImGui::TableNextRow();
-                            ImGui::TableSetColumnIndex(0); ImGui::Text("%u", im.id);
-                            ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(im.name.c_str());
-                            ImGui::TableSetColumnIndex(2); ImGui::TextUnformatted(string_VkFormat(im.format));
-                            ImGui::TableSetColumnIndex(3); ImGui::Text("%ux%u", im.extent.width, im.extent.height);
-                            ImGui::TableSetColumnIndex(4); ImGui::TextUnformatted(im.imported ? "yes" : "no");
-                            ImGui::TableSetColumnIndex(5); ImGui::Text("0x%x", (unsigned)im.creationUsage);
-                            ImGui::TableSetColumnIndex(6); ImGui::Text("%d..%d", im.firstUse, im.lastUse);
-                        }
-                        ImGui::EndTable();
-                    }
+                    ui_shadows(this);
+                    ImGui::EndTabItem();
                 }
-
-                if (ImGui::CollapsingHeader("Buffers"))
+                if (ImGui::BeginTabItem("Render Graph"))
                 {
-                    std::vector<RenderGraph::RGDebugBufferInfo> bufs;
-                    graph.debug_get_buffers(bufs);
-                    if (ImGui::BeginTable("buffers", 6, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
-                    {
-                        ImGui::TableSetupColumn("Id", ImGuiTableColumnFlags_WidthFixed, 40);
-                        ImGui::TableSetupColumn("Name");
-                        ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 100);
-                        ImGui::TableSetupColumn("Imported", ImGuiTableColumnFlags_WidthFixed, 70);
-                        ImGui::TableSetupColumn("Usage", ImGuiTableColumnFlags_WidthFixed, 100);
-                        ImGui::TableSetupColumn("Life", ImGuiTableColumnFlags_WidthFixed, 80);
-                        ImGui::TableHeadersRow();
-                        for (const auto &bf : bufs)
-                        {
-                            ImGui::TableNextRow();
-                            ImGui::TableSetColumnIndex(0); ImGui::Text("%u", bf.id);
-                            ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(bf.name.c_str());
-                            ImGui::TableSetColumnIndex(2); ImGui::Text("%zu", (size_t)bf.size);
-                            ImGui::TableSetColumnIndex(3); ImGui::TextUnformatted(bf.imported ? "yes" : "no");
-                            ImGui::TableSetColumnIndex(4); ImGui::Text("0x%x", (unsigned)bf.usage);
-                            ImGui::TableSetColumnIndex(5); ImGui::Text("%d..%d", bf.firstUse, bf.lastUse);
-                        }
-                        ImGui::EndTable();
-                    }
+                    ui_render_graph(this);
+                    ImGui::EndTabItem();
                 }
-            }
-            ImGui::End();
-        }
-
-        // Pipelines debug window (graphics)
-        if (ImGui::Begin("Pipelines"))
-        {
-            if (_pipelineManager)
-            {
-                std::vector<PipelineManager::GraphicsPipelineDebugInfo> pipes;
-                _pipelineManager->debug_get_graphics(pipes);
-                if (ImGui::Button("Reload Changed")) { _pipelineManager->hotReloadChanged(); }
-                ImGui::SameLine(); ImGui::Text("%zu graphics pipelines", pipes.size());
-                if (ImGui::BeginTable("gfxpipes", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+                if (ImGui::BeginTabItem("Pipelines"))
                 {
-                    ImGui::TableSetupColumn("Name");
-                    ImGui::TableSetupColumn("VS");
-                    ImGui::TableSetupColumn("FS");
-                    ImGui::TableSetupColumn("Valid", ImGuiTableColumnFlags_WidthFixed, 60);
-                    ImGui::TableHeadersRow();
-                    for (const auto &p : pipes)
-                    {
-                        ImGui::TableNextRow();
-                        ImGui::TableSetColumnIndex(0); ImGui::TextUnformatted(p.name.c_str());
-                        ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(p.vertexShaderPath.c_str());
-                        ImGui::TableSetColumnIndex(2); ImGui::TextUnformatted(p.fragmentShaderPath.c_str());
-                        ImGui::TableSetColumnIndex(3); ImGui::TextUnformatted(p.valid ? "yes" : "no");
-                    }
-                    ImGui::EndTable();
+                    ui_pipelines(this);
+                    ImGui::EndTabItem();
                 }
+                if (ImGui::BeginTabItem("PostFX"))
+                {
+                    ui_postfx(this);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Scene"))
+                {
+                    ui_scene(this);
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
             }
-            ImGui::End();
-        }
-
-    // Draw targets window
-        if (ImGui::Begin("Targets"))
-        {
-            ImGui::Text("Draw extent: %ux%u", _drawExtent.width, _drawExtent.height);
-            auto scExt = _swapchainManager->swapchainExtent();
-            ImGui::Text("Swapchain:   %ux%u", scExt.width, scExt.height);
-            ImGui::Text("Draw fmt:    %s", string_VkFormat(_swapchainManager->drawImage().imageFormat));
-            ImGui::Text("Swap fmt:    %s", string_VkFormat(_swapchainManager->swapchainImageFormat()));
-            ImGui::End();
-        }
-
-        // PostFX window
-        if (ImGui::Begin("PostFX"))
-        {
-            if (auto *tm = _renderPassManager->getPass<TonemapPass>())
-            {
-                float exp = tm->exposure();
-                int mode = tm->mode();
-                if (ImGui::SliderFloat("Exposure", &exp, 0.05f, 8.0f)) { tm->setExposure(exp); }
-                ImGui::TextUnformatted("Operator");
-                ImGui::SameLine();
-                if (ImGui::RadioButton("Reinhard", mode == 0)) { mode = 0; tm->setMode(mode); }
-                ImGui::SameLine();
-                if (ImGui::RadioButton("ACES", mode == 1)) { mode = 1; tm->setMode(mode); }
-            }
-            else
-            {
-                ImGui::TextUnformatted("Tonemap pass not available");
-            }
-            ImGui::End();
-        }
-
-        // Scene window
-        if (ImGui::Begin("Scene"))
-        {
-            const DrawContext &dc = _context->getMainDrawContext();
-            ImGui::Text("Opaque draws: %zu", dc.OpaqueSurfaces.size());
-            ImGui::Text("Transp draws: %zu", dc.TransparentSurfaces.size());
             ImGui::End();
         }
         ImGui::Render();

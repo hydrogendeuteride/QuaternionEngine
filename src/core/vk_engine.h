@@ -97,6 +97,7 @@ public:
 	AllocatedImage _blackImage;
 	AllocatedImage _greyImage;
 	AllocatedImage _errorCheckerboardImage;
+    AllocatedImage _flatNormalImage; // 1x1 (0.5,0.5,1.0)
 
     MaterialInstance defaultData;
 

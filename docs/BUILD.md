@@ -32,6 +32,11 @@
 - Third‑party deps
   - Vendored under `third_party/` and brought in via CMake. Do not edit headers directly; update through targets.
 
+- Optional: MikkTSpace tangents
+  - Enable at configure time: `-DENABLE_MIKKTS=ON` (default ON if found).
+  - Requires `third_party/MikkTSpace/mikktspace.c` and `mikktspace.h` (provided).
+  - Disable to use the built‑in Gram–Schmidt generator: `-DENABLE_MIKKTS=OFF`.
+
 - Validation Layers
   - Enabled in Debug (`kUseValidationLayers = true` in `src/core/config.h`).
   - Disable by building Release or toggling the flag during local experimentation.

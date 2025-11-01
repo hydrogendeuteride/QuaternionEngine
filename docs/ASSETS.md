@@ -20,4 +20,8 @@
 
 - Materials & sRGB
   - See `docs/asset_manager.md` for mesh/material creation and sRGB/UNORM handling.
+  - Conventions:
+    - Albedo/base color → sRGB
+    - Metallic-Roughness → UNORM (G=roughness, B=metallic)
+    - Normal map → UNORM (+Y green up)
 

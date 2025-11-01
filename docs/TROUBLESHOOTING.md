@@ -24,3 +24,13 @@
   - Confirm the `.spv` file changed (timestamp) and click “Reload Changed” in the Pipelines window.
   - Ensure you are editing the correct files referenced by `shaderPath()`.
 
+- GLSL error: `no such field in structure 'materialData': extra`
+  - Ensure `shaders/input_structures.glsl` defines `vec4 extra[14];` inside `GLTFMaterialData` to match C++ `MaterialConstants`.
+
+- Normals look inverted when using normal maps
+  - The engine expects +Y (green up) tangent-space normals. Flip the green channel in your texture if needed.
+
+- Tangent seams or artifacts
+  - Build with MikkTSpace enabled: `-DENABLE_MIKKTS=ON`.
+  - Check that your mesh has non-degenerate UVs.
+

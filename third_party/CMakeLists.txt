@@ -50,3 +50,7 @@ target_sources(imgui PRIVATE
 target_link_libraries(imgui PUBLIC Vulkan::Vulkan SDL2::SDL2)
 
 target_include_directories(stb_image INTERFACE stb_image)
+
+# MikkTSpace (optional)
+add_library(mikktspace STATIC MikkTSpace/mikktspace.c)
+target_include_directories(mikktspace PUBLIC MikkTSpace)

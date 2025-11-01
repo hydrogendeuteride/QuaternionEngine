@@ -14,6 +14,7 @@
 #include <fastgltf/tools.hpp>
 #include <fastgltf/util.hpp>
 #include <optional>
+#include "tangent_space.h"
 //> loadimg
 std::optional<AllocatedImage> load_image(VulkanEngine *engine, fastgltf::Asset &asset, fastgltf::Image &image, bool srgb)
 {
@@ -312,6 +313,8 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         file.materials[mat.name.c_str()] = newMat;
 
         GLTFMetallic_Roughness::MaterialConstants constants;
+        // Defaults
+        constants.extra[0].x = 1.0f; // normalScale
         constants.colorFactors.x = mat.pbrData.baseColorFactor[0];
         constants.colorFactors.y = mat.pbrData.baseColorFactor[1];
         constants.colorFactors.z = mat.pbrData.baseColorFactor[2];
@@ -334,6 +337,8 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         materialResources.colorSampler = engine->_samplerManager->defaultLinear();
         materialResources.metalRoughImage = engine->_whiteImage;
         materialResources.metalRoughSampler = engine->_samplerManager->defaultLinear();
+        materialResources.normalImage = engine->_flatNormalImage;
+        materialResources.normalSampler = engine->_samplerManager->defaultLinear();
 
         // set the uniform buffer for the material data
         materialResources.dataBuffer = file.materialDataBuffer.buffer;
@@ -384,6 +389,39 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
                 materialResources.metalRoughSampler = hasSampler ? file.samplers[sampler]
                                                                   : engine->_samplerManager->defaultLinear();
             }
+        }
+
+        // Normal map (tangent-space)
+        if (mat.normalTexture.has_value())
+        {
+            const auto &tex = gltf.textures[mat.normalTexture.value().textureIndex];
+            size_t imgIndex = tex.imageIndex.value();
+            bool hasSampler = tex.samplerIndex.has_value();
+            size_t sampler = hasSampler ? tex.samplerIndex.value() : SIZE_MAX;
+
+            if (imgIndex < gltf.images.size())
+            {
+                auto normalImg = load_image(engine, gltf, gltf.images[imgIndex], false);
+                if (normalImg.has_value())
+                {
+                    materialResources.normalImage = *normalImg;
+                    std::string key = std::string("normal_") + mat.name.c_str() + "_" + std::to_string(imgIndex);
+                    file.images[key] = *normalImg;
+                }
+                else
+                {
+                    materialResources.normalImage = images[imgIndex];
+                }
+            }
+            else
+            {
+                materialResources.normalImage = engine->_flatNormalImage;
+            }
+            materialResources.normalSampler = hasSampler ? file.samplers[sampler]
+                                                         : engine->_samplerManager->defaultLinear();
+
+            // Store normal scale into material constants extra[0].x if available
+            sceneMaterialConstants[data_index].extra[0].x = mat.normalTexture->scale;
         }
         // build material
         newMat->data = engine->metalRoughMaterial.write_material(engine->_deviceManager->device(), passType, materialResources,
@@ -442,12 +480,13 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
 
                 fastgltf::iterateAccessorWithIndex<glm::vec3>(gltf, posAccessor,
                                                               [&](glm::vec3 v, size_t index) {
-                                                                  Vertex newvtx;
+                                                                  Vertex newvtx{};
                                                                   newvtx.position = v;
                                                                   newvtx.normal = {1, 0, 0};
                                                                   newvtx.color = glm::vec4{1.f};
                                                                   newvtx.uv_x = 0;
                                                                   newvtx.uv_y = 0;
+                                                                  newvtx.tangent = glm::vec4(1,0,0,1);
                                                                   vertices[initial_vtx + index] = newvtx;
                                                               });
             }
@@ -481,6 +520,29 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
                                                               [&](glm::vec4 v, size_t index) {
                                                                   vertices[initial_vtx + index].color = v;
                                                               });
+            }
+
+            // load tangents if present (vec4, w = sign)
+            auto tangents = p.findAttribute("TANGENT");
+            bool hasTangents = tangents != p.attributes.end();
+            if (hasTangents)
+            {
+                fastgltf::iterateAccessorWithIndex<glm::vec4>(gltf, gltf.accessors[(*tangents).second],
+                                                              [&](glm::vec4 v, size_t index) {
+                                                                  vertices[initial_vtx + index].tangent = v;
+                                                              });
+            }
+
+            // Generate tangents if missing and we have UVs
+            if (!hasTangents)
+            {
+                size_t primIndexStart = newSurface.startIndex;
+                size_t primIndexCount = newSurface.count;
+                size_t primVertexStart = initial_vtx;
+                size_t primVertexCount = vertices.size() - initial_vtx;
+                geom::generate_tangents_range(vertices, indices,
+                                              primIndexStart, primIndexCount,
+                                              primVertexStart, primVertexCount);
             }
 
             if (p.materialIndex.has_value())

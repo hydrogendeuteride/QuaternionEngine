@@ -40,9 +40,11 @@ Use either the convenience descriptor (`MeshCreateInfo`) or the direct overload 
 struct AssetManager::MaterialOptions {
   std::string albedoPath;        // resolved through AssetManager
   std::string metalRoughPath;    // resolved through AssetManager
+  std::string normalPath;        // resolved through AssetManager (tangent-space normal)
   bool albedoSRGB      = true;   // VK_FORMAT_R8G8B8A8_SRGB when true
   bool metalRoughSRGB  = false;  // VK_FORMAT_R8G8B8A8_UNORM when false
-  GLTFMetallic_Roughness::MaterialConstants constants{};
+  bool normalSRGB      = false;  // normal maps should be UNORM
+  GLTFMetallic_Roughness::MaterialConstants constants{}; // extra[0].x as normalScale
   MaterialPass pass    = MaterialPass::MainColor; // or Transparent
 };
 
@@ -113,7 +115,7 @@ ctx->scene->addMeshInstance("sphere.instance", sphere,
     glm::translate(glm::mat4(1.f), glm::vec3(2.f, 0.f, -2.f)));
 ```
 
-Textured primitive (albedo + metal-rough):
+Textured primitive (albedo + metal-rough + normal):
 
 ```c++
 AssetManager::MeshCreateInfo ti{};
@@ -124,7 +126,9 @@ ti.geometry.vertices = std::span<Vertex>(v.data(), v.size());
 ti.geometry.indices  = std::span<uint32_t>(i.data(), i.size());
 ti.material.kind = AssetManager::MeshMaterialDesc::Kind::Textured;
 ti.material.options.albedoPath = "textures/ground_albedo.png";     // sRGB
-ti.material.options.metalRoughPath = "textures/ground_mr.png";     // UNORM
+ti.material.options.metalRoughPath = "textures/ground_mr.png";     // UNORM, G=roughness, B=metallic
+ti.material.options.normalPath     = "textures/ground_n.png";      // UNORM
+ti.material.options.constants.extra[0].x = 1.0f;                    // normalScale
 // ti.material.options.pass = MaterialPass::Transparent; // optional
 
 auto texturedPlane = ctx->getAssets()->createMesh(ti);
@@ -156,4 +160,5 @@ ctx->scene->removeGLTFInstance("chair01");
 - Reuse by name: `createMesh("name", ...)` returns the cached mesh if it already exists. Use a unique name or call `removeMesh(name)` to replace.
 - sRGB/UNORM: Albedo is sRGB by default, metal-rough is UNORM by default. Adjust via `MaterialOptions`.
 - Hot reload: Shaders are resolved via `shaderPath()`; pipeline hot reload is handled by the pipeline manager, not the AssetManager.
-- Normal maps: Not wired into the default GLTF PBR material in this branch. Adding them would require descriptor and shader updates.
+- Normal maps: Supported. If `normalPath` is empty, a flat normal is used.
+- Tangents: Loaded from glTF when present; otherwise generated. Enable MikkTSpace at configure time with `-DENABLE_MIKKTS=ON`.
