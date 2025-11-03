@@ -34,7 +34,23 @@ void TextureCache::cleanup()
 
 TextureCache::TextureHandle TextureCache::request(const TextureKey &key, VkSampler sampler)
 {
-    auto it = _lookup.find(key.hash);
+    // Ensure we have a valid, stable hash for deduplication.
+    TextureKey normKey = key;
+    if (normKey.hash == 0)
+    {
+        if (normKey.kind == TextureKey::SourceKind::FilePath)
+        {
+            std::string id = std::string("PATH:") + normKey.path + (normKey.srgb ? "#sRGB" : "#UNORM");
+            normKey.hash = texcache::fnv1a64(id);
+        }
+        else if (!normKey.bytes.empty())
+        {
+            uint64_t h = texcache::fnv1a64(normKey.bytes.data(), normKey.bytes.size());
+            normKey.hash = h ^ (normKey.srgb ? 0x9E3779B97F4A7C15ull : 0ull);
+        }
+    }
+
+    auto it = _lookup.find(normKey.hash);
     if (it != _lookup.end())
     {
         TextureHandle h = it->second;
@@ -47,19 +63,19 @@ TextureCache::TextureHandle TextureCache::request(const TextureKey &key, VkSampl
     }
 
     TextureHandle h = static_cast<TextureHandle>(_entries.size());
-    _lookup.emplace(key.hash, h);
+    _lookup.emplace(normKey.hash, h);
 
     Entry e{};
-    e.key = key;
+    e.key = normKey;
     e.sampler = sampler;
     e.state = EntryState::Unloaded;
-    if (key.kind == TextureKey::SourceKind::FilePath)
+    if (normKey.kind == TextureKey::SourceKind::FilePath)
     {
-        e.path = key.path;
+        e.path = normKey.path;
     }
     else
     {
-        e.bytes = key.bytes;
+        e.bytes = normKey.bytes;
     }
     _entries.push_back(std::move(e));
     return h;
@@ -198,12 +214,25 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
     // Simple throttle to avoid massive spikes.
     const int kMaxLoadsPerPump = 4;
     int started = 0;
+    const uint32_t now = _context ? _context->frameIndex : 0u;
     for (auto &e : _entries)
     {
         if (e.state == EntryState::Unloaded)
         {
-            start_load(e, rm);
-            if (++started >= kMaxLoadsPerPump) break;
+            // Visibility-driven residency: only start uploads for textures
+            // that were marked used recently (current or previous frame).
+            // This avoids uploading assets that are not visible.
+            bool recentlyUsed = true;
+            if (_context)
+            {
+                // Schedule when first seen (previous frame) or if seen again.
+                recentlyUsed = (now == 0u) || (now - e.lastUsedFrame <= 1u);
+            }
+            if (recentlyUsed)
+            {
+                start_load(e, rm);
+                if (++started >= kMaxLoadsPerPump) break;
+            }
         }
     }
 }

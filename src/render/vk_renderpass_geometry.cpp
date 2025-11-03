@@ -170,6 +170,22 @@ void GeometryPass::draw_geometry(VkCommandBuffer cmd,
         }
     }
 
+    // Texture visibility-driven residency
+    if (ctxLocal->textures && !opaque_draws.empty())
+    {
+        std::unordered_set<VkDescriptorSet> seen;
+        seen.reserve(opaque_draws.size());
+        for (uint32_t idx : opaque_draws)
+        {
+            const RenderObject &r = mainDrawContext.OpaqueSurfaces[idx];
+            VkDescriptorSet set = r.material ? r.material->materialSet : VK_NULL_HANDLE;
+            if (set != VK_NULL_HANDLE && seen.insert(set).second)
+            {
+                ctxLocal->textures->markSetUsed(set, ctxLocal->frameIndex);
+            }
+        }
+    }
+
     std::sort(opaque_draws.begin(), opaque_draws.end(), [&](const auto &iA, const auto &iB)
     {
         const RenderObject &A = mainDrawContext.OpaqueSurfaces[iA];
