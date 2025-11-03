@@ -32,6 +32,8 @@ add_executable (vulkan_engine
   core/vk_pipeline_manager.cpp
   core/frame_resources.h
   core/frame_resources.cpp
+  core/texture_cache.h
+  core/texture_cache.cpp
   core/config.h
   core/vk_engine.h
   core/vk_engine.cpp

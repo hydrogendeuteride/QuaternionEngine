@@ -31,6 +31,7 @@
 #include "core/asset_manager.h"
 #include "render/rg_graph.h"
 #include "core/vk_raytracing.h"
+#include "core/texture_cache.h"
 
 // Number of frames-in-flight. Affects per-frame command buffers, fences,
 // semaphores, and transient descriptor pools in FrameResources.
@@ -67,6 +68,7 @@ public:
     std::unique_ptr<AssetManager> _assetManager;
     std::unique_ptr<RenderGraph> _renderGraph;
     std::unique_ptr<RayTracingManager> _rayManager;
+    std::unique_ptr<TextureCache> _textureCache;
 
 	struct SDL_Window *_window{nullptr};
 

@@ -51,6 +51,44 @@
 #include "core/vk_pipeline_manager.h"
 #include "core/config.h"
 
+// Query a conservative streaming texture budget based on VMA-reported
+// device-local heap budgets. Uses ~35% of total device-local budget.
+static size_t query_texture_budget_bytes(DeviceManager* dev)
+{
+    if (!dev) return 512ull * 1024ull * 1024ull; // fallback
+    VmaAllocator alloc = dev->allocator();
+    if (!alloc) return 512ull * 1024ull * 1024ull;
+
+    const VkPhysicalDeviceMemoryProperties* memProps = nullptr;
+    vmaGetMemoryProperties(alloc, &memProps);
+    if (!memProps) return 512ull * 1024ull * 1024ull;
+
+    VmaBudget budgets[VK_MAX_MEMORY_HEAPS] = {};
+    vmaGetHeapBudgets(alloc, budgets);
+
+    unsigned long long totalBudget = 0;
+    unsigned long long totalUsage = 0;
+    for (uint32_t i = 0; i < memProps->memoryHeapCount; ++i)
+    {
+        if (memProps->memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+        {
+            totalBudget += budgets[i].budget;
+            totalUsage  += budgets[i].usage;
+        }
+    }
+    if (totalBudget == 0) return 512ull * 1024ull * 1024ull;
+
+    // Reserve ~65% of VRAM for attachments, swapchain, meshes, AS, etc.
+    unsigned long long cap = static_cast<unsigned long long>(double(totalBudget) * 0.35);
+
+    // If usage is already near the cap, still allow current textures to live; eviction will trim.
+    // Clamp to at least 128 MB, at most totalBudget.
+    unsigned long long minCap = 128ull * 1024ull * 1024ull;
+    if (cap < minCap) cap = minCap;
+    if (cap > totalBudget) cap = totalBudget;
+    return static_cast<size_t>(cap);
+}
+
 //
 // ImGui helpers: keep UI code tidy and grouped in small functions.
 // These render inside a single consolidated Debug window using tab items.
@@ -416,6 +454,11 @@ void VulkanEngine::init()
     _assetManager->init(this);
     _context->assets = _assetManager.get();
 
+    // Create texture cache (engine-owned, accessible via EngineContext)
+    _textureCache = std::make_unique<TextureCache>();
+    _textureCache->init(_context.get());
+    _context->textures = _textureCache.get();
+
     // Optional ray tracing manager if supported and extensions enabled
     if (_deviceManager->supportsRayQuery() && _deviceManager->supportsAccelerationStructure())
     {
@@ -568,7 +611,9 @@ void VulkanEngine::cleanup()
         print_vma_stats(_deviceManager.get(), "after MainDQ flush");
         dump_vma_json(_deviceManager.get(), "after_MainDQ");
 
-    _renderPassManager->cleanup();
+        if (_textureCache) { _textureCache->cleanup(); }
+
+        _renderPassManager->cleanup();
         print_vma_stats(_deviceManager.get(), "after RenderPassManager");
         dump_vma_json(_deviceManager.get(), "after_RenderPassManager");
 
@@ -673,7 +718,11 @@ void VulkanEngine::draw()
 
     // publish per-frame pointers and draw extent to context for passes
     _context->currentFrame = &get_current_frame();
+    _context->frameIndex = static_cast<uint32_t>(_frameNumber);
     _context->drawExtent = _drawExtent;
+
+    // Inform VMA of current frame for improved internal stats/aging (optional).
+    vmaSetCurrentFrameIndex(_deviceManager->allocator(), _context->frameIndex);
 
     // Optional: check for shader changes and hot-reload pipelines
     if (_pipelineManager)
@@ -700,6 +749,14 @@ void VulkanEngine::draw()
         {
             std::string name = std::string("shadow.cascade.") + std::to_string(i);
             hShadowCascades[i] = _renderGraph->create_depth_image(name.c_str(), shadowExtent, VK_FORMAT_D32_SFLOAT);
+        }
+
+        // Prior to building passes, pump texture loads for this frame.
+        if (_textureCache)
+        {
+            size_t budget = query_texture_budget_bytes(_deviceManager.get());
+            _textureCache->evictToBudget(budget);
+            _textureCache->pumpLoads(*_resourceManager, get_current_frame());
         }
 
         _resourceManager->register_upload_pass(*_renderGraph, get_current_frame());

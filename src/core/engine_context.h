@@ -30,11 +30,12 @@ struct SDL_Window;
 class AssetManager;
 class RenderGraph;
 class RayTracingManager;
+class TextureCache;
 
 struct ShadowSettings
 {
     // 0 = Clipmap only, 1 = Clipmap + RT assist, 2 = RT only
-    uint32_t mode = 0;
+    uint32_t mode = 2;
     bool hybridRayQueryEnabled = false;   // derived convenience: (mode != 0)
     uint32_t hybridRayCascadesMask = 0b1110; // bit i => cascade i uses ray query assist (default: 1..3)
     float hybridRayNoLThreshold = 0.25f;  // trigger when N·L below this (mode==1)
@@ -56,6 +57,7 @@ public:
 
     // Per-frame and subsystem pointers for modules to use without VulkanEngine
     FrameResources* currentFrame = nullptr;      // set by engine each frame
+    uint32_t frameIndex = 0;                     // incremented by engine each frame
     EngineStats* stats = nullptr;                // points to engine stats
     ComputeManager* compute = nullptr;           // compute subsystem
     PipelineManager* pipelines = nullptr;        // graphics pipeline manager
@@ -90,4 +92,7 @@ public:
     // Convenience alias (singular) requested
     AssetManager* getAsset() const { return assets; }
     RenderGraph* getRenderGraph() const { return renderGraph; }
+
+    // Streaming subsystems (engine-owned)
+    TextureCache* textures = nullptr;            // texture streaming + cache
 };

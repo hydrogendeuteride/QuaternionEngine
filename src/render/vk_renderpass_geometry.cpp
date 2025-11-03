@@ -4,6 +4,7 @@
 #include <unordered_set>
 
 #include "frame_resources.h"
+#include "texture_cache.h"
 #include "vk_descriptor_manager.h"
 #include "vk_device.h"
 #include "core/engine_context.h"
@@ -240,6 +241,10 @@ void GeometryPass::draw_geometry(VkCommandBuffer cmd,
 
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->layout, 1, 1,
                                     &r.material->materialSet, 0, nullptr);
+            if (ctxLocal->textures)
+            {
+                ctxLocal->textures->markSetUsed(r.material->materialSet, ctxLocal->frameIndex);
+            }
         }
         if (r.indexBuffer != lastIndexBuffer)
         {

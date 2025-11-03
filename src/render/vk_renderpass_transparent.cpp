@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <unordered_set>
+
+#include "texture_cache.h"
 #include "vk_scene.h"
 #include "vk_swapchain.h"
 #include "core/engine_context.h"
@@ -133,6 +135,10 @@ void TransparentPass::draw_transparent(VkCommandBuffer cmd,
             }
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->layout, 1, 1,
                                     &r.material->materialSet, 0, nullptr);
+            if (ctxLocal->textures)
+            {
+                ctxLocal->textures->markSetUsed(r.material->materialSet, ctxLocal->frameIndex);
+            }
         }
         if (r.indexBuffer != lastIndexBuffer)
         {

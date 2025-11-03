@@ -1,6 +1,7 @@
 ﻿#include "stb_image.h"
 #include <iostream>
 #include "vk_loader.h"
+#include "core/texture_cache.h"
 
 #include "core/vk_engine.h"
 #include "render/vk_materials.h"
@@ -260,40 +261,58 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
     // temporal arrays for all the objects to use while creating the GLTF data
     std::vector<std::shared_ptr<MeshAsset> > meshes;
     std::vector<std::shared_ptr<Node> > nodes;
-    std::vector<AllocatedImage> images;
     std::vector<std::shared_ptr<GLTFMaterial> > materials;
     //< load_arrays
 
-    // load all textures
-    for (size_t i = 0; i < gltf.images.size(); ++i)
+    // Note: glTF images are now loaded on-demand via TextureCache.
+    auto buildTextureKey = [&](size_t imgIndex, bool srgb) -> TextureCache::TextureKey
     {
-        fastgltf::Image &image = gltf.images[i];
-        // Default-load GLTF images as linear; baseColor is reloaded as sRGB when bound
-        std::optional<AllocatedImage> img = load_image(engine, gltf, image, false);
-
-        if (img.has_value())
+        TextureCache::TextureKey key{};
+        key.srgb = srgb;
+        key.mipmapped = true;
+        if (imgIndex >= gltf.images.size())
         {
-            images.push_back(*img);
-            // Use a unique, stable key so every allocation is tracked and later freed.
-            std::string key = image.name.empty() ? (std::string("gltf.image.") + std::to_string(i))
-                                                 : std::string(image.name.c_str());
-            // Avoid accidental collisions from duplicate names
-            int suffix = 1;
-            while (file.images.find(key) != file.images.end())
+            key.hash = 0; // invalid
+            return key;
+        }
+        fastgltf::Image &image = gltf.images[imgIndex];
+        std::visit(fastgltf::visitor{
+            [&](fastgltf::sources::URI &filePath)
             {
-                key = (image.name.empty() ? std::string("gltf.image.") + std::to_string(i)
-                                          : std::string(image.name.c_str())) + std::string("#") + std::to_string(suffix++);
-            }
-            file.images[key] = *img;
-        }
-        else
-        {
-            // we failed to load, so lets give the slot a default white texture to not
-            // completely break loading
-            images.push_back(engine->_errorCheckerboardImage);
-            std::cout << "gltf failed to load texture index " << i << " (name='" << image.name << "')" << std::endl;
-        }
-    }
+                const std::string path(filePath.uri.path().begin(), filePath.uri.path().end());
+                key.kind = TextureCache::TextureKey::SourceKind::FilePath;
+                key.path = path;
+                std::string id = std::string("GLTF:") + path + (srgb ? "#sRGB" : "#UNORM");
+                key.hash = texcache::fnv1a64(id);
+            },
+            [&](fastgltf::sources::Vector &vector)
+            {
+                key.kind = TextureCache::TextureKey::SourceKind::Bytes;
+                key.bytes.assign(vector.bytes.begin(), vector.bytes.end());
+                uint64_t h = texcache::fnv1a64(key.bytes.data(), key.bytes.size());
+                key.hash = h ^ (srgb ? 0x9E3779B97F4A7C15ull : 0ull);
+            },
+            [&](fastgltf::sources::BufferView &view)
+            {
+                auto &bufferView = gltf.bufferViews[view.bufferViewIndex];
+                auto &buffer = gltf.buffers[bufferView.bufferIndex];
+                std::visit(fastgltf::visitor{
+                    [](auto &arg) {},
+                    [&](fastgltf::sources::Vector &vec)
+                    {
+                        size_t off = bufferView.byteOffset;
+                        size_t len = bufferView.byteLength;
+                        key.kind = TextureCache::TextureKey::SourceKind::Bytes;
+                        key.bytes.assign(vec.bytes.begin() + off, vec.bytes.begin() + off + len);
+                        uint64_t h = texcache::fnv1a64(key.bytes.data(), key.bytes.size());
+                        key.hash = h ^ (srgb ? 0x9E3779B97F4A7C15ull : 0ull);
+                    }
+                }, buffer.data);
+            },
+            [](auto &other) {}
+        }, image.data);
+        return key;
+    };
 
     //> load_buffer
     // create buffer to hold the material data
@@ -343,89 +362,78 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         // set the uniform buffer for the material data
         materialResources.dataBuffer = file.materialDataBuffer.buffer;
         materialResources.dataBufferOffset = data_index * sizeof(GLTFMetallic_Roughness::MaterialConstants);
-        // grab textures from gltf file
-        if (mat.pbrData.baseColorTexture.has_value())
+        // Dynamic texture bindings via TextureCache (fallbacks are already set)
+        TextureCache *cache = engine->_context->textures;
+        TextureCache::TextureHandle hColor = TextureCache::InvalidHandle;
+        TextureCache::TextureHandle hMRO  = TextureCache::InvalidHandle;
+        TextureCache::TextureHandle hNorm = TextureCache::InvalidHandle;
+
+        if (cache && mat.pbrData.baseColorTexture.has_value())
         {
             const auto &tex = gltf.textures[mat.pbrData.baseColorTexture.value().textureIndex];
-            size_t imgIndex = tex.imageIndex.value();
-            // Sampler is optional in glTF; fall back to default if missing
-            bool hasSampler = tex.samplerIndex.has_value();
-            size_t sampler = hasSampler ? tex.samplerIndex.value() : SIZE_MAX;
-
-            // Reload albedo as sRGB, independent of the global image cache
-            if (imgIndex < gltf.images.size())
+            const size_t imgIndex = tex.imageIndex.value();
+            const bool hasSampler = tex.samplerIndex.has_value();
+            const VkSampler sampler = hasSampler ? file.samplers[tex.samplerIndex.value()] : engine->_samplerManager->defaultLinear();
+            auto key = buildTextureKey(imgIndex, true);
+            if (key.hash != 0)
             {
-                auto albedoImg = load_image(engine, gltf, gltf.images[imgIndex], true);
-                if (albedoImg.has_value())
-                {
-                    materialResources.colorImage = *albedoImg;
-                    // Track for cleanup using a unique key
-                    std::string key = std::string("albedo_") + mat.name.c_str() + "_" + std::to_string(imgIndex);
-                    file.images[key] = *albedoImg;
-                }
-                else
-                {
-                    materialResources.colorImage = images[imgIndex];
-                }
+                hColor = cache->request(key, sampler);
+                materialResources.colorSampler = sampler;
             }
-            else
-            {
-                materialResources.colorImage = engine->_errorCheckerboardImage;
-            }
-            materialResources.colorSampler = hasSampler ? file.samplers[sampler]
-                                                        : engine->_samplerManager->defaultLinear();
         }
 
-        // Metallic-Roughness texture
-        if (mat.pbrData.metallicRoughnessTexture.has_value())
+        if (cache && mat.pbrData.metallicRoughnessTexture.has_value())
         {
             const auto &tex = gltf.textures[mat.pbrData.metallicRoughnessTexture.value().textureIndex];
-            size_t imgIndex = tex.imageIndex.value();
-            bool hasSampler = tex.samplerIndex.has_value();
-            size_t sampler = hasSampler ? tex.samplerIndex.value() : SIZE_MAX;
-            if (imgIndex < images.size())
+            const size_t imgIndex = tex.imageIndex.value();
+            const bool hasSampler = tex.samplerIndex.has_value();
+            const VkSampler sampler = hasSampler ? file.samplers[tex.samplerIndex.value()] : engine->_samplerManager->defaultLinear();
+            auto key = buildTextureKey(imgIndex, false);
+            if (key.hash != 0)
             {
-                materialResources.metalRoughImage = images[imgIndex];
-                materialResources.metalRoughSampler = hasSampler ? file.samplers[sampler]
-                                                                  : engine->_samplerManager->defaultLinear();
+                hMRO = cache->request(key, sampler);
+                materialResources.metalRoughSampler = sampler;
             }
         }
 
-        // Normal map (tangent-space)
-        if (mat.normalTexture.has_value())
+        if (cache && mat.normalTexture.has_value())
         {
             const auto &tex = gltf.textures[mat.normalTexture.value().textureIndex];
-            size_t imgIndex = tex.imageIndex.value();
-            bool hasSampler = tex.samplerIndex.has_value();
-            size_t sampler = hasSampler ? tex.samplerIndex.value() : SIZE_MAX;
-
-            if (imgIndex < gltf.images.size())
+            const size_t imgIndex = tex.imageIndex.value();
+            const bool hasSampler = tex.samplerIndex.has_value();
+            const VkSampler sampler = hasSampler ? file.samplers[tex.samplerIndex.value()] : engine->_samplerManager->defaultLinear();
+            auto key = buildTextureKey(imgIndex, false);
+            if (key.hash != 0)
             {
-                auto normalImg = load_image(engine, gltf, gltf.images[imgIndex], false);
-                if (normalImg.has_value())
-                {
-                    materialResources.normalImage = *normalImg;
-                    std::string key = std::string("normal_") + mat.name.c_str() + "_" + std::to_string(imgIndex);
-                    file.images[key] = *normalImg;
-                }
-                else
-                {
-                    materialResources.normalImage = images[imgIndex];
-                }
+                hNorm = cache->request(key, sampler);
+                materialResources.normalSampler = sampler;
             }
-            else
-            {
-                materialResources.normalImage = engine->_flatNormalImage;
-            }
-            materialResources.normalSampler = hasSampler ? file.samplers[sampler]
-                                                         : engine->_samplerManager->defaultLinear();
-
-            // Store normal scale into material constants extra[0].x if available
+            // Store normal scale if provided
             sceneMaterialConstants[data_index].extra[0].x = mat.normalTexture->scale;
         }
         // build material
         newMat->data = engine->metalRoughMaterial.write_material(engine->_deviceManager->device(), passType, materialResources,
                                                                  file.descriptorPool);
+
+        // Register descriptor patches for dynamic textures
+        if (cache)
+        {
+            if (hColor != TextureCache::InvalidHandle)
+            {
+                cache->watchBinding(hColor, newMat->data.materialSet, 1u, materialResources.colorSampler,
+                                    engine->_whiteImage.imageView);
+            }
+            if (hMRO != TextureCache::InvalidHandle)
+            {
+                cache->watchBinding(hMRO, newMat->data.materialSet, 2u, materialResources.metalRoughSampler,
+                                    engine->_whiteImage.imageView);
+            }
+            if (hNorm != TextureCache::InvalidHandle)
+            {
+                cache->watchBinding(hNorm, newMat->data.materialSet, 3u, materialResources.normalSampler,
+                                    engine->_flatNormalImage.imageView);
+            }
+        }
 
         data_index++;
     }
