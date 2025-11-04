@@ -50,6 +50,7 @@
 #include "engine_context.h"
 #include "core/vk_pipeline_manager.h"
 #include "core/config.h"
+#include "core/texture_cache.h"
 
 // Query a conservative streaming texture budget based on VMA-reported
 // device-local heap budgets. Uses ~35% of total device-local budget.
@@ -131,6 +132,82 @@ namespace {
         ImGui::Text("Swapchain:   %ux%u", scExt.width, scExt.height);
         ImGui::Text("Draw fmt:    %s", string_VkFormat(eng->_swapchainManager->drawImage().imageFormat));
         ImGui::Text("Swap fmt:    %s", string_VkFormat(eng->_swapchainManager->swapchainImageFormat()));
+    }
+
+    // Texture streaming + budget UI
+    static const char* stateName(uint8_t s)
+    {
+        switch (s)
+        {
+            case 0: return "Unloaded";
+            case 1: return "Loading";
+            case 2: return "Resident";
+            case 3: return "Evicted";
+            default: return "?";
+        }
+    }
+
+    static void ui_textures(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_textureCache) { ImGui::TextUnformatted("TextureCache not available"); return; }
+        DeviceManager* dev = eng->_deviceManager.get();
+        VmaAllocator alloc = dev ? dev->allocator() : VK_NULL_HANDLE;
+        unsigned long long devLocalBudget = 0, devLocalUsage = 0;
+        if (alloc)
+        {
+            const VkPhysicalDeviceMemoryProperties* memProps = nullptr;
+            vmaGetMemoryProperties(alloc, &memProps);
+            VmaBudget budgets[VK_MAX_MEMORY_HEAPS] = {};
+            vmaGetHeapBudgets(alloc, budgets);
+            if (memProps)
+            {
+                for (uint32_t i = 0; i < memProps->memoryHeapCount; ++i)
+                {
+                    if (memProps->memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+                    {
+                        devLocalBudget += budgets[i].budget;
+                        devLocalUsage  += budgets[i].usage;
+                    }
+                }
+            }
+        }
+
+        const size_t texBudget = query_texture_budget_bytes(dev);
+        const size_t resBytes = eng->_textureCache->resident_bytes();
+        ImGui::Text("Device local: %.1f / %.1f MiB", (double)devLocalUsage/1048576.0, (double)devLocalBudget/1048576.0);
+        ImGui::Text("Texture budget: %.1f MiB", (double)texBudget/1048576.0);
+        ImGui::Text("Resident textures: %.1f MiB", (double)resBytes/1048576.0);
+        ImGui::SameLine();
+        if (ImGui::Button("Trim To Budget Now"))
+        {
+            eng->_textureCache->evictToBudget(texBudget);
+        }
+
+        TextureCache::DebugStats stats{};
+        std::vector<TextureCache::DebugRow> rows;
+        eng->_textureCache->debug_snapshot(rows, stats);
+        ImGui::Text("Counts  R:%zu  U:%zu  E:%zu", stats.countResident, stats.countUnloaded, stats.countEvicted);
+
+        const int topN = 12;
+        if (ImGui::BeginTable("texrows", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+        {
+            ImGui::TableSetupColumn("MiB", ImGuiTableColumnFlags_WidthFixed, 80);
+            ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 90);
+            ImGui::TableSetupColumn("LastUsed", ImGuiTableColumnFlags_WidthFixed, 90);
+            ImGui::TableSetupColumn("Name");
+            ImGui::TableHeadersRow();
+            int count = 0;
+            for (const auto &r : rows)
+            {
+                if (count++ >= topN) break;
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0); ImGui::Text("%.2f", (double)r.bytes/1048576.0);
+                ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(stateName(r.state));
+                ImGui::TableSetColumnIndex(2); ImGui::Text("%u", r.lastUsed);
+                ImGui::TableSetColumnIndex(3); ImGui::TextUnformatted(r.name.c_str());
+            }
+            ImGui::EndTable();
+        }
     }
 
     // Shadows / Ray Query controls
@@ -495,7 +572,7 @@ void VulkanEngine::init()
     auto imguiPass = std::make_unique<ImGuiPass>();
     _renderPassManager->setImGuiPass(std::move(imguiPass));
 
-    const std::string structurePath = _assetManager->modelPath("mirage.glb");
+    const std::string structurePath = _assetManager->modelPath("Untitled.glb");
     const auto structureFile = _assetManager->loadGLTF(structurePath);
 
     assert(structureFile.has_value());
@@ -624,6 +701,12 @@ void VulkanEngine::cleanup()
         compute.cleanup();
         print_vma_stats(_deviceManager.get(), "after Compute");
         dump_vma_json(_deviceManager.get(), "after_Compute");
+
+        // Ensure RenderGraph's timestamp query pool is destroyed before the device.
+        if (_renderGraph)
+        {
+            _renderGraph->shutdown();
+        }
 
         _swapchainManager->cleanup();
         print_vma_stats(_deviceManager.get(), "after Swapchain");
@@ -910,8 +993,8 @@ void VulkanEngine::run()
         if (ImGui::Begin("Debug"))
         {
             const ImGuiTabBarFlags tf = ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_AutoSelectNewTabs;
-            if (ImGui::BeginTabBar("DebugTabs", tf))
-            {
+        if (ImGui::BeginTabBar("DebugTabs", tf))
+        {
                 if (ImGui::BeginTabItem("Overview"))
                 {
                     ui_overview(this);
@@ -942,13 +1025,18 @@ void VulkanEngine::run()
                     ui_postfx(this);
                     ImGui::EndTabItem();
                 }
-                if (ImGui::BeginTabItem("Scene"))
-                {
-                    ui_scene(this);
-                    ImGui::EndTabItem();
-                }
-                ImGui::EndTabBar();
+            if (ImGui::BeginTabItem("Scene"))
+            {
+                ui_scene(this);
+                ImGui::EndTabItem();
             }
+            if (ImGui::BeginTabItem("Textures"))
+            {
+                ui_textures(this);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
             ImGui::End();
         }
         ImGui::Render();

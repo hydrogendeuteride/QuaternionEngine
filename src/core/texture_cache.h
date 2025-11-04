@@ -5,6 +5,11 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <deque>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 
 class EngineContext;
 class ResourceManager;
@@ -54,6 +59,24 @@ public:
     // Evict least-recently-used entries to fit within a budget in bytes.
     void evictToBudget(size_t budgetBytes);
 
+    // Debug snapshot for UI
+    struct DebugRow
+    {
+        std::string name;
+        size_t bytes{0};
+        uint32_t lastUsed{0};
+        uint8_t state{0}; // cast of EntryState
+    };
+    struct DebugStats
+    {
+        size_t residentBytes{0};
+        size_t countResident{0};
+        size_t countEvicted{0};
+        size_t countUnloaded{0};
+    };
+    void debug_snapshot(std::vector<DebugRow>& outRows, DebugStats& outStats) const;
+    size_t resident_bytes() const { return _residentBytes; }
+
 private:
     struct Patch
     {
@@ -89,6 +112,36 @@ private:
     void start_load(Entry &e, ResourceManager &rm);
     void patch_ready_entry(const Entry &e);
     void patch_to_fallback(const Entry &e);
+
+    // --- Async decode backend ---
+    struct DecodeRequest
+    {
+        TextureHandle handle{InvalidHandle};
+        TextureKey key{};
+        std::string path;
+        std::vector<uint8_t> bytes;
+    };
+    struct DecodedResult
+    {
+        TextureHandle handle{InvalidHandle};
+        int width{0};
+        int height{0};
+        std::vector<uint8_t> rgba;
+        bool mipmapped{true};
+        bool srgb{false};
+    };
+
+    void worker_loop();
+    void enqueue_decode(Entry &e);
+    void drain_ready_uploads(ResourceManager &rm);
+
+    std::vector<std::thread> _decodeThreads;
+    std::mutex _qMutex;
+    std::condition_variable _qCV;
+    std::deque<DecodeRequest> _queue;
+    std::mutex _readyMutex;
+    std::deque<DecodedResult> _ready;
+    std::atomic<bool> _running{false};
 };
 
 // Helpers to build/digest keys

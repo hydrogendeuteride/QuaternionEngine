@@ -8,14 +8,32 @@
 #include "stb_image.h"
 #include <algorithm>
 #include "vk_device.h"
+#include <cstring>
 
 void TextureCache::init(EngineContext *ctx)
 {
     _context = ctx;
+    _running = true;
+    unsigned int threads = std::max(1u, std::min(4u, std::thread::hardware_concurrency()));
+    _decodeThreads.reserve(threads);
+    for (unsigned int i = 0; i < threads; ++i)
+    {
+        _decodeThreads.emplace_back([this]() { worker_loop(); });
+    }
 }
 
 void TextureCache::cleanup()
 {
+    // Stop worker thread first
+    if (_running.exchange(false))
+    {
+        {
+            std::lock_guard<std::mutex> lk(_qMutex);
+        }
+        _qCV.notify_all();
+        for (auto &t : _decodeThreads) if (t.joinable()) t.join();
+        _decodeThreads.clear();
+    }
     if (!_context || !_context->getResources()) return;
     auto *rm = _context->getResources();
     for (auto &e : _entries)
@@ -126,53 +144,8 @@ static inline size_t estimate_rgba8_bytes(uint32_t w, uint32_t h)
 
 void TextureCache::start_load(Entry &e, ResourceManager &rm)
 {
-    if (e.state == EntryState::Resident || e.state == EntryState::Loading) return;
-
-    int width = 0, height = 0, comp = 0;
-    unsigned char *data = nullptr;
-
-    if (e.key.kind == TextureKey::SourceKind::FilePath)
-    {
-        data = stbi_load(e.path.c_str(), &width, &height, &comp, 4);
-    }
-    else
-    {
-        if (!e.bytes.empty())
-        {
-            data = stbi_load_from_memory(e.bytes.data(), static_cast<int>(e.bytes.size()), &width, &height, &comp, 4);
-        }
-    }
-
-    if (!data || width <= 0 || height <= 0)
-    {
-        // Failed decode; keep fallbacks bound. Mark as evicted/unloaded.
-        if (data) stbi_image_free(data);
-        e.state = EntryState::Evicted;
-        return;
-    }
-
-    VkExtent3D extent{static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1u};
-    VkFormat fmt = e.key.srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-
-    // Queue upload via ResourceManager (deferred pass if enabled)
-    e.image = rm.create_image(static_cast<void *>(data), extent, fmt, VK_IMAGE_USAGE_SAMPLED_BIT, e.key.mipmapped);
-
-    // Name VMA allocation for diagnostics
-    if (vmaDebugEnabled())
-    {
-        std::string name = e.key.kind == TextureKey::SourceKind::FilePath ? e.path : std::string("tex.bytes");
-        vmaSetAllocationName(_context->getDevice()->allocator(), e.image.allocation, name.c_str());
-    }
-
-    const float mipFactor = e.key.mipmapped ? 1.3333333f : 1.0f; // approx sum of 1/4^i
-    e.sizeBytes = static_cast<size_t>(estimate_rgba8_bytes(extent.width, extent.height) * mipFactor);
-    _residentBytes += e.sizeBytes;
-    e.state = EntryState::Resident;
-
-    stbi_image_free(data);
-
-    // Patch all watched descriptors to the new image
-    patch_ready_entry(e);
+    // Legacy synchronous path retained for completeness but not used by pumpLoads now.
+    enqueue_decode(e);
 }
 
 void TextureCache::patch_ready_entry(const Entry &e)
@@ -230,11 +203,14 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
             }
             if (recentlyUsed)
             {
-                start_load(e, rm);
+                enqueue_decode(e);
                 if (++started >= kMaxLoadsPerPump) break;
             }
         }
     }
+
+    // Drain decoded results and enqueue GPU uploads.
+    drain_ready_uploads(rm);
 }
 
 void TextureCache::evictToBudget(size_t budgetBytes)
@@ -269,4 +245,145 @@ void TextureCache::evictToBudget(size_t budgetBytes)
         e.state = EntryState::Evicted;
         if (_residentBytes >= e.sizeBytes) _residentBytes -= e.sizeBytes; else _residentBytes = 0;
     }
+}
+
+void TextureCache::enqueue_decode(Entry &e)
+{
+    if (e.state != EntryState::Unloaded) return;
+    e.state = EntryState::Loading;
+    DecodeRequest rq{};
+    rq.handle = static_cast<TextureHandle>(&e - _entries.data());
+    rq.key = e.key;
+    if (e.key.kind == TextureKey::SourceKind::FilePath) rq.path = e.path; else rq.bytes = e.bytes;
+    {
+        std::lock_guard<std::mutex> lk(_qMutex);
+        _queue.push_back(std::move(rq));
+    }
+    _qCV.notify_one();
+}
+
+void TextureCache::worker_loop()
+{
+    while (_running)
+    {
+        DecodeRequest rq{};
+        {
+            std::unique_lock<std::mutex> lk(_qMutex);
+            _qCV.wait(lk, [this]{ return !_running || !_queue.empty(); });
+            if (!_running) break;
+            rq = std::move(_queue.front());
+            _queue.pop_front();
+        }
+
+        // Decode using stb_image
+        int w = 0, h = 0, comp = 0;
+        unsigned char *data = nullptr;
+        if (rq.key.kind == TextureKey::SourceKind::FilePath)
+        {
+            data = stbi_load(rq.path.c_str(), &w, &h, &comp, 4);
+        }
+        else
+        {
+            if (!rq.bytes.empty())
+            {
+                data = stbi_load_from_memory(rq.bytes.data(), static_cast<int>(rq.bytes.size()), &w, &h, &comp, 4);
+            }
+        }
+
+        DecodedResult out{};
+        out.handle = rq.handle;
+        out.width = w;
+        out.height = h;
+        out.mipmapped = rq.key.mipmapped;
+        out.srgb = rq.key.srgb;
+        if (data && w > 0 && h > 0)
+        {
+            size_t sz = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
+            out.rgba.resize(sz);
+            memcpy(out.rgba.data(), data, sz);
+        }
+        if (data) stbi_image_free(data);
+
+        {
+            std::lock_guard<std::mutex> lk(_readyMutex);
+            _ready.push_back(std::move(out));
+        }
+    }
+}
+
+void TextureCache::drain_ready_uploads(ResourceManager &rm)
+{
+    std::deque<DecodedResult> local;
+    {
+        std::lock_guard<std::mutex> lk(_readyMutex);
+        if (_ready.empty()) return;
+        local.swap(_ready);
+    }
+
+    for (auto &res : local)
+    {
+        if (res.handle == InvalidHandle || res.handle >= _entries.size()) continue;
+        Entry &e = _entries[res.handle];
+        if (res.rgba.empty() || res.width <= 0 || res.height <= 0)
+        {
+            e.state = EntryState::Evicted; // failed decode; keep fallback
+            continue;
+        }
+
+        VkExtent3D extent{static_cast<uint32_t>(res.width), static_cast<uint32_t>(res.height), 1u};
+        VkFormat fmt = res.srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+        e.image = rm.create_image(static_cast<void *>(res.rgba.data()), extent, fmt,
+                                  VK_IMAGE_USAGE_SAMPLED_BIT, res.mipmapped);
+
+        if (vmaDebugEnabled())
+        {
+            std::string name = e.key.kind == TextureKey::SourceKind::FilePath ? e.path : std::string("tex.bytes");
+            vmaSetAllocationName(_context->getDevice()->allocator(), e.image.allocation, name.c_str());
+        }
+
+        const float mipFactor = res.mipmapped ? 1.3333333f : 1.0f;
+        e.sizeBytes = static_cast<size_t>(estimate_rgba8_bytes(extent.width, extent.height) * mipFactor);
+        _residentBytes += e.sizeBytes;
+        e.state = EntryState::Resident;
+
+        // Patch descriptors now; data becomes valid before sampling due to RG upload pass
+        patch_ready_entry(e);
+    }
+}
+
+void TextureCache::debug_snapshot(std::vector<DebugRow> &outRows, DebugStats &outStats) const
+{
+    outRows.clear();
+    outStats = DebugStats{};
+    outStats.residentBytes = _residentBytes;
+
+    auto stateToByteable = [&](const Entry &e) -> bool { return e.state == EntryState::Resident; };
+
+    for (const auto &e : _entries)
+    {
+        switch (e.state)
+        {
+            case EntryState::Resident: outStats.countResident++; break;
+            case EntryState::Evicted:  outStats.countEvicted++;  break;
+            case EntryState::Unloaded: outStats.countUnloaded++; break;
+            case EntryState::Loading: /* ignore */ break;
+        }
+
+        DebugRow row{};
+        if (e.key.kind == TextureKey::SourceKind::FilePath)
+        {
+            row.name = e.path.empty() ? std::string("<path>") : e.path;
+        }
+        else
+        {
+            row.name = std::string("<bytes> (") + std::to_string(e.bytes.size()) + ")";
+        }
+        row.bytes = e.sizeBytes;
+        row.lastUsed = e.lastUsedFrame;
+        row.state = static_cast<uint8_t>(e.state);
+        outRows.push_back(std::move(row));
+    }
+    std::sort(outRows.begin(), outRows.end(), [](const DebugRow &a, const DebugRow &b) {
+        return a.bytes > b.bytes;
+    });
 }

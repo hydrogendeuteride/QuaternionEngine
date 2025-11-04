@@ -25,8 +25,20 @@ void RenderGraph::init(EngineContext *ctx)
 
 void RenderGraph::clear()
 {
-	_passes.clear();
-	_resources.reset();
+    _passes.clear();
+    _resources.reset();
+}
+
+void RenderGraph::shutdown()
+{
+    // If a timestamp pool exists, ensure the GPU is not using it and destroy it.
+    if (_timestampPool != VK_NULL_HANDLE && _context && _context->getDevice())
+    {
+        // Be conservative here: make sure the graphics queue is idle before destroying.
+        vkQueueWaitIdle(_context->getDevice()->graphicsQueue());
+        vkDestroyQueryPool(_context->getDevice()->device(), _timestampPool, nullptr);
+        _timestampPool = VK_NULL_HANDLE;
+    }
 }
 
 RGImageHandle RenderGraph::import_image(const RGImportedImageDesc &desc)

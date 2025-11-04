@@ -15,8 +15,11 @@ class EngineContext;
 class RenderGraph
 {
 public:
-	void init(EngineContext* ctx);
-	void clear();
+    void init(EngineContext* ctx);
+    void clear();
+    // Destroy any GPU-side state owned by the graph (e.g. query pools).
+    // Call during engine shutdown before destroying the VkDevice.
+    void shutdown();
 
 	// Import externally owned images (swapchain, drawImage, g-buffers)
 	RGImageHandle import_image(const RGImportedImageDesc& desc);

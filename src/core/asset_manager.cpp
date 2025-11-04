@@ -10,6 +10,7 @@
 #include <scene/tangent_space.h>
 #include <stb_image.h>
 #include "asset_locator.h"
+#include <core/texture_cache.h>
 
 using std::filesystem::path;
 
@@ -156,33 +157,73 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
 
     const auto &opt = info.material.options;
 
-    auto [albedo, createdAlbedo] = loadImageFromAsset(opt.albedoPath, opt.albedoSRGB);
-    auto [mr, createdMR] = loadImageFromAsset(opt.metalRoughPath, opt.metalRoughSRGB);
-    auto [normal, createdNormal] = loadImageFromAsset(opt.normalPath, opt.normalSRGB);
-
-    const AllocatedImage &albedoRef = createdAlbedo ? albedo : _engine->_errorCheckerboardImage;
-    const AllocatedImage &mrRef = createdMR ? mr : _engine->_whiteImage;
-    const AllocatedImage &normRef = createdNormal ? normal : _engine->_flatNormalImage;
-
+    // Fallbacks are bound now; real textures will patch in via TextureCache
     AllocatedBuffer matBuffer = createMaterialBufferWithConstants(opt.constants);
 
     GLTFMetallic_Roughness::MaterialResources res{};
-    res.colorImage = albedoRef;
+    res.colorImage = _engine->_errorCheckerboardImage; // visible fallback for albedo
     res.colorSampler = _engine->_samplerManager->defaultLinear();
-    res.metalRoughImage = mrRef;
+    res.metalRoughImage = _engine->_whiteImage;
     res.metalRoughSampler = _engine->_samplerManager->defaultLinear();
-    res.normalImage = normRef;
+    res.normalImage = _engine->_flatNormalImage;
     res.normalSampler = _engine->_samplerManager->defaultLinear();
     res.dataBuffer = matBuffer.buffer;
     res.dataBufferOffset = 0;
 
     auto mat = createMaterial(opt.pass, res);
-    auto mesh = createMesh(info.name, vertsSpan, indsSpan, mat);
 
+    // Register dynamic texture bindings using the central TextureCache
+    if (_engine && _engine->_context && _engine->_context->textures)
+    {
+        TextureCache *cache = _engine->_context->textures;
+        auto buildKey = [&](std::string_view path, bool srgb) -> TextureCache::TextureKey {
+            TextureCache::TextureKey k{};
+            if (!path.empty())
+            {
+                k.kind = TextureCache::TextureKey::SourceKind::FilePath;
+                k.path = assetPath(path);
+                k.srgb = srgb;
+                k.mipmapped = true;
+                std::string id = std::string("PRIM:") + k.path + (srgb ? "#sRGB" : "#UNORM");
+                k.hash = texcache::fnv1a64(id);
+            }
+            return k;
+        };
+
+        if (!opt.albedoPath.empty())
+        {
+            auto key = buildKey(opt.albedoPath, opt.albedoSRGB);
+            if (key.hash != 0)
+            {
+                VkSampler samp = _engine->_samplerManager->defaultLinear();
+                auto handle = cache->request(key, samp);
+                cache->watchBinding(handle, mat->data.materialSet, 1u, samp, _engine->_errorCheckerboardImage.imageView);
+            }
+        }
+        if (!opt.metalRoughPath.empty())
+        {
+            auto key = buildKey(opt.metalRoughPath, opt.metalRoughSRGB);
+            if (key.hash != 0)
+            {
+                VkSampler samp = _engine->_samplerManager->defaultLinear();
+                auto handle = cache->request(key, samp);
+                cache->watchBinding(handle, mat->data.materialSet, 2u, samp, _engine->_whiteImage.imageView);
+            }
+        }
+        if (!opt.normalPath.empty())
+        {
+            auto key = buildKey(opt.normalPath, opt.normalSRGB);
+            if (key.hash != 0)
+            {
+                VkSampler samp = _engine->_samplerManager->defaultLinear();
+                auto handle = cache->request(key, samp);
+                cache->watchBinding(handle, mat->data.materialSet, 3u, samp, _engine->_flatNormalImage.imageView);
+            }
+        }
+    }
+
+    auto mesh = createMesh(info.name, vertsSpan, indsSpan, mat);
     _meshMaterialBuffers.emplace(info.name, matBuffer);
-    if (createdAlbedo) _meshOwnedImages[info.name].push_back(albedo);
-    if (createdMR) _meshOwnedImages[info.name].push_back(mr);
-    if (createdNormal) _meshOwnedImages[info.name].push_back(normal);
     return mesh;
 }
 
