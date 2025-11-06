@@ -11,6 +11,9 @@
 #include <stb_image.h>
 #include "asset_locator.h"
 #include <core/texture_cache.h>
+#include <fastgltf/parser.hpp>
+#include <fastgltf/util.hpp>
+#include <fastgltf/tools.hpp>
 
 using std::filesystem::path;
 
@@ -225,6 +228,116 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
     auto mesh = createMesh(info.name, vertsSpan, indsSpan, mat);
     _meshMaterialBuffers.emplace(info.name, matBuffer);
     return mesh;
+}
+
+size_t AssetManager::prefetchGLTFTextures(std::string_view nameOrPath)
+{
+    if (!_engine || !_engine->_context || !_engine->_context->textures) return 0;
+    if (nameOrPath.empty()) return 0;
+
+    std::string resolved = assetPath(nameOrPath);
+    std::filesystem::path path = resolved;
+
+    fastgltf::Parser parser{};
+    constexpr auto gltfOptions = fastgltf::Options::DontRequireValidAssetMember | fastgltf::Options::AllowDouble |
+                                 fastgltf::Options::LoadGLBBuffers | fastgltf::Options::LoadExternalBuffers;
+    fastgltf::GltfDataBuffer data;
+    if (!data.loadFromFile(path)) return 0;
+
+    fastgltf::Asset gltf;
+    size_t scheduled = 0;
+
+    auto type = fastgltf::determineGltfFileType(&data);
+    if (type == fastgltf::GltfType::glTF)
+    {
+        auto load = parser.loadGLTF(&data, path.parent_path(), gltfOptions);
+        if (load) gltf = std::move(load.get()); else return 0;
+    }
+    else if (type == fastgltf::GltfType::GLB)
+    {
+        auto load = parser.loadBinaryGLTF(&data, path.parent_path(), gltfOptions);
+        if (load) gltf = std::move(load.get()); else return 0;
+    }
+    else
+    {
+        return 0;
+    }
+
+    TextureCache *cache = _engine->_context->textures;
+
+    auto enqueueTex = [&](size_t imgIndex, bool srgb)
+    {
+        if (imgIndex >= gltf.images.size()) return;
+        TextureCache::TextureKey key{};
+        key.srgb = srgb;
+        key.mipmapped = true;
+
+        fastgltf::Image &image = gltf.images[imgIndex];
+        std::visit(fastgltf::visitor{
+            [&](fastgltf::sources::URI &filePath)
+            {
+                const std::string p(filePath.uri.path().begin(), filePath.uri.path().end());
+                key.kind = TextureCache::TextureKey::SourceKind::FilePath;
+                key.path = p;
+                std::string id = std::string("GLTF-PREF:") + p + (srgb ? "#sRGB" : "#UNORM");
+                key.hash = texcache::fnv1a64(id);
+            },
+            [&](fastgltf::sources::Vector &vector)
+            {
+                key.kind = TextureCache::TextureKey::SourceKind::Bytes;
+                key.bytes.assign(vector.bytes.begin(), vector.bytes.end());
+                uint64_t h = texcache::fnv1a64(key.bytes.data(), key.bytes.size());
+                key.hash = h ^ (srgb ? 0x9E3779B97F4A7C15ull : 0ull);
+            },
+            [&](fastgltf::sources::BufferView &view)
+            {
+                auto &bufferView = gltf.bufferViews[view.bufferViewIndex];
+                auto &buffer = gltf.buffers[bufferView.bufferIndex];
+                std::visit(fastgltf::visitor{
+                    [](auto &arg) {},
+                    [&](fastgltf::sources::Vector &vec)
+                    {
+                        size_t off = bufferView.byteOffset;
+                        size_t len = bufferView.byteLength;
+                        key.kind = TextureCache::TextureKey::SourceKind::Bytes;
+                        key.bytes.assign(vec.bytes.begin() + off, vec.bytes.begin() + off + len);
+                        uint64_t h = texcache::fnv1a64(key.bytes.data(), key.bytes.size());
+                        key.hash = h ^ (srgb ? 0x9E3779B97F4A7C15ull : 0ull);
+                    }
+                }, buffer.data);
+            },
+            [](auto &other) {}
+        }, image.data);
+
+        if (key.hash != 0)
+        {
+            VkSampler samp = _engine->_samplerManager->defaultLinear();
+            cache->request(key, samp);
+            scheduled++;
+        }
+    };
+
+    for (const auto &tex : gltf.textures)
+    {
+        if (tex.imageIndex.has_value())
+        {
+            // For baseColor we prefer sRGB; other maps requested later will reuse entry
+            enqueueTex(tex.imageIndex.value(), true);
+        }
+    }
+
+    // Proactively free big buffer vectors we no longer need.
+    for (auto &buf : gltf.buffers)
+    {
+        std::visit(fastgltf::visitor{
+            [](auto &arg) {},
+            [&](fastgltf::sources::Vector &vec) {
+                std::vector<uint8_t>().swap(vec.bytes);
+            }
+        }, buf.data);
+    }
+
+    return scheduled;
 }
 
 static Bounds compute_bounds(std::span<Vertex> vertices)

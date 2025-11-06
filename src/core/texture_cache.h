@@ -76,6 +76,25 @@ public:
     };
     void debug_snapshot(std::vector<DebugRow>& outRows, DebugStats& outStats) const;
     size_t resident_bytes() const { return _residentBytes; }
+    // CPU-side source bytes currently retained (compressed image payloads kept
+    // for potential re-decode). Only applies to entries created with Bytes keys.
+    size_t cpu_source_bytes() const { return _cpuSourceBytes; }
+
+    // Runtime controls
+    void set_max_loads_per_pump(int n) { _maxLoadsPerPump = (n > 0) ? n : 1; }
+    int  max_loads_per_pump() const { return _maxLoadsPerPump; }
+
+    // If false (default), compressed source bytes are dropped once an image is
+    // uploaded to the GPU and descriptors patched. Set true to retain sources
+    // for potential re-decode after eviction.
+    void set_keep_source_bytes(bool keep) { _keepSourceBytes = keep; }
+    bool keep_source_bytes() const { return _keepSourceBytes; }
+
+    // Set a soft CPU budget (in bytes) for retained compressed sources. After
+    // each upload drain, the cache will try to free source bytes for Resident
+    // entries until under budget.
+    void set_cpu_source_budget(size_t bytes) { _cpuSourceBudget = bytes; }
+    size_t cpu_source_budget() const { return _cpuSourceBudget; }
 
 private:
     struct Patch
@@ -108,6 +127,12 @@ private:
     std::unordered_map<uint64_t, TextureHandle> _lookup; // key.hash -> handle
     std::unordered_map<VkDescriptorSet, std::vector<TextureHandle>> _setToHandles;
     size_t _residentBytes{0};
+    size_t _cpuSourceBytes{0};
+
+    // Controls
+    int _maxLoadsPerPump{4};
+    bool _keepSourceBytes{false};
+    size_t _cpuSourceBudget{64ull * 1024ull * 1024ull}; // 64 MiB default
 
     void start_load(Entry &e, ResourceManager &rm);
     void patch_ready_entry(const Entry &e);
@@ -126,6 +151,11 @@ private:
         TextureHandle handle{InvalidHandle};
         int width{0};
         int height{0};
+        // Prefer heap pointer from stb to avoid an extra memcpy into a vector.
+        // If 'heap' is non-null, it must be freed with stbi_image_free() after
+        // the upload has copied the data. 'rgba' remains as a fallback path.
+        unsigned char *heap{nullptr};
+        size_t heapBytes{0};
         std::vector<uint8_t> rgba;
         bool mipmapped{true};
         bool srgb{false};
@@ -134,6 +164,8 @@ private:
     void worker_loop();
     void enqueue_decode(Entry &e);
     void drain_ready_uploads(ResourceManager &rm);
+    void drop_source_bytes(Entry &e);
+    void evictCpuToBudget();
 
     std::vector<std::thread> _decodeThreads;
     std::mutex _qMutex;

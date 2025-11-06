@@ -94,6 +94,7 @@ TextureCache::TextureHandle TextureCache::request(const TextureKey &key, VkSampl
     else
     {
         e.bytes = normKey.bytes;
+        _cpuSourceBytes += e.bytes.size();
     }
     _entries.push_back(std::move(e));
     return h;
@@ -185,7 +186,6 @@ void TextureCache::patch_to_fallback(const Entry &e)
 void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
 {
     // Simple throttle to avoid massive spikes.
-    const int kMaxLoadsPerPump = 4;
     int started = 0;
     const uint32_t now = _context ? _context->frameIndex : 0u;
     for (auto &e : _entries)
@@ -204,13 +204,16 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
             if (recentlyUsed)
             {
                 enqueue_decode(e);
-                if (++started >= kMaxLoadsPerPump) break;
+                if (++started >= _maxLoadsPerPump) break;
             }
         }
     }
 
     // Drain decoded results and enqueue GPU uploads.
     drain_ready_uploads(rm);
+
+    // Optionally trim retained compressed sources to CPU budget.
+    evictCpuToBudget();
 }
 
 void TextureCache::evictToBudget(size_t budgetBytes)
@@ -298,11 +301,13 @@ void TextureCache::worker_loop()
         out.srgb = rq.key.srgb;
         if (data && w > 0 && h > 0)
         {
-            size_t sz = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
-            out.rgba.resize(sz);
-            memcpy(out.rgba.data(), data, sz);
+            out.heap = data;
+            out.heapBytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
         }
-        if (data) stbi_image_free(data);
+        else if (data)
+        {
+            stbi_image_free(data);
+        }
 
         {
             std::lock_guard<std::mutex> lk(_readyMutex);
@@ -324,7 +329,7 @@ void TextureCache::drain_ready_uploads(ResourceManager &rm)
     {
         if (res.handle == InvalidHandle || res.handle >= _entries.size()) continue;
         Entry &e = _entries[res.handle];
-        if (res.rgba.empty() || res.width <= 0 || res.height <= 0)
+        if ((res.heap == nullptr && res.rgba.empty()) || res.width <= 0 || res.height <= 0)
         {
             e.state = EntryState::Evicted; // failed decode; keep fallback
             continue;
@@ -332,8 +337,16 @@ void TextureCache::drain_ready_uploads(ResourceManager &rm)
 
         VkExtent3D extent{static_cast<uint32_t>(res.width), static_cast<uint32_t>(res.height), 1u};
         VkFormat fmt = res.srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-        e.image = rm.create_image(static_cast<void *>(res.rgba.data()), extent, fmt,
-                                  VK_IMAGE_USAGE_SAMPLED_BIT, res.mipmapped);
+        const void *src = nullptr;
+        if (res.heap)
+        {
+            src = static_cast<const void *>(res.heap);
+        }
+        else
+        {
+            src = static_cast<const void *>(res.rgba.data());
+        }
+        e.image = rm.create_image(src, extent, fmt, VK_IMAGE_USAGE_SAMPLED_BIT, res.mipmapped);
 
         if (vmaDebugEnabled())
         {
@@ -346,8 +359,55 @@ void TextureCache::drain_ready_uploads(ResourceManager &rm)
         _residentBytes += e.sizeBytes;
         e.state = EntryState::Resident;
 
+        // Drop source bytes if policy says so (only for Bytes-backed keys).
+        if (!_keepSourceBytes && e.key.kind == TextureKey::SourceKind::Bytes)
+        {
+            drop_source_bytes(e);
+        }
+
+        // Free temporary decode heap if present
+        if (res.heap)
+        {
+            stbi_image_free(res.heap);
+        }
+
         // Patch descriptors now; data becomes valid before sampling due to RG upload pass
         patch_ready_entry(e);
+    }
+}
+
+void TextureCache::drop_source_bytes(Entry &e)
+{
+    if (e.bytes.empty()) return;
+    if (e.key.kind != TextureKey::SourceKind::Bytes) return;
+    if (_cpuSourceBytes >= e.bytes.size()) _cpuSourceBytes -= e.bytes.size();
+    e.bytes.clear();
+    e.bytes.shrink_to_fit();
+    e.path.clear();
+}
+
+void TextureCache::evictCpuToBudget()
+{
+    if (_cpuSourceBytes <= _cpuSourceBudget) return;
+    // Collect candidates: Resident entries with retained bytes
+    std::vector<TextureHandle> cands;
+    cands.reserve(_entries.size());
+    for (TextureHandle h = 0; h < _entries.size(); ++h)
+    {
+        const Entry &e = _entries[h];
+        if (e.state == EntryState::Resident && !e.bytes.empty() && e.key.kind == TextureKey::SourceKind::Bytes)
+        {
+            cands.push_back(h);
+        }
+    }
+    // LRU-ish: sort by lastUsed ascending
+    std::sort(cands.begin(), cands.end(), [&](TextureHandle a, TextureHandle b){
+        return _entries[a].lastUsedFrame < _entries[b].lastUsedFrame;
+    });
+    for (TextureHandle h : cands)
+    {
+        if (_cpuSourceBytes <= _cpuSourceBudget) break;
+        drop_source_bytes(_entries[h]);
     }
 }
 

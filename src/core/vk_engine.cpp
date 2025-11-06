@@ -174,13 +174,35 @@ namespace {
 
         const size_t texBudget = query_texture_budget_bytes(dev);
         const size_t resBytes = eng->_textureCache->resident_bytes();
+        const size_t cpuSrcBytes = eng->_textureCache->cpu_source_bytes();
         ImGui::Text("Device local: %.1f / %.1f MiB", (double)devLocalUsage/1048576.0, (double)devLocalBudget/1048576.0);
         ImGui::Text("Texture budget: %.1f MiB", (double)texBudget/1048576.0);
         ImGui::Text("Resident textures: %.1f MiB", (double)resBytes/1048576.0);
+        ImGui::Text("CPU source bytes: %.1f MiB", (double)cpuSrcBytes/1048576.0);
         ImGui::SameLine();
         if (ImGui::Button("Trim To Budget Now"))
         {
             eng->_textureCache->evictToBudget(texBudget);
+        }
+
+        // Controls
+        static int loadsPerPump = 4;
+        loadsPerPump = eng->_textureCache->max_loads_per_pump();
+        if (ImGui::SliderInt("Loads/Frame", &loadsPerPump, 1, 16))
+        {
+            eng->_textureCache->set_max_loads_per_pump(loadsPerPump);
+        }
+        static bool keepSources = false;
+        keepSources = eng->_textureCache->keep_source_bytes();
+        if (ImGui::Checkbox("Keep Source Bytes", &keepSources))
+        {
+            eng->_textureCache->set_keep_source_bytes(keepSources);
+        }
+        static int cpuBudgetMiB = 64;
+        cpuBudgetMiB = (int)(eng->_textureCache->cpu_source_budget() / 1048576ull);
+        if (ImGui::SliderInt("CPU Source Budget (MiB)", &cpuBudgetMiB, 0, 2048))
+        {
+            eng->_textureCache->set_cpu_source_budget((size_t)cpuBudgetMiB * 1048576ull);
         }
 
         TextureCache::DebugStats stats{};
@@ -535,6 +557,10 @@ void VulkanEngine::init()
     _textureCache = std::make_unique<TextureCache>();
     _textureCache->init(_context.get());
     _context->textures = _textureCache.get();
+    // Conservative defaults to avoid CPU spikes during heavy glTF loads.
+    _textureCache->set_max_loads_per_pump(3);
+    _textureCache->set_keep_source_bytes(false);
+    _textureCache->set_cpu_source_budget(32ull * 1024ull * 1024ull); // 32 MiB
 
     // Optional ray tracing manager if supported and extensions enabled
     if (_deviceManager->supportsRayQuery() && _deviceManager->supportsAccelerationStructure())

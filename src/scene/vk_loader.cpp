@@ -265,6 +265,9 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
     //< load_arrays
 
     // Note: glTF images are now loaded on-demand via TextureCache.
+    // Resolve external image paths relative to the source glTF file directory
+    // to avoid failing to find textures when running from a different CWD.
+    const std::filesystem::path baseDir = path.parent_path();
     auto buildTextureKey = [&](size_t imgIndex, bool srgb) -> TextureCache::TextureKey
     {
         TextureCache::TextureKey key{};
@@ -279,10 +282,16 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         std::visit(fastgltf::visitor{
             [&](fastgltf::sources::URI &filePath)
             {
-                const std::string path(filePath.uri.path().begin(), filePath.uri.path().end());
+                const std::string rel(filePath.uri.path().begin(), filePath.uri.path().end());
+                // Build an absolute (or at least baseDir-resolved) path for IO + stable keying
+                std::filesystem::path resolved = std::filesystem::path(rel);
+                if (resolved.is_relative())
+                {
+                    resolved = baseDir / resolved;
+                }
                 key.kind = TextureCache::TextureKey::SourceKind::FilePath;
-                key.path = path;
-                std::string id = std::string("GLTF:") + path + (srgb ? "#sRGB" : "#UNORM");
+                key.path = resolved.string();
+                std::string id = std::string("GLTF:") + key.path + (srgb ? "#sRGB" : "#UNORM");
                 key.hash = texcache::fnv1a64(id);
             },
             [&](fastgltf::sources::Vector &vector)
@@ -577,6 +586,19 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         }
 
         newmesh->meshBuffers = engine->_resourceManager->uploadMesh(indices, vertices);
+        // If CPU vectors ballooned for this mesh, release capacity back to the OS
+        auto shrink_if_huge = [](auto &vec, size_t elemSizeBytes) {
+            const size_t capBytes = vec.capacity() * elemSizeBytes;
+            const size_t kThreshold = 64ull * 1024ull * 1024ull; // 64 MiB
+            if (capBytes > kThreshold)
+            {
+                using Vec = std::remove_reference_t<decltype(vec)>;
+                Vec empty;
+                vec.swap(empty);
+            }
+        };
+        shrink_if_huge(indices, sizeof(uint32_t));
+        shrink_if_huge(vertices, sizeof(Vertex));
         if (engine->_rayManager)
         {
             engine->_rayManager->getOrBuildBLAS(newmesh);
@@ -645,6 +667,25 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
             file.topNodes.push_back(node);
             node->refreshTransform(glm::mat4{1.f});
         }
+    }
+    // We no longer need glTF-owned buffer payloads; free any large vectors
+    for (auto &buf : gltf.buffers)
+    {
+        std::visit(fastgltf::visitor{
+            [](auto &arg) {},
+            [&](fastgltf::sources::Vector &vec) {
+                std::vector<uint8_t>().swap(vec.bytes);
+            }
+        }, buf.data);
+    }
+    for (auto &img : gltf.images)
+    {
+        std::visit(fastgltf::visitor{
+            [](auto &arg) {},
+            [&](fastgltf::sources::Vector &vec) {
+                std::vector<uint8_t>().swap(vec.bytes);
+            }
+        }, img.data);
     }
     return scene;
     //< load_graph

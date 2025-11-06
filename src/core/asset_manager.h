@@ -76,6 +76,13 @@ public:
 
     std::optional<std::shared_ptr<LoadedGLTF> > loadGLTF(std::string_view nameOrPath);
 
+    // Queue texture loads for a glTF file ahead of time. This parses the glTF,
+    // builds TextureCache keys for referenced images (both external URIs and
+    // embedded images in buffers), and issues TextureCache::request() calls.
+    // Actual uploads happen via the normal per-frame pump.
+    // Returns number of textures scheduled.
+    size_t prefetchGLTFTextures(std::string_view nameOrPath);
+
     std::shared_ptr<MeshAsset> createMesh(const MeshCreateInfo &info);
 
     std::shared_ptr<MeshAsset> getPrimitive(std::string_view name) const;
