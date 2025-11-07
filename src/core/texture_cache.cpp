@@ -9,6 +9,7 @@
 #include <algorithm>
 #include "vk_device.h"
 #include <cstring>
+#include <limits>
 
 void TextureCache::init(EngineContext *ctx)
 {
@@ -118,6 +119,24 @@ void TextureCache::watchBinding(TextureHandle handle, VkDescriptorSet set, uint3
     _setToHandles[set].push_back(handle);
 }
 
+void TextureCache::unwatchSet(VkDescriptorSet set)
+{
+    if (set == VK_NULL_HANDLE) return;
+    auto it = _setToHandles.find(set);
+    if (it == _setToHandles.end()) return;
+
+    const auto &handles = it->second;
+    for (TextureHandle h : handles)
+    {
+        if (h >= _entries.size()) continue;
+        auto &patches = _entries[h].patches;
+        patches.erase(std::remove_if(patches.begin(), patches.end(),
+                                     [&](const Patch &p){ return p.set == set; }),
+                      patches.end());
+    }
+    _setToHandles.erase(it);
+}
+
 void TextureCache::markUsed(TextureHandle handle, uint32_t frameIndex)
 {
     if (handle == InvalidHandle) return;
@@ -190,7 +209,8 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
     const uint32_t now = _context ? _context->frameIndex : 0u;
     for (auto &e : _entries)
     {
-        if (e.state == EntryState::Unloaded)
+        // Allow both Unloaded and Evicted entries to start work if seen again.
+        if (e.state == EntryState::Unloaded || e.state == EntryState::Evicted)
         {
             // Visibility-driven residency: only start uploads for textures
             // that were marked used recently (current or previous frame).
@@ -201,7 +221,9 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
                 // Schedule when first seen (previous frame) or if seen again.
                 recentlyUsed = (now == 0u) || (now - e.lastUsedFrame <= 1u);
             }
-            if (recentlyUsed)
+            // Gate reload attempts to avoid rapid oscillation right after eviction.
+            bool cooldownPassed = (now >= e.nextAttemptFrame);
+            if (recentlyUsed && cooldownPassed)
             {
                 enqueue_decode(e);
                 if (++started >= _maxLoadsPerPump) break;
@@ -233,12 +255,15 @@ void TextureCache::evictToBudget(size_t budgetBytes)
     }
     std::sort(order.begin(), order.end(), [](auto &a, auto &b) { return a.second < b.second; });
 
+    const uint32_t now = _context ? _context->frameIndex : 0u;
     for (auto &pair : order)
     {
         if (_residentBytes <= budgetBytes) break;
         TextureHandle h = pair.first;
         Entry &e = _entries[h];
         if (e.state != EntryState::Resident) continue;
+        // Prefer not to evict textures used this frame unless strictly necessary.
+        if (e.lastUsedFrame == now) continue;
 
         // Rewrite watchers back to fallback before destroying
         patch_to_fallback(e);
@@ -246,13 +271,15 @@ void TextureCache::evictToBudget(size_t budgetBytes)
         _context->getResources()->destroy_image(e.image);
         e.image = {};
         e.state = EntryState::Evicted;
+        e.lastEvictedFrame = now;
+        e.nextAttemptFrame = std::max(e.nextAttemptFrame, now + _reloadCooldownFrames);
         if (_residentBytes >= e.sizeBytes) _residentBytes -= e.sizeBytes; else _residentBytes = 0;
     }
 }
 
 void TextureCache::enqueue_decode(Entry &e)
 {
-    if (e.state != EntryState::Unloaded) return;
+    if (e.state != EntryState::Unloaded && e.state != EntryState::Evicted) return;
     e.state = EntryState::Loading;
     DecodeRequest rq{};
     rq.handle = static_cast<TextureHandle>(&e - _entries.data());
@@ -335,17 +362,34 @@ void TextureCache::drain_ready_uploads(ResourceManager &rm)
             continue;
         }
 
+        const uint32_t now = _context ? _context->frameIndex : 0u;
         VkExtent3D extent{static_cast<uint32_t>(res.width), static_cast<uint32_t>(res.height), 1u};
         VkFormat fmt = res.srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-        const void *src = nullptr;
-        if (res.heap)
+
+        // Estimate resident size for admission control (match post-upload computation)
+        const float mipFactor = res.mipmapped ? 1.3333333f : 1.0f;
+        const size_t expectedBytes = static_cast<size_t>(estimate_rgba8_bytes(extent.width, extent.height) * mipFactor);
+
+        if (_gpuBudgetBytes != std::numeric_limits<size_t>::max())
         {
-            src = static_cast<const void *>(res.heap);
+            if (_residentBytes + expectedBytes > _gpuBudgetBytes)
+            {
+                size_t need = (_residentBytes + expectedBytes) - _gpuBudgetBytes;
+                (void)try_make_space(need, now);
+            }
+            if (_residentBytes + expectedBytes > _gpuBudgetBytes)
+            {
+                // Not enough space even after eviction → back off; free decode heap
+                if (res.heap) { stbi_image_free(res.heap); res.heap = nullptr; }
+                e.state = EntryState::Evicted;
+                e.lastEvictedFrame = now;
+                e.nextAttemptFrame = std::max(e.nextAttemptFrame, now + _reloadCooldownFrames);
+                continue;
+            }
         }
-        else
-        {
-            src = static_cast<const void *>(res.rgba.data());
-        }
+
+        const void *src = res.heap ? static_cast<const void *>(res.heap)
+                                    : static_cast<const void *>(res.rgba.data());
         e.image = rm.create_image(src, extent, fmt, VK_IMAGE_USAGE_SAMPLED_BIT, res.mipmapped);
 
         if (vmaDebugEnabled())
@@ -354,10 +398,10 @@ void TextureCache::drain_ready_uploads(ResourceManager &rm)
             vmaSetAllocationName(_context->getDevice()->allocator(), e.image.allocation, name.c_str());
         }
 
-        const float mipFactor = res.mipmapped ? 1.3333333f : 1.0f;
-        e.sizeBytes = static_cast<size_t>(estimate_rgba8_bytes(extent.width, extent.height) * mipFactor);
+        e.sizeBytes = expectedBytes;
         _residentBytes += e.sizeBytes;
         e.state = EntryState::Resident;
+        e.nextAttemptFrame = 0; // clear backoff after success
 
         // Drop source bytes if policy says so (only for Bytes-backed keys).
         if (!_keepSourceBytes && e.key.kind == TextureKey::SourceKind::Bytes)
@@ -409,6 +453,43 @@ void TextureCache::evictCpuToBudget()
         if (_cpuSourceBytes <= _cpuSourceBudget) break;
         drop_source_bytes(_entries[h]);
     }
+}
+
+bool TextureCache::try_make_space(size_t bytesNeeded, uint32_t now)
+{
+    if (bytesNeeded == 0) return true;
+    if (_residentBytes == 0) return false;
+
+    // Collect candidates that were not used this frame, oldest first
+    std::vector<std::pair<TextureHandle, uint32_t>> order;
+    order.reserve(_entries.size());
+    for (TextureHandle h = 0; h < _entries.size(); ++h)
+    {
+        const auto &e = _entries[h];
+        if (e.state == EntryState::Resident && e.lastUsedFrame != now)
+        {
+            order.emplace_back(h, e.lastUsedFrame);
+        }
+    }
+    std::sort(order.begin(), order.end(), [](auto &a, auto &b) { return a.second < b.second; });
+
+    size_t freed = 0;
+    for (auto &pair : order)
+    {
+        if (freed >= bytesNeeded) break;
+        Entry &e = _entries[pair.first];
+        if (e.state != EntryState::Resident) continue;
+
+        patch_to_fallback(e);
+        _context->getResources()->destroy_image(e.image);
+        e.image = {};
+        e.state = EntryState::Evicted;
+        e.lastEvictedFrame = now;
+        e.nextAttemptFrame = std::max(e.nextAttemptFrame, now + _reloadCooldownFrames);
+        if (_residentBytes >= e.sizeBytes) _residentBytes -= e.sizeBytes; else _residentBytes = 0;
+        freed += e.sizeBytes;
+    }
+    return freed >= bytesNeeded;
 }
 
 void TextureCache::debug_snapshot(std::vector<DebugRow> &outRows, DebugStats &outStats) const

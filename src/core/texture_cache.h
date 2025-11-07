@@ -10,6 +10,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
+#include <limits>
 
 class EngineContext;
 class ResourceManager;
@@ -47,6 +48,10 @@ public:
     // Register a descriptor binding to patch when the texture is ready.
     void watchBinding(TextureHandle handle, VkDescriptorSet set, uint32_t binding,
                       VkSampler sampler, VkImageView fallbackView);
+
+    // Remove all watches for a descriptor set (call before destroying the
+    // pool that owns the set). Prevents attempts to patch dead sets.
+    void unwatchSet(VkDescriptorSet set);
 
     // Mark a texture as used this frame (for LRU).
     void markUsed(TextureHandle handle, uint32_t frameIndex);
@@ -96,6 +101,11 @@ public:
     void set_cpu_source_budget(size_t bytes) { _cpuSourceBudget = bytes; }
     size_t cpu_source_budget() const { return _cpuSourceBudget; }
 
+    // Optional GPU residency budget, used to avoid immediate thrashing when
+    // accepting new uploads. The engine should refresh this each frame.
+    void set_gpu_budget_bytes(size_t bytes) { _gpuBudgetBytes = bytes; }
+    size_t gpu_budget_bytes() const { return _gpuBudgetBytes; }
+
 private:
     struct Patch
     {
@@ -115,6 +125,8 @@ private:
         AllocatedImage image{};     // valid when Resident
         size_t sizeBytes{0};        // approximate VRAM cost
         uint32_t lastUsedFrame{0};
+        uint32_t lastEvictedFrame{0};
+        uint32_t nextAttemptFrame{0}; // gate reload attempts to reduce churn
         std::vector<Patch> patches; // descriptor patches to rewrite
 
         // Source payload for deferred load
@@ -133,6 +145,8 @@ private:
     int _maxLoadsPerPump{4};
     bool _keepSourceBytes{false};
     size_t _cpuSourceBudget{64ull * 1024ull * 1024ull}; // 64 MiB default
+    size_t _gpuBudgetBytes{std::numeric_limits<size_t>::max()}; // unlimited unless set
+    uint32_t _reloadCooldownFrames{2};
 
     void start_load(Entry &e, ResourceManager &rm);
     void patch_ready_entry(const Entry &e);
@@ -166,6 +180,11 @@ private:
     void drain_ready_uploads(ResourceManager &rm);
     void drop_source_bytes(Entry &e);
     void evictCpuToBudget();
+
+    // Try to free at least 'bytesNeeded' by evicting least-recently-used
+    // Resident entries that were not used in the current frame. Returns true
+    // if enough space was reclaimed. Does not evict textures used this frame.
+    bool try_make_space(size_t bytesNeeded, uint32_t now);
 
     std::vector<std::thread> _decodeThreads;
     std::mutex _qMutex;

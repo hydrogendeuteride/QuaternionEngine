@@ -173,6 +173,7 @@ namespace {
         }
 
         const size_t texBudget = query_texture_budget_bytes(dev);
+        eng->_textureCache->set_gpu_budget_bytes(texBudget);
         const size_t resBytes = eng->_textureCache->resident_bytes();
         const size_t cpuSrcBytes = eng->_textureCache->cpu_source_bytes();
         ImGui::Text("Device local: %.1f / %.1f MiB", (double)devLocalUsage/1048576.0, (double)devLocalBudget/1048576.0);
@@ -560,7 +561,7 @@ void VulkanEngine::init()
     // Conservative defaults to avoid CPU spikes during heavy glTF loads.
     _textureCache->set_max_loads_per_pump(3);
     _textureCache->set_keep_source_bytes(false);
-    _textureCache->set_cpu_source_budget(32ull * 1024ull * 1024ull); // 32 MiB
+    _textureCache->set_cpu_source_budget(64ull * 1024ull * 1024ull); // 32 MiB
 
     // Optional ray tracing manager if supported and extensions enabled
     if (_deviceManager->supportsRayQuery() && _deviceManager->supportsAccelerationStructure())
@@ -598,7 +599,7 @@ void VulkanEngine::init()
     auto imguiPass = std::make_unique<ImGuiPass>();
     _renderPassManager->setImGuiPass(std::move(imguiPass));
 
-    const std::string structurePath = _assetManager->modelPath("Untitled.glb");
+    const std::string structurePath = _assetManager->modelPath("seoul_high/scene.gltf");
     const auto structureFile = _assetManager->loadGLTF(structurePath);
 
     assert(structureFile.has_value());
@@ -864,6 +865,7 @@ void VulkanEngine::draw()
         if (_textureCache)
         {
             size_t budget = query_texture_budget_bytes(_deviceManager.get());
+            _textureCache->set_gpu_budget_bytes(budget);
             _textureCache->evictToBudget(budget);
             _textureCache->pumpLoads(*_resourceManager, get_current_frame());
         }

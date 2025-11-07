@@ -704,6 +704,20 @@ void LoadedGLTF::clearAll()
 {
     VkDevice dv = creator->_deviceManager->device();
 
+    // Before destroying descriptor pools, unregister descriptor-set watches so
+    // the TextureCache will not attempt to patch dead sets.
+    if (creator && creator->_context && creator->_context->textures)
+    {
+        TextureCache *cache = creator->_context->textures;
+        for (auto &[k, mat] : materials)
+        {
+            if (mat && mat->data.materialSet != VK_NULL_HANDLE)
+            {
+                cache->unwatchSet(mat->data.materialSet);
+            }
+        }
+    }
+
     for (auto &[k, v]: meshes)
     {
         if (creator->_rayManager)
