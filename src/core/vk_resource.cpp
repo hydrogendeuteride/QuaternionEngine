@@ -134,6 +134,43 @@ AllocatedImage ResourceManager::create_image(VkExtent3D size, VkFormat format, V
     return newImage;
 }
 
+AllocatedImage ResourceManager::create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage,
+                                             bool mipmapped, uint32_t mipLevelsOverride) const
+{
+    if (!mipmapped || mipLevelsOverride == 0)
+    {
+        return create_image(size, format, usage, mipmapped);
+    }
+
+    AllocatedImage newImage{};
+    newImage.imageFormat = format;
+    newImage.imageExtent = size;
+
+    VkImageCreateInfo img_info = vkinit::image_create_info(format, usage, size);
+    img_info.mipLevels = mipLevelsOverride;
+
+    VmaAllocationCreateInfo allocinfo = {};
+    allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    allocinfo.requiredFlags = static_cast<VkMemoryPropertyFlags>(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VK_CHECK(
+        vmaCreateImage(_deviceManager->allocator(), &img_info, &allocinfo, &newImage.image, &newImage.allocation,
+            nullptr));
+
+    VkImageAspectFlags aspectFlag = VK_IMAGE_ASPECT_COLOR_BIT;
+    if (format == VK_FORMAT_D32_SFLOAT)
+    {
+        aspectFlag = VK_IMAGE_ASPECT_DEPTH_BIT;
+    }
+
+    VkImageViewCreateInfo view_info = vkinit::imageview_create_info(format, newImage.image, aspectFlag);
+    view_info.subresourceRange.levelCount = img_info.mipLevels;
+
+    VK_CHECK(vkCreateImageView(_deviceManager->device(), &view_info, nullptr, &newImage.imageView));
+
+    return newImage;
+}
+
 // Returns byte size per texel for a subset of common formats.
 static inline size_t bytes_per_texel(VkFormat fmt)
 {
@@ -180,6 +217,46 @@ AllocatedImage ResourceManager::create_image(const void *data, VkExtent3D size, 
     pending.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     pending.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     pending.generateMips = mipmapped;
+    pending.mipLevels = (mipmapped)
+        ? static_cast<uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1
+        : 1;
+
+    _pendingImageUploads.push_back(std::move(pending));
+
+    if (!_deferUploads)
+    {
+        process_queued_uploads_immediate();
+    }
+
+    return new_image;
+}
+
+AllocatedImage ResourceManager::create_image(const void *data, VkExtent3D size, VkFormat format,
+                                             VkImageUsageFlags usage,
+                                             bool mipmapped, uint32_t mipLevelsOverride)
+{
+    size_t bpp = bytes_per_texel(format);
+    size_t data_size = static_cast<size_t>(size.depth) * size.width * size.height * bpp;
+    AllocatedBuffer uploadbuffer = create_buffer(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                 VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+    memcpy(uploadbuffer.info.pMappedData, data, data_size);
+    vmaFlushAllocation(_deviceManager->allocator(), uploadbuffer.allocation, 0, data_size);
+
+    AllocatedImage new_image = create_image(size, format,
+                                            usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                            mipmapped, mipLevelsOverride);
+
+    PendingImageUpload pending{};
+    pending.staging = uploadbuffer;
+    pending.image = new_image.image;
+    pending.extent = size;
+    pending.format = format;
+    pending.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    pending.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    pending.generateMips = mipmapped;
+    pending.mipLevels = (mipmapped && mipLevelsOverride > 0) ? mipLevelsOverride
+                        : (mipmapped ? static_cast<uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1 : 1);
 
     _pendingImageUploads.push_back(std::move(pending));
 
@@ -333,8 +410,9 @@ void ResourceManager::process_queued_uploads_immediate()
 
             if (imageUpload.generateMips)
             {
-                vkutil::generate_mipmaps(cmd, imageUpload.image,
-                                         VkExtent2D{imageUpload.extent.width, imageUpload.extent.height});
+                vkutil::generate_mipmaps_levels(cmd, imageUpload.image,
+                                         VkExtent2D{imageUpload.extent.width, imageUpload.extent.height},
+                                         static_cast<int>(imageUpload.mipLevels));
             }
             else
             {
@@ -507,10 +585,11 @@ void ResourceManager::register_upload_pass(RenderGraph &graph, FrameResources &f
 
                 if (upload.generateMips)
                 {
-                    // NOTE: generate_mipmaps() transitions the image to
+                    // NOTE: generate_mipmaps_levels() transitions the image to
                     // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL at the end.
-                    // Do not transition back to TRANSFER here. See docs/ResourceManager.md.
-                    vkutil::generate_mipmaps(cmd, image, VkExtent2D{upload.extent.width, upload.extent.height});
+                    // Do not transition back to TRANSFER here.
+                    vkutil::generate_mipmaps_levels(cmd, image, VkExtent2D{upload.extent.width, upload.extent.height},
+                                                    static_cast<int>(upload.mipLevels));
                 }
             }
         });

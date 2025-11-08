@@ -36,6 +36,7 @@ public:
         VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         VkImageLayout finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         bool generateMips = false;
+        uint32_t mipLevels = 1;
     };
 
     void init(DeviceManager *deviceManager);
@@ -48,9 +49,15 @@ public:
 
     AllocatedImage create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage,
                                 bool mipmapped = false) const;
+    // Variant with explicit mip level count (>=1). If 0, computes full chain when mipmapped.
+    AllocatedImage create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage,
+                                bool mipmapped, uint32_t mipLevelsOverride) const;
 
     AllocatedImage create_image(const void *data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage,
                                 bool mipmapped = false);
+    // Variant with explicit mip level count used for generate_mipmaps.
+    AllocatedImage create_image(const void *data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage,
+                                bool mipmapped, uint32_t mipLevelsOverride);
 
     void destroy_image(const AllocatedImage &img) const;
 

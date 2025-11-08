@@ -193,6 +193,12 @@ namespace {
         {
             eng->_textureCache->set_max_loads_per_pump(loadsPerPump);
         }
+        static int uploadBudgetMiB = 128;
+        uploadBudgetMiB = (int)(eng->_textureCache->max_bytes_per_pump() / 1048576ull);
+        if (ImGui::SliderInt("Upload Budget (MiB)", &uploadBudgetMiB, 16, 2048))
+        {
+            eng->_textureCache->set_max_bytes_per_pump((size_t)uploadBudgetMiB * 1048576ull);
+        }
         static bool keepSources = false;
         keepSources = eng->_textureCache->keep_source_bytes();
         if (ImGui::Checkbox("Keep Source Bytes", &keepSources))
@@ -204,6 +210,12 @@ namespace {
         if (ImGui::SliderInt("CPU Source Budget (MiB)", &cpuBudgetMiB, 0, 2048))
         {
             eng->_textureCache->set_cpu_source_budget((size_t)cpuBudgetMiB * 1048576ull);
+        }
+        static int maxUploadDim = 4096;
+        maxUploadDim = (int)eng->_textureCache->max_upload_dimension();
+        if (ImGui::SliderInt("Max Upload Dimension", &maxUploadDim, 0, 8192))
+        {
+            eng->_textureCache->set_max_upload_dimension((uint32_t)std::max(0, maxUploadDim));
         }
 
         TextureCache::DebugStats stats{};
@@ -558,10 +570,12 @@ void VulkanEngine::init()
     _textureCache = std::make_unique<TextureCache>();
     _textureCache->init(_context.get());
     _context->textures = _textureCache.get();
-    // Conservative defaults to avoid CPU spikes during heavy glTF loads.
+    // Conservative defaults to avoid CPU/RAM/VRAM spikes during heavy glTF loads.
     _textureCache->set_max_loads_per_pump(3);
     _textureCache->set_keep_source_bytes(false);
     _textureCache->set_cpu_source_budget(64ull * 1024ull * 1024ull); // 32 MiB
+    _textureCache->set_max_bytes_per_pump(128ull * 1024ull * 1024ull); // 128 MiB/frame
+    _textureCache->set_max_upload_dimension(4096);
 
     // Optional ray tracing manager if supported and extensions enabled
     if (_deviceManager->supportsRayQuery() && _deviceManager->supportsAccelerationStructure())

@@ -10,6 +10,7 @@
 #include "vk_device.h"
 #include <cstring>
 #include <limits>
+#include <cmath>
 
 void TextureCache::init(EngineContext *ctx)
 {
@@ -157,9 +158,66 @@ void TextureCache::markSetUsed(VkDescriptorSet set, uint32_t frameIndex)
     }
 }
 
-static inline size_t estimate_rgba8_bytes(uint32_t w, uint32_t h)
+static inline size_t bytes_per_texel(VkFormat fmt)
 {
-    return static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
+    switch (fmt)
+    {
+        case VK_FORMAT_R8_UNORM:
+        case VK_FORMAT_R8_SRGB:
+            return 1;
+        case VK_FORMAT_R8G8_UNORM:
+        case VK_FORMAT_R8G8_SRGB:
+            return 2;
+        case VK_FORMAT_R8G8B8A8_UNORM:
+        case VK_FORMAT_R8G8B8A8_SRGB:
+        case VK_FORMAT_B8G8R8A8_UNORM:
+        case VK_FORMAT_B8G8R8A8_SRGB:
+            return 4;
+        default:
+            return 4;
+    }
+}
+
+static inline float mip_factor_for_levels(uint32_t levels)
+{
+    if (levels <= 1) return 1.0f;
+    // Sum of geometric series for area across mips (base * (1 + 1/4 + ...))
+    // factor = (1 - 4^{-L}) / (1 - 1/4) = 4/3 * (1 - 4^{-L})
+    float L = static_cast<float>(levels);
+    return 1.3333333f * (1.0f - std::pow(0.25f, L));
+}
+
+static inline VkFormat choose_format(TextureCache::TextureKey::ChannelsHint hint, bool srgb)
+{
+    using CH = TextureCache::TextureKey::ChannelsHint;
+    switch (hint)
+    {
+        case CH::R:  return srgb ? VK_FORMAT_R8_SRGB     : VK_FORMAT_R8_UNORM;
+        case CH::RG: return srgb ? VK_FORMAT_R8G8_SRGB   : VK_FORMAT_R8G8_UNORM;
+        case CH::RGBA:
+        case CH::Auto:
+        default:     return srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    }
+}
+
+// Nearest-neighbor downscale-by-2 in-place helper (returns newly allocated buffer)
+static std::vector<uint8_t> downscale_half(const unsigned char* src, int w, int h, int comps)
+{
+    int nw = std::max(1, w / 2);
+    int nh = std::max(1, h / 2);
+    std::vector<uint8_t> out(static_cast<size_t>(nw) * nh * comps);
+    for (int y = 0; y < nh; ++y)
+    {
+        for (int x = 0; x < nw; ++x)
+        {
+            int sx = std::min(w - 1, x * 2);
+            int sy = std::min(h - 1, y * 2);
+            const unsigned char* sp = src + (static_cast<size_t>(sy) * w + sx) * comps;
+            unsigned char* dp = out.data() + (static_cast<size_t>(y) * nw + x) * comps;
+            std::memcpy(dp, sp, comps);
+        }
+    }
+    return out;
 }
 
 void TextureCache::start_load(Entry &e, ResourceManager &rm)
@@ -207,6 +265,12 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
     // Simple throttle to avoid massive spikes.
     int started = 0;
     const uint32_t now = _context ? _context->frameIndex : 0u;
+    // First, drain decoded results with a byte budget.
+    size_t admitted = drain_ready_uploads(rm, _maxBytesPerPump);
+
+    // If we exhausted the budget, avoid scheduling more decodes this frame.
+    bool budgetRemaining = (admitted < _maxBytesPerPump);
+
     for (auto &e : _entries)
     {
         // Allow both Unloaded and Evicted entries to start work if seen again.
@@ -223,7 +287,7 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
             }
             // Gate reload attempts to avoid rapid oscillation right after eviction.
             bool cooldownPassed = (now >= e.nextAttemptFrame);
-            if (recentlyUsed && cooldownPassed)
+            if (recentlyUsed && cooldownPassed && budgetRemaining)
             {
                 enqueue_decode(e);
                 if (++started >= _maxLoadsPerPump) break;
@@ -231,8 +295,11 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
         }
     }
 
-    // Drain decoded results and enqueue GPU uploads.
-    drain_ready_uploads(rm);
+    // Drain any remaining decoded results if we still have headroom.
+    if (budgetRemaining)
+    {
+        drain_ready_uploads(rm, _maxBytesPerPump - admitted);
+    }
 
     // Optionally trim retained compressed sources to CPU budget.
     evictCpuToBudget();
@@ -326,10 +393,33 @@ void TextureCache::worker_loop()
         out.height = h;
         out.mipmapped = rq.key.mipmapped;
         out.srgb = rq.key.srgb;
+        out.channels = rq.key.channels;
+        out.mipClampLevels = rq.key.mipClampLevels;
         if (data && w > 0 && h > 0)
         {
-            out.heap = data;
-            out.heapBytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
+            // Progressive downscale if requested
+            if (_maxUploadDimension > 0 && (w > static_cast<int>(_maxUploadDimension) || h > static_cast<int>(_maxUploadDimension)))
+            {
+                std::vector<uint8_t> scaled;
+                scaled.assign(data, data + static_cast<size_t>(w) * h * 4);
+                int cw = w, ch = h;
+                while (cw > static_cast<int>(_maxUploadDimension) || ch > static_cast<int>(_maxUploadDimension))
+                {
+                    auto tmp = downscale_half(scaled.data(), cw, ch, 4);
+                    scaled.swap(tmp);
+                    cw = std::max(1, cw / 2);
+                    ch = std::max(1, ch / 2);
+                }
+                stbi_image_free(data);
+                out.rgba = std::move(scaled);
+                out.width = cw;
+                out.height = ch;
+            }
+            else
+            {
+                out.heap = data;
+                out.heapBytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
+            }
         }
         else if (data)
         {
@@ -343,15 +433,16 @@ void TextureCache::worker_loop()
     }
 }
 
-void TextureCache::drain_ready_uploads(ResourceManager &rm)
+size_t TextureCache::drain_ready_uploads(ResourceManager &rm, size_t budgetBytes)
 {
     std::deque<DecodedResult> local;
     {
         std::lock_guard<std::mutex> lk(_readyMutex);
-        if (_ready.empty()) return;
+        if (_ready.empty()) return 0;
         local.swap(_ready);
     }
 
+    size_t admitted = 0;
     for (auto &res : local)
     {
         if (res.handle == InvalidHandle || res.handle >= _entries.size()) continue;
@@ -364,11 +455,35 @@ void TextureCache::drain_ready_uploads(ResourceManager &rm)
 
         const uint32_t now = _context ? _context->frameIndex : 0u;
         VkExtent3D extent{static_cast<uint32_t>(res.width), static_cast<uint32_t>(res.height), 1u};
-        VkFormat fmt = res.srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+        TextureKey::ChannelsHint hint = (e.key.channels == TextureKey::ChannelsHint::Auto)
+                                            ? TextureKey::ChannelsHint::Auto
+                                            : e.key.channels;
+        VkFormat fmt = choose_format(hint, res.srgb);
 
         // Estimate resident size for admission control (match post-upload computation)
-        const float mipFactor = res.mipmapped ? 1.3333333f : 1.0f;
-        const size_t expectedBytes = static_cast<size_t>(estimate_rgba8_bytes(extent.width, extent.height) * mipFactor);
+        uint32_t desiredLevels = 1;
+        if (res.mipmapped)
+        {
+            if (res.mipClampLevels > 0)
+            {
+                desiredLevels = res.mipClampLevels;
+            }
+            else
+            {
+                desiredLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(extent.width, extent.height)))) + 1u;
+            }
+        }
+        const float mipFactor = res.mipmapped ? mip_factor_for_levels(desiredLevels) : 1.0f;
+        const size_t expectedBytes = static_cast<size_t>(extent.width) * extent.height * bytes_per_texel(fmt) * mipFactor;
+
+        // Byte budget for this pump (frame)
+        if (admitted + expectedBytes > budgetBytes)
+        {
+            // push back to be retried next frame/pump
+            std::lock_guard<std::mutex> lk(_readyMutex);
+            _ready.push_front(std::move(res));
+            continue;
+        }
 
         if (_gpuBudgetBytes != std::numeric_limits<size_t>::max())
         {
@@ -388,9 +503,38 @@ void TextureCache::drain_ready_uploads(ResourceManager &rm)
             }
         }
 
-        const void *src = res.heap ? static_cast<const void *>(res.heap)
-                                    : static_cast<const void *>(res.rgba.data());
-        e.image = rm.create_image(src, extent, fmt, VK_IMAGE_USAGE_SAMPLED_BIT, res.mipmapped);
+        // Optionally repack channels to R or RG to save memory
+        std::vector<uint8_t> packed;
+        const void *src = nullptr;
+        if (hint == TextureKey::ChannelsHint::R)
+        {
+            packed.resize(static_cast<size_t>(extent.width) * extent.height);
+            const uint8_t* in = res.heap ? res.heap : res.rgba.data();
+            for (size_t i = 0, px = static_cast<size_t>(extent.width) * extent.height; i < px; ++i)
+            {
+                packed[i] = in[i * 4 + 0];
+            }
+            src = packed.data();
+        }
+        else if (hint == TextureKey::ChannelsHint::RG)
+        {
+            packed.resize(static_cast<size_t>(extent.width) * extent.height * 2);
+            const uint8_t* in = res.heap ? res.heap : res.rgba.data();
+            for (size_t i = 0, px = static_cast<size_t>(extent.width) * extent.height; i < px; ++i)
+            {
+                packed[i * 2 + 0] = in[i * 4 + 0];
+                packed[i * 2 + 1] = in[i * 4 + 1];
+            }
+            src = packed.data();
+        }
+        else
+        {
+            src = res.heap ? static_cast<const void *>(res.heap)
+                           : static_cast<const void *>(res.rgba.data());
+        }
+
+        uint32_t mipOverride = (res.mipmapped ? desiredLevels : 1);
+        e.image = rm.create_image(src, extent, fmt, VK_IMAGE_USAGE_SAMPLED_BIT, res.mipmapped, mipOverride);
 
         if (vmaDebugEnabled())
         {
@@ -417,7 +561,9 @@ void TextureCache::drain_ready_uploads(ResourceManager &rm)
 
         // Patch descriptors now; data becomes valid before sampling due to RG upload pass
         patch_ready_entry(e);
+        admitted += expectedBytes;
     }
+    return admitted;
 }
 
 void TextureCache::drop_source_bytes(Entry &e)

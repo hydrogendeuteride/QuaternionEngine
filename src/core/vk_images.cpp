@@ -138,9 +138,14 @@ void vkutil::copy_image_to_image(VkCommandBuffer cmd, VkImage source, VkImage de
 }
 //< copyimg
 //> mipgen
-void vkutil::generate_mipmaps(VkCommandBuffer cmd, VkImage image, VkExtent2D imageSize)
+static inline int compute_full_mip_count(VkExtent2D imageSize)
 {
-    int mipLevels = int(std::floor(std::log2(std::max(imageSize.width, imageSize.height)))) + 1;
+    return int(std::floor(std::log2(std::max(imageSize.width, imageSize.height)))) + 1;
+}
+
+void vkutil::generate_mipmaps_levels(VkCommandBuffer cmd, VkImage image, VkExtent2D imageSize, int mipLevels)
+{
+    if (mipLevels <= 0) mipLevels = 1;
     for (int mip = 0; mip < mipLevels; mip++) {
 
         VkExtent2D halfSize = imageSize;
@@ -210,3 +215,8 @@ void vkutil::generate_mipmaps(VkCommandBuffer cmd, VkImage image, VkExtent2D ima
     transition_image(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 //< mipgen
+
+void vkutil::generate_mipmaps(VkCommandBuffer cmd, VkImage image, VkExtent2D imageSize)
+{
+    generate_mipmaps_levels(cmd, image, imageSize, compute_full_mip_count(imageSize));
+}

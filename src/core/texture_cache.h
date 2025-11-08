@@ -28,11 +28,14 @@ public:
     struct TextureKey
     {
         enum class SourceKind : uint8_t { FilePath, Bytes };
+        enum class ChannelsHint : uint8_t { Auto, R, RG, RGBA };
         SourceKind kind{SourceKind::FilePath};
         std::string path;                 // used when kind==FilePath
         std::vector<uint8_t> bytes;       // used when kind==Bytes
         bool srgb{false};                 // desired sampling format
         bool mipmapped{true};             // generate full mip chain
+        ChannelsHint channels{ChannelsHint::Auto}; // prefer narrower formats when possible
+        uint32_t mipClampLevels{0};       // 0 = full chain, otherwise limit to N mips
         uint64_t hash{0};                 // stable dedup key
     };
 
@@ -88,6 +91,14 @@ public:
     // Runtime controls
     void set_max_loads_per_pump(int n) { _maxLoadsPerPump = (n > 0) ? n : 1; }
     int  max_loads_per_pump() const { return _maxLoadsPerPump; }
+    // Limit total bytes admitted for uploads per pump (frame).
+    void set_max_bytes_per_pump(size_t bytes) { _maxBytesPerPump = bytes; }
+    size_t max_bytes_per_pump() const { return _maxBytesPerPump; }
+    // Clamp decoded image dimensions before upload (progressive resolution).
+    // 0 disables clamping. When >0, images larger than this dimension on any axis
+    // are downscaled by powers of 2 on the decode thread until within limit.
+    void set_max_upload_dimension(uint32_t dim) { _maxUploadDimension = dim; }
+    uint32_t max_upload_dimension() const { return _maxUploadDimension; }
 
     // If false (default), compressed source bytes are dropped once an image is
     // uploaded to the GPU and descriptors patched. Set true to retain sources
@@ -147,6 +158,8 @@ private:
     size_t _cpuSourceBudget{64ull * 1024ull * 1024ull}; // 64 MiB default
     size_t _gpuBudgetBytes{std::numeric_limits<size_t>::max()}; // unlimited unless set
     uint32_t _reloadCooldownFrames{2};
+    size_t _maxBytesPerPump{128ull * 1024ull * 1024ull}; // 128 MiB/frame upload budget
+    uint32_t _maxUploadDimension{4096};                   // progressive downscale cap
 
     void start_load(Entry &e, ResourceManager &rm);
     void patch_ready_entry(const Entry &e);
@@ -173,11 +186,14 @@ private:
         std::vector<uint8_t> rgba;
         bool mipmapped{true};
         bool srgb{false};
+        TextureKey::ChannelsHint channels{TextureKey::ChannelsHint::Auto};
+        uint32_t mipClampLevels{0};
     };
 
     void worker_loop();
     void enqueue_decode(Entry &e);
-    void drain_ready_uploads(ResourceManager &rm);
+    // Returns total resident bytes admitted this pump (after GPU budget gate).
+    size_t drain_ready_uploads(ResourceManager &rm, size_t budgetBytes);
     void drop_source_bytes(Entry &e);
     void evictCpuToBudget();
 
