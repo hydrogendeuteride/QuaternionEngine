@@ -9,10 +9,12 @@ except Exception:
     PIL_OK = False
 
 DEFAULT_SUFFIX = {
-    "albedo": ["_albedo", "_basecolor", "_base_colour", "_base_color", "_base"],
-    "mr":     ["_mr", "_orm", "_metalrough", "_metallicroughness"],
+    "albedo": ["_albedo", "_basecolor", "_base_colour", "_base_color", "_base", "baseColor"],
+    "mr":     ["_mr", "_orm", "_metalrough", "_metallicroughness", "metallicRoughness"],
     "normal": ["_normal", "_norm", "_nrm", "_normalgl"]
 }
+
+SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tga", ".tif", ".tiff"}
 
 def which_or_die(cmd):
     from shutil import which
@@ -78,24 +80,22 @@ def parse_gltf_roles(gltf_path: Path):
 
     return roles
 
-def has_meaningful_alpha(png_path: Path) -> bool:
+def has_meaningful_alpha(img_path: Path) -> bool:
     if not PIL_OK:
         return False
     try:
-        with Image.open(png_path) as im:
-            if im.mode in ("RGBA", "LA") or ("transparency" in im.info):
+        with Image.open(img_path) as im:
+            if ("A" in im.getbands()) or ("transparency" in im.info):
                 im = im.convert("RGBA")
                 alpha = im.getchannel("A")
                 extrema = alpha.getextrema()
-                if extrema and extrema != (255, 255):
-                    return True
-
-                return False
+                return bool(extrema and extrema != (255, 255))
+            return False
     except Exception:
         return False
     return False
 
-def decide_targets(role, albedo_target, png_path):
+def decide_targets(role, albedo_target, img_path):
     """ return transcode target(BCn), OETF(srgb/linear)"""
     if role == "normal":
         return "bc5", "linear"
@@ -103,7 +103,7 @@ def decide_targets(role, albedo_target, png_path):
         return "bc7", "linear"
     # albedo
     if albedo_target == "auto":
-        if has_meaningful_alpha(png_path):
+        if has_meaningful_alpha(img_path):
             return "bc3", "srgb"
         else:
             return "bc1", "srgb"
@@ -124,15 +124,15 @@ def run_cmd(args_list, dry_run=False):
         print(f"[ERR] {cmd}\n  -> exit {e.returncode}", file=sys.stderr)
         return e.returncode
 
-def process_one(png_path: Path, out_dir: Path, role, opts):
-    stem = png_path.stem
+def process_one(img_path: Path, out_dir: Path, role, opts):
+    stem = img_path.stem
     out_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir = out_dir / ".intermediate"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp_ktx2 = tmp_dir / f"{stem}.uastc.ktx2"
 
     # 1) PNG -> KTX2(UASTC)
-    target_bc, oetf = decide_targets(role, opts.albedo_target, png_path)
+    target_bc, oetf = decide_targets(role, opts.albedo_target, img_path)
     toktx = [
         "toktx",
         "--t2",
@@ -147,7 +147,7 @@ def process_one(png_path: Path, out_dir: Path, role, opts):
         toktx += ["--lower_left_maps_to_s0t0"]
     # albedo: srgb, else linear
     toktx += ["--assign_oetf", oetf]
-    toktx += [str(tmp_ktx2), str(png_path)]
+    toktx += [str(tmp_ktx2), str(img_path)]
     rc = run_cmd(toktx, dry_run=opts.dry_run)
     if rc != 0: return rc
 
@@ -170,8 +170,8 @@ def process_one(png_path: Path, out_dir: Path, role, opts):
     return 0
 
 def main():
-    p = argparse.ArgumentParser(description="PNG → KTX2(BCn) encoder (toktx + ktx transcode)")
-    p.add_argument("-i", "--input", required=True, help="Input folder(recursive) or PNG file")
+    p = argparse.ArgumentParser(description="Image → KTX2(BCn) encoder (toktx + ktx transcode)")
+    p.add_argument("-i", "--input", required=True, help="Input folder(recursive) or image file")
     p.add_argument("-o", "--output", required=True, help="Output folder")
     p.add_argument("--gltf", help=".gltf File path (optional). glTF first, suffix last")
     p.add_argument("--suffix-albedo", default=",".join(DEFAULT_SUFFIX["albedo"]),
@@ -202,13 +202,14 @@ def main():
         gltf_roles = parse_gltf_roles(Path(opts.gltf))
 
     in_path = Path(opts.input)
-    png_files = []
-    if in_path.is_file() and in_path.suffix.lower() == ".png":
-        png_files = [in_path]
+    img_files = []
+    if in_path.is_file() and in_path.suffix.lower() in SUPPORTED_IMAGE_EXTS:
+        img_files = [in_path]
     else:
-        png_files = list(in_path.rglob("*.png"))
-    if not png_files:
-        sys.exit("No input PNGs.")
+        for ext in SUPPORTED_IMAGE_EXTS:
+            img_files.extend(in_path.rglob(f"*{ext}"))
+    if not img_files:
+        sys.exit("No input images (supported: .png .jpg .jpeg .tga .tif .tiff).")
 
     out_dir = Path(opts.output)
 
@@ -224,16 +225,16 @@ def main():
     tasks = []
     with ThreadPoolExecutor(max_workers=opts.jobs) as ex:
         futs = {}
-        for png in png_files:
-            role = decide_role_for_path(png)
-            fut = ex.submit(process_one, png, out_dir, role, opts)
-            futs[fut] = (png, role)
+        for img in img_files:
+            role = decide_role_for_path(img)
+            fut = ex.submit(process_one, img, out_dir, role, opts)
+            futs[fut] = (img, role)
         any_err = False
         for fut in as_completed(futs):
-            png, role = futs[fut]
+            img, role = futs[fut]
             rc = fut.result()
             status = "OK" if rc == 0 else f"ERR({rc})"
-            print(f"[{status}] {png.name} -> role={role}")
+            print(f"[{status}] {img.name} -> role={role}")
             if rc != 0:
                 any_err = True
         if any_err:

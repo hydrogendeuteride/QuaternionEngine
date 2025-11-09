@@ -112,3 +112,27 @@ add_custom_command(TARGET vulkan_engine POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:vulkan_engine> $<TARGET_FILE_DIR:vulkan_engine>
   COMMAND_EXPAND_LISTS
   )
+
+option(ENABLE_LIBKTX "Enable KTX2 loading via libktx" ON)
+if (ENABLE_LIBKTX)
+  find_package(ktx CONFIG QUIET)
+  if (NOT ktx_FOUND)
+    find_package(ktx QUIET)
+  endif()
+
+  set(_KTX_TARGET "")
+  if (TARGET ktx::ktx)
+    set(_KTX_TARGET ktx::ktx)
+  elseif (TARGET KTX::ktx)
+    set(_KTX_TARGET KTX::ktx)
+  elseif (TARGET ktx)
+    set(_KTX_TARGET ktx)
+  endif()
+
+  if (_KTX_TARGET STREQUAL "")
+    message(STATUS "libktx not found via find_package; looking for in-tree build...")
+  else()
+    target_link_libraries(vulkan_engine PUBLIC ${_KTX_TARGET})
+    target_compile_definitions(vulkan_engine PUBLIC VULKAN_ENGINE_HAS_KTX=1)
+  endif()
+endif()
