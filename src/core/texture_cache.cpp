@@ -437,7 +437,6 @@ void TextureCache::worker_loop()
             if (hasKTX2)
             {
                 attemptedKTX2 = true;
-                fmt::println("[TextureCache] KTX2 candidate for '{}' → '{}'", rq.path, ktxPath.string());
                 ktxTexture2* ktex = nullptr;
                 ktxResult kres = ktxTexture2_CreateFromNamedFile(ktxPath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktex);
                 if (kres != KTX_SUCCESS || !ktex)
@@ -511,8 +510,6 @@ void TextureCache::worker_loop()
                             }
                             out.width = static_cast<int>(baseW);
                             out.height = static_cast<int>(baseH);
-                            fmt::println("[TextureCache] libktx parsed: format={}, {}x{}, mips={}, dataSize={}",
-                                          string_VkFormat(vkfmt), baseW, baseH, mipLevels, (unsigned long long)totalSize);
                             ktxTexture_Destroy(ktxTexture(ktex));
                         }
                     }
