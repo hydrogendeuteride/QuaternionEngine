@@ -59,9 +59,13 @@ void main()
     float metallic  = clamp(mrTex.y * materialData.metal_rough_factors.x, 0.0, 1.0);
 
     // Normal mapping path for forward/transparent pipeline
-    vec3 Nm = texture(normalMap, inUV).xyz * 2.0 - 1.0;
+    // Expect UNORM normal map; support BC5 (RG) by reconstructing Z from XY.
+    vec2 enc = texture(normalMap, inUV).xy * 2.0 - 1.0;
     float normalScale = max(materialData.extra[0].x, 0.0);
-    Nm.xy *= normalScale;
+    enc *= normalScale;
+    float z2 = 1.0 - dot(enc, enc);
+    float nz = z2 > 0.0 ? sqrt(z2) : 0.0;
+    vec3 Nm = vec3(enc, nz);
     vec3 Nn = normalize(inNormal);
     vec3 T = normalize(inTangent.xyz);
     vec3 B = normalize(cross(Nn, T)) * inTangent.w;

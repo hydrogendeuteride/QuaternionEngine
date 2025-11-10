@@ -18,13 +18,13 @@ Data Flow
   - `pumpLoads(...)` looks for entries in `Unloaded` or `Evicted` state that were seen recently (`now == 0` or `now - lastUsed <= 1`) and starts at most `max_loads_per_pump` decodes per call, while enforcing a byte budget for uploads per frame.
   - Render passes mark used sets each frame with `markSetUsed(...)` (or specific handles via `markUsed(...)`).
 - Decode
-  - FilePath: if the path ends with `.ktx2` or a sibling exists, parse KTX2 (2D, single‑face, single‑layer, no supercompression). Otherwise, decode to RGBA8 via stb_image.
+  - FilePath: if the path ends with `.ktx2` or a sibling exists, we load via libktx (and transcode to BCn if needed). Otherwise, decode to RGBA8 via stb_image.
   - Bytes: always decode via stb_image (no sibling discovery possible).
 - Admission & Upload
   - Before upload, an expected resident size is computed (exact for KTX2 by summing level byte lengths; estimated for raster by format×area×mip‑factor). A per‑frame byte budget (`max_bytes_per_pump`) throttles uploads.
   - If a GPU texture budget is set, the cache evicts least‑recently‑used textures not used this frame. If it still cannot fit, the decode is deferred or dropped with backoff.
   - Raster: `ResourceManager::create_image(...)` stages a single region, then optionally generates mips on GPU.
-  - KTX2: `ResourceManager::create_image_compressed(...)` allocates an image with the file’s `VkFormat` and records one `VkBufferImageCopy` per mip level (no GPU mip gen). Immediate path transitions to `SHADER_READ_ONLY_OPTIMAL`; RG path leaves it in `TRANSFER_DST` until a sampling pass.
+  - KTX2: `ResourceManager::create_image_compressed(...)` allocates an image with the file’s `VkFormat` (from libktx) and records one `VkBufferImageCopy` per mip level (no GPU mip gen). Immediate path transitions to `SHADER_READ_ONLY_OPTIMAL`; the RenderGraph path transitions after copy when no mip gen.
   - If the device cannot sample the KTX2 format, the cache falls back to raster decode.
   - After upload: state → `Resident`, descriptors recorded via `watchBinding` are rewritten to the new image view with the chosen sampler and `SHADER_READ_ONLY_OPTIMAL` layout. For Bytes‑backed keys, compressed source bytes are dropped unless `keep_source_bytes` is enabled.
 - Eviction & Reload
@@ -71,8 +71,8 @@ Implementation Notes
    - The decode thread downsizes large images by powers of 2 until within `Max Upload Dimension`, reducing both staging and VRAM. You can increase the cap or disable it (set to 0) from the UI.
 
 KTX2 specifics
-- Supported: 2D, single‑face, single‑layer, no supercompression; pre‑transcoded BCn (including sRGB variants).
-- Not supported: UASTC/BasisLZ transcoding at runtime, cube/array/multilayer.
+- Supported: 2D, single‑face, single‑layer KTX2. If BasisLZ/UASTC, libktx transcodes to BCn. sRGB/UNORM is honored from the file’s DFD and can be nudged by request (albedo sRGB, MR/normal UNORM).
+- Not supported: Cube/array/multilayer KTX2 (current code path assumes single layer, 2D).
 
 Limitations / Future Work
 - Linear‑blit capability check

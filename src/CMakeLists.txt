@@ -34,8 +34,6 @@ add_executable (vulkan_engine
   core/frame_resources.cpp
   core/texture_cache.h
   core/texture_cache.cpp
-  core/ktx2_loader.h
-  core/ktx2_loader.cpp
   core/config.h
   core/vk_engine.h
   core/vk_engine.cpp
@@ -115,26 +113,16 @@ add_custom_command(TARGET vulkan_engine POST_BUILD
   COMMAND_EXPAND_LISTS
   )
 
-option(ENABLE_LIBKTX "Enable KTX2 loading via libktx" ON)
-if (ENABLE_LIBKTX)
-  find_package(ktx CONFIG QUIET)
-  if (NOT ktx_FOUND)
-    find_package(ktx QUIET)
-  endif()
-
-  set(_KTX_TARGET "")
-  if (TARGET ktx::ktx)
-    set(_KTX_TARGET ktx::ktx)
-  elseif (TARGET KTX::ktx)
-    set(_KTX_TARGET KTX::ktx)
-  elseif (TARGET ktx)
-    set(_KTX_TARGET ktx)
-  endif()
-
-  if (_KTX_TARGET STREQUAL "")
-    message(STATUS "libktx not found via find_package; looking for in-tree build...")
-  else()
-    target_link_libraries(vulkan_engine PUBLIC ${_KTX_TARGET})
-    target_compile_definitions(vulkan_engine PUBLIC VULKAN_ENGINE_HAS_KTX=1)
-  endif()
+find_package(ktx CONFIG REQUIRED)
+set(_KTX_TARGET "")
+if (TARGET ktx::ktx)
+  set(_KTX_TARGET ktx::ktx)
+elseif (TARGET KTX::ktx)
+  set(_KTX_TARGET KTX::ktx)
+elseif (TARGET ktx)
+  set(_KTX_TARGET ktx)
 endif()
+if (_KTX_TARGET STREQUAL "")
+  message(FATAL_ERROR "libktx not found; please install KTX v2 and expose its CMake package")
+endif()
+target_link_libraries(vulkan_engine PUBLIC ${_KTX_TARGET})

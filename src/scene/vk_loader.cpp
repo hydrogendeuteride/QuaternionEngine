@@ -412,6 +412,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
             const bool hasSampler = tex.samplerIndex.has_value();
             const VkSampler sampler = hasSampler ? file.samplers[tex.samplerIndex.value()] : engine->_samplerManager->defaultLinear();
             auto key = buildTextureKey(imgIndex, false);
+            key.channels = TextureCache::TextureKey::ChannelsHint::RG; // prefer BC5 for normals
             if (key.hash != 0)
             {
                 hNorm = cache->request(key, sampler);

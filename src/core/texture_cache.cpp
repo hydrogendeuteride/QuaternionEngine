@@ -6,7 +6,8 @@
 #include <core/config.h>
 #include <algorithm>
 #include "stb_image.h"
-#include "ktx2_loader.h"
+#include <ktx.h>
+#include <ktxvulkan.h>
 #include <algorithm>
 #include "vk_device.h"
 #include <cstring>
@@ -178,6 +179,40 @@ static inline size_t bytes_per_texel(VkFormat fmt)
             return 4;
         default:
             return 4;
+    }
+}
+
+static inline VkFormat to_srgb_variant(VkFormat fmt)
+{
+    switch (fmt)
+    {
+        case VK_FORMAT_BC1_RGB_UNORM_BLOCK:   return VK_FORMAT_BC1_RGB_SRGB_BLOCK;
+        case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:  return VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
+        case VK_FORMAT_BC2_UNORM_BLOCK:       return VK_FORMAT_BC2_SRGB_BLOCK;
+        case VK_FORMAT_BC3_UNORM_BLOCK:       return VK_FORMAT_BC3_SRGB_BLOCK;
+        case VK_FORMAT_BC7_UNORM_BLOCK:       return VK_FORMAT_BC7_SRGB_BLOCK;
+        case VK_FORMAT_R8G8B8A8_UNORM:        return VK_FORMAT_R8G8B8A8_SRGB;
+        case VK_FORMAT_B8G8R8A8_UNORM:        return VK_FORMAT_B8G8R8A8_SRGB;
+        case VK_FORMAT_R8_UNORM:              return VK_FORMAT_R8_SRGB;
+        case VK_FORMAT_R8G8_UNORM:            return VK_FORMAT_R8G8_SRGB;
+        default: return fmt;
+    }
+}
+
+static inline VkFormat to_unorm_variant(VkFormat fmt)
+{
+    switch (fmt)
+    {
+        case VK_FORMAT_BC1_RGB_SRGB_BLOCK:   return VK_FORMAT_BC1_RGB_UNORM_BLOCK;
+        case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:  return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
+        case VK_FORMAT_BC2_SRGB_BLOCK:       return VK_FORMAT_BC2_UNORM_BLOCK;
+        case VK_FORMAT_BC3_SRGB_BLOCK:       return VK_FORMAT_BC3_UNORM_BLOCK;
+        case VK_FORMAT_BC7_SRGB_BLOCK:       return VK_FORMAT_BC7_UNORM_BLOCK;
+        case VK_FORMAT_R8G8B8A8_SRGB:        return VK_FORMAT_R8G8B8A8_UNORM;
+        case VK_FORMAT_B8G8R8A8_SRGB:        return VK_FORMAT_B8G8R8A8_UNORM;
+        case VK_FORMAT_R8_SRGB:              return VK_FORMAT_R8_UNORM;
+        case VK_FORMAT_R8G8_SRGB:            return VK_FORMAT_R8G8_UNORM;
+        default: return fmt;
     }
 }
 
@@ -402,50 +437,85 @@ void TextureCache::worker_loop()
             if (hasKTX2)
             {
                 attemptedKTX2 = true;
-                // Read file
                 fmt::println("[TextureCache] KTX2 candidate for '{}' → '{}'", rq.path, ktxPath.string());
-                std::ifstream ifs(ktxPath, std::ios::binary);
-                if (ifs)
+                ktxTexture2* ktex = nullptr;
+                ktxResult kres = ktxTexture2_CreateFromNamedFile(ktxPath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktex);
+                if (kres != KTX_SUCCESS || !ktex)
                 {
-                    std::vector<uint8_t> fileBytes(std::istreambuf_iterator<char>(ifs), {});
-                    fmt::println("[TextureCache] KTX2 read {} bytes", fileBytes.size());
-                    KTX2Image ktx{};
-                    std::string err;
-                    if (parse_ktx2(fileBytes.data(), fileBytes.size(), ktx, &err))
-                    {
-                        fmt::println("[TextureCache] KTX2 parsed: format={}, {}x{}, mips={}, faces={}, layers={}, supercompression={}",
-                                      string_VkFormat(static_cast<VkFormat>(ktx.format)), ktx.width, ktx.height,
-                                      ktx.mipLevels, ktx.faceCount, ktx.layerCount, ktx.supercompression);
-                        size_t sum = 0; for (const auto &lv: ktx.levels) sum += static_cast<size_t>(lv.length);
-                        fmt::println("[TextureCache] KTX2 levels: {} totalBytes={}", ktx.levels.size(), sum);
-                        for (size_t li = 0; li < ktx.levels.size(); ++li)
-                        {
-                            fmt::println("  L{}: off={}, len={}, extent={}x{}", li, ktx.levels[li].offset,
-                                          ktx.levels[li].length,
-                                          std::max(1u, ktx.width  >> li),
-                                          std::max(1u, ktx.height >> li));
-                        }
-                        out.isKTX2 = true;
-                        out.ktxFormat = ktx.format;
-                        out.ktxMipLevels = ktx.mipLevels;
-                        out.ktx.bytes = std::move(ktx.data);
-                        out.ktx.levels.reserve(ktx.levels.size());
-                        for (const auto &lv : ktx.levels)
-                        {
-                            out.ktx.levels.push_back({lv.offset, lv.length, lv.width, lv.height});
-                        }
-                        out.width  = static_cast<int>(ktx.width);
-                        out.height = static_cast<int>(ktx.height);
-                    }
-                    else
-                    {
-                        fmt::println("[TextureCache] parse_ktx2 failed for '{}' ({} bytes): {}",
-                                      ktxPath.string(), fileBytes.size(), err);
-                    }
+                    fmt::println("[TextureCache] libktx open failed for '{}': {}", ktxPath.string(), ktxErrorString(kres));
                 }
                 else
                 {
-                    fmt::println("[TextureCache] Failed to open KTX2 file '{}'", ktxPath.string());
+                    if (ktxTexture2_NeedsTranscoding(ktex))
+                    {
+                        ktx_transcode_fmt_e target = (rq.key.channels == TextureKey::ChannelsHint::RG) ? KTX_TTF_BC5_RG : KTX_TTF_BC7_RGBA;
+                        kres = ktxTexture2_TranscodeBasis(ktex, target, 0);
+                        if (kres != KTX_SUCCESS)
+                        {
+                            fmt::println("[TextureCache] libktx transcode failed for '{}': {}", ktxPath.string(), ktxErrorString(kres));
+                            ktxTexture_Destroy(ktxTexture(ktex));
+                            ktex = nullptr;
+                        }
+                    }
+                    if (ktex)
+                    {
+                        VkFormat vkfmt = static_cast<VkFormat>(ktex->vkFormat);
+                        uint32_t mipLevels = ktex->numLevels;
+                        uint32_t baseW = ktex->baseWidth;
+                        uint32_t baseH = ktex->baseHeight;
+                        ktx_size_t totalSize = ktxTexture_GetDataSize(ktxTexture(ktex));
+                        const uint8_t* dataPtr = reinterpret_cast<const uint8_t*>(ktxTexture_GetData(ktxTexture(ktex)));
+
+                        switch (vkfmt)
+                        {
+                            case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
+                            case VK_FORMAT_BC1_RGB_SRGB_BLOCK:
+                            case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
+                            case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:
+                            case VK_FORMAT_BC2_UNORM_BLOCK:
+                            case VK_FORMAT_BC2_SRGB_BLOCK:
+                            case VK_FORMAT_BC3_UNORM_BLOCK:
+                            case VK_FORMAT_BC3_SRGB_BLOCK:
+                            case VK_FORMAT_BC4_UNORM_BLOCK:
+                            case VK_FORMAT_BC4_SNORM_BLOCK:
+                            case VK_FORMAT_BC5_UNORM_BLOCK:
+                            case VK_FORMAT_BC5_SNORM_BLOCK:
+                            case VK_FORMAT_BC6H_UFLOAT_BLOCK:
+                            case VK_FORMAT_BC6H_SFLOAT_BLOCK:
+                            case VK_FORMAT_BC7_UNORM_BLOCK:
+                            case VK_FORMAT_BC7_SRGB_BLOCK:
+                                break;
+                            default:
+                                fmt::println("[TextureCache] libktx returned non-BC format {} — skipping KTX2", string_VkFormat(vkfmt));
+                                ktxTexture_Destroy(ktxTexture(ktex));
+                                ktex = nullptr;
+                                break;
+                        }
+
+                        if (ktex)
+                        {
+                            out.isKTX2 = true;
+                            out.ktxFormat = vkfmt;
+                            out.ktxMipLevels = mipLevels;
+                            out.ktx.bytes.assign(dataPtr, dataPtr + totalSize);
+                            out.ktx.levels.clear();
+                            out.ktx.levels.reserve(mipLevels);
+                            for (uint32_t mip = 0; mip < mipLevels; ++mip)
+                            {
+                                ktx_size_t off = 0, len = 0;
+                                ktxTexture_GetImageOffset(ktxTexture(ktex), mip, 0, 0, &off);
+                                ktxTexture_GetImageSize(ktxTexture(ktex), mip, &len);
+                                uint32_t w = std::max(1u, baseW >> mip);
+                                uint32_t h = std::max(1u, baseH >> mip);
+                                out.ktx.levels.push_back({ static_cast<uint64_t>(off), static_cast<uint64_t>(len), w, h });
+                            }
+                            out.width = static_cast<int>(baseW);
+                            out.height = static_cast<int>(baseH);
+                            fmt::println("[TextureCache] libktx parsed: format={}, {}x{}, mips={}, dataSize={}",
+                                          string_VkFormat(vkfmt), baseW, baseH, mipLevels, (unsigned long long)totalSize);
+                            ktxTexture_Destroy(ktxTexture(ktex));
+                        }
+                    }
                 }
             }
             else if (p.extension() == ".ktx2")
@@ -541,6 +611,14 @@ size_t TextureCache::drain_ready_uploads(ResourceManager &rm, size_t budgetBytes
         if (res.isKTX2)
         {
             fmt = res.ktxFormat;
+            // Nudge format to sRGB/UNORM variant based on request to avoid gamma mistakes
+            VkFormat reqFmt = e.key.srgb ? to_srgb_variant(fmt) : to_unorm_variant(fmt);
+            if (reqFmt != fmt)
+            {
+                fmt = reqFmt;
+                fmt::println("[TextureCache] Overriding KTX2 format to {} based on request (original {})",
+                              string_VkFormat(fmt), string_VkFormat(res.ktxFormat));
+            }
             desiredLevels = res.ktxMipLevels;
             for (const auto &lv : res.ktx.levels) expectedBytes += static_cast<size_t>(lv.length);
         }
@@ -800,6 +878,10 @@ void TextureCache::debug_snapshot(std::vector<DebugRow> &outRows, DebugStats &ou
         else
         {
             row.name = std::string("<bytes> (") + std::to_string(e.bytes.size()) + ")";
+        }
+        if (e.state == EntryState::Resident && e.image.image)
+        {
+            row.name += std::string(" [") + string_VkFormat(e.image.imageFormat) + "]";
         }
         row.bytes = e.sizeBytes;
         row.lastUsed = e.lastUsedFrame;
