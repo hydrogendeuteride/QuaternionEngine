@@ -156,7 +156,6 @@ def process_one(img_path: Path, out_dir: Path, role, opts):
     ktx_trans = [
         "ktx", "transcode",
         "--target", target_bc,
-        "--zstd", "18",
         str(tmp_ktx2), str(out_ktx2)
     ]
     rc = run_cmd(ktx_trans, dry_run=opts.dry_run)

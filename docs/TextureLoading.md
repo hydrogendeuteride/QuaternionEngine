@@ -1,7 +1,7 @@
 Texture Loading & Streaming
 
 Overview
-- Streaming cache: `src/core/texture_cache.{h,cpp}` asynchronously decodes images (stb_image) on a small worker pool (1–4 threads, clamped by hardware concurrency) and uploads them via `ResourceManager` with optional mipmaps. Descriptors registered up‑front are patched in‑place once the texture becomes resident. Large decodes can be downscaled on workers before upload to cap peak memory.
+- Streaming cache: `src/core/texture_cache.{h,cpp}` asynchronously decodes images (stb_image) on a small worker pool (1–4 threads, clamped by hardware concurrency) and uploads them via `ResourceManager` with optional mipmaps. For FilePath keys, a sibling `<stem>.ktx2` (or direct `.ktx2`) is preferred over PNG/JPEG. Descriptors registered up‑front are patched in‑place once the texture becomes resident. Large decodes can be downscaled on workers before upload to cap peak memory.
 - Uploads: `src/core/vk_resource.{h,cpp}` stages pixel data and either submits immediately or registers a Render Graph transfer pass. Mipmaps use `vkutil::generate_mipmaps(...)` and finish in `SHADER_READ_ONLY_OPTIMAL`.
 - Integration points:
   - Materials: layouts use `UPDATE_AFTER_BIND`; descriptors can be rewritten after bind.
@@ -18,11 +18,14 @@ Data Flow
   - `pumpLoads(...)` looks for entries in `Unloaded` or `Evicted` state that were seen recently (`now == 0` or `now - lastUsed <= 1`) and starts at most `max_loads_per_pump` decodes per call, while enforcing a byte budget for uploads per frame.
   - Render passes mark used sets each frame with `markSetUsed(...)` (or specific handles via `markUsed(...)`).
 - Decode
-  - Worker threads decode to RGBA8 with stb_image (`stbi_load` / `stbi_load_from_memory`). Results are queued for the main thread.
--- Admission & Upload
-  - Before upload, an expected resident size is computed from chosen format (R/RG/RGBA) and mip count (full chain or clamped). A per‑frame byte budget (`max_bytes_per_pump`) throttles the total amount uploaded each pump.
-  - If a GPU texture budget is set, the cache tries to free space by evicting least‑recently‑used textures not used this frame. If it still cannot fit, the decode is deferred (kept in the ready queue) or dropped with backoff if VRAM is tight.
-  - Uploads are created via `ResourceManager::create_image(...)`, which now supports an explicit mip count. Deferred upload paths generate exactly the requested number of mips.
+  - FilePath: if the path ends with `.ktx2` or a sibling exists, parse KTX2 (2D, single‑face, single‑layer, no supercompression). Otherwise, decode to RGBA8 via stb_image.
+  - Bytes: always decode via stb_image (no sibling discovery possible).
+- Admission & Upload
+  - Before upload, an expected resident size is computed (exact for KTX2 by summing level byte lengths; estimated for raster by format×area×mip‑factor). A per‑frame byte budget (`max_bytes_per_pump`) throttles uploads.
+  - If a GPU texture budget is set, the cache evicts least‑recently‑used textures not used this frame. If it still cannot fit, the decode is deferred or dropped with backoff.
+  - Raster: `ResourceManager::create_image(...)` stages a single region, then optionally generates mips on GPU.
+  - KTX2: `ResourceManager::create_image_compressed(...)` allocates an image with the file’s `VkFormat` and records one `VkBufferImageCopy` per mip level (no GPU mip gen). Immediate path transitions to `SHADER_READ_ONLY_OPTIMAL`; RG path leaves it in `TRANSFER_DST` until a sampling pass.
+  - If the device cannot sample the KTX2 format, the cache falls back to raster decode.
   - After upload: state → `Resident`, descriptors recorded via `watchBinding` are rewritten to the new image view with the chosen sampler and `SHADER_READ_ONLY_OPTIMAL` layout. For Bytes‑backed keys, compressed source bytes are dropped unless `keep_source_bytes` is enabled.
 - Eviction & Reload
   - `evictToBudget(bytes)` rewrites watchers to fallbacks, destroys images, and marks entries `Evicted`. Evicted entries can reload automatically when seen again and a short cooldown has passed (default ~2 frames), avoiding immediate thrash.
@@ -67,11 +70,15 @@ Implementation Notes
  - Progressive downscale
    - The decode thread downsizes large images by powers of 2 until within `Max Upload Dimension`, reducing both staging and VRAM. You can increase the cap or disable it (set to 0) from the UI.
 
+KTX2 specifics
+- Supported: 2D, single‑face, single‑layer, no supercompression; pre‑transcoded BCn (including sRGB variants).
+- Not supported: UASTC/BasisLZ transcoding at runtime, cube/array/multilayer.
+
 Limitations / Future Work
 - Linear‑blit capability check
   - `generate_mipmaps` always uses `VK_FILTER_LINEAR`. Add a format/feature check and a fallback path (nearest or compute downsample).
 - Texture formats
-  - Only 8‑bit RGBA uploads via stb_image today. Consider KTX2/BasisU for ASTC/BCn, specialized R8/RG8 paths, and float HDR support (`stbi_loadf` → `R16G16B16A16_SFLOAT`).
+  - Raster path: 8‑bit R/RG/RGBA via stb_image. Compressed path: BCn via `.ktx2`. Future: ASTC/ETC2, specialized R8/RG8 parsing, and float HDR support (`stbi_loadf` → `R16G16B16A16_SFLOAT`).
 - Normal‑map mip quality
   - Linear blits reduce normal length; consider a compute renormalization pass.
 - Samplers

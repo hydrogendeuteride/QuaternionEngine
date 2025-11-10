@@ -34,6 +34,8 @@ add_executable (vulkan_engine
   core/frame_resources.cpp
   core/texture_cache.h
   core/texture_cache.cpp
+  core/ktx2_loader.h
+  core/ktx2_loader.cpp
   core/config.h
   core/vk_engine.h
   core/vk_engine.cpp

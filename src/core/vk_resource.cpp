@@ -391,22 +391,34 @@ void ResourceManager::process_queued_uploads_immediate()
             vkutil::transition_image(cmd, imageUpload.image, imageUpload.initialLayout,
                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-            VkBufferImageCopy copyRegion = {};
-            copyRegion.bufferOffset = 0;
-            copyRegion.bufferRowLength = 0;
-            copyRegion.bufferImageHeight = 0;
-            copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            copyRegion.imageSubresource.mipLevel = 0;
-            copyRegion.imageSubresource.baseArrayLayer = 0;
-            copyRegion.imageSubresource.layerCount = 1;
-            copyRegion.imageExtent = imageUpload.extent;
+            if (!imageUpload.copies.empty())
+            {
+                vkCmdCopyBufferToImage(cmd,
+                                       imageUpload.staging.buffer,
+                                       imageUpload.image,
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                       static_cast<uint32_t>(imageUpload.copies.size()),
+                                       imageUpload.copies.data());
+            }
+            else
+            {
+                VkBufferImageCopy copyRegion = {};
+                copyRegion.bufferOffset = 0;
+                copyRegion.bufferRowLength = 0;
+                copyRegion.bufferImageHeight = 0;
+                copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                copyRegion.imageSubresource.mipLevel = 0;
+                copyRegion.imageSubresource.baseArrayLayer = 0;
+                copyRegion.imageSubresource.layerCount = 1;
+                copyRegion.imageExtent = imageUpload.extent;
 
-            vkCmdCopyBufferToImage(cmd,
-                                   imageUpload.staging.buffer,
-                                   imageUpload.image,
-                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                   1,
-                                   &copyRegion);
+                vkCmdCopyBufferToImage(cmd,
+                                       imageUpload.staging.buffer,
+                                       imageUpload.image,
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                       1,
+                                       &copyRegion);
+            }
 
             if (imageUpload.generateMips)
             {
@@ -571,25 +583,36 @@ void ResourceManager::register_upload_pass(RenderGraph &graph, FrameResources &f
                 VkBuffer staging = res.buffer(binding.stagingHandle);
                 VkImage image = res.image(binding.imageHandle);
 
-                VkBufferImageCopy region{};
-                region.bufferOffset = 0;
-                region.bufferRowLength = 0;
-                region.bufferImageHeight = 0;
-                region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                region.imageSubresource.mipLevel = 0;
-                region.imageSubresource.baseArrayLayer = 0;
-                region.imageSubresource.layerCount = 1;
-                region.imageExtent = upload.extent;
-
-                vkCmdCopyBufferToImage(cmd, staging, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+                if (!upload.copies.empty())
+                {
+                    vkCmdCopyBufferToImage(cmd, staging, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                            static_cast<uint32_t>(upload.copies.size()), upload.copies.data());
+                }
+                else
+                {
+                    VkBufferImageCopy region{};
+                    region.bufferOffset = 0;
+                    region.bufferRowLength = 0;
+                    region.bufferImageHeight = 0;
+                    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                    region.imageSubresource.mipLevel = 0;
+                    region.imageSubresource.baseArrayLayer = 0;
+                    region.imageSubresource.layerCount = 1;
+                    region.imageExtent = upload.extent;
+                    vkCmdCopyBufferToImage(cmd, staging, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+                }
 
                 if (upload.generateMips)
                 {
                     // NOTE: generate_mipmaps_levels() transitions the image to
                     // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL at the end.
-                    // Do not transition back to TRANSFER here.
                     vkutil::generate_mipmaps_levels(cmd, image, VkExtent2D{upload.extent.width, upload.extent.height},
                                                     static_cast<int>(upload.mipLevels));
+                }
+                else
+                {
+                    // Transition to final layout for sampling
+                    vkutil::transition_image(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, upload.finalLayout);
                 }
             }
         });
@@ -605,4 +628,64 @@ void ResourceManager::register_upload_pass(RenderGraph &graph, FrameResources &f
             destroy_buffer(upload.staging);
         }
     });
+}
+
+AllocatedImage ResourceManager::create_image_compressed(const void* bytes, size_t size,
+                                                       VkFormat fmt,
+                                                       std::span<const MipLevelCopy> levels,
+                                                       VkImageUsageFlags usage)
+{
+    if (bytes == nullptr || size == 0 || levels.empty())
+    {
+        return {};
+    }
+
+    // Determine base extent from level 0
+    VkExtent3D extent{ levels[0].width, levels[0].height, 1 };
+
+    // Stage full payload as-is
+    AllocatedBuffer uploadbuffer = create_buffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                 VMA_MEMORY_USAGE_CPU_TO_GPU);
+    std::memcpy(uploadbuffer.info.pMappedData, bytes, size);
+    vmaFlushAllocation(_deviceManager->allocator(), uploadbuffer.allocation, 0, size);
+
+    // Create GPU image with explicit mip count; no mip generation
+    const uint32_t mipCount = static_cast<uint32_t>(levels.size());
+    AllocatedImage new_image = create_image(extent, fmt,
+                                            usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                            /*mipmapped=*/true, mipCount);
+
+    PendingImageUpload pending{};
+    pending.staging = uploadbuffer;
+    pending.image = new_image.image;
+    pending.extent = extent;
+    pending.format = fmt;
+    pending.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    pending.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    pending.generateMips = false;
+    pending.mipLevels = mipCount;
+    pending.copies.reserve(levels.size());
+
+    for (uint32_t i = 0; i < mipCount; ++i)
+    {
+        VkBufferImageCopy region{};
+        region.bufferOffset = levels[i].offset;
+        region.bufferRowLength = 0; // tightly packed
+        region.bufferImageHeight = 0;
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = i;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = { levels[i].width, levels[i].height, 1 };
+        pending.copies.push_back(region);
+    }
+
+    _pendingImageUploads.push_back(std::move(pending));
+
+    if (!_deferUploads)
+    {
+        process_queued_uploads_immediate();
+    }
+
+    return new_image;
 }

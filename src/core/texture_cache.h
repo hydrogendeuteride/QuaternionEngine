@@ -188,6 +188,17 @@ private:
         bool srgb{false};
         TextureKey::ChannelsHint channels{TextureKey::ChannelsHint::Auto};
         uint32_t mipClampLevels{0};
+
+        // Compressed path (KTX2 pre-transcoded BCn). When true, 'rgba/heap'
+        // are ignored and the fields below describe the payload.
+        bool isKTX2{false};
+        VkFormat ktxFormat{VK_FORMAT_UNDEFINED};
+        uint32_t ktxMipLevels{0};
+        struct KTXPack {
+            struct L { uint64_t offset{0}, length{0}; uint32_t width{0}, height{0}; };
+            std::vector<uint8_t> bytes;     // full file content
+            std::vector<L> levels;           // per-mip region description
+        } ktx;
     };
 
     void worker_loop();

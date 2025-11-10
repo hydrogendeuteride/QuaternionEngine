@@ -13,6 +13,13 @@ struct FrameResources;
 class ResourceManager
 {
 public:
+    struct MipLevelCopy
+    {
+        uint64_t offset{0};
+        uint64_t length{0};
+        uint32_t width{0};
+        uint32_t height{0};
+    };
     struct BufferCopyRegion
     {
         VkBuffer destination = VK_NULL_HANDLE;
@@ -37,6 +44,8 @@ public:
         VkImageLayout finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         bool generateMips = false;
         uint32_t mipLevels = 1;
+        // For multi-region (per-mip) uploads
+        std::vector<VkBufferImageCopy> copies;
     };
 
     void init(DeviceManager *deviceManager);
@@ -58,6 +67,14 @@ public:
     // Variant with explicit mip level count used for generate_mipmaps.
     AllocatedImage create_image(const void *data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage,
                                 bool mipmapped, uint32_t mipLevelsOverride);
+
+    // Create an image from a compressed payload (e.g., KTX2 pre-transcoded BCn).
+    // 'bytes' backs a single staging buffer; 'levels' provides per-mip copy regions.
+    // No GPU mip generation is performed; the number of mips equals levels.size().
+    AllocatedImage create_image_compressed(const void* bytes, size_t size,
+                                           VkFormat fmt,
+                                           std::span<const MipLevelCopy> levels,
+                                           VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT);
 
     void destroy_image(const AllocatedImage &img) const;
 

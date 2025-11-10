@@ -6,9 +6,12 @@
 #include <core/config.h>
 #include <algorithm>
 #include "stb_image.h"
+#include "ktx2_loader.h"
 #include <algorithm>
 #include "vk_device.h"
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <cmath>
 
@@ -372,58 +375,131 @@ void TextureCache::worker_loop()
             _queue.pop_front();
         }
 
-        // Decode using stb_image
-        int w = 0, h = 0, comp = 0;
-        unsigned char *data = nullptr;
-        if (rq.key.kind == TextureKey::SourceKind::FilePath)
-        {
-            data = stbi_load(rq.path.c_str(), &w, &h, &comp, 4);
-        }
-        else
-        {
-            if (!rq.bytes.empty())
-            {
-                data = stbi_load_from_memory(rq.bytes.data(), static_cast<int>(rq.bytes.size()), &w, &h, &comp, 4);
-            }
-        }
-
         DecodedResult out{};
         out.handle = rq.handle;
-        out.width = w;
-        out.height = h;
         out.mipmapped = rq.key.mipmapped;
         out.srgb = rq.key.srgb;
         out.channels = rq.key.channels;
         out.mipClampLevels = rq.key.mipClampLevels;
-        if (data && w > 0 && h > 0)
+
+        // 1) Prefer KTX2 when source is a file path and a .ktx2 version exists
+        bool attemptedKTX2 = false;
+        if (rq.key.kind == TextureKey::SourceKind::FilePath)
         {
-            // Progressive downscale if requested
-            if (_maxUploadDimension > 0 && (w > static_cast<int>(_maxUploadDimension) || h > static_cast<int>(_maxUploadDimension)))
+            std::filesystem::path p = rq.path;
+            std::filesystem::path ktxPath;
+            if (p.extension() == ".ktx2")
             {
-                std::vector<uint8_t> scaled;
-                scaled.assign(data, data + static_cast<size_t>(w) * h * 4);
-                int cw = w, ch = h;
-                while (cw > static_cast<int>(_maxUploadDimension) || ch > static_cast<int>(_maxUploadDimension))
-                {
-                    auto tmp = downscale_half(scaled.data(), cw, ch, 4);
-                    scaled.swap(tmp);
-                    cw = std::max(1, cw / 2);
-                    ch = std::max(1, ch / 2);
-                }
-                stbi_image_free(data);
-                out.rgba = std::move(scaled);
-                out.width = cw;
-                out.height = ch;
+                ktxPath = p;
             }
             else
             {
-                out.heap = data;
-                out.heapBytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
+                ktxPath = p;
+                ktxPath.replace_extension(".ktx2");
+            }
+            std::error_code ec;
+            bool hasKTX2 = (!ktxPath.empty() && std::filesystem::exists(ktxPath, ec) && !ec);
+            if (hasKTX2)
+            {
+                attemptedKTX2 = true;
+                // Read file
+                fmt::println("[TextureCache] KTX2 candidate for '{}' → '{}'", rq.path, ktxPath.string());
+                std::ifstream ifs(ktxPath, std::ios::binary);
+                if (ifs)
+                {
+                    std::vector<uint8_t> fileBytes(std::istreambuf_iterator<char>(ifs), {});
+                    fmt::println("[TextureCache] KTX2 read {} bytes", fileBytes.size());
+                    KTX2Image ktx{};
+                    std::string err;
+                    if (parse_ktx2(fileBytes.data(), fileBytes.size(), ktx, &err))
+                    {
+                        fmt::println("[TextureCache] KTX2 parsed: format={}, {}x{}, mips={}, faces={}, layers={}, supercompression={}",
+                                      string_VkFormat(static_cast<VkFormat>(ktx.format)), ktx.width, ktx.height,
+                                      ktx.mipLevels, ktx.faceCount, ktx.layerCount, ktx.supercompression);
+                        size_t sum = 0; for (const auto &lv: ktx.levels) sum += static_cast<size_t>(lv.length);
+                        fmt::println("[TextureCache] KTX2 levels: {} totalBytes={}", ktx.levels.size(), sum);
+                        for (size_t li = 0; li < ktx.levels.size(); ++li)
+                        {
+                            fmt::println("  L{}: off={}, len={}, extent={}x{}", li, ktx.levels[li].offset,
+                                          ktx.levels[li].length,
+                                          std::max(1u, ktx.width  >> li),
+                                          std::max(1u, ktx.height >> li));
+                        }
+                        out.isKTX2 = true;
+                        out.ktxFormat = ktx.format;
+                        out.ktxMipLevels = ktx.mipLevels;
+                        out.ktx.bytes = std::move(ktx.data);
+                        out.ktx.levels.reserve(ktx.levels.size());
+                        for (const auto &lv : ktx.levels)
+                        {
+                            out.ktx.levels.push_back({lv.offset, lv.length, lv.width, lv.height});
+                        }
+                        out.width  = static_cast<int>(ktx.width);
+                        out.height = static_cast<int>(ktx.height);
+                    }
+                    else
+                    {
+                        fmt::println("[TextureCache] parse_ktx2 failed for '{}' ({} bytes): {}",
+                                      ktxPath.string(), fileBytes.size(), err);
+                    }
+                }
+                else
+                {
+                    fmt::println("[TextureCache] Failed to open KTX2 file '{}'", ktxPath.string());
+                }
+            }
+            else if (p.extension() == ".ktx2")
+            {
+                fmt::println("[TextureCache] Requested .ktx2 '{}' but file not found (ec={})", p.string(), ec.value());
             }
         }
-        else if (data)
+
+        // 2) Raster fallback via stb_image if not KTX2 or unsupported
+        if (!out.isKTX2)
         {
-            stbi_image_free(data);
+            int w = 0, h = 0, comp = 0;
+            unsigned char *data = nullptr;
+            if (rq.key.kind == TextureKey::SourceKind::FilePath)
+            {
+                data = stbi_load(rq.path.c_str(), &w, &h, &comp, 4);
+            }
+            else if (!rq.bytes.empty())
+            {
+                data = stbi_load_from_memory(rq.bytes.data(), static_cast<int>(rq.bytes.size()), &w, &h, &comp, 4);
+            }
+
+            out.width = w;
+            out.height = h;
+            if (data && w > 0 && h > 0)
+            {
+                // Progressive downscale if requested
+                if (_maxUploadDimension > 0 && (w > static_cast<int>(_maxUploadDimension) || h > static_cast<int>(_maxUploadDimension)))
+                {
+                    std::vector<uint8_t> scaled;
+                    scaled.assign(data, data + static_cast<size_t>(w) * h * 4);
+                    int cw = w, ch = h;
+                    while (cw > static_cast<int>(_maxUploadDimension) || ch > static_cast<int>(_maxUploadDimension))
+                    {
+                        auto tmp = downscale_half(scaled.data(), cw, ch, 4);
+                        scaled.swap(tmp);
+                        cw = std::max(1, cw / 2);
+                        ch = std::max(1, ch / 2);
+                    }
+                    stbi_image_free(data);
+                    out.rgba = std::move(scaled);
+                    out.width = cw;
+                    out.height = ch;
+                }
+                else
+                {
+                    out.heap = data;
+                    out.heapBytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
+                }
+            }
+            else if (data)
+            {
+                stbi_image_free(data);
+            }
         }
 
         {
@@ -447,34 +523,38 @@ size_t TextureCache::drain_ready_uploads(ResourceManager &rm, size_t budgetBytes
     {
         if (res.handle == InvalidHandle || res.handle >= _entries.size()) continue;
         Entry &e = _entries[res.handle];
-        if ((res.heap == nullptr && res.rgba.empty()) || res.width <= 0 || res.height <= 0)
+        if (!res.isKTX2 && ((res.heap == nullptr && res.rgba.empty()) || res.width <= 0 || res.height <= 0))
         {
             e.state = EntryState::Evicted; // failed decode; keep fallback
             continue;
         }
 
         const uint32_t now = _context ? _context->frameIndex : 0u;
-        VkExtent3D extent{static_cast<uint32_t>(res.width), static_cast<uint32_t>(res.height), 1u};
+        VkExtent3D extent{static_cast<uint32_t>(std::max(0, res.width)), static_cast<uint32_t>(std::max(0, res.height)), 1u};
         TextureKey::ChannelsHint hint = (e.key.channels == TextureKey::ChannelsHint::Auto)
                                             ? TextureKey::ChannelsHint::Auto
                                             : e.key.channels;
-        VkFormat fmt = choose_format(hint, res.srgb);
 
-        // Estimate resident size for admission control (match post-upload computation)
+        size_t expectedBytes = 0;
+        VkFormat fmt = VK_FORMAT_UNDEFINED;
         uint32_t desiredLevels = 1;
-        if (res.mipmapped)
+        if (res.isKTX2)
         {
-            if (res.mipClampLevels > 0)
-            {
-                desiredLevels = res.mipClampLevels;
-            }
-            else
-            {
-                desiredLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(extent.width, extent.height)))) + 1u;
-            }
+            fmt = res.ktxFormat;
+            desiredLevels = res.ktxMipLevels;
+            for (const auto &lv : res.ktx.levels) expectedBytes += static_cast<size_t>(lv.length);
         }
-        const float mipFactor = res.mipmapped ? mip_factor_for_levels(desiredLevels) : 1.0f;
-        const size_t expectedBytes = static_cast<size_t>(extent.width) * extent.height * bytes_per_texel(fmt) * mipFactor;
+        else
+        {
+            fmt = choose_format(hint, res.srgb);
+            if (res.mipmapped)
+            {
+                if (res.mipClampLevels > 0) desiredLevels = res.mipClampLevels;
+                else desiredLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(extent.width, extent.height)))) + 1u;
+            }
+            const float mipFactor = res.mipmapped ? mip_factor_for_levels(desiredLevels) : 1.0f;
+            expectedBytes = static_cast<size_t>(extent.width) * extent.height * bytes_per_texel(fmt) * mipFactor;
+        }
 
         // Byte budget for this pump (frame)
         if (admitted + expectedBytes > budgetBytes)
@@ -503,38 +583,95 @@ size_t TextureCache::drain_ready_uploads(ResourceManager &rm, size_t budgetBytes
             }
         }
 
-        // Optionally repack channels to R or RG to save memory
-        std::vector<uint8_t> packed;
-        const void *src = nullptr;
-        if (hint == TextureKey::ChannelsHint::R)
+        if (res.isKTX2)
         {
-            packed.resize(static_cast<size_t>(extent.width) * extent.height);
-            const uint8_t* in = res.heap ? res.heap : res.rgba.data();
-            for (size_t i = 0, px = static_cast<size_t>(extent.width) * extent.height; i < px; ++i)
+            // Basic format support check: ensure the GPU can sample this format
+            bool supported = true;
+            if (_context && _context->getDevice())
             {
-                packed[i] = in[i * 4 + 0];
+                VkFormatProperties props{};
+                vkGetPhysicalDeviceFormatProperties(_context->getDevice()->physicalDevice(), fmt, &props);
+                supported = (props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
             }
-            src = packed.data();
-        }
-        else if (hint == TextureKey::ChannelsHint::RG)
-        {
-            packed.resize(static_cast<size_t>(extent.width) * extent.height * 2);
-            const uint8_t* in = res.heap ? res.heap : res.rgba.data();
-            for (size_t i = 0, px = static_cast<size_t>(extent.width) * extent.height; i < px; ++i)
+
+            if (!supported)
             {
-                packed[i * 2 + 0] = in[i * 4 + 0];
-                packed[i * 2 + 1] = in[i * 4 + 1];
+                VkFormatProperties props{};
+                if (_context && _context->getDevice())
+                {
+                    vkGetPhysicalDeviceFormatProperties(_context->getDevice()->physicalDevice(), fmt, &props);
+                }
+                fmt::println("[TextureCache] Compressed format unsupported: format={} (optimalFeatures=0x{:08x}) — fallback raster for {}",
+                              string_VkFormat(fmt), props.optimalTilingFeatures, e.path);
+                // Fall back to raster path: requeue by synthesizing a non-KTX result
+                // Attempt synchronous fallback decode from file if available.
+                int fw = 0, fh = 0, comp = 0;
+                unsigned char *fdata = nullptr;
+                if (e.key.kind == TextureKey::SourceKind::FilePath)
+                {
+                    fdata = stbi_load(e.path.c_str(), &fw, &fh, &comp, 4);
+                }
+                if (!fdata)
+                {
+                    e.state = EntryState::Evicted;
+                    continue;
+                }
+                VkExtent3D fext{ (uint32_t)fw, (uint32_t)fh, 1 };
+                VkFormat ffmt = choose_format(hint, res.srgb);
+                uint32_t mips = (res.mipmapped) ? static_cast<uint32_t>(std::floor(std::log2(std::max(fext.width, fext.height)))) + 1u : 1u;
+                e.image = rm.create_image(fdata, fext, ffmt, VK_IMAGE_USAGE_SAMPLED_BIT, res.mipmapped, mips);
+                stbi_image_free(fdata);
+                e.sizeBytes = static_cast<size_t>(fext.width) * fext.height * bytes_per_texel(ffmt) * (res.mipmapped ? mip_factor_for_levels(mips) : 1.0f);
             }
-            src = packed.data();
+            else
+            {
+                // Prepare level table for ResourceManager
+                std::vector<ResourceManager::MipLevelCopy> levels;
+                levels.reserve(res.ktx.levels.size());
+                for (const auto &lv : res.ktx.levels)
+                {
+                    levels.push_back(ResourceManager::MipLevelCopy{ lv.offset, lv.length, lv.width, lv.height });
+                }
+                e.image = rm.create_image_compressed(res.ktx.bytes.data(), res.ktx.bytes.size(), fmt, levels);
+                e.sizeBytes = expectedBytes;
+            }
         }
         else
         {
-            src = res.heap ? static_cast<const void *>(res.heap)
-                           : static_cast<const void *>(res.rgba.data());
-        }
+            // Optionally repack channels to R or RG to save memory
+            std::vector<uint8_t> packed;
+            const void *src = nullptr;
+            if (hint == TextureKey::ChannelsHint::R)
+            {
+                packed.resize(static_cast<size_t>(extent.width) * extent.height);
+                const uint8_t* in = res.heap ? res.heap : res.rgba.data();
+                for (size_t i = 0, px = static_cast<size_t>(extent.width) * extent.height; i < px; ++i)
+                {
+                    packed[i] = in[i * 4 + 0];
+                }
+                src = packed.data();
+            }
+            else if (hint == TextureKey::ChannelsHint::RG)
+            {
+                packed.resize(static_cast<size_t>(extent.width) * extent.height * 2);
+                const uint8_t* in = res.heap ? res.heap : res.rgba.data();
+                for (size_t i = 0, px = static_cast<size_t>(extent.width) * extent.height; i < px; ++i)
+                {
+                    packed[i * 2 + 0] = in[i * 4 + 0];
+                    packed[i * 2 + 1] = in[i * 4 + 1];
+                }
+                src = packed.data();
+            }
+            else
+            {
+                src = res.heap ? static_cast<const void *>(res.heap)
+                               : static_cast<const void *>(res.rgba.data());
+            }
 
-        uint32_t mipOverride = (res.mipmapped ? desiredLevels : 1);
-        e.image = rm.create_image(src, extent, fmt, VK_IMAGE_USAGE_SAMPLED_BIT, res.mipmapped, mipOverride);
+            uint32_t mipOverride = (res.mipmapped ? desiredLevels : 1);
+            e.image = rm.create_image(src, extent, fmt, VK_IMAGE_USAGE_SAMPLED_BIT, res.mipmapped, mipOverride);
+            e.sizeBytes = expectedBytes;
+        }
 
         if (vmaDebugEnabled())
         {
@@ -542,7 +679,6 @@ size_t TextureCache::drain_ready_uploads(ResourceManager &rm, size_t budgetBytes
             vmaSetAllocationName(_context->getDevice()->allocator(), e.image.allocation, name.c_str());
         }
 
-        e.sizeBytes = expectedBytes;
         _residentBytes += e.sizeBytes;
         e.state = EntryState::Resident;
         e.nextAttemptFrame = 0; // clear backoff after success
