@@ -21,7 +21,7 @@ const float SHADOW_BORDER_SMOOTH_NDC = 0.08;
 // Base PCF radius in texels for cascade 0; higher cascades scale this up slightly.
 const float SHADOW_PCF_BASE_RADIUS = 1.35;
 // Additional per-cascade radius scale for coarser cascades (0..1 factor added across levels)
-const float SHADOW_PCF_CASCADE_GAIN = 2.0; // extra radius at far end
+const float SHADOW_PCF_CASCADE_GAIN = 2.0;// extra radius at far end
 // Receiver normal-based offset to reduce acne (in world units)
 const float SHADOW_NORMAL_OFFSET = 0.0025;
 // Scale for receiver-plane depth bias term (tweak if over/under biased)
@@ -29,8 +29,8 @@ const float SHADOW_RPDB_SCALE = 1.0;
 // Minimum clamp to keep a tiny bias even on perpendicular receivers
 const float SHADOW_MIN_BIAS = 1e-5;
 // Ray query safety params
-const float SHADOW_RAY_TMIN = 0.02;      // start a bit away from the surface
-const float SHADOW_RAY_ORIGIN_BIAS = 0.01; // world units
+const float SHADOW_RAY_TMIN = 0.02;// start a bit away from the surface
+const float SHADOW_RAY_ORIGIN_BIAS = 0.01;// world units
 
 const float PI = 3.14159265359;
 
@@ -74,7 +74,7 @@ CascadeMix computeCascadeMix(vec3 worldPos)
 
     if (primary < 3u)
     {
-        float edge = max(abs(ndcP.x), abs(ndcP.y)); // 0..1, 1 at border
+        float edge = max(abs(ndcP.x), abs(ndcP.y));// 0..1, 1 at border
         // start blending when we are within S of the border
         float t = clamp((edge - (1.0 - SHADOW_BORDER_SMOOTH_NDC)) / max(SHADOW_BORDER_SMOOTH_NDC, 1e-4), 0.0, 1.0);
         float w = smoothstep(0.0, 1.0, t);
@@ -107,7 +107,7 @@ vec2 receiverPlaneDepthGradient(vec3 ndc, vec3 dndc_dx, vec3 dndc_dy)
 
     // Build Jacobian J = [du/dx du/dy; dv/dx dv/dy] (column-major)
     mat2 J = mat2(duv_dx.x, duv_dy.x,
-                  duv_dx.y, duv_dy.y);
+    duv_dx.y, duv_dy.y);
 
     // Depth derivatives w.r.t screen pixels
     vec2 dz_dxdy = vec2(dndc_dx.z, dndc_dy.z);
@@ -121,9 +121,9 @@ vec2 receiverPlaneDepthGradient(vec3 ndc, vec3 dndc_dx, vec3 dndc_dy)
     }
 
     // Manual inverse for stability/perf on some drivers
-    mat2 invJ = (1.0 / det) * mat2( J[1][1], -J[0][1],
-                                    -J[1][0],  J[0][0]);
-    return invJ * dz_dxdy; // (dz/du, dz/dv)
+    mat2 invJ = (1.0 / det) * mat2(J[1][1], -J[0][1],
+    -J[1][0], J[0][0]);
+    return invJ * dz_dxdy;// (dz/du, dz/dv)
 }
 
 float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
@@ -135,7 +135,7 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
     vec2 suv  = ndc.xy * 0.5 + 0.5;
 
     if (any(lessThan(suv, vec2(0.0))) || any(greaterThan(suv, vec2(1.0))))
-        return 1.0;
+    return 1.0;
 
     float current = clamp(ndc.z, 0.0, 1.0);
 
@@ -165,7 +165,7 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
     for (int i = 0; i < TAP_COUNT; ++i)
     {
         vec2  pu   = rot * POISSON_16[i];
-        vec2  off  = pu * radius * texelSize; // uv-space offset of this tap
+        vec2  off  = pu * radius * texelSize;// uv-space offset of this tap
 
         float pr   = length(pu);
         float w    = 1.0 - smoothstep(0.0, 0.65, pr);
@@ -194,10 +194,10 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
     if (sceneData.rtOptions.z == 2u) {
         #ifdef GL_EXT_ray_query
         float farR = max(max(sceneData.cascadeSplitsView.x, sceneData.cascadeSplitsView.y),
-                         max(sceneData.cascadeSplitsView.z, sceneData.cascadeSplitsView.w));
+        max(sceneData.cascadeSplitsView.z, sceneData.cascadeSplitsView.w));
         rayQueryEXT rq;
         rayQueryInitializeEXT(rq, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-                              0xFF, wp + N * SHADOW_RAY_ORIGIN_BIAS, SHADOW_RAY_TMIN, L, farR);
+        0xFF, wp + N * SHADOW_RAY_ORIGIN_BIAS, SHADOW_RAY_TMIN, L, farR);
         while (rayQueryProceedEXT(rq)) { }
         bool hit = (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT);
         return hit ? 0.0 : 1.0;
@@ -224,7 +224,7 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
                 rayQueryEXT rq;
                 // tmin: small offset to avoid self-hits
                 rayQueryInitializeEXT(rq, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-                                      0xFF, wp + N * SHADOW_RAY_ORIGIN_BIAS, SHADOW_RAY_TMIN, L, maxT);
+                0xFF, wp + N * SHADOW_RAY_ORIGIN_BIAS, SHADOW_RAY_TMIN, L, maxT);
                 bool hit = false;
                 while (rayQueryProceedEXT(rq)) { }
                 hit = (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT);
@@ -252,7 +252,7 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
             float maxT = max(maxT0, maxT1);
             rayQueryEXT rq;
             rayQueryInitializeEXT(rq, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-                                  0xFF, wp + N * SHADOW_RAY_ORIGIN_BIAS, SHADOW_RAY_TMIN, L, maxT);
+            0xFF, wp + N * SHADOW_RAY_ORIGIN_BIAS, SHADOW_RAY_TMIN, L, maxT);
             while (rayQueryProceedEXT(rq)) { }
             bool hit = (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT);
             if (hit) vis = min(vis, 0.0);

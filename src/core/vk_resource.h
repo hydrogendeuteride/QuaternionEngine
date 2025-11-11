@@ -76,6 +76,19 @@ public:
                                            std::span<const MipLevelCopy> levels,
                                            VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT);
 
+    // Create a layered image (2D array or cubemap) from a compressed payload.
+    // - 'bytes' is the full KTX2 data payload staged into one buffer
+    // - 'regions' lists VkBufferImageCopy entries (one per mip × layer)
+    // - 'mipLevels' and 'layerCount' define the image subresource counts
+    // - for cubemaps, pass flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT and layerCount=6
+    AllocatedImage create_image_compressed_layers(const void* bytes, size_t size,
+                                                  VkFormat fmt,
+                                                  uint32_t mipLevels,
+                                                  uint32_t layerCount,
+                                                  std::span<const VkBufferImageCopy> regions,
+                                                  VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT,
+                                                  VkImageCreateFlags flags = 0);
+
     void destroy_image(const AllocatedImage &img) const;
 
     GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);

@@ -689,3 +689,79 @@ AllocatedImage ResourceManager::create_image_compressed(const void* bytes, size_
 
     return new_image;
 }
+
+AllocatedImage ResourceManager::create_image_compressed_layers(const void* bytes, size_t size,
+                                                              VkFormat fmt,
+                                                              uint32_t mipLevels,
+                                                              uint32_t layerCount,
+                                                              std::span<const VkBufferImageCopy> regions,
+                                                              VkImageUsageFlags usage,
+                                                              VkImageCreateFlags flags)
+{
+    if (bytes == nullptr || size == 0 || regions.empty() || mipLevels == 0 || layerCount == 0)
+    {
+        return {};
+    }
+
+    // Infer base extent from mip 0 entry
+    VkExtent3D extent{1, 1, 1};
+    // Find first region for mip 0 to get base dimensions
+    for (const auto &r : regions)
+    {
+        if (r.imageSubresource.mipLevel == 0)
+        {
+            extent = { r.imageExtent.width, r.imageExtent.height, r.imageExtent.depth > 0 ? r.imageExtent.depth : 1u };
+            break;
+        }
+    }
+
+    // Create staging buffer with compressed payload
+    AllocatedBuffer uploadbuffer = create_buffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                 VMA_MEMORY_USAGE_CPU_TO_GPU);
+    std::memcpy(uploadbuffer.info.pMappedData, bytes, size);
+    vmaFlushAllocation(_deviceManager->allocator(), uploadbuffer.allocation, 0, size);
+
+    // Create the destination image with explicit mips/layers and any requested flags
+    VkImageUsageFlags imageUsage = usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    VkImageCreateInfo img_info = vkinit::image_create_info(fmt, imageUsage, extent, mipLevels, layerCount, flags);
+
+    AllocatedImage newImage{};
+    newImage.imageFormat = fmt;
+    newImage.imageExtent = extent;
+
+    // GPU-only device local memory
+    VmaAllocationCreateInfo allocinfo{};
+    allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    allocinfo.requiredFlags = static_cast<VkMemoryPropertyFlags>(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VK_CHECK(vmaCreateImage(_deviceManager->allocator(), &img_info, &allocinfo, &newImage.image, &newImage.allocation, nullptr));
+
+    // Build appropriate image view: cube when cube-compatible and 6 layers; array view otherwise.
+    const bool isDepth = (fmt == VK_FORMAT_D32_SFLOAT);
+    VkImageAspectFlags aspect = isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+    const bool isCube = ((flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) != 0) && (layerCount == 6);
+    VkImageViewType viewType = isCube ? VK_IMAGE_VIEW_TYPE_CUBE : (layerCount > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D);
+
+    VkImageViewCreateInfo viewInfo = vkinit::imageview_create_info(viewType, fmt, newImage.image, aspect, 0, mipLevels, 0, layerCount);
+    VK_CHECK(vkCreateImageView(_deviceManager->device(), &viewInfo, nullptr, &newImage.imageView));
+
+    // Queue copy regions for the RenderGraph upload or immediate path
+    PendingImageUpload pending{};
+    pending.staging = uploadbuffer;
+    pending.image = newImage.image;
+    pending.extent = extent;
+    pending.format = fmt;
+    pending.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    pending.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    pending.generateMips = false; // compressed, mips provided
+    pending.mipLevels = mipLevels;
+    pending.copies.assign(regions.begin(), regions.end());
+
+    _pendingImageUploads.push_back(std::move(pending));
+
+    if (!_deferUploads)
+    {
+        process_queued_uploads_immediate();
+    }
+
+    return newImage;
+}

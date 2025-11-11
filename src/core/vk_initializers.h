@@ -63,6 +63,24 @@ namespace vkinit
 
     VkImageViewCreateInfo imageview_create_info(VkFormat format, VkImage image, VkImageAspectFlags aspectFlags);
 
+    // Overload: explicit mip/array counts and image flags (e.g., cube compatible)
+    VkImageCreateInfo image_create_info(VkFormat format,
+                                        VkImageUsageFlags usageFlags,
+                                        VkExtent3D extent,
+                                        uint32_t mipLevels,
+                                        uint32_t arrayLayers,
+                                        VkImageCreateFlags flags);
+
+    // Overload: explicit view type and subresource counts for layered/cubemap views
+    VkImageViewCreateInfo imageview_create_info(VkImageViewType viewType,
+                                                VkFormat format,
+                                                VkImage image,
+                                                VkImageAspectFlags aspectFlags,
+                                                uint32_t baseMipLevel,
+                                                uint32_t levelCount,
+                                                uint32_t baseArrayLayer,
+                                                uint32_t layerCount);
+
     VkPipelineLayoutCreateInfo pipeline_layout_create_info();
 
     VkPipelineShaderStageCreateInfo pipeline_shader_stage_create_info(VkShaderStageFlagBits stage,

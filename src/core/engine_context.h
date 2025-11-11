@@ -31,6 +31,7 @@ class AssetManager;
 class RenderGraph;
 class RayTracingManager;
 class TextureCache;
+class IBLManager;
 
 struct ShadowSettings
 {
@@ -95,4 +96,5 @@ public:
 
     // Streaming subsystems (engine-owned)
     TextureCache* textures = nullptr;            // texture streaming + cache
+    IBLManager*  ibl = nullptr;                  // optional IBL owner (if created by engine)
 };

@@ -312,6 +312,29 @@ VkImageCreateInfo vkinit::image_create_info(VkFormat format, VkImageUsageFlags u
     return info;
 }
 
+VkImageCreateInfo vkinit::image_create_info(VkFormat format,
+                                            VkImageUsageFlags usageFlags,
+                                            VkExtent3D extent,
+                                            uint32_t mipLevels,
+                                            uint32_t arrayLayers,
+                                            VkImageCreateFlags flags)
+{
+    VkImageCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    info.pNext = nullptr;
+
+    info.flags = flags;
+    info.imageType = VK_IMAGE_TYPE_2D;
+    info.format = format;
+    info.extent = extent;
+    info.mipLevels = mipLevels > 0 ? mipLevels : 1;
+    info.arrayLayers = arrayLayers > 0 ? arrayLayers : 1;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = usageFlags;
+    return info;
+}
+
 VkImageViewCreateInfo vkinit::imageview_create_info(VkFormat format, VkImage image, VkImageAspectFlags aspectFlags)
 {
     // build a image-view for the depth image to use for rendering
@@ -328,6 +351,29 @@ VkImageViewCreateInfo vkinit::imageview_create_info(VkFormat format, VkImage ima
     info.subresourceRange.layerCount = 1;
     info.subresourceRange.aspectMask = aspectFlags;
 
+    return info;
+}
+
+VkImageViewCreateInfo vkinit::imageview_create_info(VkImageViewType viewType,
+                                                    VkFormat format,
+                                                    VkImage image,
+                                                    VkImageAspectFlags aspectFlags,
+                                                    uint32_t baseMipLevel,
+                                                    uint32_t levelCount,
+                                                    uint32_t baseArrayLayer,
+                                                    uint32_t layerCount)
+{
+    VkImageViewCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    info.pNext = nullptr;
+    info.viewType = viewType;
+    info.image = image;
+    info.format = format;
+    info.subresourceRange.aspectMask = aspectFlags;
+    info.subresourceRange.baseMipLevel = baseMipLevel;
+    info.subresourceRange.levelCount = levelCount;
+    info.subresourceRange.baseArrayLayer = baseArrayLayer;
+    info.subresourceRange.layerCount = layerCount;
     return info;
 }
 

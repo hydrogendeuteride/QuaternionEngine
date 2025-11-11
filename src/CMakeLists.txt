@@ -34,11 +34,15 @@ add_executable (vulkan_engine
   core/frame_resources.cpp
   core/texture_cache.h
   core/texture_cache.cpp
+  core/ktx_loader.h
+  core/ktx_loader.cpp
   core/config.h
   core/vk_engine.h
   core/vk_engine.cpp
   core/vk_raytracing.h
   core/vk_raytracing.cpp
+  core/ibl_manager.h
+  core/ibl_manager.cpp
   # render
   render/vk_pipelines.h
   render/vk_pipelines.cpp

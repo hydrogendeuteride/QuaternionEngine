@@ -573,7 +573,7 @@ void VulkanEngine::init()
     // Conservative defaults to avoid CPU/RAM/VRAM spikes during heavy glTF loads.
     _textureCache->set_max_loads_per_pump(3);
     _textureCache->set_keep_source_bytes(false);
-    _textureCache->set_cpu_source_budget(64ull * 1024ull * 1024ull); // 32 MiB
+    _textureCache->set_cpu_source_budget(64ull * 1024ull * 1024ull); // 64 MiB
     _textureCache->set_max_bytes_per_pump(128ull * 1024ull * 1024ull); // 128 MiB/frame
     _textureCache->set_max_upload_dimension(4096);
 
