@@ -471,6 +471,28 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const std::string &name,
     return mesh;
 }
 
+std::shared_ptr<GLTFMaterial> AssetManager::createMaterialFromConstants(
+    const std::string &name,
+    const GLTFMetallic_Roughness::MaterialConstants &constants,
+    MaterialPass pass)
+{
+    if (!_engine) return {};
+    GLTFMetallic_Roughness::MaterialResources res{};
+    res.colorImage = _engine->_whiteImage;
+    res.colorSampler = _engine->_samplerManager->defaultLinear();
+    res.metalRoughImage = _engine->_whiteImage;
+    res.metalRoughSampler = _engine->_samplerManager->defaultLinear();
+    res.normalImage = _engine->_flatNormalImage;
+    res.normalSampler = _engine->_samplerManager->defaultLinear();
+
+    AllocatedBuffer buf = createMaterialBufferWithConstants(constants);
+    res.dataBuffer = buf.buffer;
+    res.dataBufferOffset = 0;
+    _meshMaterialBuffers[name] = buf;
+
+    return createMaterial(pass, res);
+}
+
 std::shared_ptr<MeshAsset> AssetManager::getMesh(const std::string &name) const
 {
     auto it = _meshCache.find(name);

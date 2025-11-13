@@ -23,7 +23,7 @@ void SceneManager::init(EngineContext *context)
     mainCamera.yaw = 0;
 
     sceneData.ambientColor = glm::vec4(0.1f, 0.1f, 0.1f, 1.0f);
-    sceneData.sunlightDirection = glm::vec4(-1.0f, -1.0f, -0.1f, 1.0f);
+    sceneData.sunlightDirection = glm::vec4(-0.2f, -1.0f, -0.3f, 1.0f);
     sceneData.sunlightColor = glm::vec4(1.0f, 1.0f, 1.0f, 3.0f);
 }
 

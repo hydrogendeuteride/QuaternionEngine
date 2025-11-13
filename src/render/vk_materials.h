@@ -12,6 +12,7 @@ struct GLTFMetallic_Roughness
     MaterialPipeline gBufferPipeline;
 
     VkDescriptorSetLayout materialLayout;
+    VkDescriptorSetLayout emptySetLayout = VK_NULL_HANDLE; // placeholder for set=2
 
     struct MaterialConstants
     {

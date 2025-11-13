@@ -96,6 +96,11 @@ public:
 
     bool removeMesh(const std::string &name);
 
+    // Convenience: create a PBR material from constants using engine default textures
+    std::shared_ptr<GLTFMaterial> createMaterialFromConstants(const std::string &name,
+                                                              const GLTFMetallic_Roughness::MaterialConstants &constants,
+                                                              MaterialPass pass = MaterialPass::MainColor);
+
     const AssetPaths &paths() const { return _locator.paths(); }
     void setPaths(const AssetPaths &p) { _locator.setPaths(p); }
 

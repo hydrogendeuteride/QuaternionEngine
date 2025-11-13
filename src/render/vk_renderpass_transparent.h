@@ -24,5 +24,7 @@ private:
                           RGImageHandle depthHandle) const;
 
     EngineContext *_context{};
+    mutable AllocatedImage _fallbackIbl2D{};  // 1x1 black (created in init)
+    mutable AllocatedImage _fallbackBrdf2D{}; // 1x1 black RG
 };
 

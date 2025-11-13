@@ -17,12 +17,21 @@
 #include "vk_swapchain.h"
 #include "render/rg_graph.h"
 #include <array>
+#include <cstring>
 
+#include "ibl_manager.h"
 #include "vk_raytracing.h"
 
 void LightingPass::init(EngineContext *context)
 {
     _context = context;
+
+    // Placeholder empty set layout to keep array sizes stable if needed
+    {
+        VkDescriptorSetLayoutCreateInfo info{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        info.bindingCount = 0; info.pBindings = nullptr;
+        vkCreateDescriptorSetLayout(_context->getDevice()->device(), &info, nullptr, &_emptySetLayout);
+    }
 
     // Build descriptor layout for GBuffer inputs
     {
@@ -59,10 +68,16 @@ void LightingPass::init(EngineContext *context)
     }
 
     // Build lighting pipelines (RT and non-RT) through PipelineManager
+    // Ensure IBL layout exists (moved to IBLManager)
+    VkDescriptorSetLayout iblLayout = _emptySetLayout;
+    if (_context->ibl && _context->ibl->ensureLayout())
+        iblLayout = _context->ibl->descriptorLayout();
+
     VkDescriptorSetLayout layouts[] = {
-        _context->getDescriptorLayouts()->gpuSceneDataLayout(),
-        _gBufferInputDescriptorLayout,
-        _shadowDescriptorLayout
+        _context->getDescriptorLayouts()->gpuSceneDataLayout(), // set=0
+        _gBufferInputDescriptorLayout,                          // set=1
+        _shadowDescriptorLayout,                                // set=2
+        iblLayout                                               // set=3
     };
 
     GraphicsPipelineCreateInfo baseInfo{};
@@ -92,7 +107,23 @@ void LightingPass::init(EngineContext *context)
         // Pipelines are owned by PipelineManager; only destroy our local descriptor set layout
         vkDestroyDescriptorSetLayout(_context->getDevice()->device(), _gBufferInputDescriptorLayout, nullptr);
         vkDestroyDescriptorSetLayout(_context->getDevice()->device(), _shadowDescriptorLayout, nullptr);
+        if (_emptySetLayout) vkDestroyDescriptorSetLayout(_context->getDevice()->device(), _emptySetLayout, nullptr);
     });
+
+    // Create tiny fallback textures for IBL (grey 2D and RG LUT)
+    // so shaders can safely sample even when IBL isn't loaded.
+    {
+        const uint32_t pixel = 0xFF333333u; // RGBA8 grey
+        _fallbackIbl2D = _context->getResources()->create_image(&pixel, VkExtent3D{1,1,1},
+                                                                VK_FORMAT_R8G8B8A8_UNORM,
+                                                                VK_IMAGE_USAGE_SAMPLED_BIT);
+    }
+    {
+        // 1x1 RG UNORM for BRDF LUT fallback
+        const uint16_t rg = 0x0000u; // R=0,G=0
+        _fallbackBrdfLut2D = _context->getResources()->create_image(
+            &rg, VkExtent3D{1,1,1}, VK_FORMAT_R8G8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+    }
 }
 
 void LightingPass::execute(VkCommandBuffer)
@@ -222,6 +253,41 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
         vkUpdateDescriptorSets(deviceManager->device(), 1, &write, 0, nullptr);
     }
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 2, 1, &shadowSet, 0, nullptr);
+
+    // IBL descriptor set (set = 3). Use loaded IBL if present, otherwise fall back to black.
+    VkImageView specView = _fallbackIbl2D.imageView;
+    VkImageView brdfView = _fallbackBrdfLut2D.imageView;
+    VkBuffer shBuf = VK_NULL_HANDLE; VkDeviceSize shSize = sizeof(glm::vec4)*9;
+    if (ctxLocal->ibl)
+    {
+        if (ctxLocal->ibl->specular().imageView) specView = ctxLocal->ibl->specular().imageView;
+        if (ctxLocal->ibl->brdf().imageView)     brdfView = ctxLocal->ibl->brdf().imageView;
+        if (ctxLocal->ibl->hasSH())              shBuf = ctxLocal->ibl->shBuffer().buffer;
+    }
+    // If SH missing, create a zero buffer for this frame
+    AllocatedBuffer shZero{};
+    if (shBuf == VK_NULL_HANDLE)
+    {
+        shZero = resourceManager->create_buffer(shSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        std::memset(shZero.info.pMappedData, 0, shSize);
+        vmaFlushAllocation(deviceManager->allocator(), shZero.allocation, 0, shSize);
+        shBuf = shZero.buffer;
+        ctxLocal->currentFrame->_deletionQueue.push_function([resourceManager, shZero]() { resourceManager->destroy_buffer(shZero); });
+    }
+    // Allocate from IBL layout (must exist because pipeline was created with it)
+    VkDescriptorSetLayout iblSetLayout = (ctxLocal->ibl ? ctxLocal->ibl->descriptorLayout() : _emptySetLayout);
+    VkDescriptorSet iblSet = ctxLocal->currentFrame->_frameDescriptors.allocate(
+        deviceManager->device(), iblSetLayout);
+    {
+        DescriptorWriter w;
+        w.write_image(0, specView, ctxLocal->getSamplers()->defaultLinear(),
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        w.write_image(1, brdfView, ctxLocal->getSamplers()->defaultLinear(),
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        w.write_buffer(2, shBuf, shSize, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        w.update_set(deviceManager->device(), iblSet);
+    }
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 3, 1, &iblSet, 0, nullptr);
 
     VkViewport viewport{};
     viewport.x = 0;

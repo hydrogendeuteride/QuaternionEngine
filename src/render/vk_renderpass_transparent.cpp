@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <unordered_set>
 
+#include "ibl_manager.h"
 #include "texture_cache.h"
+#include "vk_sampler_manager.h"
 #include "vk_scene.h"
 #include "vk_swapchain.h"
 #include "core/engine_context.h"
@@ -16,6 +18,12 @@
 void TransparentPass::init(EngineContext *context)
 {
     _context = context;
+    // Create fallback images
+    const uint32_t pixel = 0x00000000u;
+    _fallbackIbl2D = _context->getResources()->create_image(&pixel, VkExtent3D{1,1,1},
+                                                            VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+    _fallbackBrdf2D = _context->getResources()->create_image(&pixel, VkExtent3D{1,1,1},
+                                                             VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
 }
 
 void TransparentPass::execute(VkCommandBuffer)
@@ -94,6 +102,41 @@ void TransparentPass::draw_transparent(VkCommandBuffer cmd,
     writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
     writer.update_set(deviceManager->device(), globalDescriptor);
 
+    // Build IBL descriptor set (set=3) once for this pass
+    VkDescriptorSet iblSet = VK_NULL_HANDLE;
+    VkDescriptorSetLayout iblLayout = ctxLocal->ibl ? ctxLocal->ibl->descriptorLayout() : VK_NULL_HANDLE;
+    VkImageView specView = VK_NULL_HANDLE, brdfView = VK_NULL_HANDLE;
+    VkBuffer shBuf = VK_NULL_HANDLE; VkDeviceSize shSize = sizeof(glm::vec4)*9;
+    if (iblLayout)
+    {
+        // Fallbacks: use black if any missing
+        specView = (ctxLocal->ibl && ctxLocal->ibl->specular().imageView) ? ctxLocal->ibl->specular().imageView
+                                                                          : _fallbackIbl2D.imageView;
+        brdfView = (ctxLocal->ibl && ctxLocal->ibl->brdf().imageView)    ? ctxLocal->ibl->brdf().imageView
+                                                                          : _fallbackBrdf2D.imageView;
+        if (ctxLocal->ibl && ctxLocal->ibl->hasSH()) shBuf = ctxLocal->ibl->shBuffer().buffer;
+
+        // If SH missing, allocate zero UBO for this frame
+        AllocatedBuffer shZero{};
+        if (shBuf == VK_NULL_HANDLE)
+        {
+            shZero = resourceManager->create_buffer(shSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+            std::memset(shZero.info.pMappedData, 0, shSize);
+            vmaFlushAllocation(deviceManager->allocator(), shZero.allocation, 0, shSize);
+            shBuf = shZero.buffer;
+            ctxLocal->currentFrame->_deletionQueue.push_function([resourceManager, shZero]() { resourceManager->destroy_buffer(shZero); });
+        }
+
+        iblSet = ctxLocal->currentFrame->_frameDescriptors.allocate(deviceManager->device(), iblLayout);
+        DescriptorWriter iw;
+        iw.write_image(0, specView, ctxLocal->getSamplers()->defaultLinear(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        iw.write_image(1, brdfView, ctxLocal->getSamplers()->defaultLinear(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        iw.write_buffer(2, shBuf, shSize, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        iw.update_set(deviceManager->device(), iblSet);
+    }
+
     // Sort transparent back-to-front using camera-space depth.
     // We approximate object depth by transforming the mesh bounds origin.
     // For better results consider using per-object center or per-draw depth range.
@@ -132,6 +175,11 @@ void TransparentPass::draw_transparent(VkCommandBuffer cmd,
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->pipeline);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->layout, 0, 1,
                                         &globalDescriptor, 0, nullptr);
+                if (iblSet)
+                {
+                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->layout, 3, 1,
+                                            &iblSet, 0, nullptr);
+                }
             }
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->layout, 1, 1,
                                     &r.material->materialSet, 0, nullptr);
@@ -163,5 +211,10 @@ void TransparentPass::draw_transparent(VkCommandBuffer cmd,
 
 void TransparentPass::cleanup()
 {
+    if (_context && _context->getResources())
+    {
+        if (_fallbackIbl2D.image) _context->getResources()->destroy_image(_fallbackIbl2D);
+        if (_fallbackBrdf2D.image) _context->getResources()->destroy_image(_fallbackBrdf2D);
+    }
     fmt::print("TransparentPass::cleanup()\n");
 }

@@ -32,6 +32,7 @@
 #include "render/rg_graph.h"
 #include "core/vk_raytracing.h"
 #include "core/texture_cache.h"
+#include "core/ibl_manager.h"
 
 // Number of frames-in-flight. Affects per-frame command buffers, fences,
 // semaphores, and transient descriptor pools in FrameResources.
@@ -69,6 +70,7 @@ public:
     std::unique_ptr<RenderGraph> _renderGraph;
     std::unique_ptr<RayTracingManager> _rayManager;
     std::unique_ptr<TextureCache> _textureCache;
+    std::unique_ptr<IBLManager> _iblManager;
 
 	struct SDL_Window *_window{nullptr};
 
@@ -108,6 +110,9 @@ public:
     EngineStats stats;
 
     std::vector<RenderPass> renderPasses;
+
+    // Debug helpers: track spawned IBL test meshes to remove them easily
+    std::vector<std::string> _iblTestNames;
 
     // Debug: persistent pass enable overrides (by pass name)
     std::unordered_map<std::string, bool> _rgPassToggles;

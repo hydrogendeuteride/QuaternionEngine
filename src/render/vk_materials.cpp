@@ -25,9 +25,21 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine *engine)
                                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                          nullptr, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
 
+    // Ensure IBL layout exists; add placeholder for set=2
+    // Create a persistent empty set layout placeholder (lifetime = GLTFMetallic_Roughness)
+    {
+        VkDescriptorSetLayoutCreateInfo info{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        VK_CHECK(vkCreateDescriptorSetLayout(engine->_deviceManager->device(), &info, nullptr, &emptySetLayout));
+    }
+    VkDescriptorSetLayout iblLayout = emptySetLayout;
+    if (engine->_context->ibl && engine->_context->ibl->ensureLayout())
+        iblLayout = engine->_context->ibl->descriptorLayout();
+
     VkDescriptorSetLayout layouts[] = {
-        engine->_descriptorManager->gpuSceneDataLayout(),
-        materialLayout
+        engine->_descriptorManager->gpuSceneDataLayout(), // set=0
+        materialLayout,                                   // set=1
+        emptySetLayout,                                   // set=2 (unused)
+        iblLayout                                         // set=3
     };
 
     // Register pipelines with the central PipelineManager
@@ -87,6 +99,8 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine *engine)
     };
     engine->_pipelineManager->registerGraphics("mesh.gbuffer", gbufferInfo);
 
+    // Keep emptySetLayout until clear_resources()
+
     engine->_pipelineManager->getMaterialPipeline("mesh.opaque", opaquePipeline);
     engine->_pipelineManager->getMaterialPipeline("mesh.transparent", transparentPipeline);
     engine->_pipelineManager->getMaterialPipeline("mesh.gbuffer", gBufferPipeline);
@@ -95,6 +109,7 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine *engine)
 void GLTFMetallic_Roughness::clear_resources(VkDevice device) const
 {
     vkDestroyDescriptorSetLayout(device, materialLayout, nullptr);
+    if (emptySetLayout) vkDestroyDescriptorSetLayout(device, emptySetLayout, nullptr);
 }
 
 MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, MaterialPass pass,

@@ -9,13 +9,13 @@ Current structure:
 - PBR (IBL is WIP), cascaded shadows, normal mapping (MikkTSpace tangents optional)
 - GLTF loading and rendering, primitive creation and rendering.
 - Supports texture compression(BCn, non glTF standard), LRU reload
+- IBL
 
 Work-In-Progress
-- [ ] IBL
 - [ ] TAA
 - [ ] Multiple light
 - [ ] SSR
-- [ ] SSAO, bloom
+- [ ] bloom
 - [ ] Planet Rendering
 
 ## Build prequsites

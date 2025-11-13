@@ -25,4 +25,12 @@ private:
     EngineContext *_context = nullptr;
 
     void init_background_pipelines();
+
+    // Graphics env background pipeline
+    VkPipeline _envPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout _envPipelineLayout = VK_NULL_HANDLE;
+    // Empty descriptor layout used as placeholder for sets 1 and 2
+    VkDescriptorSetLayout _emptySetLayout = VK_NULL_HANDLE;
+    // Fallback 1x1x6 black cube if IBL not loaded
+    AllocatedImage _fallbackIblCube{};
 };

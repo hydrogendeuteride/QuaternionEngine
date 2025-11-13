@@ -51,6 +51,7 @@
 #include "core/vk_pipeline_manager.h"
 #include "core/config.h"
 #include "core/texture_cache.h"
+#include "core/ibl_manager.h"
 
 // Query a conservative streaming texture budget based on VMA-reported
 // device-local heap budgets. Uses ~35% of total device-local budget.
@@ -114,6 +115,85 @@ namespace {
 
         ImGui::Separator();
         ImGui::SliderFloat("Render Scale", &eng->renderScale, 0.3f, 1.f);
+    }
+
+    // IBL test grid spawner (spheres varying metallic/roughness)
+    static void spawn_ibl_test(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_assetManager || !eng->_sceneManager) return;
+        using MC = GLTFMetallic_Roughness::MaterialConstants;
+
+        std::vector<Vertex> verts; std::vector<uint32_t> inds;
+        primitives::buildSphere(verts, inds, 24, 24);
+
+        const float mVals[5] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+        const float rVals[5] = {0.04f, 0.25f, 0.5f, 0.75f, 1.0f};
+        const float spacing = 1.6f;
+        const glm::vec3 origin(-spacing*2.0f, 0.0f, -spacing*2.0f);
+
+        for (int iy=0; iy<5; ++iy)
+        {
+            for (int ix=0; ix<5; ++ix)
+            {
+                MC c{};
+                c.colorFactors = glm::vec4(0.82f, 0.82f, 0.82f, 1.0f);
+                c.metal_rough_factors = glm::vec4(mVals[ix], rVals[iy], 0.0f, 0.0f);
+                const std::string base = fmt::format("ibltest.m{}_r{}", ix, iy);
+                auto mat = eng->_assetManager->createMaterialFromConstants(base+".mat", c, MaterialPass::MainColor);
+
+                auto mesh = eng->_assetManager->createMesh(base+".mesh", std::span<Vertex>(verts.data(), verts.size()),
+                                                           std::span<uint32_t>(inds.data(), inds.size()), mat);
+
+                const glm::vec3 pos = origin + glm::vec3(ix*spacing, 0.5f, iy*spacing);
+                glm::mat4 M = glm::translate(glm::mat4(1.0f), pos);
+                eng->_sceneManager->addMeshInstance(base+".inst", mesh, M);
+                eng->_iblTestNames.push_back(base+".inst");
+                eng->_iblTestNames.push_back(base+".mesh");
+                eng->_iblTestNames.push_back(base+".mat");
+            }
+        }
+
+        // Chrome and glass extras
+        {
+            MC chrome{}; chrome.colorFactors = glm::vec4(0.9f,0.9f,0.9f,1.0f); chrome.metal_rough_factors = glm::vec4(1.0f, 0.06f,0,0);
+            auto mat = eng->_assetManager->createMaterialFromConstants("ibltest.chrome.mat", chrome, MaterialPass::MainColor);
+            auto mesh = eng->_assetManager->createMesh("ibltest.chrome.mesh", std::span<Vertex>(verts.data(), verts.size()),
+                                                       std::span<uint32_t>(inds.data(), inds.size()), mat);
+            glm::mat4 M = glm::translate(glm::mat4(1.0f), origin + glm::vec3(5.5f, 0.5f, 0.0f));
+            eng->_sceneManager->addMeshInstance("ibltest.chrome.inst", mesh, M);
+            eng->_iblTestNames.insert(eng->_iblTestNames.end(), {"ibltest.chrome.inst","ibltest.chrome.mesh","ibltest.chrome.mat"});
+        }
+        {
+            MC glass{}; glass.colorFactors = glm::vec4(0.9f,0.95f,1.0f,0.25f); glass.metal_rough_factors = glm::vec4(0.0f, 0.02f,0,0);
+            auto mat = eng->_assetManager->createMaterialFromConstants("ibltest.glass.mat", glass, MaterialPass::Transparent);
+            auto mesh = eng->_assetManager->createMesh("ibltest.glass.mesh", std::span<Vertex>(verts.data(), verts.size()),
+                                                       std::span<uint32_t>(inds.data(), inds.size()), mat);
+            glm::mat4 M = glm::translate(glm::mat4(1.0f), origin + glm::vec3(5.5f, 0.5f, 2.0f));
+            eng->_sceneManager->addMeshInstance("ibltest.glass.inst", mesh, M);
+            eng->_iblTestNames.insert(eng->_iblTestNames.end(), {"ibltest.glass.inst","ibltest.glass.mesh","ibltest.glass.mat"});
+        }
+    }
+
+    static void clear_ibl_test(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_sceneManager || !eng->_assetManager) return;
+        for (size_t i=0;i<eng->_iblTestNames.size(); ++i)
+        {
+            const std::string &n = eng->_iblTestNames[i];
+            // Remove instances and meshes by prefix
+            if (n.ends_with(".inst")) eng->_sceneManager->removeMeshInstance(n);
+            else if (n.ends_with(".mesh")) eng->_assetManager->removeMesh(n);
+        }
+        eng->_iblTestNames.clear();
+    }
+
+    static void ui_ibl(VulkanEngine *eng)
+    {
+        if (!eng) return;
+        if (ImGui::Button("Spawn IBL Test Grid")) { spawn_ibl_test(eng); }
+        ImGui::SameLine();
+        if (ImGui::Button("Clear IBL Test")) { clear_ibl_test(eng); }
+        ImGui::TextUnformatted("5x5 spheres: metallic across columns, roughness across rows.\nExtra: chrome + glass.");
     }
 
     // Quick stats & targets overview
@@ -600,6 +680,21 @@ void VulkanEngine::init()
     _renderGraph->init(_context.get());
     _context->renderGraph = _renderGraph.get();
 
+    // Create IBL manager early so set=3 layout exists before pipelines are built
+    _iblManager = std::make_unique<IBLManager>();
+    _iblManager->init(_context.get());
+    // Publish to context for passes and pipeline layout assembly
+    _context->ibl = _iblManager.get();
+
+    // Try to load default IBL assets if present
+    {
+        IBLPaths ibl{};
+        // ibl.specularCube = _assetManager->assetPath("ibl/docklands.ktx2");
+        // ibl.diffuseCube  = _assetManager->assetPath("ibl/docklands.ktx2"); // temporary: reuse if separate diffuse not provided
+        ibl.brdfLut2D    = _assetManager->assetPath("ibl/brdf_lut.ktx2");
+        _iblManager->load(ibl);
+    }
+
     init_frame_resources();
 
     // Build material pipelines early so materials can be created
@@ -1060,6 +1155,11 @@ void VulkanEngine::run()
                 if (ImGui::BeginTabItem("Pipelines"))
                 {
                     ui_pipelines(this);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("IBL"))
+                {
+                    ui_ibl(this);
                     ImGui::EndTabItem();
                 }
                 if (ImGui::BeginTabItem("PostFX"))

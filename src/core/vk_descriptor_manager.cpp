@@ -24,6 +24,7 @@ void DescriptorManager::init(DeviceManager *deviceManager)
             _deviceManager->device(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             nullptr, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
     }
+
 }
 
 void DescriptorManager::cleanup()
