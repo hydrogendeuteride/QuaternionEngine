@@ -2,6 +2,7 @@
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_ray_query : require
 #include "input_structures.glsl"
+#include "ibl_common.glsl"
 
 layout(location=0) in vec2 inUV;
 layout(location=0) out vec4 outColor;
@@ -10,33 +11,6 @@ layout(set=1, binding=0) uniform sampler2D posTex;
 layout(set=1, binding=1) uniform sampler2D normalTex;
 layout(set=1, binding=2) uniform sampler2D albedoTex;
 layout(set=2, binding=0) uniform sampler2D shadowTex[4];
-// IBL (set=3): specular prefiltered cube, diffuse irradiance cube, BRDF LUT
-layout(set=3, binding=0) uniform sampler2D iblSpec2D;
-layout(set=3, binding=1) uniform sampler2D iblBRDF;
-layout(std140, set=3, binding=2) uniform IBL_SH { vec4 sh[9]; } iblSH;
-
-vec3 sh_eval_irradiance(vec3 n)
-{
-    float x=n.x, y=n.y, z=n.z;
-    const float c0=0.2820947918;
-    const float c1=0.4886025119;
-    const float c2=1.0925484306;
-    const float c3=0.3153915653;
-    const float c4=0.5462742153;
-    float Y[9];
-    Y[0]=c0; Y[1]=c1*y; Y[2]=c1*z; Y[3]=c1*x; Y[4]=c2*x*y; Y[5]=c2*y*z; Y[6]=c3*(3.0*z*z-1.0); Y[7]=c2*x*z; Y[8]=c4*(x*x-y*y);
-    vec3 r=vec3(0.0);
-    for (int i=0;i<9;++i) r += iblSH.sh[i].rgb * Y[i];
-    return r;
-}
-
-vec2 dir_to_equirect(vec3 d)
-{
-    d = normalize(d);
-    float phi = atan(d.z, d.x);
-    float theta = acos(clamp(d.y, -1.0, 1.0));
-    return vec2(phi * (0.15915494309) + 0.5, theta * (0.31830988618));
-}
 // TLAS for ray query (optional, guarded by sceneData.rtOptions.x)
 #ifdef GL_EXT_ray_query
 layout(set=0, binding=1) uniform accelerationStructureEXT topLevelAS;
@@ -369,7 +343,7 @@ void main(){
     // Image-Based Lighting: split-sum approximation
     vec3 R = reflect(-V, N);
     float levels = float(textureQueryLevels(iblSpec2D));
-    float lod = clamp(roughness * max(levels - 1.0, 0.0), 0.0, max(levels - 1.0, 0.0));
+    float lod = ibl_lod_from_roughness(roughness, levels);
     vec2 uv = dir_to_equirect(R);
     vec3 prefiltered = textureLod(iblSpec2D, uv, lod).rgb;
     vec2 brdf = texture(iblBRDF, vec2(max(dot(N, V), 0.0), roughness)).rg;
