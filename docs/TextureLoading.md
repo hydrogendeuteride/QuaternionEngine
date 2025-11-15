@@ -8,6 +8,7 @@ Overview
   - glTF loader: `src/scene/vk_loader.cpp` builds keys, requests handles, and registers descriptor patches with the cache.
   - Primitives/adhoc: `src/core/asset_manager.cpp` builds materials and registers texture watches.
   - Visibility: `src/render/vk_renderpass_geometry.cpp` and `src/render/vk_renderpass_transparent.cpp` call `TextureCache::markSetUsed(...)` for sets that are actually drawn.
+- IBL: high‑dynamic‑range environment textures are typically loaded directly as `.ktx2` via `IBLManager` instead of the generic streaming cache. See “Image‑Based Lighting (IBL)” below.
 
 Data Flow
 - Request
@@ -65,27 +66,54 @@ Implementation Notes
   - Material descriptor sets and pools are created with `UPDATE_AFTER_BIND` flags; patches are applied safely across frames using a `DescriptorWriter`.
 - Key hashing
   - 64‑bit FNV‑1a for dedup. FilePath keys hash `PATH:<path>#(sRGB|UNORM)`. Bytes keys hash the payload and XOR an sRGB tag when requested.
- - Format selection and channel packing
-   - `TextureKey::channels` can be `Auto` (default), `R`, `RG`, or `RGBA`. The cache chooses `VK_FORMAT_R8/R8G8/RGBA8` (sRGB variants when requested) and packs channels on CPU for `R`/`RG` to reduce staging + VRAM.
- - Progressive downscale
-   - The decode thread downsizes large images by powers of 2 until within `Max Upload Dimension`, reducing both staging and VRAM. You can increase the cap or disable it (set to 0) from the UI.
+- Format selection and channel packing
+  - `TextureKey::channels` can be `Auto` (default), `R`, `RG`, or `RGBA`. The cache chooses `VK_FORMAT_R8/R8G8/RGBA8` (sRGB variants when requested) and packs channels on CPU for `R`/`RG` to reduce staging + VRAM.
+- Progressive downscale
+  - The decode thread downsizes large images by powers of 2 until within `Max Upload Dimension`, reducing both staging and VRAM. You can increase the cap or disable it (set to 0) from the UI.
 
 KTX2 specifics
 - Supported: 2D, single‑face, single‑layer KTX2. If BasisLZ/UASTC, libktx transcodes to BCn. sRGB/UNORM is honored from the file’s DFD and can be nudged by request (albedo sRGB, MR/normal UNORM).
-- Not supported: Cube/array/multilayer KTX2 (current code path assumes single layer, 2D).
+- Not supported: Cube/array/multilayer KTX2 in the generic cache path (it assumes single‑layer, 2D). Cubemap KTX2 for IBL is loaded via `IBLManager` (see below).
 
 Limitations / Future Work
 - Linear‑blit capability check
-  - `generate_mipmaps` always uses `VK_FILTER_LINEAR`. Add a format/feature check and a fallback path (nearest or compute downsample).
+  - `vkutil::generate_mipmaps` / `generate_mipmaps_levels` always use `VK_FILTER_LINEAR` for blits without checking `VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT`. Add a per‑format capability check and a fallback path (nearest or compute downsample) for formats that do not support linear filtering (especially some compressed formats).
 - Texture formats
-  - Raster path: 8‑bit R/RG/RGBA via stb_image. Compressed path: BCn via `.ktx2`. Future: ASTC/ETC2, specialized R8/RG8 parsing, and float HDR support (`stbi_loadf` → `R16G16B16A16_SFLOAT`).
+  - Raster path: limited to 8‑bit R/RG/RGBA via `stbi_load`. KTX2 path in `TextureCache::worker_loop` currently accepts only BCn/BC6H formats and rejects other VkFormats returned by libktx (e.g., uncompressed `R16G16B16A16_SFLOAT`). Future work: ASTC/ETC2, specialized R8/RG8 parsing, and float HDR support (`stbi_loadf` → `R16G16B16A16_SFLOAT`) so HDR albedo/lighting data can stream through the generic cache (today HDR IBL uses the separate `IBLManager` path).
 - Normal‑map mip quality
-  - Linear blits reduce normal length; consider a compute renormalization pass.
+  - Normal maps share the same linear blit pipeline as color textures; no renormalization pass runs after mip generation. Consider a compute or fragment pass to renormalize normal map mips (or a dedicated normal‑aware downsample) to improve shading at grazing angles and distant LODs.
 - Samplers
-  - Anisotropy is currently disabled in `SamplerManager`; enable when supported and expose a knob.
+  - Anisotropy is currently disabled in `SamplerManager` (`anisotropyEnable = VK_FALSE`). Enable it when the feature is present, expose a knob in the Debug UI, and consider per‑material/per‑texture anisotropy settings.
 - Minor robustness
-  - `enqueue_decode()` derives the handle via pointer arithmetic on `_entries`. Passing the precomputed index would avoid any future reallocation hazards.
+  - `enqueue_decode()` computes the handle from the entry pointer (`&e - _entries.data()`) and passes it to worker threads. This is safe as long as `_entries` is not resized during enqueue, but storing the index explicitly when the entry is created (in `request()`) would make the relationship clearer and robust against future refactors.
 
 Operational Tips
 - Keep deferred uploads enabled (`ResourceManager::set_deferred_uploads(true)`) to coalesce copies per frame (engine does this during init).
 - To debug VMA allocations and name images, set `VE_VMA_DEBUG=1`.
+
+Image‑Based Lighting (IBL) Textures
+- Manager: `src/core/ibl_manager.{h,cpp}` owns IBL GPU resources and the shared descriptor set layout for set=3.
+- Inputs (`IBLPaths`):
+  - `specularCube`: preferred is a GPU‑ready `.ktx2` (BC6H or `R16G16B16A16_SFLOAT`) containing either a cubemap or an equirectangular 2D env with prefiltered mips.
+  - `diffuseCube`: optional `.ktx2` cubemap for diffuse irradiance. If missing, diffuse IBL falls back to SH only.
+  - `brdfLut2D`: `.ktx2` 2D RG LUT (e.g., `VK_FORMAT_R8G8_UNORM` or BC5).
+- Loading:
+  - Specular:
+    - If `specularCube` is a cubemap `.ktx2`, `IBLManager` uses `ktxutil::load_ktx2_cubemap` and uploads via `ResourceManager::create_image_compressed_layers`, preserving the file’s format and mip chain.
+    - If cubemap load fails, it falls back to 2D `.ktx2` via `ktxutil::load_ktx2_2d` + `ResourceManager::create_image_compressed`. The image is treated as equirectangular with prefiltered mips and sampled with explicit LOD in shaders.
+    - If the format is float HDR (`R16G16B16A16_SFLOAT` or `R32G32B32A32_SFLOAT`) and the aspect ratio is 2:1, `IBLManager` additionally computes 2nd‑order SH coefficients (9×`vec3`) on the CPU for diffuse irradiance and uploads them to a UBO (`_shBuffer`).
+  - Diffuse (optional):
+    - If `diffuseCube` is provided and valid, it is uploaded as a cubemap using `create_image_compressed_layers`. Current shaders use the SH buffer for diffuse; this cubemap can be wired into a future path if you want to sample it directly.
+  - BRDF LUT:
+    - `brdfLut2D` is loaded as 2D `.ktx2` via `ktxutil::load_ktx2_2d` and uploaded with `create_image_compressed`.
+  - Fallbacks:
+    - `LightingPass` and `TransparentPass` create tiny 1×1 UNORM textures (grey 2D for env, RG for BRDF LUT) so shaders can safely sample IBL bindings even when IBL assets are not loaded.
+- Descriptor layout & bindings:
+  - `IBLManager::ensureLayout()` creates a descriptor set layout for set=3 with:
+    - binding 0: `COMBINED_IMAGE_SAMPLER` — specular env (2D equirect with mips or cubemap sampled via 2D path).
+    - binding 1: `COMBINED_IMAGE_SAMPLER` — BRDF LUT 2D.
+    - binding 2: `UNIFORM_BUFFER` — SH coefficients (`vec4 sh[9]`, RGB in `.xyz`).
+  - Render passes that use IBL fetch this layout from `EngineContext::ibl` and allocate per‑frame sets:
+    - `vk_renderpass_lighting.cpp`: deferred lighting (set=3).
+    - `vk_renderpass_transparent.cpp`: forward/transparent PBR materials (set=3).
+    - `vk_renderpass_background.cpp`: environment background (set=3; only binding 0 is used in the shader).
