@@ -49,6 +49,26 @@ target_sources(imgui PRIVATE
 
 target_link_libraries(imgui PUBLIC Vulkan::Vulkan SDL2::SDL2)
 
+add_library(ImGuizmo STATIC
+  ImGuizmo/ImGuizmo.cpp
+  ImGuizmo/ImSequencer.cpp
+  ImGuizmo/ImCurveEdit.cpp
+  ImGuizmo/ImGradient.cpp
+  ImGuizmo/GraphEditor.cpp
+)
+
+target_include_directories(ImGuizmo PUBLIC
+  ImGuizmo
+  imgui
+)
+
+target_compile_definitions(ImGuizmo
+        PRIVATE
+        IMGUI_DEFINE_MATH_OPERATORS
+)
+
+target_link_libraries(ImGuizmo PUBLIC imgui)
+
 target_include_directories(stb_image INTERFACE stb_image)
 
 # MikkTSpace (optional)

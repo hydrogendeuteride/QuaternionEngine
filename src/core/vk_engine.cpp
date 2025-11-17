@@ -14,10 +14,8 @@
 //
 //> includes
 #include "vk_engine.h"
-#include <core/vk_images.h>
 
 #include "SDL2/SDL.h"
-#include "SDL2/SDL_vulkan.h"
 
 #include <core/vk_initializers.h>
 #include <core/vk_types.h>
@@ -29,7 +27,6 @@
 #include <span>
 #include <array>
 
-#include "render/vk_pipelines.h"
 #include <iostream>
 #include <glm/gtx/transform.hpp>
 
@@ -49,7 +46,6 @@
 #include "vk_resource.h"
 #include "engine_context.h"
 #include "core/vk_pipeline_manager.h"
-#include "core/config.h"
 #include "core/texture_cache.h"
 #include "core/ibl_manager.h"
 
@@ -540,6 +536,44 @@ namespace {
         const DrawContext &dc = eng->_context->getMainDrawContext();
         ImGui::Text("Opaque draws: %zu", dc.OpaqueSurfaces.size());
         ImGui::Text("Transp draws: %zu", dc.TransparentSurfaces.size());
+        ImGui::Checkbox("Use ID-buffer picking", &eng->_useIdBufferPicking);
+        ImGui::Separator();
+        if (eng->_lastPick.valid)
+        {
+            const char *meshName = eng->_lastPick.mesh ? eng->_lastPick.mesh->name.c_str() : "<unknown>";
+            const char *sceneName = "<none>";
+            if (eng->_lastPick.scene && !eng->_lastPick.scene->debugName.empty())
+            {
+                sceneName = eng->_lastPick.scene->debugName.c_str();
+            }
+            ImGui::Text("Last pick scene: %s", sceneName);
+            ImGui::Text("Last pick mesh: %s (surface %u)", meshName, eng->_lastPick.surfaceIndex);
+            ImGui::Text("World pos: (%.3f, %.3f, %.3f)",
+                        eng->_lastPick.worldPos.x,
+                        eng->_lastPick.worldPos.y,
+                        eng->_lastPick.worldPos.z);
+            ImGui::Text("Indices: first=%u count=%u",
+                        eng->_lastPick.firstIndex,
+                        eng->_lastPick.indexCount);
+        }
+        else
+        {
+            ImGui::TextUnformatted("Last pick: <none>");
+        }
+        ImGui::Separator();
+        if (eng->_hoverPick.valid)
+        {
+            const char *meshName = eng->_hoverPick.mesh ? eng->_hoverPick.mesh->name.c_str() : "<unknown>";
+            ImGui::Text("Hover mesh: %s (surface %u)", meshName, eng->_hoverPick.surfaceIndex);
+        }
+        else
+        {
+            ImGui::TextUnformatted("Hover: <none>");
+        }
+        if (!eng->_dragSelection.empty())
+        {
+            ImGui::Text("Drag selection: %zu objects", eng->_dragSelection.size());
+        }
     }
 } // namespace
 
@@ -708,7 +742,7 @@ void VulkanEngine::init()
     auto imguiPass = std::make_unique<ImGuiPass>();
     _renderPassManager->setImGuiPass(std::move(imguiPass));
 
-    const std::string structurePath = _assetManager->modelPath("sponza_2/scene.gltf");
+    const std::string structurePath = _assetManager->modelPath("mirage2000/scene.gltf");
     const auto structureFile = _assetManager->loadGLTF(structurePath);
 
     assert(structureFile.has_value());
@@ -857,6 +891,13 @@ void VulkanEngine::cleanup()
         print_vma_stats(_deviceManager.get(), "after RTManager");
         dump_vma_json(_deviceManager.get(), "after_RTManager");
 
+        // Destroy pick readback buffer before resource manager cleanup
+        if (_pickReadbackBuffer.buffer)
+        {
+            _resourceManager->destroy_buffer(_pickReadbackBuffer);
+            _pickReadbackBuffer = {};
+        }
+
         _resourceManager->cleanup();
         print_vma_stats(_deviceManager.get(), "after ResourceManager");
         dump_vma_json(_deviceManager.get(), "after_ResourceManager");
@@ -884,10 +925,42 @@ void VulkanEngine::cleanup()
 
 void VulkanEngine::draw()
 {
-    _sceneManager->update_scene();
     //> frame_clear
     //wait until the gpu has finished rendering the last frame. Timeout of 1 second
     VK_CHECK(vkWaitForFences(_deviceManager->device(), 1, &get_current_frame()._renderFence, true, 1000000000));
+
+    // If we scheduled an ID-buffer readback in the previous frame, resolve it now.
+    if (_pickResultPending && _pickReadbackBuffer.buffer && _sceneManager)
+    {
+        vmaInvalidateAllocation(_deviceManager->allocator(), _pickReadbackBuffer.allocation, 0, sizeof(uint32_t));
+        uint32_t pickedID = 0;
+        if (_pickReadbackBuffer.info.pMappedData)
+        {
+            pickedID = *reinterpret_cast<const uint32_t *>(_pickReadbackBuffer.info.pMappedData);
+        }
+
+        if (pickedID == 0)
+        {
+            // Do not override existing raycast pick when ID buffer reports "no object".
+        }
+        else
+        {
+            RenderObject picked{};
+            if (_sceneManager->resolveObjectID(pickedID, picked))
+            {
+                // Fallback hit position: object origin in world space (can refine later)
+                glm::vec3 fallbackPos = glm::vec3(picked.transform[3]);
+                _lastPick.mesh = picked.sourceMesh;
+                _lastPick.scene = picked.sourceScene;
+                _lastPick.worldPos = fallbackPos;
+                _lastPick.firstIndex = picked.firstIndex;
+                _lastPick.indexCount = picked.indexCount;
+                _lastPick.surfaceIndex = picked.surfaceIndex;
+                _lastPick.valid = true;
+            }
+        }
+        _pickResultPending = false;
+    }
 
     get_current_frame()._deletionQueue.flush();
     // Resolve last frame's pass timings before we clear and rebuild the graph
@@ -897,6 +970,29 @@ void VulkanEngine::draw()
     }
     get_current_frame()._frameDescriptors.clear_pools(_deviceManager->device());
     //< frame_clear
+
+    _sceneManager->update_scene();
+
+    // Per-frame hover raycast based on last mouse position.
+    if (_sceneManager && _mousePosPixels.x >= 0.0f && _mousePosPixels.y >= 0.0f)
+    {
+        RenderObject hoverObj{};
+        glm::vec3 hoverPos{};
+        if (_sceneManager->pick(_mousePosPixels, hoverObj, hoverPos))
+        {
+            _hoverPick.mesh = hoverObj.sourceMesh;
+            _hoverPick.scene = hoverObj.sourceScene;
+            _hoverPick.worldPos = hoverPos;
+            _hoverPick.firstIndex = hoverObj.firstIndex;
+            _hoverPick.indexCount = hoverObj.indexCount;
+            _hoverPick.surfaceIndex = hoverObj.surfaceIndex;
+            _hoverPick.valid = true;
+        }
+        else
+        {
+            _hoverPick.valid = false;
+        }
+    }
 
     uint32_t swapchainImageIndex;
 
@@ -999,7 +1095,67 @@ void VulkanEngine::draw()
             }
             if (auto *geometry = _renderPassManager->getPass<GeometryPass>())
             {
-                geometry->register_graph(_renderGraph.get(), hGBufferPosition, hGBufferNormal, hGBufferAlbedo, hDepth);
+                RGImageHandle hID = _renderGraph->import_id_buffer();
+                geometry->register_graph(_renderGraph.get(), hGBufferPosition, hGBufferNormal, hGBufferAlbedo, hID, hDepth);
+
+                // If ID-buffer picking is enabled and a pick was requested this frame,
+                // add a small transfer pass to read back 1 pixel from the ID buffer.
+                if (_useIdBufferPicking && _pendingPick.active && hID.valid() && _pickReadbackBuffer.buffer)
+                {
+                    VkExtent2D swapExt = _swapchainManager->swapchainExtent();
+                    VkExtent2D drawExt = _drawExtent;
+
+                    float sx = _pendingPick.windowPos.x / float(std::max(1u, swapExt.width));
+                    float sy = _pendingPick.windowPos.y / float(std::max(1u, swapExt.height));
+
+                    uint32_t idX = uint32_t(glm::clamp(sx * float(drawExt.width),  0.0f, float(drawExt.width  - 1)));
+                    uint32_t idY = uint32_t(glm::clamp(sy * float(drawExt.height), 0.0f, float(drawExt.height - 1)));
+                    _pendingPick.idCoords = {idX, idY};
+
+                    RGImportedBufferDesc bd{};
+                    bd.name = "pick.readback";
+                    bd.buffer = _pickReadbackBuffer.buffer;
+                    bd.size = sizeof(uint32_t);
+                    bd.currentStage = VK_PIPELINE_STAGE_2_NONE;
+                    bd.currentAccess = 0;
+                    RGBufferHandle hPickBuf = _renderGraph->import_buffer(bd);
+
+                    _renderGraph->add_pass(
+                        "PickReadback",
+                        RGPassType::Transfer,
+                        [hID, hPickBuf](RGPassBuilder &builder, EngineContext *)
+                        {
+                            builder.read(hID, RGImageUsage::TransferSrc);
+                            builder.write_buffer(hPickBuf, RGBufferUsage::TransferDst);
+                        },
+                        [this, hID, hPickBuf](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *)
+                        {
+                            VkImage idImage = res.image(hID);
+                            VkBuffer dst = res.buffer(hPickBuf);
+                            if (idImage == VK_NULL_HANDLE || dst == VK_NULL_HANDLE) return;
+
+                            VkBufferImageCopy region{};
+                            region.bufferOffset = 0;
+                            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                            region.imageSubresource.mipLevel = 0;
+                            region.imageSubresource.baseArrayLayer = 0;
+                            region.imageSubresource.layerCount = 1;
+                            region.imageOffset = { static_cast<int32_t>(_pendingPick.idCoords.x),
+                                                   static_cast<int32_t>(_pendingPick.idCoords.y),
+                                                   0 };
+                            region.imageExtent = {1, 1, 1};
+
+                            vkCmdCopyImageToBuffer(cmd,
+                                                   idImage,
+                                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                                   dst,
+                                                   1,
+                                                   &region);
+                        });
+
+                    _pickResultPending = true;
+                    _pendingPick.active = false;
+                }
             }
             if (auto *lighting = _renderPassManager->getPass<LightingPass>())
             {
@@ -1104,6 +1260,95 @@ void VulkanEngine::run()
                     freeze_rendering = false;
                 }
             }
+            if (e.type == SDL_MOUSEMOTION)
+            {
+                _mousePosPixels = glm::vec2{static_cast<float>(e.motion.x),
+                                            static_cast<float>(e.motion.y)};
+                if (_dragState.buttonDown)
+                {
+                    _dragState.current = _mousePosPixels;
+                    // Consider any motion as dragging for now; can add threshold if desired.
+                    _dragState.dragging = true;
+                }
+            }
+            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT)
+            {
+                _dragState.buttonDown = true;
+                _dragState.dragging = false;
+                _dragState.start = glm::vec2{static_cast<float>(e.button.x),
+                                             static_cast<float>(e.button.y)};
+                _dragState.current = _dragState.start;
+            }
+            if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT)
+            {
+                glm::vec2 releasePos{static_cast<float>(e.button.x),
+                                     static_cast<float>(e.button.y)};
+                _dragState.buttonDown = false;
+
+                constexpr float clickThreshold = 3.0f;
+                glm::vec2 delta = releasePos - _dragState.start;
+                bool treatAsClick = !_dragState.dragging &&
+                                    std::abs(delta.x) < clickThreshold &&
+                                    std::abs(delta.y) < clickThreshold;
+
+                if (treatAsClick)
+                {
+                    // Raycast click selection
+                    if (_sceneManager)
+                    {
+                        RenderObject hitObject{};
+                        glm::vec3 hitPos{};
+                        if (_sceneManager->pick(releasePos, hitObject, hitPos))
+                        {
+                            _lastPick.mesh = hitObject.sourceMesh;
+                            _lastPick.scene = hitObject.sourceScene;
+                            _lastPick.worldPos = hitPos;
+                            _lastPick.firstIndex = hitObject.firstIndex;
+                            _lastPick.indexCount = hitObject.indexCount;
+                            _lastPick.surfaceIndex = hitObject.surfaceIndex;
+                            _lastPick.valid = true;
+                        }
+                        else
+                        {
+                            _lastPick.valid = false;
+                        }
+                    }
+
+                    // Optionally queue an ID-buffer pick at this position
+                    if (_useIdBufferPicking)
+                    {
+                        _pendingPick.active = true;
+                        _pendingPick.windowPos = releasePos;
+                    }
+                }
+                else
+                {
+                    // Drag selection completed; compute selection based on screen-space rectangle.
+                    _dragSelection.clear();
+                    if (_sceneManager)
+                    {
+                        std::vector<RenderObject> selected;
+                        _sceneManager->selectRect(_dragState.start, releasePos, selected);
+                        _dragSelection.reserve(selected.size());
+                        for (const RenderObject &obj : selected)
+                        {
+                            PickInfo info{};
+                            info.mesh = obj.sourceMesh;
+                            info.scene = obj.sourceScene;
+                            // Use bounds origin transformed to world as a representative point.
+                            glm::vec3 centerWorld = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.0f));
+                            info.worldPos = centerWorld;
+                            info.firstIndex = obj.firstIndex;
+                            info.indexCount = obj.indexCount;
+                            info.surfaceIndex = obj.surfaceIndex;
+                            info.valid = true;
+                            _dragSelection.push_back(info);
+                        }
+                    }
+                }
+
+                _dragState.dragging = false;
+            }
             _sceneManager->getMainCamera().processSDLEvent(e);
             ImGui_ImplSDL2_ProcessEvent(&e);
         }
@@ -1207,6 +1452,12 @@ void VulkanEngine::init_frame_resources()
     {
         _frames[i].init(_deviceManager.get(), frame_sizes);
     }
+
+    // Allocate a small readback buffer for ID-buffer picking (single uint32 pixel)
+    _pickReadbackBuffer = _resourceManager->create_buffer(
+        sizeof(uint32_t),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VMA_MEMORY_USAGE_CPU_TO_GPU);
 }
 
 void VulkanEngine::init_pipelines()
@@ -1218,8 +1469,16 @@ void MeshNode::Draw(const glm::mat4 &topMatrix, DrawContext &ctx)
 {
     glm::mat4 nodeMatrix = topMatrix * worldTransform;
 
-    for (auto &s: mesh->surfaces)
+    if (!mesh)
     {
+        Node::Draw(topMatrix, ctx);
+        return;
+    }
+
+    for (uint32_t i = 0; i < mesh->surfaces.size(); ++i)
+    {
+        const auto &s = mesh->surfaces[i];
+
         RenderObject def{};
         def.indexCount = s.count;
         def.firstIndex = s.startIndex;
@@ -1230,6 +1489,10 @@ void MeshNode::Draw(const glm::mat4 &topMatrix, DrawContext &ctx)
 
         def.transform = nodeMatrix;
         def.vertexBufferAddress = mesh->meshBuffers.vertexBufferAddress;
+        def.sourceMesh = mesh.get();
+        def.surfaceIndex = i;
+        def.objectID = ctx.nextID++;
+        def.sourceScene = scene;
 
         if (s.material->data.passType == MaterialPass::Transparent)
         {

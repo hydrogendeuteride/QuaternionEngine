@@ -13,7 +13,7 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine *engine)
     VkPushConstantRange matrixRange{};
     matrixRange.offset = 0;
     matrixRange.size = sizeof(GPUDrawPushConstants);
-    matrixRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    matrixRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
     DescriptorLayoutBuilder layoutBuilder;
     layoutBuilder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
@@ -92,9 +92,10 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine *engine)
         VkFormat gFormats[] = {
             engine->_swapchainManager->gBufferPosition().imageFormat,
             engine->_swapchainManager->gBufferNormal().imageFormat,
-            engine->_swapchainManager->gBufferAlbedo().imageFormat
+            engine->_swapchainManager->gBufferAlbedo().imageFormat,
+            engine->_swapchainManager->idBuffer().imageFormat
         };
-        b.set_color_attachment_formats(std::span<VkFormat>(gFormats, 3));
+        b.set_color_attachment_formats(std::span<VkFormat>(gFormats, 4));
         b.set_depth_format(engine->_swapchainManager->depthImage().imageFormat);
     };
     engine->_pipelineManager->registerGraphics("mesh.gbuffer", gbufferInfo);

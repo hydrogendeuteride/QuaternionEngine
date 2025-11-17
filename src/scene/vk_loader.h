@@ -84,6 +84,9 @@ struct LoadedGLTF : public IRenderable
     float animationTime = 0.f;
     bool animationLoop = true;
 
+    // Optional debug name (e.g., key used when loaded into SceneManager)
+    std::string debugName;
+
     // Animation helpers
     void updateAnimation(float dt);
     void refreshAllTransforms();

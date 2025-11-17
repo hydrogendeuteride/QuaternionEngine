@@ -18,6 +18,7 @@ public:
                         RGImageHandle gbufferPosition,
                         RGImageHandle gbufferNormal,
                         RGImageHandle gbufferAlbedo,
+                        RGImageHandle idHandle,
                         RGImageHandle depthHandle);
 
 private:
@@ -29,5 +30,6 @@ private:
                        RGImageHandle gbufferPosition,
                        RGImageHandle gbufferNormal,
                        RGImageHandle gbufferAlbedo,
+                       RGImageHandle idHandle,
                        RGImageHandle depthHandle) const;
 };

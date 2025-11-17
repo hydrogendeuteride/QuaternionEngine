@@ -25,11 +25,12 @@ layout(buffer_reference, std430) readonly buffer VertexBuffer{
     Vertex vertices[];
 };
 
-//push constants block
-layout( push_constant ) uniform constants
+//push constants block (must match GPUDrawPushConstants layout in C++)
+layout(push_constant) uniform constants
 {
     mat4 render_matrix;
     VertexBuffer vertexBuffer;
+    uint objectID;
 } PushConstants;
 
 void main()

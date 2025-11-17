@@ -56,6 +56,7 @@ struct Pass; // fwd
 	RGImageHandle import_gbuffer_position();
 	RGImageHandle import_gbuffer_normal();
 	RGImageHandle import_gbuffer_albedo();
+	RGImageHandle import_id_buffer();
 	RGImageHandle import_swapchain_image(uint32_t index);
     void add_present_chain(RGImageHandle sourceDraw,
                            RGImageHandle targetSwapchain,

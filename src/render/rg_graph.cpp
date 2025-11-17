@@ -947,6 +947,18 @@ RGImageHandle RenderGraph::import_gbuffer_albedo()
 	return import_image(d);
 }
 
+RGImageHandle RenderGraph::import_id_buffer()
+{
+	RGImportedImageDesc d{};
+	d.name = "idBuffer.objectID";
+	d.image = _context->getSwapchain()->idBuffer().image;
+	d.imageView = _context->getSwapchain()->idBuffer().imageView;
+	d.format = _context->getSwapchain()->idBuffer().imageFormat;
+	d.extent = _context->getDrawExtent();
+	d.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	return import_image(d);
+}
+
 RGImageHandle RenderGraph::import_swapchain_image(uint32_t index)
 {
 	RGImportedImageDesc d{};

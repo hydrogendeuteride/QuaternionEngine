@@ -1,5 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_buffer_reference : require
 #include "input_structures.glsl"
 
 layout(location = 0) in vec3 inNormal;
@@ -11,6 +12,26 @@ layout(location = 4) in vec4 inTangent;
 layout(location = 0) out vec4 outPos;
 layout(location = 1) out vec4 outNorm;
 layout(location = 2) out vec4 outAlbedo;
+layout(location = 3) out uint outObjectID;
+
+// Keep push constants layout in sync with mesh.vert / GPUDrawPushConstants
+struct Vertex {
+    vec3 position; float uv_x;
+    vec3 normal;   float uv_y;
+    vec4 color;
+    vec4 tangent;
+};
+
+layout(buffer_reference, std430) readonly buffer VertexBuffer{
+    Vertex vertices[];
+};
+
+layout(push_constant) uniform constants
+{
+    mat4 render_matrix;
+    VertexBuffer vertexBuffer;
+    uint objectID;
+} PushConstants;
 
 void main() {
     // Apply baseColor texture and baseColorFactor once
@@ -37,4 +58,5 @@ void main() {
     outPos = vec4(inWorldPos, 1.0);
     outNorm = vec4(Nw, roughness);
     outAlbedo = vec4(albedo, metallic);
+    outObjectID = PushConstants.objectID;
 }

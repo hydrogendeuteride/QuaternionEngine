@@ -129,6 +129,7 @@ struct GPUMeshBuffers {
 struct GPUDrawPushConstants {
     glm::mat4 worldMatrix;
     VkDeviceAddress vertexBuffer;
+    uint32_t objectID;
 };
 
 struct DrawContext;

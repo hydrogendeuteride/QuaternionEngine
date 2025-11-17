@@ -3,12 +3,14 @@
 #include <scene/camera.h>
 #include <unordered_map>
 #include <memory>
+#include <glm/vec2.hpp>
 
 #include "scene/vk_loader.h"
 class EngineContext;
 
 struct RenderObject
 {
+    // Geometry and material binding
     uint32_t indexCount;
     uint32_t firstIndex;
     VkBuffer indexBuffer;
@@ -19,12 +21,22 @@ struct RenderObject
 
     glm::mat4 transform;
     VkDeviceAddress vertexBufferAddress;
+
+    // Optional debug/source information (may be null/unused for some objects).
+    MeshAsset *sourceMesh = nullptr;
+    uint32_t surfaceIndex = 0;
+    // Unique per-draw identifier for ID-buffer picking (0 = none).
+    uint32_t objectID = 0;
+    // Optional owning glTF scene for this draw (null for procedural/dynamic meshes).
+    LoadedGLTF *sourceScene = nullptr;
 };
 
 struct DrawContext
 {
     std::vector<RenderObject> OpaqueSurfaces;
     std::vector<RenderObject> TransparentSurfaces;
+    // Monotonic counter used to assign stable per-frame object IDs.
+    uint32_t nextID = 1;
 };
 
 class SceneManager
@@ -37,6 +49,20 @@ public:
     void update_scene();
 
     Camera &getMainCamera() { return mainCamera; }
+
+    // Ray-pick against current DrawContext using per-surface Bounds.
+    // mousePosPixels is in window coordinates (SDL), origin at top-left.
+    // Returns true if any object was hit, filling outObject and outWorldPos.
+    bool pick(const glm::vec2 &mousePosPixels, RenderObject &outObject, glm::vec3 &outWorldPos);
+
+    // Resolve an object ID (from ID buffer) back to the RenderObject for
+    // the most recently built DrawContext. Returns false if not found or id==0.
+    bool resolveObjectID(uint32_t id, RenderObject &outObject) const;
+
+    // Select all objects whose projected bounds intersect the given screen-space
+    // rectangle (window coordinates, origin top-left). Results are appended to outObjects.
+    void selectRect(const glm::vec2 &p0, const glm::vec2 &p1, std::vector<RenderObject> &outObjects) const;
+
     const GPUSceneData &getSceneData() const { return sceneData; }
     DrawContext &getMainDrawContext() { return mainDrawContext; }
 

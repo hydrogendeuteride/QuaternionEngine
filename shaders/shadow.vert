@@ -19,6 +19,7 @@ layout(buffer_reference, std430) readonly buffer VertexBuffer{
 layout(push_constant) uniform PushConsts {
     mat4 render_matrix;
     VertexBuffer vertexBuffer;
+    uint objectID;
     uint cascadeIndex; // which cascade this pass renders
     // pad to 16-byte boundary implicitly
 } PC;

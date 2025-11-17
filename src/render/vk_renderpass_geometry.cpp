@@ -69,9 +69,11 @@ void GeometryPass::register_graph(RenderGraph *graph,
                                   RGImageHandle gbufferPosition,
                                   RGImageHandle gbufferNormal,
                                   RGImageHandle gbufferAlbedo,
+                                  RGImageHandle idHandle,
                                   RGImageHandle depthHandle)
 {
-    if (!graph || !gbufferPosition.valid() || !gbufferNormal.valid() || !gbufferAlbedo.valid() || !depthHandle.valid())
+    if (!graph || !gbufferPosition.valid() || !gbufferNormal.valid() || !gbufferAlbedo.valid() ||
+        !idHandle.valid() || !depthHandle.valid())
     {
         return;
     }
@@ -79,7 +81,7 @@ void GeometryPass::register_graph(RenderGraph *graph,
     graph->add_pass(
         "Geometry",
         RGPassType::Graphics,
-        [gbufferPosition, gbufferNormal, gbufferAlbedo, depthHandle](RGPassBuilder &builder, EngineContext *ctx)
+        [gbufferPosition, gbufferNormal, gbufferAlbedo, idHandle, depthHandle](RGPassBuilder &builder, EngineContext *ctx)
         {
             VkClearValue clear{};
             clear.color = {{0.f, 0.f, 0.f, 0.f}};
@@ -87,6 +89,9 @@ void GeometryPass::register_graph(RenderGraph *graph,
             builder.write_color(gbufferPosition, true, clear);
             builder.write_color(gbufferNormal, true, clear);
             builder.write_color(gbufferAlbedo, true, clear);
+            VkClearValue clearID{};
+            clearID.color.uint32[0] = 0u;
+            builder.write_color(idHandle, true, clearID);
 
             // Reverse-Z: clear depth to 0.0
             VkClearValue depthClear{};
@@ -118,11 +123,11 @@ void GeometryPass::register_graph(RenderGraph *graph,
                     builder.read_buffer(b, RGBufferUsage::StorageRead, 0, "geom.vertex");
             }
         },
-        [this, gbufferPosition, gbufferNormal, gbufferAlbedo, depthHandle](VkCommandBuffer cmd,
-                                                                           const RGPassResources &res,
-                                                                           EngineContext *ctx)
+        [this, gbufferPosition, gbufferNormal, gbufferAlbedo, idHandle, depthHandle](VkCommandBuffer cmd,
+                                                                                     const RGPassResources &res,
+                                                                                     EngineContext *ctx)
         {
-            draw_geometry(cmd, ctx, res, gbufferPosition, gbufferNormal, gbufferAlbedo, depthHandle);
+            draw_geometry(cmd, ctx, res, gbufferPosition, gbufferNormal, gbufferAlbedo, idHandle, depthHandle);
         });
 }
 
@@ -132,6 +137,7 @@ void GeometryPass::draw_geometry(VkCommandBuffer cmd,
                                  RGImageHandle gbufferPosition,
                                  RGImageHandle gbufferNormal,
                                  RGImageHandle gbufferAlbedo,
+                                 RGImageHandle /*idHandle*/,
                                  RGImageHandle depthHandle) const
 {
     EngineContext *ctxLocal = context ? context : _context;
@@ -270,6 +276,7 @@ void GeometryPass::draw_geometry(VkCommandBuffer cmd,
         GPUDrawPushConstants push_constants{};
         push_constants.worldMatrix = r.transform;
         push_constants.vertexBuffer = r.vertexBufferAddress;
+        push_constants.objectID = r.objectID;
 
         vkCmdPushConstants(cmd, r.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                            sizeof(GPUDrawPushConstants), &push_constants);

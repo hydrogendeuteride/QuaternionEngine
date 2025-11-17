@@ -70,6 +70,10 @@ void SwapchainManager::init_swapchain()
                                                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
         _gBufferAlbedo = _resourceManager->create_image(drawImageExtent, VK_FORMAT_R8G8B8A8_UNORM,
                                                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        _idBuffer = _resourceManager->create_image(drawImageExtent, VK_FORMAT_R32_UINT,
+                                                   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                   VK_IMAGE_USAGE_SAMPLED_BIT);
 
         _deletionQueue.push_function([=]() {
             vkDestroyImageView(_deviceManager->device(), _drawImage.imageView, nullptr);
@@ -81,6 +85,7 @@ void SwapchainManager::init_swapchain()
             _resourceManager->destroy_image(_gBufferPosition);
             _resourceManager->destroy_image(_gBufferNormal);
             _resourceManager->destroy_image(_gBufferAlbedo);
+            _resourceManager->destroy_image(_idBuffer);
         });
     };
 
@@ -191,6 +196,10 @@ void SwapchainManager::resize_swapchain(struct SDL_Window *window)
                                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
     _gBufferAlbedo = _resourceManager->create_image(drawImageExtent, VK_FORMAT_R8G8B8A8_UNORM,
                                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    _idBuffer = _resourceManager->create_image(drawImageExtent, VK_FORMAT_R32_UINT,
+                                               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                               VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                               VK_IMAGE_USAGE_SAMPLED_BIT);
 
     _deletionQueue.push_function([=]() {
         vkDestroyImageView(_deviceManager->device(), _drawImage.imageView, nullptr);
@@ -202,6 +211,7 @@ void SwapchainManager::resize_swapchain(struct SDL_Window *window)
         _resourceManager->destroy_image(_gBufferPosition);
         _resourceManager->destroy_image(_gBufferNormal);
         _resourceManager->destroy_image(_gBufferAlbedo);
+        _resourceManager->destroy_image(_idBuffer);
     });
 
     resize_requested = false;

@@ -574,17 +574,31 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
                 newSurface.material = materials[0];
             }
 
-            glm::vec3 minpos = vertices[initial_vtx].position;
-            glm::vec3 maxpos = vertices[initial_vtx].position;
-            for (int i = initial_vtx; i < vertices.size(); i++)
+            // Compute per-surface bounds using only the indices referenced by this primitive.
+            if (newSurface.count > 0)
             {
-                minpos = glm::min(minpos, vertices[i].position);
-                maxpos = glm::max(maxpos, vertices[i].position);
+                uint32_t firstIndex = newSurface.startIndex;
+                uint32_t lastIndex = newSurface.startIndex + newSurface.count;
+                uint32_t baseVertex = indices[firstIndex];
+                glm::vec3 minpos = vertices[baseVertex].position;
+                glm::vec3 maxpos = vertices[baseVertex].position;
+                for (uint32_t i = firstIndex + 1; i < lastIndex; i++)
+                {
+                    uint32_t vi = indices[i];
+                    const glm::vec3 &p = vertices[vi].position;
+                    minpos = glm::min(minpos, p);
+                    maxpos = glm::max(maxpos, p);
+                }
+                newSurface.bounds.origin = (maxpos + minpos) / 2.f;
+                newSurface.bounds.extents = (maxpos - minpos) / 2.f;
+                newSurface.bounds.sphereRadius = glm::length(newSurface.bounds.extents);
             }
-
-            newSurface.bounds.origin = (maxpos + minpos) / 2.f;
-            newSurface.bounds.extents = (maxpos - minpos) / 2.f;
-            newSurface.bounds.sphereRadius = glm::length(newSurface.bounds.extents);
+            else
+            {
+                newSurface.bounds.origin = glm::vec3(0.0f);
+                newSurface.bounds.extents = glm::vec3(0.5f);
+                newSurface.bounds.sphereRadius = glm::length(newSurface.bounds.extents);
+            }
             newmesh->surfaces.push_back(newSurface);
         }
 
@@ -616,8 +630,10 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         // find if the node has a mesh, and if it does hook it to the mesh pointer and allocate it with the meshnode class
         if (node.meshIndex.has_value())
         {
-            newNode = std::make_shared<MeshNode>();
-            static_cast<MeshNode *>(newNode.get())->mesh = meshes[*node.meshIndex];
+            auto meshNode = std::make_shared<MeshNode>();
+            meshNode->mesh = meshes[*node.meshIndex];
+            meshNode->scene = &file;
+            newNode = meshNode;
         }
         else
         {

@@ -49,9 +49,11 @@ struct RenderPass
 
 struct MeshNode : public Node
 {
-	std::shared_ptr<MeshAsset> mesh;
+    std::shared_ptr<MeshAsset> mesh;
+    // Owning glTF scene (for picking/debug); may be null for non-gltf meshes.
+    LoadedGLTF *scene = nullptr;
 
-	virtual void Draw(const glm::mat4 &topMatrix, DrawContext &ctx) override;
+    virtual void Draw(const glm::mat4 &topMatrix, DrawContext &ctx) override;
 };
 
 class VulkanEngine
@@ -113,6 +115,42 @@ public:
 
     // Debug helpers: track spawned IBL test meshes to remove them easily
     std::vector<std::string> _iblTestNames;
+
+    struct PickInfo
+    {
+        MeshAsset *mesh = nullptr;
+        LoadedGLTF *scene = nullptr;
+        glm::vec3 worldPos{0.0f};
+        uint32_t indexCount = 0;
+        uint32_t firstIndex = 0;
+        uint32_t surfaceIndex = 0;
+        bool valid = false;
+    } _lastPick;
+
+    struct PickRequest
+    {
+        bool active = false;
+        glm::vec2 windowPos{0.0f};
+        glm::uvec2 idCoords{0, 0};
+    } _pendingPick;
+    bool _pickResultPending = false;
+    AllocatedBuffer _pickReadbackBuffer{};
+
+    // Hover and drag-selection state (raycast-based)
+    PickInfo _hoverPick{};
+    glm::vec2 _mousePosPixels{-1.0f, -1.0f};
+    struct DragState
+    {
+        bool dragging = false;
+        bool buttonDown = false;
+        glm::vec2 start{0.0f};
+        glm::vec2 current{0.0f};
+    } _dragState;
+    // Optional list of last drag-selected objects (for future editing UI)
+    std::vector<PickInfo> _dragSelection;
+
+    // Toggle to enable/disable ID-buffer picking in addition to raycast
+    bool _useIdBufferPicking = false;
 
     // Debug: persistent pass enable overrides (by pass name)
     std::unordered_map<std::string, bool> _rgPassToggles;

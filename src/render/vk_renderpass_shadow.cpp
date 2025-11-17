@@ -29,7 +29,7 @@ void ShadowPass::init(EngineContext *context)
     // Keep push constants matching current shader layout for now
     VkPushConstantRange pc{};
     pc.offset = 0;
-    // Push constants layout in shadow.vert is mat4 + device address + uint, rounded to 16 bytes
+    // Push constants layout in shadow.vert is GPUDrawPushConstants + cascade index, rounded to 16 bytes
     const uint32_t pcRaw = static_cast<uint32_t>(sizeof(GPUDrawPushConstants) + sizeof(uint32_t));
     const uint32_t pcAligned = (pcRaw + 15u) & ~15u; // 16-byte alignment to match std430 expectations
     pc.size = pcAligned;
@@ -197,6 +197,7 @@ void ShadowPass::draw_shadow(VkCommandBuffer cmd,
         ShadowPC spc{};
         spc.draw.worldMatrix = r.transform;
         spc.draw.vertexBuffer = r.vertexBufferAddress;
+        spc.draw.objectID = r.objectID;
         spc.cascadeIndex = cascadeIndex;
         vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ShadowPC), &spc);
         vkCmdDrawIndexed(cmd, r.indexCount, 1, r.firstIndex, 0, 0);

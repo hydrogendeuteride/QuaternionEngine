@@ -196,6 +196,7 @@ void TransparentPass::draw_transparent(VkCommandBuffer cmd,
         GPUDrawPushConstants push{};
         push.worldMatrix = r.transform;
         push.vertexBuffer = r.vertexBufferAddress;
+        push.objectID = r.objectID;
         vkCmdPushConstants(cmd, r.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                            sizeof(GPUDrawPushConstants), &push);
         vkCmdDrawIndexed(cmd, r.indexCount, 1, r.firstIndex, 0, 0);
