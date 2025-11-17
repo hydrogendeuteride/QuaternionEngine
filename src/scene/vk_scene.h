@@ -66,7 +66,20 @@ public:
     void addGLTFInstance(const std::string &name, std::shared_ptr<LoadedGLTF> scene,
                          const glm::mat4 &transform = glm::mat4(1.f));
     bool removeGLTFInstance(const std::string &name);
+    bool setGLTFInstanceTransform(const std::string &name, const glm::mat4 &transform);
     void clearGLTFInstances();
+
+    // Animation control helpers (glTF)
+    // Note: a LoadedGLTF may be shared by multiple instances; changing
+    // the active animation on a scene or instance affects all users
+    // of that shared LoadedGLTF.
+    bool setSceneAnimation(const std::string &sceneName, int animationIndex, bool resetTime = true);
+    bool setSceneAnimation(const std::string &sceneName, const std::string &animationName, bool resetTime = true);
+    bool setSceneAnimationLoop(const std::string &sceneName, bool loop);
+
+    bool setGLTFInstanceAnimation(const std::string &instanceName, int animationIndex, bool resetTime = true);
+    bool setGLTFInstanceAnimation(const std::string &instanceName, const std::string &animationName, bool resetTime = true);
+    bool setGLTFInstanceAnimationLoop(const std::string &instanceName, bool loop);
 
     struct SceneStats
     {

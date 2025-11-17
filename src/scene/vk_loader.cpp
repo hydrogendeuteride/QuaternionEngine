@@ -1,5 +1,7 @@
 ﻿#include "stb_image.h"
 #include <iostream>
+#include <algorithm>
+#include <cmath>
 #include "vk_loader.h"
 #include "core/texture_cache.h"
 
@@ -623,11 +625,29 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         }
 
         nodes.push_back(newNode);
-        file.nodes[node.name.c_str()];
+        if (!node.name.empty())
+        {
+            file.nodes[std::string(node.name)] = newNode;
+        }
 
         std::visit(fastgltf::visitor{
                        [&](fastgltf::Node::TransformMatrix matrix) {
-                           memcpy(&newNode->localTransform, matrix.data(), sizeof(matrix));
+                           glm::mat4 m(1.0f);
+                           memcpy(&m, matrix.data(), sizeof(matrix));
+
+                           glm::vec3 t = glm::vec3(m[3]);
+                           glm::vec3 col0 = glm::vec3(m[0]);
+                           glm::vec3 col1 = glm::vec3(m[1]);
+                           glm::vec3 col2 = glm::vec3(m[2]);
+
+                           glm::vec3 s(glm::length(col0), glm::length(col1), glm::length(col2));
+                           if (s.x != 0.0f) col0 /= s.x;
+                           if (s.y != 0.0f) col1 /= s.y;
+                           if (s.z != 0.0f) col2 /= s.z;
+                           glm::mat3 rotMat(col0, col1, col2);
+                           glm::quat r = glm::quat_cast(rotMat);
+
+                           newNode->setTRS(t, r, s);
                        },
                        [&](fastgltf::Node::TRS transform) {
                            glm::vec3 tl(transform.translation[0], transform.translation[1],
@@ -636,11 +656,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
                                          transform.rotation[2]);
                            glm::vec3 sc(transform.scale[0], transform.scale[1], transform.scale[2]);
 
-                           glm::mat4 tm = glm::translate(glm::mat4(1.f), tl);
-                           glm::mat4 rm = glm::toMat4(rot);
-                           glm::mat4 sm = glm::scale(glm::mat4(1.f), sc);
-
-                           newNode->localTransform = tm * rm * sm;
+                           newNode->setTRS(tl, rot, sc);
                        }
                    },
                    node.transform);
@@ -669,6 +685,125 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
             node->refreshTransform(glm::mat4{1.f});
         }
     }
+
+    // Load animations (if present)
+    if (!gltf.animations.empty())
+    {
+        file.animations.reserve(gltf.animations.size());
+
+        for (auto &anim: gltf.animations)
+        {
+            LoadedGLTF::Animation dstAnim;
+            dstAnim.name = anim.name.c_str();
+            dstAnim.duration = 0.0f;
+
+            dstAnim.channels.reserve(anim.channels.size());
+
+            for (auto &ch: anim.channels)
+            {
+                if (ch.nodeIndex >= nodes.size() || ch.samplerIndex >= anim.samplers.size())
+                {
+                    continue;
+                }
+
+                LoadedGLTF::AnimationChannel channel{};
+                channel.node = nodes[ch.nodeIndex];
+
+                switch (ch.path)
+                {
+                    case fastgltf::AnimationPath::Translation:
+                        channel.target = LoadedGLTF::AnimationChannel::Target::Translation;
+                        break;
+                    case fastgltf::AnimationPath::Rotation:
+                        channel.target = LoadedGLTF::AnimationChannel::Target::Rotation;
+                        break;
+                    case fastgltf::AnimationPath::Scale:
+                        channel.target = LoadedGLTF::AnimationChannel::Target::Scale;
+                        break;
+                    default:
+                        // Weights and other paths not yet supported
+                        continue;
+                }
+
+                const fastgltf::AnimationSampler &sampler = anim.samplers[ch.samplerIndex];
+                switch (sampler.interpolation)
+                {
+                    case fastgltf::AnimationInterpolation::Step:
+                        channel.interpolation = LoadedGLTF::AnimationChannel::Interpolation::Step;
+                        break;
+                    case fastgltf::AnimationInterpolation::Linear:
+                    case fastgltf::AnimationInterpolation::CubicSpline:
+                    default:
+                        channel.interpolation = LoadedGLTF::AnimationChannel::Interpolation::Linear;
+                        break;
+                }
+
+                // Input times
+                const auto &timeAccessor = gltf.accessors[sampler.inputAccessor];
+                channel.times.reserve(timeAccessor.count);
+                float maxTime = 0.0f;
+
+                fastgltf::iterateAccessorWithIndex<float>(gltf, timeAccessor,
+                    [&](float value, size_t) {
+                        channel.times.push_back(value);
+                        if (value > maxTime) maxTime = value;
+                    });
+
+                // Output values
+                const auto &valueAccessor = gltf.accessors[sampler.outputAccessor];
+                const bool isCubic = sampler.interpolation == fastgltf::AnimationInterpolation::CubicSpline;
+
+                if (channel.target == LoadedGLTF::AnimationChannel::Target::Rotation)
+                {
+                    channel.vec4Values.clear();
+                    channel.vec4Values.reserve(valueAccessor.count);
+
+                    fastgltf::iterateAccessorWithIndex<glm::vec4>(gltf, valueAccessor,
+                        [&](glm::vec4 v, size_t index) {
+                            if (isCubic)
+                            {
+                                // For cubic-spline, values are [in, value, out]; keep only the middle one.
+                                if (index % 3 != 1) return;
+                            }
+                            channel.vec4Values.push_back(v);
+                        });
+                }
+                else
+                {
+                    channel.vec3Values.clear();
+                    channel.vec3Values.reserve(valueAccessor.count);
+
+                    fastgltf::iterateAccessorWithIndex<glm::vec3>(gltf, valueAccessor,
+                        [&](glm::vec3 v, size_t index) {
+                            if (isCubic)
+                            {
+                                if (index % 3 != 1) return;
+                            }
+                            channel.vec3Values.push_back(v);
+                        });
+                }
+
+                if (!channel.times.empty())
+                {
+                    dstAnim.duration = std::max(dstAnim.duration, maxTime);
+                    dstAnim.channels.push_back(std::move(channel));
+                }
+            }
+
+            if (!dstAnim.channels.empty())
+            {
+                file.animations.push_back(std::move(dstAnim));
+            }
+        }
+
+        if (!file.animations.empty())
+        {
+            file.activeAnimation = 0;
+            file.animationTime = 0.0f;
+            file.animationLoop = true;
+        }
+    }
+
     // We no longer need glTF-owned buffer payloads; free any large vectors
     for (auto &buf : gltf.buffers)
     {
@@ -699,6 +834,192 @@ void LoadedGLTF::Draw(const glm::mat4 &topMatrix, DrawContext &ctx)
     {
         n->Draw(topMatrix, ctx);
     }
+}
+
+std::shared_ptr<Node> LoadedGLTF::getNode(const std::string &name)
+{
+    auto it = nodes.find(name);
+    return (it != nodes.end()) ? it->second : nullptr;
+}
+
+void LoadedGLTF::refreshAllTransforms()
+{
+    for (auto &n: topNodes)
+    {
+        if (n)
+        {
+            n->refreshTransform(glm::mat4{1.f});
+        }
+    }
+}
+
+void LoadedGLTF::setActiveAnimation(int index, bool resetTime)
+{
+    if (animations.empty())
+    {
+        activeAnimation = -1;
+        return;
+    }
+
+    if (index < 0 || index >= static_cast<int>(animations.size()))
+    {
+        index = 0;
+    }
+
+    activeAnimation = index;
+    if (resetTime)
+    {
+        animationTime = 0.0f;
+    }
+}
+
+void LoadedGLTF::setActiveAnimation(const std::string &name, bool resetTime)
+{
+    for (size_t i = 0; i < animations.size(); ++i)
+    {
+        if (animations[i].name == name)
+        {
+            setActiveAnimation(static_cast<int>(i), resetTime);
+            return;
+        }
+    }
+}
+
+void LoadedGLTF::updateAnimation(float dt)
+{
+    if (animations.empty()) return;
+    if (activeAnimation < 0 || activeAnimation >= static_cast<int>(animations.size())) return;
+    if (dt <= 0.0f) return;
+
+    Animation &clip = animations[activeAnimation];
+    if (clip.duration <= 0.0f) return;
+
+    animationTime += dt;
+    if (animationLoop)
+    {
+        animationTime = std::fmod(animationTime, clip.duration);
+        if (animationTime < 0.0f)
+        {
+            animationTime += clip.duration;
+        }
+    }
+    else if (animationTime > clip.duration)
+    {
+        animationTime = clip.duration;
+    }
+
+    float t = animationTime;
+
+    for (auto &ch: clip.channels)
+    {
+        if (!ch.node) continue;
+        const size_t keyCount = ch.times.size();
+        if (keyCount == 0) continue;
+
+        size_t k1 = 0;
+        while (k1 < keyCount && ch.times[k1] < t)
+        {
+            ++k1;
+        }
+
+        size_t k0;
+        if (k1 == 0)
+        {
+            k0 = k1 = 0;
+        }
+        else if (k1 >= keyCount)
+        {
+            k0 = keyCount - 1;
+            k1 = keyCount - 1;
+        }
+        else
+        {
+            k0 = k1 - 1;
+        }
+
+        float t0 = ch.times[k0];
+        float t1 = ch.times[k1];
+        float alpha = 0.0f;
+        if (k0 != k1 && t1 > t0)
+        {
+            alpha = (t - t0) / (t1 - t0);
+            alpha = std::clamp(alpha, 0.0f, 1.0f);
+        }
+
+        Node &node = *ch.node;
+
+        switch (ch.target)
+        {
+            case AnimationChannel::Target::Translation:
+            {
+                if (ch.vec3Values.size() != keyCount) break;
+                glm::vec3 v0 = ch.vec3Values[k0];
+                glm::vec3 v1 = ch.vec3Values[k1];
+                glm::vec3 v;
+                if (ch.interpolation == AnimationChannel::Interpolation::Step || k0 == k1)
+                {
+                    v = v0;
+                }
+                else
+                {
+                    v = v0 * (1.0f - alpha) + v1 * alpha;
+                }
+                node.translation = v;
+                node.hasTRS = true;
+                break;
+            }
+            case AnimationChannel::Target::Scale:
+            {
+                if (ch.vec3Values.size() != keyCount) break;
+                glm::vec3 v0 = ch.vec3Values[k0];
+                glm::vec3 v1 = ch.vec3Values[k1];
+                glm::vec3 v;
+                if (ch.interpolation == AnimationChannel::Interpolation::Step || k0 == k1)
+                {
+                    v = v0;
+                }
+                else
+                {
+                    v = v0 * (1.0f - alpha) + v1 * alpha;
+                }
+                node.scale = v;
+                node.hasTRS = true;
+                break;
+            }
+            case AnimationChannel::Target::Rotation:
+            {
+                if (ch.vec4Values.size() != keyCount) break;
+                glm::vec4 v0 = ch.vec4Values[k0];
+                glm::vec4 v1 = ch.vec4Values[k1];
+
+                glm::quat q0(v0.w, v0.x, v0.y, v0.z);
+                glm::quat q1(v1.w, v1.x, v1.y, v1.z);
+                glm::quat q;
+                if (ch.interpolation == AnimationChannel::Interpolation::Step || k0 == k1)
+                {
+                    q = q0;
+                }
+                else
+                {
+                    q = glm::slerp(q0, q1, alpha);
+                }
+                node.rotation = glm::normalize(q);
+                node.hasTRS = true;
+                break;
+            }
+        }
+    }
+
+    // Rebuild local matrices from updated TRS and refresh world transforms
+    for (auto &[name, nodePtr]: nodes)
+    {
+        if (nodePtr && nodePtr->hasTRS)
+        {
+            nodePtr->updateLocalFromTRS();
+        }
+    }
+
+    refreshAllTransforms();
 }
 
 void LoadedGLTF::clearAll()

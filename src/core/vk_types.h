@@ -20,6 +20,9 @@
 
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
+#include <glm/vec3.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 
 #define VK_CHECK(x)                                                     \
@@ -147,6 +150,28 @@ struct Node : public IRenderable {
 
     glm::mat4 localTransform;
     glm::mat4 worldTransform;
+
+    glm::vec3 translation{0.0f, 0.0f, 0.0f};
+    glm::vec3 scale{1.0f, 1.0f, 1.0f};
+    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+    bool hasTRS{false};
+
+    void updateLocalFromTRS()
+    {
+        glm::mat4 tm = glm::translate(glm::mat4(1.0f), translation);
+        glm::mat4 rm = glm::mat4_cast(rotation);
+        glm::mat4 sm = glm::scale(glm::mat4(1.0f), scale);
+        localTransform = tm * rm * sm;
+    }
+
+    void setTRS(const glm::vec3 &t, const glm::quat &r, const glm::vec3 &s)
+    {
+        translation = t;
+        rotation = r;
+        scale = s;
+        hasTRS = true;
+        updateLocalFromTRS();
+    }
 
     void refreshTransform(const glm::mat4& parentMatrix)
     {

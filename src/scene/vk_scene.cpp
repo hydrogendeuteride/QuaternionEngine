@@ -1,6 +1,8 @@
 #include "vk_scene.h"
 
 #include <utility>
+#include <unordered_set>
+#include <chrono>
 
 #include "vk_swapchain.h"
 #include "core/engine_context.h"
@@ -36,9 +38,51 @@ void SceneManager::update_scene()
 
     mainCamera.update();
 
-    if (loadedScenes.find("structure") != loadedScenes.end())
+    // Simple per-frame dt (seconds) for animations
+    static auto lastFrameTime = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    float dt = std::chrono::duration<float>(now - lastFrameTime).count();
+    lastFrameTime = now;
+    if (dt < 0.f)
     {
-        loadedScenes["structure"]->Draw(glm::mat4{1.f}, mainDrawContext);
+        dt = 0.f;
+    }
+    if (dt > 0.1f)
+    {
+        dt = 0.1f;
+    }
+
+    // Advance glTF animations once per unique LoadedGLTF
+    if (dt > 0.f)
+    {
+        std::unordered_set<LoadedGLTF *> animatedScenes;
+
+        auto updateSceneAnim = [&](std::shared_ptr<LoadedGLTF> &scene) {
+            if (!scene) return;
+            LoadedGLTF *ptr = scene.get();
+            if (animatedScenes.insert(ptr).second)
+            {
+                ptr->updateAnimation(dt);
+            }
+        };
+
+        for (auto &[name, scene] : loadedScenes)
+        {
+            updateSceneAnim(scene);
+        }
+        for (auto &[name, inst] : dynamicGLTFInstances)
+        {
+            updateSceneAnim(inst.scene);
+        }
+    }
+
+    // Draw all loaded GLTF scenes (static world)
+    for (auto &[name, scene] : loadedScenes)
+    {
+        if (scene)
+        {
+            scene->Draw(glm::mat4{1.f}, mainDrawContext);
+        }
     }
 
     // dynamic GLTF instances
@@ -237,7 +281,87 @@ bool SceneManager::removeGLTFInstance(const std::string &name)
     return dynamicGLTFInstances.erase(name) > 0;
 }
 
+bool SceneManager::setGLTFInstanceTransform(const std::string &name, const glm::mat4 &transform)
+{
+    auto it = dynamicGLTFInstances.find(name);
+    if (it == dynamicGLTFInstances.end()) return false;
+    it->second.transform = transform;
+    return true;
+}
+
 void SceneManager::clearGLTFInstances()
 {
     dynamicGLTFInstances.clear();
+}
+
+bool SceneManager::setSceneAnimation(const std::string &sceneName, int animationIndex, bool resetTime)
+{
+    auto it = loadedScenes.find(sceneName);
+    if (it == loadedScenes.end() || !it->second)
+    {
+        return false;
+    }
+
+    it->second->setActiveAnimation(animationIndex, resetTime);
+    return true;
+}
+
+bool SceneManager::setSceneAnimation(const std::string &sceneName, const std::string &animationName, bool resetTime)
+{
+    auto it = loadedScenes.find(sceneName);
+    if (it == loadedScenes.end() || !it->second)
+    {
+        return false;
+    }
+
+    it->second->setActiveAnimation(animationName, resetTime);
+    return true;
+}
+
+bool SceneManager::setSceneAnimationLoop(const std::string &sceneName, bool loop)
+{
+    auto it = loadedScenes.find(sceneName);
+    if (it == loadedScenes.end() || !it->second)
+    {
+        return false;
+    }
+
+    it->second->animationLoop = loop;
+    return true;
+}
+
+bool SceneManager::setGLTFInstanceAnimation(const std::string &instanceName, int animationIndex, bool resetTime)
+{
+    auto it = dynamicGLTFInstances.find(instanceName);
+    if (it == dynamicGLTFInstances.end() || !it->second.scene)
+    {
+        return false;
+    }
+
+    it->second.scene->setActiveAnimation(animationIndex, resetTime);
+    return true;
+}
+
+bool SceneManager::setGLTFInstanceAnimation(const std::string &instanceName, const std::string &animationName, bool resetTime)
+{
+    auto it = dynamicGLTFInstances.find(instanceName);
+    if (it == dynamicGLTFInstances.end() || !it->second.scene)
+    {
+        return false;
+    }
+
+    it->second.scene->setActiveAnimation(animationName, resetTime);
+    return true;
+}
+
+bool SceneManager::setGLTFInstanceAnimationLoop(const std::string &instanceName, bool loop)
+{
+    auto it = dynamicGLTFInstances.find(instanceName);
+    if (it == dynamicGLTFInstances.end() || !it->second.scene)
+    {
+        return false;
+    }
+
+    it->second.scene->animationLoop = loop;
+    return true;
 }

@@ -59,6 +59,38 @@ struct LoadedGLTF : public IRenderable
 
     VulkanEngine *creator;
 
+    struct AnimationChannel
+    {
+        enum class Target { Translation, Rotation, Scale };
+        enum class Interpolation { Linear, Step };
+
+        Target target = Target::Translation;
+        Interpolation interpolation = Interpolation::Linear;
+        std::shared_ptr<Node> node;
+        std::vector<float> times;
+        std::vector<glm::vec3> vec3Values; // translation / scale
+        std::vector<glm::vec4> vec4Values; // rotation (x,y,z,w)
+    };
+
+    struct Animation
+    {
+        std::string name;
+        float duration = 0.f;
+        std::vector<AnimationChannel> channels;
+    };
+
+    std::vector<Animation> animations;
+    int activeAnimation = -1;
+    float animationTime = 0.f;
+    bool animationLoop = true;
+
+    // Animation helpers
+    void updateAnimation(float dt);
+    void refreshAllTransforms();
+    std::shared_ptr<Node> getNode(const std::string &name);
+    void setActiveAnimation(int index, bool resetTime = true);
+    void setActiveAnimation(const std::string &name, bool resetTime = true);
+
     ~LoadedGLTF() { clearAll(); };
 
     void clearMeshes(){ clearAll(); };
