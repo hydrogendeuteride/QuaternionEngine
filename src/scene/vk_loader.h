@@ -11,11 +11,25 @@
 
 class VulkanEngine;
 
+// Basic collision / selection shape associated with a render surface.
+// origin/extents are always the local-space AABB center and half-size;
+// sphereRadius is a conservative bounding-sphere radius in local space.
+// type controls how precise ray tests should be.
+enum class BoundsType : uint8_t
+{
+    None = 0,   // not pickable
+    Box,        // oriented box using origin/extents (default)
+    Sphere,     // sphere using origin + sphereRadius
+    Capsule,    // capsule aligned with local Y (derived from extents)
+    Mesh        // full mesh (BVH / ray query); currently falls back to Box
+};
+
 struct Bounds
 {
     glm::vec3 origin;
     float sphereRadius;
     glm::vec3 extents;
+    BoundsType type = BoundsType::Box;
 };
 
 struct GLTFMaterial

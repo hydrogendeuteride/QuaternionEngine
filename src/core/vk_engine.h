@@ -167,6 +167,9 @@ public:
 	//run main loop
 	void run();
 
+    // Query a conservative streaming texture budget for the texture cache.
+    size_t query_texture_budget_bytes() const;
+
 	bool resize_requested{false};
 	bool freeze_rendering{false};
 

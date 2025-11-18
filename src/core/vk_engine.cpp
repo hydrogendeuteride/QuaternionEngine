@@ -49,8 +49,6 @@
 #include "core/texture_cache.h"
 #include "core/ibl_manager.h"
 
-// Query a conservative streaming texture budget based on VMA-reported
-// device-local heap budgets. Uses ~35% of total device-local budget.
 static size_t query_texture_budget_bytes(DeviceManager* dev)
 {
     if (!dev) return 512ull * 1024ull * 1024ull; // fallback
@@ -90,6 +88,7 @@ static size_t query_texture_budget_bytes(DeviceManager* dev)
 //
 // ImGui helpers: keep UI code tidy and grouped in small functions.
 // These render inside a single consolidated Debug window using tab items.
+// (Original definitions are now compiled out; see core/vk_engine_ui.cpp.)
 //
 namespace {
     // Background / compute playground
@@ -142,7 +141,7 @@ namespace {
 
                 const glm::vec3 pos = origin + glm::vec3(ix*spacing, 0.5f, iy*spacing);
                 glm::mat4 M = glm::translate(glm::mat4(1.0f), pos);
-                eng->_sceneManager->addMeshInstance(base+".inst", mesh, M);
+                eng->_sceneManager->addMeshInstance(base+".inst", mesh, M, BoundsType::Sphere);
                 eng->_iblTestNames.push_back(base+".inst");
                 eng->_iblTestNames.push_back(base+".mesh");
                 eng->_iblTestNames.push_back(base+".mat");
@@ -156,7 +155,7 @@ namespace {
             auto mesh = eng->_assetManager->createMesh("ibltest.chrome.mesh", std::span<Vertex>(verts.data(), verts.size()),
                                                        std::span<uint32_t>(inds.data(), inds.size()), mat);
             glm::mat4 M = glm::translate(glm::mat4(1.0f), origin + glm::vec3(5.5f, 0.5f, 0.0f));
-            eng->_sceneManager->addMeshInstance("ibltest.chrome.inst", mesh, M);
+            eng->_sceneManager->addMeshInstance("ibltest.chrome.inst", mesh, M, BoundsType::Sphere);
             eng->_iblTestNames.insert(eng->_iblTestNames.end(), {"ibltest.chrome.inst","ibltest.chrome.mesh","ibltest.chrome.mat"});
         }
         {
@@ -165,7 +164,7 @@ namespace {
             auto mesh = eng->_assetManager->createMesh("ibltest.glass.mesh", std::span<Vertex>(verts.data(), verts.size()),
                                                        std::span<uint32_t>(inds.data(), inds.size()), mat);
             glm::mat4 M = glm::translate(glm::mat4(1.0f), origin + glm::vec3(5.5f, 0.5f, 2.0f));
-            eng->_sceneManager->addMeshInstance("ibltest.glass.inst", mesh, M);
+            eng->_sceneManager->addMeshInstance("ibltest.glass.inst", mesh, M, BoundsType::Sphere);
             eng->_iblTestNames.insert(eng->_iblTestNames.end(), {"ibltest.glass.inst","ibltest.glass.mesh","ibltest.glass.mat"});
         }
     }
@@ -619,6 +618,43 @@ static void dump_vma_json(DeviceManager* dev, const char* tag)
     }
 }
 
+size_t VulkanEngine::query_texture_budget_bytes() const
+{
+    DeviceManager *dev = _deviceManager.get();
+    if (!dev) return 512ull * 1024ull * 1024ull; // fallback
+    VmaAllocator alloc = dev->allocator();
+    if (!alloc) return 512ull * 1024ull * 1024ull;
+
+    const VkPhysicalDeviceMemoryProperties *memProps = nullptr;
+    vmaGetMemoryProperties(alloc, &memProps);
+    if (!memProps) return 512ull * 1024ull * 1024ull;
+
+    VmaBudget budgets[VK_MAX_MEMORY_HEAPS] = {};
+    vmaGetHeapBudgets(alloc, budgets);
+
+    unsigned long long totalBudget = 0;
+    unsigned long long totalUsage = 0;
+    for (uint32_t i = 0; i < memProps->memoryHeapCount; ++i)
+    {
+        if (memProps->memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+        {
+            totalBudget += budgets[i].budget;
+            totalUsage  += budgets[i].usage;
+        }
+    }
+    if (totalBudget == 0) return 512ull * 1024ull * 1024ull;
+
+    // Reserve ~65% of VRAM for attachments, swapchain, meshes, AS, etc.
+    unsigned long long cap = static_cast<unsigned long long>(double(totalBudget) * 0.35);
+
+    // If usage is already near the cap, still allow current textures to live; eviction will trim.
+    // Clamp to at least 128 MB, at most totalBudget.
+    unsigned long long minCap = 128ull * 1024ull * 1024ull;
+    if (cap < minCap) cap = minCap;
+    if (cap > totalBudget) cap = totalBudget;
+    return static_cast<size_t>(cap);
+}
+
 void VulkanEngine::init()
 {
     // We initialize SDL and create a window with it.
@@ -814,7 +850,8 @@ void VulkanEngine::init_default_data()
         _sceneManager->addMeshInstance("default.cube", cubeMesh,
                                        glm::translate(glm::mat4(1.f), glm::vec3(-2.f, 0.f, -2.f)));
         _sceneManager->addMeshInstance("default.sphere", sphereMesh,
-                                       glm::translate(glm::mat4(1.f), glm::vec3(2.f, 0.f, -2.f)));
+                                       glm::translate(glm::mat4(1.f), glm::vec3(2.f, 0.f, -2.f)),
+                                       BoundsType::Sphere);
     }
 
     _mainDeletionQueue.push_function([&]() {
@@ -1069,7 +1106,7 @@ void VulkanEngine::draw()
         // Prior to building passes, pump texture loads for this frame.
         if (_textureCache)
         {
-            size_t budget = query_texture_budget_bytes(_deviceManager.get());
+            size_t budget = query_texture_budget_bytes();
             _textureCache->set_gpu_budget_bytes(budget);
             _textureCache->evictToBudget(budget);
             _textureCache->pumpLoads(*_resourceManager, get_current_frame());
@@ -1375,8 +1412,8 @@ void VulkanEngine::run()
         if (ImGui::Begin("Debug"))
         {
             const ImGuiTabBarFlags tf = ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_AutoSelectNewTabs;
-        if (ImGui::BeginTabBar("DebugTabs", tf))
-        {
+            if (ImGui::BeginTabBar("DebugTabs", tf))
+            {
                 if (ImGui::BeginTabItem("Overview"))
                 {
                     ui_overview(this);
@@ -1412,20 +1449,21 @@ void VulkanEngine::run()
                     ui_postfx(this);
                     ImGui::EndTabItem();
                 }
-            if (ImGui::BeginTabItem("Scene"))
-            {
-                ui_scene(this);
-                ImGui::EndTabItem();
+                if (ImGui::BeginTabItem("Scene"))
+                {
+                    ui_scene(this);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Textures"))
+                {
+                    ui_textures(this);
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
             }
-            if (ImGui::BeginTabItem("Textures"))
-            {
-                ui_textures(this);
-                ImGui::EndTabItem();
-            }
-            ImGui::EndTabBar();
-        }
             ImGui::End();
         }
+
         ImGui::Render();
         draw();
 

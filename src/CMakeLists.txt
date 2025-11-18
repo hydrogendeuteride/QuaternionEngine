@@ -39,6 +39,7 @@ add_executable (vulkan_engine
   core/config.h
   core/vk_engine.h
   core/vk_engine.cpp
+  core/vk_engine_ui.cpp
   core/vk_raytracing.h
   core/vk_raytracing.cpp
   core/ibl_manager.h
@@ -76,6 +77,7 @@ add_executable (vulkan_engine
   # scene
   scene/vk_scene.h
   scene/vk_scene.cpp
+  scene/vk_scene_picking.cpp
   scene/vk_loader.h
   scene/vk_loader.cpp
   scene/tangent_space.h

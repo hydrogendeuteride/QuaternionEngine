@@ -62,6 +62,9 @@ public:
         std::string name;
         MeshGeometryDesc geometry;
         MeshMaterialDesc material;
+        // Optional override for collision / picking bounds type for this mesh.
+        // When unset, a reasonable default is chosen based on geometry.type.
+        std::optional<BoundsType> boundsType;
     };
 
     void init(VulkanEngine *engine);

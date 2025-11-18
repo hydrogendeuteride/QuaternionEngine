@@ -3,6 +3,7 @@
 #include <scene/camera.h>
 #include <unordered_map>
 #include <memory>
+#include <optional>
 #include <glm/vec2.hpp>
 
 #include "scene/vk_loader.h"
@@ -75,10 +76,12 @@ public:
     {
         std::shared_ptr<MeshAsset> mesh;
         glm::mat4 transform{1.f};
+        std::optional<BoundsType> boundsTypeOverride;
     };
 
     void addMeshInstance(const std::string &name, std::shared_ptr<MeshAsset> mesh,
-                         const glm::mat4 &transform = glm::mat4(1.f));
+                         const glm::mat4 &transform = glm::mat4(1.f),
+                         std::optional<BoundsType> boundsType = {});
     bool removeMeshInstance(const std::string &name);
     void clearMeshInstances();
 

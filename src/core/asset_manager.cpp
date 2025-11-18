@@ -131,20 +131,20 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
 
     switch (info.geometry.type)
     {
-        case MeshGeometryDesc::Type::Provided:
-            vertsSpan = info.geometry.vertices;
-            indsSpan = info.geometry.indices;
-            break;
-        case MeshGeometryDesc::Type::Cube:
-            primitives::buildCube(tmpVerts, tmpInds);
-            vertsSpan = tmpVerts;
-            indsSpan = tmpInds;
-            break;
-        case MeshGeometryDesc::Type::Sphere:
-            primitives::buildSphere(tmpVerts, tmpInds, info.geometry.sectors, info.geometry.stacks);
-            vertsSpan = tmpVerts;
-            indsSpan = tmpInds;
-            break;
+    case MeshGeometryDesc::Type::Provided:
+        vertsSpan = info.geometry.vertices;
+        indsSpan = info.geometry.indices;
+        break;
+    case MeshGeometryDesc::Type::Cube:
+        primitives::buildCube(tmpVerts, tmpInds);
+        vertsSpan = tmpVerts;
+        indsSpan = tmpInds;
+        break;
+    case MeshGeometryDesc::Type::Sphere:
+        primitives::buildSphere(tmpVerts, tmpInds, info.geometry.sectors, info.geometry.stacks);
+        vertsSpan = tmpVerts;
+        indsSpan = tmpInds;
+        break;
     }
 
     // Ensure tangents exist for primitives (and provided geometry if needed)
@@ -153,80 +153,112 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
         geom::generate_tangents(tmpVerts, tmpInds);
     }
 
+    std::shared_ptr<MeshAsset> mesh;
+
     if (info.material.kind == MeshMaterialDesc::Kind::Default)
     {
-        return createMesh(info.name, vertsSpan, indsSpan, {});
+        mesh = createMesh(info.name, vertsSpan, indsSpan, {});
     }
-
-    const auto &opt = info.material.options;
-
-    // Fallbacks are bound now; real textures will patch in via TextureCache
-    AllocatedBuffer matBuffer = createMaterialBufferWithConstants(opt.constants);
-
-    GLTFMetallic_Roughness::MaterialResources res{};
-    res.colorImage = _engine->_errorCheckerboardImage; // visible fallback for albedo
-    res.colorSampler = _engine->_samplerManager->defaultLinear();
-    res.metalRoughImage = _engine->_whiteImage;
-    res.metalRoughSampler = _engine->_samplerManager->defaultLinear();
-    res.normalImage = _engine->_flatNormalImage;
-    res.normalSampler = _engine->_samplerManager->defaultLinear();
-    res.dataBuffer = matBuffer.buffer;
-    res.dataBufferOffset = 0;
-
-    auto mat = createMaterial(opt.pass, res);
-
-    // Register dynamic texture bindings using the central TextureCache
-    if (_engine && _engine->_context && _engine->_context->textures)
+    else
     {
-        TextureCache *cache = _engine->_context->textures;
-        auto buildKey = [&](std::string_view path, bool srgb) -> TextureCache::TextureKey {
-            TextureCache::TextureKey k{};
-            if (!path.empty())
-            {
-                k.kind = TextureCache::TextureKey::SourceKind::FilePath;
-                k.path = assetPath(path);
-                k.srgb = srgb;
-                k.mipmapped = true;
-                std::string id = std::string("PRIM:") + k.path + (srgb ? "#sRGB" : "#UNORM");
-                k.hash = texcache::fnv1a64(id);
-            }
-            return k;
-        };
+        const auto &opt = info.material.options;
 
-        if (!opt.albedoPath.empty())
+        // Fallbacks are bound now; real textures will patch in via TextureCache
+        AllocatedBuffer matBuffer = createMaterialBufferWithConstants(opt.constants);
+
+        GLTFMetallic_Roughness::MaterialResources res{};
+        res.colorImage = _engine->_errorCheckerboardImage; // visible fallback for albedo
+        res.colorSampler = _engine->_samplerManager->defaultLinear();
+        res.metalRoughImage = _engine->_whiteImage;
+        res.metalRoughSampler = _engine->_samplerManager->defaultLinear();
+        res.normalImage = _engine->_flatNormalImage;
+        res.normalSampler = _engine->_samplerManager->defaultLinear();
+        res.dataBuffer = matBuffer.buffer;
+        res.dataBufferOffset = 0;
+
+        auto mat = createMaterial(opt.pass, res);
+
+        // Register dynamic texture bindings using the central TextureCache
+        if (_engine && _engine->_context && _engine->_context->textures)
         {
-            auto key = buildKey(opt.albedoPath, opt.albedoSRGB);
-            if (key.hash != 0)
+            TextureCache *cache = _engine->_context->textures;
+            auto buildKey = [&](std::string_view path, bool srgb) -> TextureCache::TextureKey {
+                TextureCache::TextureKey k{};
+                if (!path.empty())
+                {
+                    k.kind = TextureCache::TextureKey::SourceKind::FilePath;
+                    k.path = assetPath(path);
+                    k.srgb = srgb;
+                    k.mipmapped = true;
+                    std::string id = std::string("PRIM:") + k.path + (srgb ? "#sRGB" : "#UNORM");
+                    k.hash = texcache::fnv1a64(id);
+                }
+                return k;
+            };
+
+            if (!opt.albedoPath.empty())
             {
-                VkSampler samp = _engine->_samplerManager->defaultLinear();
-                auto handle = cache->request(key, samp);
-                cache->watchBinding(handle, mat->data.materialSet, 1u, samp, _engine->_errorCheckerboardImage.imageView);
+                auto key = buildKey(opt.albedoPath, opt.albedoSRGB);
+                if (key.hash != 0)
+                {
+                    VkSampler samp = _engine->_samplerManager->defaultLinear();
+                    auto handle = cache->request(key, samp);
+                    cache->watchBinding(handle, mat->data.materialSet, 1u, samp, _engine->_errorCheckerboardImage.imageView);
+                }
+            }
+            if (!opt.metalRoughPath.empty())
+            {
+                auto key = buildKey(opt.metalRoughPath, opt.metalRoughSRGB);
+                if (key.hash != 0)
+                {
+                    VkSampler samp = _engine->_samplerManager->defaultLinear();
+                    auto handle = cache->request(key, samp);
+                    cache->watchBinding(handle, mat->data.materialSet, 2u, samp, _engine->_whiteImage.imageView);
+                }
+            }
+            if (!opt.normalPath.empty())
+            {
+                auto key = buildKey(opt.normalPath, opt.normalSRGB);
+                if (key.hash != 0)
+                {
+                    VkSampler samp = _engine->_samplerManager->defaultLinear();
+                    auto handle = cache->request(key, samp);
+                    cache->watchBinding(handle, mat->data.materialSet, 3u, samp, _engine->_flatNormalImage.imageView);
+                }
             }
         }
-        if (!opt.metalRoughPath.empty())
+
+        mesh = createMesh(info.name, vertsSpan, indsSpan, mat);
+        _meshMaterialBuffers.emplace(info.name, matBuffer);
+    }
+
+    if (!mesh)
+    {
+        return {};
+    }
+
+    // Tag primitive meshes with more appropriate default bounds types for picking,
+    // then apply any explicit override from MeshCreateInfo.
+    for (auto &surf : mesh->surfaces)
+    {
+        switch (info.geometry.type)
         {
-            auto key = buildKey(opt.metalRoughPath, opt.metalRoughSRGB);
-            if (key.hash != 0)
-            {
-                VkSampler samp = _engine->_samplerManager->defaultLinear();
-                auto handle = cache->request(key, samp);
-                cache->watchBinding(handle, mat->data.materialSet, 2u, samp, _engine->_whiteImage.imageView);
-            }
+        case MeshGeometryDesc::Type::Sphere:
+            surf.bounds.type = BoundsType::Sphere;
+            break;
+        case MeshGeometryDesc::Type::Cube:
+        case MeshGeometryDesc::Type::Provided:
+        default:
+            surf.bounds.type = BoundsType::Box;
+            break;
         }
-        if (!opt.normalPath.empty())
+
+        if (info.boundsType.has_value())
         {
-            auto key = buildKey(opt.normalPath, opt.normalSRGB);
-            if (key.hash != 0)
-            {
-                VkSampler samp = _engine->_samplerManager->defaultLinear();
-                auto handle = cache->request(key, samp);
-                cache->watchBinding(handle, mat->data.materialSet, 3u, samp, _engine->_flatNormalImage.imageView);
-            }
+            surf.bounds.type = *info.boundsType;
         }
     }
 
-    auto mesh = createMesh(info.name, vertsSpan, indsSpan, mat);
-    _meshMaterialBuffers.emplace(info.name, matBuffer);
     return mesh;
 }
 
@@ -348,6 +380,7 @@ static Bounds compute_bounds(std::span<Vertex> vertices)
         b.origin = glm::vec3(0.0f);
         b.extents = glm::vec3(0.5f);
         b.sphereRadius = glm::length(b.extents);
+        b.type = BoundsType::Box;
         return b;
     }
     glm::vec3 minpos = vertices[0].position;
@@ -360,6 +393,7 @@ static Bounds compute_bounds(std::span<Vertex> vertices)
     b.origin = (maxpos + minpos) / 2.f;
     b.extents = (maxpos - minpos) / 2.f;
     b.sphereRadius = glm::length(b.extents);
+    b.type = BoundsType::Box;
     return b;
 }
 
