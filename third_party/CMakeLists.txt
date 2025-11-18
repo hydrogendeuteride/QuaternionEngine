@@ -69,6 +69,9 @@ target_compile_definitions(ImGuizmo
 
 target_link_libraries(ImGuizmo PUBLIC imgui)
 
+add_subdirectory(BVH)
+target_include_directories(BVH2 INTERFACE taskflow)
+
 target_include_directories(stb_image INTERFACE stb_image)
 
 # MikkTSpace (optional)
