@@ -137,6 +137,130 @@ namespace
         return true;
     }
 
+    // Ray / capsule intersection in world space. Capsule is aligned with local Y axis
+    // and reconstructed from Bounds.origin/extents, assuming extents.x/z ~= radius
+    // and extents.y ~= halfHeight + radius (AABB center/half-size convention).
+    bool intersect_ray_capsule(const glm::vec3 &rayOrigin,
+                               const glm::vec3 &rayDir,
+                               const Bounds &bounds,
+                               const glm::mat4 &worldTransform,
+                               glm::vec3 &outWorldHit)
+    {
+        if (glm::length2(rayDir) < 1e-8f)
+        {
+            return false;
+        }
+
+        // Transform ray into object-local space.
+        glm::mat4 invM = glm::inverse(worldTransform);
+        glm::vec3 localOrigin = glm::vec3(invM * glm::vec4(rayOrigin, 1.0f));
+        glm::vec3 localDir = glm::vec3(invM * glm::vec4(rayDir, 0.0f));
+        if (glm::length2(localDir) < 1e-8f)
+        {
+            return false;
+        }
+        localDir = glm::normalize(localDir);
+
+        // Work in capsule-local space where Bounds.origin is at (0,0,0).
+        glm::vec3 ro = localOrigin - bounds.origin;
+        glm::vec3 rd = localDir;
+
+        float radius = std::max(bounds.extents.x, bounds.extents.z);
+        if (radius <= 0.0f)
+        {
+            return false;
+        }
+        // extents.y is (halfCylinder + radius) for a symmetric capsule.
+        float halfSegment = std::max(bounds.extents.y - radius, 0.0f);
+
+        float tHit = std::numeric_limits<float>::max();
+        bool hit = false;
+
+        // 1) Cylinder part around Y axis: x^2 + z^2 = r^2, |y| <= halfSegment.
+        float a = rd.x * rd.x + rd.z * rd.z;
+        float b = 2.0f * (ro.x * rd.x + ro.z * rd.z);
+        float c = ro.x * ro.x + ro.z * ro.z - radius * radius;
+
+        if (std::abs(a) > 1e-8f)
+        {
+            float disc = b * b - 4.0f * a * c;
+            if (disc >= 0.0f)
+            {
+                float s = std::sqrt(disc);
+                float invDen = 0.5f / a;
+                float t0 = (-b - s) * invDen;
+                float t1 = (-b + s) * invDen;
+                if (t0 > t1) std::swap(t0, t1);
+
+                auto tryCylHit = [&](float t)
+                {
+                    if (t < 0.0f || t >= tHit)
+                    {
+                        return;
+                    }
+                    glm::vec3 p = ro + rd * t;
+                    if (std::abs(p.y) <= halfSegment + 1e-4f)
+                    {
+                        tHit = t;
+                        hit = true;
+                    }
+                };
+
+                tryCylHit(t0);
+                tryCylHit(t1);
+            }
+        }
+
+        // 2) Spherical caps at y = +/- halfSegment.
+        auto intersectCap = [&](float capY)
+        {
+            glm::vec3 center(0.0f, capY, 0.0f);
+            glm::vec3 oc = ro - center;
+            float b2 = glm::dot(oc, rd);
+            float c2 = glm::dot(oc, oc) - radius * radius;
+            float disc = b2 * b2 - c2;
+            if (disc < 0.0f)
+            {
+                return;
+            }
+            float s = std::sqrt(disc);
+            float t0 = -b2 - s;
+            float t1 = -b2 + s;
+
+            auto tryCapHit = [&](float t)
+            {
+                if (t < 0.0f || t >= tHit)
+                {
+                    return;
+                }
+                tHit = t;
+                hit = true;
+            };
+
+            if (t0 >= 0.0f) tryCapHit(t0);
+            if (t1 >= 0.0f) tryCapHit(t1);
+        };
+
+        intersectCap(+halfSegment);
+        intersectCap(-halfSegment);
+
+        if (!hit)
+        {
+            return false;
+        }
+
+        glm::vec3 localHit = ro + rd * tHit;
+        glm::vec3 worldHit = glm::vec3(worldTransform * glm::vec4(localHit + bounds.origin, 1.0f));
+
+        if (glm::dot(worldHit - rayOrigin, rayDir) <= 0.0f)
+        {
+            return false;
+        }
+
+        outWorldHit = worldHit;
+        return true;
+    }
+
     // Ray / oriented-bounds intersection in world space using object-local shape.
     // Uses a quick sphere test first; on success refines based on BoundsType.
     // Returns true when hit; outWorldHit is the closest hit point in world space.
@@ -173,9 +297,12 @@ namespace
                 outWorldHit = rayOrigin + rayDir * sphereT;
                 return true;
             }
+            case BoundsType::Capsule:
+            {
+                return intersect_ray_capsule(rayOrigin, rayDir, bounds, worldTransform, outWorldHit);
+            }
             case BoundsType::Box:
             case BoundsType::Mesh: // TODO: replace with BVH/mesh query; box is a safe fallback.
-            case BoundsType::Capsule:
             default:
             {
                 // For Capsule and Mesh we currently fall back to the oriented box;

@@ -40,7 +40,7 @@ public:
 
     struct MeshGeometryDesc
     {
-        enum class Type { Provided, Cube, Sphere };
+        enum class Type { Provided, Cube, Sphere, Plane, Capsule };
 
         Type type = Type::Provided;
         std::span<Vertex> vertices{};

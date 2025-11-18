@@ -17,6 +17,7 @@
 #include "core/texture_cache.h"
 #include "core/ibl_manager.h"
 #include "engine_context.h"
+#include <vk_types.h>
 
 namespace {
 

@@ -111,6 +111,18 @@ std::shared_ptr<MeshAsset> AssetManager::getPrimitive(std::string_view name) con
         if (auto m = findBy("Sphere")) return m;
         return {};
     }
+    if (name == std::string_view("plane") || name == std::string_view("Plane"))
+    {
+        if (auto m = findBy("plane")) return m;
+        if (auto m = findBy("Plane")) return m;
+        return {};
+    }
+    if (name == std::string_view("capsule") || name == std::string_view("Capsule"))
+    {
+        if (auto m = findBy("capsule")) return m;
+        if (auto m = findBy("Capsule")) return m;
+        return {};
+    }
     return {};
 }
 
@@ -142,6 +154,16 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
         break;
     case MeshGeometryDesc::Type::Sphere:
         primitives::buildSphere(tmpVerts, tmpInds, info.geometry.sectors, info.geometry.stacks);
+        vertsSpan = tmpVerts;
+        indsSpan = tmpInds;
+        break;
+    case MeshGeometryDesc::Type::Plane:
+        primitives::buildPlane(tmpVerts, tmpInds);
+        vertsSpan = tmpVerts;
+        indsSpan = tmpInds;
+        break;
+    case MeshGeometryDesc::Type::Capsule:
+        primitives::buildCapsule(tmpVerts, tmpInds);
         vertsSpan = tmpVerts;
         indsSpan = tmpInds;
         break;
@@ -246,7 +268,15 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
         case MeshGeometryDesc::Type::Sphere:
             surf.bounds.type = BoundsType::Sphere;
             break;
+        case MeshGeometryDesc::Type::Capsule:
+            surf.bounds.type = BoundsType::Capsule;
+            break;
         case MeshGeometryDesc::Type::Cube:
+            surf.bounds.type = BoundsType::Box;
+            break;
+        case MeshGeometryDesc::Type::Plane:
+            surf.bounds.type = BoundsType::Box;
+            break;
         case MeshGeometryDesc::Type::Provided:
         default:
             surf.bounds.type = BoundsType::Box;
