@@ -19,6 +19,8 @@
 #include "engine_context.h"
 #include <vk_types.h>
 
+#include "mesh_bvh.h"
+
 namespace {
 
 // Background / compute playground
@@ -538,7 +540,9 @@ static void ui_scene(VulkanEngine *eng)
     ImGui::Text("Opaque draws: %zu", dc.OpaqueSurfaces.size());
     ImGui::Text("Transp draws: %zu", dc.TransparentSurfaces.size());
     ImGui::Checkbox("Use ID-buffer picking", &eng->_useIdBufferPicking);
+    ImGui::Checkbox("Debug draw mesh BVH (last pick)", &eng->_debugDrawBVH);
     ImGui::Separator();
+
     if (eng->_lastPick.valid)
     {
         const char *meshName = eng->_lastPick.mesh ? eng->_lastPick.mesh->name.c_str() : "<unknown>";
@@ -556,6 +560,21 @@ static void ui_scene(VulkanEngine *eng)
         ImGui::Text("Indices: first=%u count=%u",
                     eng->_lastPick.firstIndex,
                     eng->_lastPick.indexCount);
+
+        if (eng->_sceneManager)
+        {
+            const SceneManager::PickingDebug &dbg = eng->_sceneManager->getPickingDebug();
+            ImGui::Text("Mesh BVH used: %s, hit: %s, fallback box: %s",
+                        dbg.usedMeshBVH ? "yes" : "no",
+                        dbg.meshBVHHit ? "yes" : "no",
+                        dbg.meshBVHFallbackBox ? "yes" : "no");
+            if (dbg.meshBVHPrimCount > 0)
+            {
+                ImGui::Text("Mesh BVH stats: prims=%u, nodes=%u",
+                            dbg.meshBVHPrimCount,
+                            dbg.meshBVHNodeCount);
+            }
+        }
     }
     else
     {

@@ -2,6 +2,7 @@
 
 #include "vk_swapchain.h"
 #include "core/engine_context.h"
+#include "mesh_bvh.h"
 
 #include "glm/gtx/transform.hpp"
 #include <glm/gtc/matrix_transform.hpp>
@@ -14,6 +15,13 @@
 
 namespace
 {
+    struct BoundsHitDebug
+    {
+        bool usedBVH = false;
+        bool bvhHit = false;
+        bool fallbackBox = false;
+    };
+
     // Ray / oriented-box intersection in world space using object-local AABB.
     // Returns true when hit; outWorldHit is the closest hit point in world space.
     bool intersect_ray_box(const glm::vec3 &rayOrigin,
@@ -262,14 +270,18 @@ namespace
     }
 
     // Ray / oriented-bounds intersection in world space using object-local shape.
-    // Uses a quick sphere test first; on success refines based on BoundsType.
+    // For non-mesh shapes we use a quick world-space bounding-sphere pretest;
+    // for mesh bounds we go directly to the mesh BVH (which already has a root AABB).
     // Returns true when hit; outWorldHit is the closest hit point in world space.
     bool intersect_ray_bounds(const glm::vec3 &rayOrigin,
                               const glm::vec3 &rayDir,
-                              const Bounds &bounds,
-                              const glm::mat4 &worldTransform,
-                              glm::vec3 &outWorldHit)
+                              const RenderObject &obj,
+                              glm::vec3 &outWorldHit,
+                              BoundsHitDebug *debug)
     {
+        const Bounds &bounds = obj.bounds;
+        const glm::mat4 &worldTransform = obj.transform;
+
         // Non-pickable object.
         if (bounds.type == BoundsType::None)
         {
@@ -281,32 +293,63 @@ namespace
             return false;
         }
 
-        // Early reject using bounding sphere in world space.
-        float sphereT = 0.0f;
-        if (!intersect_ray_sphere(rayOrigin, rayDir, bounds, worldTransform, sphereT))
-        {
-            return false;
-        }
-
-        // Shape-specific refinement after the conservative sphere test.
         switch (bounds.type)
         {
             case BoundsType::Sphere:
             {
+                // Early reject using bounding sphere in world space.
+                float sphereT = 0.0f;
+                if (!intersect_ray_sphere(rayOrigin, rayDir, bounds, worldTransform, sphereT))
+                {
+                    return false;
+                }
                 // We already have the hit distance along the ray from the sphere test.
                 outWorldHit = rayOrigin + rayDir * sphereT;
                 return true;
             }
             case BoundsType::Capsule:
             {
+                float sphereT = 0.0f;
+                if (!intersect_ray_sphere(rayOrigin, rayDir, bounds, worldTransform, sphereT))
+                {
+                    return false;
+                }
                 return intersect_ray_capsule(rayOrigin, rayDir, bounds, worldTransform, outWorldHit);
             }
+            case BoundsType::Mesh:
+            {
+                // Try high-precision mesh BVH first when available, then fall back to box.
+                if (obj.sourceMesh && obj.sourceMesh->bvh)
+                {
+                    if (debug)
+                    {
+                        debug->usedBVH = true;
+                    }
+                    MeshBVHPickHit meshHit{};
+                    if (intersect_ray_mesh_bvh(*obj.sourceMesh->bvh, worldTransform, rayOrigin, rayDir, meshHit))
+                    {
+                        if (debug)
+                        {
+                            debug->bvhHit = true;
+                        }
+                        outWorldHit = meshHit.worldPos;
+                        return true;
+                    }
+                    if (debug)
+                    {
+                        debug->fallbackBox = true;
+                    }
+                }
+                // return intersect_ray_box(rayOrigin, rayDir, bounds, worldTransform, outWorldHit);
+            }
             case BoundsType::Box:
-            case BoundsType::Mesh: // TODO: replace with BVH/mesh query; box is a safe fallback.
             default:
             {
-                // For Capsule and Mesh we currently fall back to the oriented box;
-                // this still benefits from tighter AABBs if you author them.
+                float sphereT = 0.0f;
+                if (!intersect_ray_sphere(rayOrigin, rayDir, bounds, worldTransform, sphereT))
+                {
+                    return false;
+                }
                 return intersect_ray_box(rayOrigin, rayDir, bounds, worldTransform, outWorldHit);
             }
         }
@@ -397,12 +440,16 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
     float bestDist2 = std::numeric_limits<float>::max();
     glm::vec3 bestHitPos{};
 
+    // Reset debug info for this pick.
+    pickingDebug = {};
+
     auto testList = [&](const std::vector<RenderObject> &list)
     {
         for (const RenderObject &obj: list)
         {
             glm::vec3 hitPos{};
-            if (!intersect_ray_bounds(rayOrigin, rayDir, obj.bounds, obj.transform, hitPos))
+            BoundsHitDebug localDebug{};
+            if (!intersect_ray_bounds(rayOrigin, rayDir, obj, hitPos, &localDebug))
             {
                 continue;
             }
@@ -414,6 +461,23 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
                 bestHitPos = hitPos;
                 outObject = obj;
                 anyHit = true;
+
+                // Capture debug info for the best hit so far.
+                pickingDebug.usedMeshBVH = localDebug.usedBVH;
+                pickingDebug.meshBVHHit = localDebug.bvhHit;
+                pickingDebug.meshBVHFallbackBox = localDebug.fallbackBox;
+                if (obj.sourceMesh && obj.sourceMesh->bvh)
+                {
+                    pickingDebug.meshBVHPrimCount =
+                        static_cast<uint32_t>(obj.sourceMesh->bvh->primitives.size());
+                    pickingDebug.meshBVHNodeCount =
+                        static_cast<uint32_t>(obj.sourceMesh->bvh->nodes.size());
+                }
+                else
+                {
+                    pickingDebug.meshBVHPrimCount = 0;
+                    pickingDebug.meshBVHNodeCount = 0;
+                }
             }
         }
     };

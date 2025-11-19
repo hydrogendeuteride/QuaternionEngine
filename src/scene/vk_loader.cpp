@@ -18,6 +18,7 @@
 #include <fastgltf/util.hpp>
 #include <optional>
 #include "tangent_space.h"
+#include "mesh_bvh.h"
 //> loadimg
 std::optional<AllocatedImage> load_image(VulkanEngine *engine, fastgltf::Asset &asset, fastgltf::Image &image, bool srgb)
 {
@@ -592,16 +593,23 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
                 newSurface.bounds.origin = (maxpos + minpos) / 2.f;
                 newSurface.bounds.extents = (maxpos - minpos) / 2.f;
                 newSurface.bounds.sphereRadius = glm::length(newSurface.bounds.extents);
-                newSurface.bounds.type = BoundsType::Box;
+                newSurface.bounds.type = BoundsType::Mesh;
             }
             else
             {
                 newSurface.bounds.origin = glm::vec3(0.0f);
                 newSurface.bounds.extents = glm::vec3(0.5f);
                 newSurface.bounds.sphereRadius = glm::length(newSurface.bounds.extents);
-                newSurface.bounds.type = BoundsType::Box;
+                newSurface.bounds.type = BoundsType::Mesh;
             }
             newmesh->surfaces.push_back(newSurface);
+        }
+
+        // Build CPU BVH for precise picking over this mesh (triangle-level).
+        {
+            std::span<const Vertex> vSpan(vertices.data(), vertices.size());
+            std::span<const uint32_t> iSpan(indices.data(), indices.size());
+            newmesh->bvh = build_mesh_bvh(*newmesh, vSpan, iSpan);
         }
 
         newmesh->meshBuffers = engine->_resourceManager->uploadMesh(indices, vertices);

@@ -121,6 +121,7 @@ public:
         MeshAsset *mesh = nullptr;
         LoadedGLTF *scene = nullptr;
         glm::vec3 worldPos{0.0f};
+        glm::mat4 worldTransform{1.0f};
         uint32_t indexCount = 0;
         uint32_t firstIndex = 0;
         uint32_t surfaceIndex = 0;
@@ -151,6 +152,8 @@ public:
 
     // Toggle to enable/disable ID-buffer picking in addition to raycast
     bool _useIdBufferPicking = false;
+    // Debug: draw mesh BVH boxes for last pick
+    bool _debugDrawBVH = false;
 
     // Debug: persistent pass enable overrides (by pass name)
     std::unordered_map<std::string, bool> _rgPassToggles;

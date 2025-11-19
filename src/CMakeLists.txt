@@ -78,6 +78,8 @@ add_executable (vulkan_engine
   scene/vk_scene.h
   scene/vk_scene.cpp
   scene/vk_scene_picking.cpp
+  scene/mesh_bvh.h
+  scene/mesh_bvh.cpp
   scene/vk_loader.h
   scene/vk_loader.cpp
   scene/tangent_space.h

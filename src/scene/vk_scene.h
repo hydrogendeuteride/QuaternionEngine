@@ -115,6 +115,17 @@ public:
         float scene_update_time = 0.f;
     } stats;
 
+    struct PickingDebug
+    {
+        bool usedMeshBVH = false;
+        bool meshBVHHit = false;
+        bool meshBVHFallbackBox = false;
+        uint32_t meshBVHPrimCount = 0;
+        uint32_t meshBVHNodeCount = 0;
+    };
+
+    const PickingDebug &getPickingDebug() const { return pickingDebug; }
+
 private:
     EngineContext *_context = nullptr;
 
@@ -126,4 +137,6 @@ private:
     std::unordered_map<std::string, std::shared_ptr<Node> > loadedNodes;
     std::unordered_map<std::string, MeshInstance> dynamicMeshInstances;
     std::unordered_map<std::string, GLTFInstance> dynamicGLTFInstances;
+
+    PickingDebug pickingDebug{};
 };

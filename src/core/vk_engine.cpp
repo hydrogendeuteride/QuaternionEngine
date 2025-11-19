@@ -466,6 +466,7 @@ void VulkanEngine::draw()
                 _lastPick.mesh = picked.sourceMesh;
                 _lastPick.scene = picked.sourceScene;
                 _lastPick.worldPos = fallbackPos;
+                _lastPick.worldTransform = picked.transform;
                 _lastPick.firstIndex = picked.firstIndex;
                 _lastPick.indexCount = picked.indexCount;
                 _lastPick.surfaceIndex = picked.surfaceIndex;
@@ -496,6 +497,7 @@ void VulkanEngine::draw()
             _hoverPick.mesh = hoverObj.sourceMesh;
             _hoverPick.scene = hoverObj.sourceScene;
             _hoverPick.worldPos = hoverPos;
+            _hoverPick.worldTransform = hoverObj.transform;
             _hoverPick.firstIndex = hoverObj.firstIndex;
             _hoverPick.indexCount = hoverObj.indexCount;
             _hoverPick.surfaceIndex = hoverObj.surfaceIndex;
@@ -816,6 +818,7 @@ void VulkanEngine::run()
                             _lastPick.mesh = hitObject.sourceMesh;
                             _lastPick.scene = hitObject.sourceScene;
                             _lastPick.worldPos = hitPos;
+                            _lastPick.worldTransform = hitObject.transform;
                             _lastPick.firstIndex = hitObject.firstIndex;
                             _lastPick.indexCount = hitObject.indexCount;
                             _lastPick.surfaceIndex = hitObject.surfaceIndex;
@@ -851,6 +854,7 @@ void VulkanEngine::run()
                             // Use bounds origin transformed to world as a representative point.
                             glm::vec3 centerWorld = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.0f));
                             info.worldPos = centerWorld;
+                             info.worldTransform = obj.transform;
                             info.firstIndex = obj.firstIndex;
                             info.indexCount = obj.indexCount;
                             info.surfaceIndex = obj.surfaceIndex;

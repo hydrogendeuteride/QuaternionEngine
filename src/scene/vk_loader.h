@@ -45,6 +45,8 @@ struct GeoSurface
     std::shared_ptr<GLTFMaterial> material;
 };
 
+struct MeshBVH;
+
 struct MeshAsset
 {
     std::string name;
@@ -52,6 +54,9 @@ struct MeshAsset
 
     std::vector<GeoSurface> surfaces;
     GPUMeshBuffers meshBuffers;
+
+    // Optional CPU BVH for precise picking / queries.
+    std::shared_ptr<MeshBVH> bvh;
 };
 
 struct LoadedGLTF : public IRenderable
