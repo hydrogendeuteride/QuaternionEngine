@@ -89,14 +89,20 @@ namespace
             return false;
         }
 
-        float tHit = (tMin >= 0.0f) ? tMin : tMax;
-        glm::vec3 localHit = localOrigin + tHit * localDir;
-        glm::vec3 worldHit = glm::vec3(worldTransform * glm::vec4(localHit, 1.0f));
-
-        if (glm::dot(worldHit - rayOrigin, rayDir) <= 0.0f)
+        // Choose the closest intersection in front of the ray origin.
+        // If the ray starts inside the box (tMin <= 0), use the exit point tMax.
+        float tHit = tMin;
+        if (tHit <= 0.0f)
+        {
+            tHit = tMax;
+        }
+        if (tHit <= 0.0f)
         {
             return false;
         }
+
+        glm::vec3 localHit = localOrigin + tHit * localDir;
+        glm::vec3 worldHit = glm::vec3(worldTransform * glm::vec4(localHit, 1.0f));
 
         outWorldHit = worldHit;
         return true;

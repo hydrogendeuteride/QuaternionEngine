@@ -8,6 +8,7 @@
 #include <render/vk_materials.h>
 #include <render/primitives.h>
 #include <scene/tangent_space.h>
+#include <scene/mesh_bvh.h>
 #include <stb_image.h>
 #include "asset_locator.h"
 #include <core/texture_cache.h>
@@ -530,6 +531,10 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const std::string &name,
     surf.material = material;
     surf.bounds = compute_bounds(vertices);
     mesh->surfaces.push_back(surf);
+
+    // Build CPU-side BVH for precise ray picking over this mesh.
+    // This uses the same mesh-local vertex/index data as the GPU upload.
+    mesh->bvh = build_mesh_bvh(*mesh, vertices, indices);
 
     _meshCache.emplace(name, mesh);
     return mesh;

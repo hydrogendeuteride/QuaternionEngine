@@ -540,6 +540,8 @@ static void ui_scene(VulkanEngine *eng)
     ImGui::Text("Opaque draws: %zu", dc.OpaqueSurfaces.size());
     ImGui::Text("Transp draws: %zu", dc.TransparentSurfaces.size());
     ImGui::Checkbox("Use ID-buffer picking", &eng->_useIdBufferPicking);
+    ImGui::Text("Picking mode: %s",
+                eng->_useIdBufferPicking ? "ID buffer (async, 1-frame latency)" : "CPU raycast");
     ImGui::Checkbox("Debug draw mesh BVH (last pick)", &eng->_debugDrawBVH);
     ImGui::Separator();
 
@@ -552,6 +554,9 @@ static void ui_scene(VulkanEngine *eng)
             sceneName = eng->_lastPick.scene->debugName.c_str();
         }
         ImGui::Text("Last pick scene: %s", sceneName);
+        ImGui::Text("Last pick source: %s",
+                    eng->_useIdBufferPicking ? "ID buffer" : "CPU raycast");
+        ImGui::Text("Last pick object ID: %u", eng->_lastPickObjectID);
         ImGui::Text("Last pick mesh: %s (surface %u)", meshName, eng->_lastPick.surfaceIndex);
         ImGui::Text("World pos: (%.3f, %.3f, %.3f)",
                     eng->_lastPick.worldPos.x,

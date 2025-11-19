@@ -127,6 +127,7 @@ public:
         uint32_t surfaceIndex = 0;
         bool valid = false;
     } _lastPick;
+    uint32_t _lastPickObjectID = 0;
 
     struct PickRequest
     {

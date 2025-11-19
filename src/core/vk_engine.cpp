@@ -438,53 +438,6 @@ void VulkanEngine::cleanup()
 
 void VulkanEngine::draw()
 {
-    //> frame_clear
-    //wait until the gpu has finished rendering the last frame. Timeout of 1 second
-    VK_CHECK(vkWaitForFences(_deviceManager->device(), 1, &get_current_frame()._renderFence, true, 1000000000));
-
-    // If we scheduled an ID-buffer readback in the previous frame, resolve it now.
-    if (_pickResultPending && _pickReadbackBuffer.buffer && _sceneManager)
-    {
-        vmaInvalidateAllocation(_deviceManager->allocator(), _pickReadbackBuffer.allocation, 0, sizeof(uint32_t));
-        uint32_t pickedID = 0;
-        if (_pickReadbackBuffer.info.pMappedData)
-        {
-            pickedID = *reinterpret_cast<const uint32_t *>(_pickReadbackBuffer.info.pMappedData);
-        }
-
-        if (pickedID == 0)
-        {
-            // Do not override existing raycast pick when ID buffer reports "no object".
-        }
-        else
-        {
-            RenderObject picked{};
-            if (_sceneManager->resolveObjectID(pickedID, picked))
-            {
-                // Fallback hit position: object origin in world space (can refine later)
-                glm::vec3 fallbackPos = glm::vec3(picked.transform[3]);
-                _lastPick.mesh = picked.sourceMesh;
-                _lastPick.scene = picked.sourceScene;
-                _lastPick.worldPos = fallbackPos;
-                _lastPick.worldTransform = picked.transform;
-                _lastPick.firstIndex = picked.firstIndex;
-                _lastPick.indexCount = picked.indexCount;
-                _lastPick.surfaceIndex = picked.surfaceIndex;
-                _lastPick.valid = true;
-            }
-        }
-        _pickResultPending = false;
-    }
-
-    get_current_frame()._deletionQueue.flush();
-    // Resolve last frame's pass timings before we clear and rebuild the graph
-    if (_renderGraph)
-    {
-        _renderGraph->resolve_timings();
-    }
-    get_current_frame()._frameDescriptors.clear_pools(_deviceManager->device());
-    //< frame_clear
-
     _sceneManager->update_scene();
 
     // Per-frame hover raycast based on last mouse position.
@@ -808,33 +761,38 @@ void VulkanEngine::run()
 
                 if (treatAsClick)
                 {
-                    // Raycast click selection
-                    if (_sceneManager)
-                    {
-                        RenderObject hitObject{};
-                        glm::vec3 hitPos{};
-                        if (_sceneManager->pick(releasePos, hitObject, hitPos))
-                        {
-                            _lastPick.mesh = hitObject.sourceMesh;
-                            _lastPick.scene = hitObject.sourceScene;
-                            _lastPick.worldPos = hitPos;
-                            _lastPick.worldTransform = hitObject.transform;
-                            _lastPick.firstIndex = hitObject.firstIndex;
-                            _lastPick.indexCount = hitObject.indexCount;
-                            _lastPick.surfaceIndex = hitObject.surfaceIndex;
-                            _lastPick.valid = true;
-                        }
-                        else
-                        {
-                            _lastPick.valid = false;
-                        }
-                    }
-
-                    // Optionally queue an ID-buffer pick at this position
                     if (_useIdBufferPicking)
                     {
+                        // Asynchronous ID-buffer clicking: queue a pick request for this position.
+                        // The result will be resolved at the start of a future frame from the ID buffer.
                         _pendingPick.active = true;
                         _pendingPick.windowPos = releasePos;
+                    }
+                    else
+                    {
+                        // Raycast click selection (CPU side) when ID-buffer picking is disabled.
+                        if (_sceneManager)
+                        {
+                            RenderObject hitObject{};
+                            glm::vec3 hitPos{};
+                            if (_sceneManager->pick(releasePos, hitObject, hitPos))
+                            {
+                                _lastPick.mesh = hitObject.sourceMesh;
+                                _lastPick.scene = hitObject.sourceScene;
+                                _lastPick.worldPos = hitPos;
+                                _lastPick.worldTransform = hitObject.transform;
+                                _lastPick.firstIndex = hitObject.firstIndex;
+                                _lastPick.indexCount = hitObject.indexCount;
+                                _lastPick.surfaceIndex = hitObject.surfaceIndex;
+                                _lastPick.valid = true;
+                                _lastPickObjectID = hitObject.objectID;
+                            }
+                            else
+                            {
+                                _lastPick.valid = false;
+                                _lastPickObjectID = 0;
+                            }
+                        }
                     }
                 }
                 else
@@ -881,6 +839,58 @@ void VulkanEngine::run()
             _swapchainManager->resize_swapchain(_window);
         }
 
+        // Begin frame: wait for the GPU, resolve pending ID-buffer picks,
+        // and clear per-frame resources before building UI and recording commands.
+        VK_CHECK(vkWaitForFences(_deviceManager->device(), 1, &get_current_frame()._renderFence, true, 1000000000));
+
+        if (_pickResultPending && _pickReadbackBuffer.buffer && _sceneManager)
+        {
+            vmaInvalidateAllocation(_deviceManager->allocator(), _pickReadbackBuffer.allocation, 0, sizeof(uint32_t));
+            uint32_t pickedID = 0;
+            if (_pickReadbackBuffer.info.pMappedData)
+            {
+                pickedID = *reinterpret_cast<const uint32_t *>(_pickReadbackBuffer.info.pMappedData);
+            }
+
+            if (pickedID == 0)
+            {
+                // No object under cursor in ID buffer: clear last pick.
+                _lastPick.valid = false;
+                _lastPickObjectID = 0;
+            }
+            else
+            {
+                _lastPickObjectID = pickedID;
+                RenderObject picked{};
+                if (_sceneManager->resolveObjectID(pickedID, picked))
+                {
+                    // Fallback hit position: object origin in world space (can refine later)
+                    glm::vec3 fallbackPos = glm::vec3(picked.transform[3]);
+                    _lastPick.mesh = picked.sourceMesh;
+                    _lastPick.scene = picked.sourceScene;
+                    _lastPick.worldPos = fallbackPos;
+                    _lastPick.worldTransform = picked.transform;
+                    _lastPick.firstIndex = picked.firstIndex;
+                    _lastPick.indexCount = picked.indexCount;
+                    _lastPick.surfaceIndex = picked.surfaceIndex;
+                    _lastPick.valid = true;
+                }
+                else
+                {
+                    _lastPick.valid = false;
+                    _lastPickObjectID = 0;
+                }
+            }
+            _pickResultPending = false;
+        }
+
+        get_current_frame()._deletionQueue.flush();
+        if (_renderGraph)
+        {
+            _renderGraph->resolve_timings();
+        }
+        get_current_frame()._frameDescriptors.clear_pools(_deviceManager->device());
+
 
         // imgui new frame
         ImGui_ImplVulkan_NewFrame();
@@ -918,7 +928,7 @@ void VulkanEngine::init_frame_resources()
         _frames[i].init(_deviceManager.get(), frame_sizes);
     }
 
-    // Allocate a small readback buffer for ID-buffer picking (single uint32 pixel)
+    // Allocate a small readback buffer for ID-buffer picking (single uint32 pixel).
     _pickReadbackBuffer = _resourceManager->create_buffer(
         sizeof(uint32_t),
         VK_BUFFER_USAGE_TRANSFER_DST_BIT,

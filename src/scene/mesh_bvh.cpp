@@ -58,10 +58,14 @@ std::unique_ptr<MeshBVH> build_mesh_bvh(const MeshAsset &mesh,
             const glm::vec3 &p1 = vertices[i1].position;
             const glm::vec3 &p2 = vertices[i2].position;
 
+            // BVH2 now expects triangle primitives with explicit vertices.
+            // Store the triangle in mesh-local space and let the library
+            // compute/update the AABB used for hierarchy construction.
             PrimitiveF prim{};
-            prim.bounds.expand(Vec3<float>(p0.x, p0.y, p0.z));
-            prim.bounds.expand(Vec3<float>(p1.x, p1.y, p1.z));
-            prim.bounds.expand(Vec3<float>(p2.x, p2.y, p2.z));
+            prim.v0 = Vec3<float>(p0.x, p0.y, p0.z);
+            prim.v1 = Vec3<float>(p1.x, p1.y, p1.z);
+            prim.v2 = Vec3<float>(p2.x, p2.y, p2.z);
+            prim.updateBounds();
             result->primitives.push_back(prim);
 
             MeshBVHPrimitiveRef ref{};
@@ -144,4 +148,3 @@ bool intersect_ray_mesh_bvh(const MeshBVH &bvh,
 
     return true;
 }
-

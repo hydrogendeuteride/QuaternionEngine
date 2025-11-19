@@ -20,7 +20,7 @@ public:
     bool rmbDown { false };
 
     // Field of view in degrees for projection
-    float fovDegrees { 70.f };
+    float fovDegrees { 50.f };
 
     glm::mat4 getViewMatrix();
     glm::mat4 getRotationMatrix();

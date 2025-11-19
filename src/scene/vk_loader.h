@@ -21,7 +21,7 @@ enum class BoundsType : uint8_t
     Box,        // oriented box using origin/extents (default)
     Sphere,     // sphere using origin + sphereRadius
     Capsule,    // capsule aligned with local Y (derived from extents)
-    Mesh        // full mesh (BVH / ray query); currently falls back to Box
+    Mesh        // full mesh (BVH / ray query using mesh BVH when available)
 };
 
 struct Bounds
