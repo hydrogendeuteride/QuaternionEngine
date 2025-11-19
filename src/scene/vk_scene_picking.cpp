@@ -283,10 +283,16 @@ namespace
                               const glm::vec3 &rayDir,
                               const RenderObject &obj,
                               glm::vec3 &outWorldHit,
-                              BoundsHitDebug *debug)
+                              BoundsHitDebug *debug,
+                              MeshBVHPickHit *outMeshHit)
     {
         const Bounds &bounds = obj.bounds;
         const glm::mat4 &worldTransform = obj.transform;
+
+        if (outMeshHit)
+        {
+            *outMeshHit = {};
+        }
 
         // Non-pickable object.
         if (bounds.type == BoundsType::None)
@@ -324,29 +330,41 @@ namespace
             }
             case BoundsType::Mesh:
             {
-                // Try high-precision mesh BVH first when available, then fall back to box.
-                if (obj.sourceMesh && obj.sourceMesh->bvh)
+                // For mesh bounds we rely solely on the CPU mesh BVH.
+                // If there is no BVH or the BVH misses, the object is
+                // treated as not hit by this ray (no coarse box fallback).
+                if (!obj.sourceMesh || !obj.sourceMesh->bvh)
+                {
+                    return false;
+                }
+
+                if (debug)
+                {
+                    debug->usedBVH = true;
+                }
+
+                MeshBVHPickHit meshHit{};
+                if (!intersect_ray_mesh_bvh(*obj.sourceMesh->bvh, worldTransform, rayOrigin, rayDir, meshHit))
                 {
                     if (debug)
                     {
-                        debug->usedBVH = true;
-                    }
-                    MeshBVHPickHit meshHit{};
-                    if (intersect_ray_mesh_bvh(*obj.sourceMesh->bvh, worldTransform, rayOrigin, rayDir, meshHit))
-                    {
-                        if (debug)
-                        {
-                            debug->bvhHit = true;
-                        }
-                        outWorldHit = meshHit.worldPos;
-                        return true;
-                    }
-                    if (debug)
-                    {
+                        // BVH was queried but produced no hit.
                         debug->fallbackBox = true;
                     }
+                    return false;
                 }
-                // return intersect_ray_box(rayOrigin, rayDir, bounds, worldTransform, outWorldHit);
+
+                if (debug)
+                {
+                    debug->bvhHit = true;
+                }
+
+                outWorldHit = meshHit.worldPos;
+                if (outMeshHit)
+                {
+                    *outMeshHit = meshHit;
+                }
+                return true;
             }
             case BoundsType::Box:
             default:
@@ -455,7 +473,8 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
         {
             glm::vec3 hitPos{};
             BoundsHitDebug localDebug{};
-            if (!intersect_ray_bounds(rayOrigin, rayDir, obj, hitPos, &localDebug))
+            MeshBVHPickHit localMeshHit{};
+            if (!intersect_ray_bounds(rayOrigin, rayDir, obj, hitPos, &localDebug, &localMeshHit))
             {
                 continue;
             }
@@ -466,6 +485,16 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
                 bestDist2 = d2;
                 bestHitPos = hitPos;
                 outObject = obj;
+
+                // If we have a precise mesh BVH hit, refine the picked
+                // primitive to the exact triangle instead of the whole surface.
+                if (localMeshHit.hit && outObject.sourceMesh && outObject.sourceMesh->bvh)
+                {
+                    outObject.firstIndex = localMeshHit.firstIndex;
+                    outObject.indexCount = 3;
+                    outObject.surfaceIndex = localMeshHit.surfaceIndex;
+                }
+
                 anyHit = true;
 
                 // Capture debug info for the best hit so far.
