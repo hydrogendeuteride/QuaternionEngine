@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <glm/vec2.hpp>
+#include <string>
 
 #include "scene/vk_loader.h"
 class EngineContext;
@@ -28,8 +29,19 @@ struct RenderObject
     uint32_t surfaceIndex = 0;
     // Unique per-draw identifier for ID-buffer picking (0 = none).
     uint32_t objectID = 0;
-    // Optional owning glTF scene for this draw (null for procedural/dynamic meshes).
+    // Optional logical owner for editor/picking (instance name etc.).
+    enum class OwnerType : uint8_t
+    {
+        None = 0,
+        StaticGLTF,     // loaded scene
+        GLTFInstance,   // runtime glTF instance with transform
+        MeshInstance    // dynamic primitive/mesh instance
+    };
+    OwnerType ownerType = OwnerType::None;
+    std::string ownerName;
+    // Optional owning glTF scene and node for this draw (null for procedural/dynamic meshes).
     LoadedGLTF *sourceScene = nullptr;
+    Node *sourceNode = nullptr;
 };
 
 struct DrawContext
@@ -137,6 +149,9 @@ private:
     std::unordered_map<std::string, std::shared_ptr<Node> > loadedNodes;
     std::unordered_map<std::string, MeshInstance> dynamicMeshInstances;
     std::unordered_map<std::string, GLTFInstance> dynamicGLTFInstances;
+    // Keep GLTF assets alive until after the next frame fence to avoid destroying
+    // GPU resources that might still be in-flight.
+    std::vector<std::shared_ptr<LoadedGLTF>> pendingGLTFRelease;
 
     PickingDebug pickingDebug{};
 };

@@ -120,6 +120,9 @@ public:
     {
         MeshAsset *mesh = nullptr;
         LoadedGLTF *scene = nullptr;
+        Node *node = nullptr;
+        RenderObject::OwnerType ownerType = RenderObject::OwnerType::None;
+        std::string ownerName;
         glm::vec3 worldPos{0.0f};
         glm::mat4 worldTransform{1.0f};
         uint32_t indexCount = 0;
@@ -173,6 +176,12 @@ public:
 
     // Query a conservative streaming texture budget for the texture cache.
     size_t query_texture_budget_bytes() const;
+
+    // Convenience helper: load a glTF from assets/models and add it as a runtime instance.
+    // modelRelativePath is relative to the AssetManager model root.
+    bool addGLTFInstance(const std::string &instanceName,
+                         const std::string &modelRelativePath,
+                         const glm::mat4 &transform = glm::mat4(1.f));
 
 	bool resize_requested{false};
 	bool freeze_rendering{false};

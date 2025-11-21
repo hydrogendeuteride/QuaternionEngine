@@ -254,13 +254,6 @@ void VulkanEngine::init()
     auto imguiPass = std::make_unique<ImGuiPass>();
     _renderPassManager->setImGuiPass(std::move(imguiPass));
 
-    const std::string structurePath = _assetManager->modelPath("mirage2000/scene.gltf");
-    const auto structureFile = _assetManager->loadGLTF(structurePath);
-
-    assert(structureFile.has_value());
-
-    _sceneManager->loadScene("structure", *structureFile);
-
     _resourceManager->set_deferred_uploads(true);
 
     //everything went fine
@@ -330,6 +323,8 @@ void VulkanEngine::init_default_data()
                                        BoundsType::Sphere);
     }
 
+    addGLTFInstance("mirage", "mirage2000/scene.gltf", glm::mat4(1.0f));
+
     _mainDeletionQueue.push_function([&]() {
         _resourceManager->destroy_image(_whiteImage);
         _resourceManager->destroy_image(_greyImage);
@@ -338,6 +333,32 @@ void VulkanEngine::init_default_data()
         _resourceManager->destroy_image(_flatNormalImage);
     });
     //< default_img
+}
+
+bool VulkanEngine::addGLTFInstance(const std::string &instanceName,
+                                   const std::string &modelRelativePath,
+                                   const glm::mat4 &transform)
+{
+    if (!_assetManager || !_sceneManager)
+    {
+        return false;
+    }
+
+    const std::string fullPath = _assetManager->modelPath(modelRelativePath);
+    auto gltf = _assetManager->loadGLTF(fullPath);
+    if (!gltf.has_value() || !gltf.value())
+    {
+        return false;
+    }
+
+    // Provide a readable debug name for UI/picking when missing.
+    if ((*gltf)->debugName.empty())
+    {
+        (*gltf)->debugName = modelRelativePath;
+    }
+
+    _sceneManager->addGLTFInstance(instanceName, *gltf, transform);
+    return true;
 }
 
 void VulkanEngine::cleanup()
@@ -449,6 +470,9 @@ void VulkanEngine::draw()
         {
             _hoverPick.mesh = hoverObj.sourceMesh;
             _hoverPick.scene = hoverObj.sourceScene;
+            _hoverPick.node = hoverObj.sourceNode;
+            _hoverPick.ownerType = hoverObj.ownerType;
+            _hoverPick.ownerName = hoverObj.ownerName;
             _hoverPick.worldPos = hoverPos;
             _hoverPick.worldTransform = hoverObj.transform;
             _hoverPick.firstIndex = hoverObj.firstIndex;
@@ -459,6 +483,8 @@ void VulkanEngine::draw()
         else
         {
             _hoverPick.valid = false;
+            _hoverPick.ownerName.clear();
+            _hoverPick.ownerType = RenderObject::OwnerType::None;
         }
     }
 
@@ -779,6 +805,9 @@ void VulkanEngine::run()
                             {
                                 _lastPick.mesh = hitObject.sourceMesh;
                                 _lastPick.scene = hitObject.sourceScene;
+                                _lastPick.node = hitObject.sourceNode;
+                                _lastPick.ownerType = hitObject.ownerType;
+                                _lastPick.ownerName = hitObject.ownerName;
                                 _lastPick.worldPos = hitPos;
                                 _lastPick.worldTransform = hitObject.transform;
                                 _lastPick.firstIndex = hitObject.firstIndex;
@@ -790,6 +819,8 @@ void VulkanEngine::run()
                             else
                             {
                                 _lastPick.valid = false;
+                                _lastPick.ownerName.clear();
+                                _lastPick.ownerType = RenderObject::OwnerType::None;
                                 _lastPickObjectID = 0;
                             }
                         }
@@ -809,10 +840,13 @@ void VulkanEngine::run()
                             PickInfo info{};
                             info.mesh = obj.sourceMesh;
                             info.scene = obj.sourceScene;
+                            info.node = obj.sourceNode;
+                            info.ownerType = obj.ownerType;
+                            info.ownerName = obj.ownerName;
                             // Use bounds origin transformed to world as a representative point.
                             glm::vec3 centerWorld = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.0f));
                             info.worldPos = centerWorld;
-                             info.worldTransform = obj.transform;
+                            info.worldTransform = obj.transform;
                             info.firstIndex = obj.firstIndex;
                             info.indexCount = obj.indexCount;
                             info.surfaceIndex = obj.surfaceIndex;
@@ -856,6 +890,8 @@ void VulkanEngine::run()
             {
                 // No object under cursor in ID buffer: clear last pick.
                 _lastPick.valid = false;
+                _lastPick.ownerName.clear();
+                _lastPick.ownerType = RenderObject::OwnerType::None;
                 _lastPickObjectID = 0;
             }
             else
@@ -868,6 +904,9 @@ void VulkanEngine::run()
                     glm::vec3 fallbackPos = glm::vec3(picked.transform[3]);
                     _lastPick.mesh = picked.sourceMesh;
                     _lastPick.scene = picked.sourceScene;
+                    _lastPick.node = picked.sourceNode;
+                    _lastPick.ownerType = picked.ownerType;
+                    _lastPick.ownerName = picked.ownerName;
                     _lastPick.worldPos = fallbackPos;
                     _lastPick.worldTransform = picked.transform;
                     _lastPick.firstIndex = picked.firstIndex;
@@ -878,6 +917,8 @@ void VulkanEngine::run()
                 else
                 {
                     _lastPick.valid = false;
+                    _lastPick.ownerName.clear();
+                    _lastPick.ownerType = RenderObject::OwnerType::None;
                     _lastPickObjectID = 0;
                 }
             }
@@ -968,6 +1009,7 @@ void MeshNode::Draw(const glm::mat4 &topMatrix, DrawContext &ctx)
         def.surfaceIndex = i;
         def.objectID = ctx.nextID++;
         def.sourceScene = scene;
+        def.sourceNode = this;
 
         if (s.material->data.passType == MaterialPass::Transparent)
         {

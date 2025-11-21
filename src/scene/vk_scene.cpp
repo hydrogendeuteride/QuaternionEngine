@@ -34,6 +34,9 @@ void SceneManager::update_scene()
 {
     auto start = std::chrono::system_clock::now();
 
+    // Release any GLTF assets that were scheduled for safe destruction after GPU idle.
+    pendingGLTFRelease.clear();
+
     mainDrawContext.OpaqueSurfaces.clear();
     mainDrawContext.TransparentSurfaces.clear();
     mainDrawContext.nextID = 1;
@@ -78,12 +81,30 @@ void SceneManager::update_scene()
         }
     }
 
+    auto tagOwner = [&](RenderObject::OwnerType type, const std::string &name,
+                        size_t opaqueBegin, size_t transpBegin)
+    {
+        for (size_t i = opaqueBegin; i < mainDrawContext.OpaqueSurfaces.size(); ++i)
+        {
+            mainDrawContext.OpaqueSurfaces[i].ownerType = type;
+            mainDrawContext.OpaqueSurfaces[i].ownerName = name;
+        }
+        for (size_t i = transpBegin; i < mainDrawContext.TransparentSurfaces.size(); ++i)
+        {
+            mainDrawContext.TransparentSurfaces[i].ownerType = type;
+            mainDrawContext.TransparentSurfaces[i].ownerName = name;
+        }
+    };
+
     // Draw all loaded GLTF scenes (static world)
     for (auto &[name, scene] : loadedScenes)
     {
         if (scene)
         {
+            const size_t opaqueStart = mainDrawContext.OpaqueSurfaces.size();
+            const size_t transpStart = mainDrawContext.TransparentSurfaces.size();
             scene->Draw(glm::mat4{1.f}, mainDrawContext);
+            tagOwner(RenderObject::OwnerType::StaticGLTF, name, opaqueStart, transpStart);
         }
     }
 
@@ -93,7 +114,10 @@ void SceneManager::update_scene()
         const GLTFInstance &inst = kv.second;
         if (inst.scene)
         {
+            const size_t opaqueStart = mainDrawContext.OpaqueSurfaces.size();
+            const size_t transpStart = mainDrawContext.TransparentSurfaces.size();
             inst.scene->Draw(inst.transform, mainDrawContext);
+            tagOwner(RenderObject::OwnerType::GLTFInstance, kv.first, opaqueStart, transpStart);
         }
     }
 
@@ -123,6 +147,8 @@ void SceneManager::update_scene()
             obj.sourceMesh = inst.mesh.get();
             obj.surfaceIndex = surfaceIndex++;
             obj.objectID = mainDrawContext.nextID++;
+            obj.ownerType = RenderObject::OwnerType::MeshInstance;
+            obj.ownerName = kv.first;
             if (obj.material->passType == MaterialPass::Transparent)
             {
                 mainDrawContext.TransparentSurfaces.push_back(obj);
@@ -299,7 +325,17 @@ void SceneManager::addGLTFInstance(const std::string &name, std::shared_ptr<Load
 
 bool SceneManager::removeGLTFInstance(const std::string &name)
 {
-    return dynamicGLTFInstances.erase(name) > 0;
+    auto it = dynamicGLTFInstances.find(name);
+    if (it == dynamicGLTFInstances.end()) return false;
+
+    // Defer destruction until after the next frame fence (update_scene).
+    if (it->second.scene)
+    {
+        pendingGLTFRelease.push_back(it->second.scene);
+    }
+
+    dynamicGLTFInstances.erase(it);
+    return true;
 }
 
 bool SceneManager::setGLTFInstanceTransform(const std::string &name, const glm::mat4 &transform)
@@ -312,6 +348,13 @@ bool SceneManager::setGLTFInstanceTransform(const std::string &name, const glm::
 
 void SceneManager::clearGLTFInstances()
 {
+    for (auto &kv : dynamicGLTFInstances)
+    {
+        if (kv.second.scene)
+        {
+            pendingGLTFRelease.push_back(kv.second.scene);
+        }
+    }
     dynamicGLTFInstances.clear();
 }
 

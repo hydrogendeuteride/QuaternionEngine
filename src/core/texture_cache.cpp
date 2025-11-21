@@ -122,6 +122,19 @@ void TextureCache::watchBinding(TextureHandle handle, VkDescriptorSet set, uint3
 
     // Back-reference for fast per-set markUsed
     _setToHandles[set].push_back(handle);
+
+    // If the texture is already resident, immediately patch the new descriptor
+    // so re-spawned models using cached textures get the correct bindings.
+    if (e.state == EntryState::Resident && e.image.imageView != VK_NULL_HANDLE && set != VK_NULL_HANDLE)
+    {
+        if (!_context || !_context->getDevice()) return;
+        DescriptorWriter writer;
+        writer.write_image(static_cast<int>(binding), e.image.imageView,
+                           p.sampler ? p.sampler : e.sampler,
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.update_set(_context->getDevice()->device(), set);
+    }
 }
 
 void TextureCache::unwatchSet(VkDescriptorSet set)
