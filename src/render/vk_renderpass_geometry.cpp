@@ -278,8 +278,9 @@ void GeometryPass::draw_geometry(VkCommandBuffer cmd,
         push_constants.vertexBuffer = r.vertexBufferAddress;
         push_constants.objectID = r.objectID;
 
-        vkCmdPushConstants(cmd, r.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0,
-                           sizeof(GPUDrawPushConstants), &push_constants);
+        vkCmdPushConstants(cmd, r.material->pipeline->layout,
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(GPUDrawPushConstants), &push_constants);
 
         vkCmdDrawIndexed(cmd, r.indexCount, 1, r.firstIndex, 0, 0);
 

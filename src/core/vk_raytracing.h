@@ -31,9 +31,14 @@ public:
     VkAccelerationStructureKHR tlas() const { return _tlas.handle; }
     VkDeviceAddress tlasAddress() const { return _tlas.deviceAddress; }
 
+    // Destroy any BLAS resources queued for deferred deletion. Call after GPU fence wait.
+    void flushPendingDeletes();
+
     // Remove and destroy a cached BLAS associated with a vertex buffer.
     // Safe to call even if no BLAS exists for the buffer.
     void removeBLASForBuffer(VkBuffer vertexBuffer);
+    // Remove and destroy a cached BLAS associated with a mesh pointer.
+    void removeBLASForMesh(const MeshAsset *mesh);
  
 private:
      // function pointers (resolved on init)
@@ -45,14 +50,18 @@ private:
  
     DeviceManager* _device{nullptr};
     ResourceManager* _resources{nullptr};
- 
-     // BLAS cache by vertex buffer handle
-     std::unordered_map<VkBuffer, AccelStructureHandle> _blasByVB;
+
+    // BLAS cache by vertex buffer handle (legacy) and by mesh pointer (preferred)
+    std::unordered_map<VkBuffer, AccelStructureHandle> _blasByVB;
+    std::unordered_map<const MeshAsset*, AccelStructureHandle> _blasByMesh;
  
     // TLAS + scratch / instance buffer (rebuilt per frame)
     AccelStructureHandle _tlas{};
     AllocatedBuffer _tlasInstanceBuffer{};
     size_t _tlasInstanceCapacity{0};
+
+    // BLAS scheduled for destruction once GPU is idle
+    std::vector<AccelStructureHandle> _pendingBlasDestroy;
 
     // Properties
     VkDeviceSize _minScratchAlignment{256};

@@ -877,6 +877,9 @@ void VulkanEngine::run()
         // and clear per-frame resources before building UI and recording commands.
         VK_CHECK(vkWaitForFences(_deviceManager->device(), 1, &get_current_frame()._renderFence, true, 1000000000));
 
+        // Safe to destroy any BLAS queued for deletion now that the previous frame is idle.
+        if (_rayManager) { _rayManager->flushPendingDeletes(); }
+
         if (_pickResultPending && _pickReadbackBuffer.buffer && _sceneManager)
         {
             vmaInvalidateAllocation(_deviceManager->allocator(), _pickReadbackBuffer.allocation, 0, sizeof(uint32_t));

@@ -32,6 +32,9 @@ void RayTracingManager::init(DeviceManager *dev, ResourceManager *res)
 void RayTracingManager::cleanup()
 {
     VkDevice dv = _device->device();
+    // Destroy any deferred BLAS first
+    flushPendingDeletes();
+
     if (_tlas.handle)
     {
         _vkDestroyAccelerationStructureKHR(dv, _tlas.handle, nullptr);
@@ -60,6 +63,25 @@ void RayTracingManager::cleanup()
         }
     }
     _blasByVB.clear();
+    _blasByMesh.clear();
+}
+
+void RayTracingManager::flushPendingDeletes()
+{
+    if (_pendingBlasDestroy.empty()) return;
+    VkDevice dv = _device->device();
+    for (auto &as : _pendingBlasDestroy)
+    {
+        if (as.handle)
+        {
+            _vkDestroyAccelerationStructureKHR(dv, as.handle, nullptr);
+        }
+        if (as.storage.buffer)
+        {
+            _resources->destroy_buffer(as.storage);
+        }
+    }
+    _pendingBlasDestroy.clear();
 }
 
 static VkDeviceAddress get_buffer_address(VkDevice dev, VkBuffer buf)
@@ -74,6 +96,10 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     if (!mesh) return {};
     VkBuffer vb = mesh->meshBuffers.vertexBuffer.buffer;
     if (auto it = _blasByVB.find(vb); it != _blasByVB.end())
+    {
+        return it->second;
+    }
+    if (auto it = _blasByMesh.find(mesh.get()); it != _blasByMesh.end())
     {
         return it->second;
     }
@@ -185,6 +211,7 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     blas.deviceAddress = _vkGetAccelerationStructureDeviceAddressKHR(_device->device(), &dai);
 
     _blasByVB.emplace(vb, blas);
+    _blasByMesh.emplace(mesh.get(), blas);
     return blas;
 }
 
@@ -223,16 +250,33 @@ VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const Dra
 
     for (const auto &r: dc.OpaqueSurfaces)
     {
-        // Find mesh BLAS by vertex buffer
+        // Find mesh BLAS by vertex buffer, then by mesh pointer (if available).
         AccelStructureHandle blas{};
-        // We don't have MeshAsset pointer here; BLAS cache is keyed by VB handle; if missing, skip
         auto it = _blasByVB.find(r.vertexBuffer);
-        if (it == _blasByVB.end())
+        if (it != _blasByVB.end())
         {
-            // Can't build BLAS on the fly without mesh topology; skip this instance
+            blas = it->second;
+        }
+        else if (r.sourceMesh)
+        {
+            auto itMesh = _blasByMesh.find(r.sourceMesh);
+            if (itMesh != _blasByMesh.end())
+            {
+                blas = itMesh->second;
+            }
+            else
+            {
+                // Try to build on the fly if the mesh is still alive (non-owning shared_ptr wrapper).
+                std::shared_ptr<MeshAsset> nonOwning(const_cast<MeshAsset *>(r.sourceMesh), [](MeshAsset *) {});
+                blas = getOrBuildBLAS(nonOwning);
+            }
+        }
+
+        if (!blas.handle)
+        {
+            // Can't build BLAS; skip this instance
             continue;
         }
-        blas = it->second;
 
         VkAccelerationStructureInstanceKHR inst{};
         // Fill 3x4 row-major from GLM column-major mat4
@@ -352,13 +396,46 @@ void RayTracingManager::removeBLASForBuffer(VkBuffer vertexBuffer)
     auto it = _blasByVB.find(vertexBuffer);
     if (it == _blasByVB.end()) return;
 
-    if (it->second.handle)
+    // Defer destruction until after the next fence wait to avoid racing in-flight traces.
+    _pendingBlasDestroy.push_back(it->second);
+
+    // Also erase corresponding mesh-keyed entry if present
+    for (auto mit = _blasByMesh.begin(); mit != _blasByMesh.end(); )
     {
-        _vkDestroyAccelerationStructureKHR(dv, it->second.handle, nullptr);
-    }
-    if (it->second.storage.buffer)
-    {
-        _resources->destroy_buffer(it->second.storage);
+        if (mit->second.handle == it->second.handle)
+        {
+            mit = _blasByMesh.erase(mit);
+        }
+        else
+        {
+            ++mit;
+        }
     }
     _blasByVB.erase(it);
+}
+
+void RayTracingManager::removeBLASForMesh(const MeshAsset *mesh)
+{
+    if (!mesh) return;
+    VkDevice dv = _device->device();
+    auto it = _blasByMesh.find(mesh);
+    if (it == _blasByMesh.end()) return;
+
+    // Defer destruction until after the next fence wait to avoid racing in-flight traces.
+    _pendingBlasDestroy.push_back(it->second);
+
+    // Remove any VB-keyed entries that point to the same BLAS
+    for (auto vbit = _blasByVB.begin(); vbit != _blasByVB.end(); )
+    {
+        if (vbit->second.handle == it->second.handle)
+        {
+            vbit = _blasByVB.erase(vbit);
+        }
+        else
+        {
+            ++vbit;
+        }
+    }
+
+    _blasByMesh.erase(it);
 }

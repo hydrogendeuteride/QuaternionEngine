@@ -1070,7 +1070,7 @@ void LoadedGLTF::clearAll()
     {
         if (creator->_rayManager)
         {
-            creator->_rayManager->removeBLASForBuffer(v->meshBuffers.vertexBuffer.buffer);
+            creator->_rayManager->removeBLASForMesh(v.get());
         }
         creator->_resourceManager->destroy_buffer(v->meshBuffers.indexBuffer);
         creator->_resourceManager->destroy_buffer(v->meshBuffers.vertexBuffer);

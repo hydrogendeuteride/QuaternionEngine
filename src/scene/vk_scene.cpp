@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <limits>
 #include <cmath>
+
+#include "frame_resources.h"
 #include "core/config.h"
 
 void SceneManager::init(EngineContext *context)
@@ -35,6 +37,16 @@ void SceneManager::update_scene()
     auto start = std::chrono::system_clock::now();
 
     // Release any GLTF assets that were scheduled for safe destruction after GPU idle.
+    // Defer actual destruction to the current frame's deletion queue so we wait
+    // until the GPU has finished work that might still reference their resources.
+    if (_context && _context->currentFrame)
+    {
+        for (auto &sp : pendingGLTFRelease)
+        {
+            auto keepAlive = sp; // copy to keep ref count in the lambda
+            _context->currentFrame->_deletionQueue.push_function([keepAlive]() mutable { keepAlive.reset(); });
+        }
+    }
     pendingGLTFRelease.clear();
 
     mainDrawContext.OpaqueSurfaces.clear();
@@ -331,7 +343,16 @@ bool SceneManager::removeGLTFInstance(const std::string &name)
     // Defer destruction until after the next frame fence (update_scene).
     if (it->second.scene)
     {
-        pendingGLTFRelease.push_back(it->second.scene);
+        if (_context && _context->currentFrame)
+        {
+            auto keepAlive = it->second.scene;
+            _context->currentFrame->_deletionQueue.push_function([keepAlive]() mutable { keepAlive.reset(); });
+        }
+        else
+        {
+            // Fallback: stash until we have a frame to attach the destruction to.
+            pendingGLTFRelease.push_back(it->second.scene);
+        }
     }
 
     dynamicGLTFInstances.erase(it);
