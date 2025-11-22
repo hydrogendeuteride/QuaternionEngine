@@ -17,6 +17,15 @@
 
 #include "frame_resources.h"
 #include "core/config.h"
+#include <fmt/core.h>
+
+SceneManager::~SceneManager()
+{
+    fmt::println("[SceneManager] dtor: loadedScenes={} dynamicGLTFInstances={} pendingGLTFRelease={}",
+                 loadedScenes.size(),
+                 dynamicGLTFInstances.size(),
+                 pendingGLTFRelease.size());
+}
 
 void SceneManager::init(EngineContext *context)
 {
@@ -41,6 +50,13 @@ void SceneManager::update_scene()
     // until the GPU has finished work that might still reference their resources.
     if (_context && _context->currentFrame)
     {
+        if (!pendingGLTFRelease.empty())
+        {
+            fmt::println("[SceneManager] update_scene: scheduling {} pending GLTF releases (hasContext={}, hasFrame={})",
+                         pendingGLTFRelease.size(),
+                         true,
+                         true);
+        }
         for (auto &sp : pendingGLTFRelease)
         {
             auto keepAlive = sp; // copy to keep ref count in the lambda
@@ -332,6 +348,9 @@ void SceneManager::addGLTFInstance(const std::string &name, std::shared_ptr<Load
                                    const glm::mat4 &transform)
 {
     if (!scene) return;
+    fmt::println("[SceneManager] addGLTFInstance '{}' (scene='{}')",
+                 name,
+                 scene->debugName.empty() ? "<unnamed>" : scene->debugName.c_str());
     dynamicGLTFInstances[name] = GLTFInstance{std::move(scene), transform};
 }
 
@@ -346,6 +365,9 @@ bool SceneManager::removeGLTFInstance(const std::string &name)
         if (_context && _context->currentFrame)
         {
             auto keepAlive = it->second.scene;
+            fmt::println("[SceneManager] removeGLTFInstance '{}' scheduling deferred destroy (scene='{}')",
+                         name,
+                         keepAlive && !keepAlive->debugName.empty() ? keepAlive->debugName.c_str() : "<unnamed>");
             _context->currentFrame->_deletionQueue.push_function([keepAlive]() mutable { keepAlive.reset(); });
         }
         else
@@ -369,6 +391,9 @@ bool SceneManager::setGLTFInstanceTransform(const std::string &name, const glm::
 
 void SceneManager::clearGLTFInstances()
 {
+    fmt::println("[SceneManager] clearGLTFInstances: dynamicGLTFInstances={} pendingBefore={}",
+                 dynamicGLTFInstances.size(),
+                 pendingGLTFRelease.size());
     for (auto &kv : dynamicGLTFInstances)
     {
         if (kv.second.scene)
@@ -377,6 +402,8 @@ void SceneManager::clearGLTFInstances()
         }
     }
     dynamicGLTFInstances.clear();
+    fmt::println("[SceneManager] clearGLTFInstances: pendingAfter={}",
+                 pendingGLTFRelease.size());
 }
 
 bool SceneManager::setSceneAnimation(const std::string &sceneName, int animationIndex, bool resetTime)

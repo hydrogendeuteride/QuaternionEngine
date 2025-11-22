@@ -620,8 +620,44 @@ namespace
             else if (pick->ownerType == RenderObject::OwnerType::GLTFInstance)
             {
                 bool ok = eng->_sceneManager->removeGLTFInstance(pick->ownerName);
-                deleteStatus = ok ? "Removed glTF instance: " + pick->ownerName
-                                  : "glTF instance not found: " + pick->ownerName;
+                if (ok)
+                {
+                    deleteStatus = "Removed glTF instance: " + pick->ownerName;
+
+                    // Debug: log and clear any picks that still reference the deleted instance.
+                    fmt::println("[Debug] GLTF delete requested for '{}'; clearing picks if they match.",
+                                 pick->ownerName);
+
+                    if (eng->_lastPick.valid &&
+                        eng->_lastPick.ownerType == RenderObject::OwnerType::GLTFInstance &&
+                        eng->_lastPick.ownerName == pick->ownerName)
+                    {
+                        fmt::println("[Debug] Clearing _lastPick for deleted GLTF instance '{}'", pick->ownerName);
+                        eng->_lastPick.valid = false;
+                        eng->_lastPick.ownerName.clear();
+                        eng->_lastPick.ownerType = RenderObject::OwnerType::None;
+                        eng->_lastPick.mesh = nullptr;
+                        eng->_lastPick.scene = nullptr;
+                        eng->_lastPick.node = nullptr;
+                    }
+
+                    if (eng->_hoverPick.valid &&
+                        eng->_hoverPick.ownerType == RenderObject::OwnerType::GLTFInstance &&
+                        eng->_hoverPick.ownerName == pick->ownerName)
+                    {
+                        fmt::println("[Debug] Clearing _hoverPick for deleted GLTF instance '{}'", pick->ownerName);
+                        eng->_hoverPick.valid = false;
+                        eng->_hoverPick.ownerName.clear();
+                        eng->_hoverPick.ownerType = RenderObject::OwnerType::None;
+                        eng->_hoverPick.mesh = nullptr;
+                        eng->_hoverPick.scene = nullptr;
+                        eng->_hoverPick.node = nullptr;
+                    }
+                }
+                else
+                {
+                    deleteStatus = "glTF instance not found: " + pick->ownerName;
+                }
             }
             else
             {

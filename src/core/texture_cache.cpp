@@ -42,10 +42,15 @@ void TextureCache::cleanup()
     }
     if (!_context || !_context->getResources()) return;
     auto *rm = _context->getResources();
-    for (auto &e : _entries)
+    for (TextureHandle h = 0; h < _entries.size(); ++h)
     {
+        auto &e = _entries[h];
         if (e.state == EntryState::Resident && e.image.image)
         {
+            fmt::println("[TextureCache] cleanup destroy handle={} path='{}' bytes={}",
+                         h,
+                         e.path.empty() ? "<bytes>" : e.path,
+                         e.sizeBytes);
             rm->destroy_image(e.image);
             e.image = {};
         }
@@ -102,6 +107,13 @@ TextureCache::TextureHandle TextureCache::request(const TextureKey &key, VkSampl
         e.bytes = normKey.bytes;
         _cpuSourceBytes += e.bytes.size();
     }
+    fmt::println("[TextureCache] request handle={} kind={} path='{}' srgb={} mipmapped={} hash=0x{:016x}",
+                 h,
+                 (normKey.kind == TextureKey::SourceKind::FilePath ? "FilePath" : "Bytes"),
+                 normKey.kind == TextureKey::SourceKind::FilePath ? normKey.path : "<bytes>",
+                 normKey.srgb,
+                 normKey.mipmapped,
+                 normKey.hash);
     _entries.push_back(std::move(e));
     return h;
 }
@@ -386,6 +398,11 @@ void TextureCache::evictToBudget(size_t budgetBytes)
         // Rewrite watchers back to fallback before destroying
         patch_to_fallback(e);
 
+        fmt::println("[TextureCache] evictToBudget destroy handle={} path='{}' bytes={} residentBytesBefore={}",
+                     h,
+                     e.path.empty() ? "<bytes>" : e.path,
+                     e.sizeBytes,
+                     _residentBytes);
         _context->getResources()->destroy_image(e.image);
         e.image = {};
         e.state = EntryState::Evicted;
@@ -720,6 +737,14 @@ size_t TextureCache::drain_ready_uploads(ResourceManager &rm, size_t budgetBytes
                 {
                     levels.push_back(ResourceManager::MipLevelCopy{ lv.offset, lv.length, lv.width, lv.height });
                 }
+                fmt::println("[TextureCache] upload KTX2 handle={} fmt={} levels={} size={}x{} srgb={} path='{}'",
+                             res.handle,
+                             string_VkFormat(fmt),
+                             res.ktxMipLevels,
+                             extent.width,
+                             extent.height,
+                             res.srgb,
+                             e.path);
                 e.image = rm.create_image_compressed(res.ktx.bytes.data(), res.ktx.bytes.size(), fmt, levels);
                 e.sizeBytes = expectedBytes;
             }
@@ -757,6 +782,14 @@ size_t TextureCache::drain_ready_uploads(ResourceManager &rm, size_t budgetBytes
             }
 
             uint32_t mipOverride = (res.mipmapped ? desiredLevels : 1);
+            fmt::println("[TextureCache] upload raster handle={} fmt={} levels={} size={}x{} srgb={} path='{}'",
+                         res.handle,
+                         string_VkFormat(fmt),
+                         mipOverride,
+                         extent.width,
+                         extent.height,
+                         res.srgb,
+                         e.path);
             e.image = rm.create_image(src, extent, fmt, VK_IMAGE_USAGE_SAMPLED_BIT, res.mipmapped, mipOverride);
             e.sizeBytes = expectedBytes;
         }
@@ -847,10 +880,16 @@ bool TextureCache::try_make_space(size_t bytesNeeded, uint32_t now)
     for (auto &pair : order)
     {
         if (freed >= bytesNeeded) break;
-        Entry &e = _entries[pair.first];
+        TextureHandle h = pair.first;
+        Entry &e = _entries[h];
         if (e.state != EntryState::Resident) continue;
 
         patch_to_fallback(e);
+        fmt::println("[TextureCache] try_make_space destroy handle={} path='{}' bytes={} residentBytesBefore={}",
+                     h,
+                     e.path.empty() ? "<bytes>" : e.path,
+                     e.sizeBytes,
+                     _residentBytes);
         _context->getResources()->destroy_image(e.image);
         e.image = {};
         e.state = EntryState::Evicted;

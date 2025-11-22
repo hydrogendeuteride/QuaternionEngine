@@ -55,6 +55,7 @@ struct DrawContext
 class SceneManager
 {
 public:
+    ~SceneManager();
     void init(EngineContext *context);
 
     void cleanup();

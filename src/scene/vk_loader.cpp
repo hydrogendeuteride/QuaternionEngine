@@ -164,7 +164,7 @@ VkSamplerMipmapMode extract_mipmap_mode(fastgltf::Filter filter)
 std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::string_view filePath)
 {
     //> load_1
-    fmt::print("Loading GLTF: {}", filePath);
+    fmt::println("[GLTF] loadGltf begin: '{}'", filePath);
 
     std::shared_ptr<LoadedGLTF> scene = std::make_shared<LoadedGLTF>();
     scene->creator = engine;
@@ -849,6 +849,13 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
             }
         }, img.data);
     }
+    fmt::println("[GLTF] loadGltf done: meshes={} materials={} images={} samplers={} animations={} debugName='{}'",
+                 file.meshes.size(),
+                 file.materials.size(),
+                 file.images.size(),
+                 file.samplers.size(),
+                 file.animations.size(),
+                 file.debugName.empty() ? "<none>" : file.debugName);
     return scene;
     //< load_graph
 }
@@ -1050,6 +1057,14 @@ void LoadedGLTF::updateAnimation(float dt)
 
 void LoadedGLTF::clearAll()
 {
+    const char *name = debugName.empty() ? "<unnamed>" : debugName.c_str();
+    fmt::println("[GLTF] clearAll begin for '{}' (meshes={} images={} materials={} samplers={})",
+                 name,
+                 meshes.size(),
+                 images.size(),
+                 materials.size(),
+                 samplers.size());
+
     VkDevice dv = creator->_deviceManager->device();
 
     // Before destroying descriptor pools, unregister descriptor-set watches so
@@ -1097,4 +1112,11 @@ void LoadedGLTF::clearAll()
     descriptorPool.destroy_pools(dv);
 
     creator->_resourceManager->destroy_buffer(materialBuffer);
+
+    fmt::println("[GLTF] clearAll done for '{}' (meshes={}, images={}, materials={}, samplers={})",
+                 name,
+                 meshes.size(),
+                 images.size(),
+                 materials.size(),
+                 samplers.size());
 }
