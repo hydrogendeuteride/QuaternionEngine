@@ -15,6 +15,7 @@
 #include <fastgltf/parser.hpp>
 #include <fastgltf/util.hpp>
 #include <fastgltf/tools.hpp>
+#include <fmt/core.h>
 
 using std::filesystem::path;
 
@@ -83,11 +84,28 @@ std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_v
 
     if (auto it = _gltfCacheByPath.find(key); it != _gltfCacheByPath.end())
     {
-        if (auto sp = it->second.lock()) return sp;
+        if (auto sp = it->second.lock())
+        {
+            fmt::println("[AssetManager] loadGLTF cache hit key='{}' path='{}' ptr={}", key, resolved,
+                         static_cast<const void *>(sp.get()));
+            return sp;
+        }
+        fmt::println("[AssetManager] loadGLTF cache expired key='{}' path='{}' (reloading)", key, resolved);
     }
 
     auto loaded = loadGltf(_engine, resolved);
     if (!loaded.has_value()) return {};
+
+    if (loaded.value())
+    {
+        fmt::println("[AssetManager] loadGLTF loaded new scene key='{}' path='{}' ptr={}", key, resolved,
+                     static_cast<const void *>(loaded.value().get()));
+    }
+    else
+    {
+        fmt::println("[AssetManager] loadGLTF got empty scene for key='{}' path='{}'", key, resolved);
+    }
+
     _gltfCacheByPath[key] = loaded.value();
     return loaded;
 }
@@ -519,11 +537,9 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const std::string &name,
     auto mesh = std::make_shared<MeshAsset>();
     mesh->name = name;
     mesh->meshBuffers = _engine->_resourceManager->uploadMesh(indices, vertices);
-    // Build BLAS for the mesh if ray tracing manager is available
-    if (_engine->_rayManager)
-    {
-        _engine->_rayManager->getOrBuildBLAS(mesh);
-    }
+    // BLAS for this mesh is built lazily when TLAS is constructed from the draw
+    // context (RayTracingManager::buildTLASFromDrawContext). This keeps RT work
+    // centralized and avoids redundant builds on load.
 
     GeoSurface surf{};
     surf.startIndex = 0;

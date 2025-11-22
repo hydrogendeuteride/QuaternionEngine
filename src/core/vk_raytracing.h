@@ -51,8 +51,9 @@ private:
     DeviceManager* _device{nullptr};
     ResourceManager* _resources{nullptr};
 
-    // BLAS cache by vertex buffer handle (legacy) and by mesh pointer (preferred)
-    std::unordered_map<VkBuffer, AccelStructureHandle> _blasByVB;
+    // BLAS cache per mesh. BLAS lifetime is tied to MeshAsset lifetime;
+    // when a mesh is destroyed or its GPU buffers are freed, the owning code
+    // must call removeBLASForMesh/removeBLASForBuffer to drop the cached BLAS.
     std::unordered_map<const MeshAsset*, AccelStructureHandle> _blasByMesh;
  
     // TLAS + scratch / instance buffer (rebuilt per frame)

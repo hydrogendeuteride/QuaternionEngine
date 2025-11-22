@@ -218,6 +218,12 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
     //< load_1
     //> load_2
     // we can stimate the descriptors we will need accurately
+    fmt::println("[GLTF] loadGltf: materials={} meshes={} images={} samplers={} (creating descriptor pool)",
+                 gltf.materials.size(),
+                 gltf.meshes.size(),
+                 gltf.images.size(),
+                 gltf.samplers.size());
+
     std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> sizes = {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3},
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3},
@@ -225,6 +231,10 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
     };
 
     file.descriptorPool.init(engine->_deviceManager->device(), gltf.materials.size(), sizes);
+
+    fmt::println("[GLTF] loadGltf: descriptor pool initialized for '{}' (materials={})",
+                 filePath,
+                 gltf.materials.size());
     //< load_2
     //> load_samplers
 
@@ -613,6 +623,10 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         }
 
         newmesh->meshBuffers = engine->_resourceManager->uploadMesh(indices, vertices);
+        // BLAS for this mesh will be built lazily from RayTracingManager::buildTLASFromDrawContext()
+        // when ray-traced shadows are enabled. This avoids redundant builds and concentrates
+        // RT work in one place.
+
         // If CPU vectors ballooned for this mesh, release capacity back to the OS
         auto shrink_if_huge = [](auto &vec, size_t elemSizeBytes) {
             const size_t capBytes = vec.capacity() * elemSizeBytes;
@@ -626,10 +640,6 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         };
         shrink_if_huge(indices, sizeof(uint32_t));
         shrink_if_huge(vertices, sizeof(Vertex));
-        if (engine->_rayManager)
-        {
-            engine->_rayManager->getOrBuildBLAS(newmesh);
-        }
     }
     //> load_nodes
     // load all nodes and their meshes

@@ -5,6 +5,7 @@
 #include "scene/vk_loader.h"
 #include "scene/vk_scene.h"
 #include <cstring>
+#include <numeric>
 
 void RayTracingManager::init(DeviceManager *dev, ResourceManager *res)
 {
@@ -51,24 +52,28 @@ void RayTracingManager::cleanup()
         _tlasInstanceBuffer = {};
         _tlasInstanceCapacity = 0;
     }
-    for (auto &kv: _blasByVB)
+
+    // Destroy any remaining cached BLAS that weren't queued for deferred destroy.
+    for (auto &kv : _blasByMesh)
     {
-        if (kv.second.handle)
+        const AccelStructureHandle &as = kv.second;
+        if (as.handle)
         {
-            _vkDestroyAccelerationStructureKHR(dv, kv.second.handle, nullptr);
+            _vkDestroyAccelerationStructureKHR(dv, as.handle, nullptr);
         }
-        if (kv.second.storage.buffer)
+        if (as.storage.buffer)
         {
-            _resources->destroy_buffer(kv.second.storage);
+            _resources->destroy_buffer(as.storage);
         }
     }
-    _blasByVB.clear();
     _blasByMesh.clear();
 }
 
 void RayTracingManager::flushPendingDeletes()
 {
     if (_pendingBlasDestroy.empty()) return;
+
+    fmt::println("[RT] flushPendingDeletes: destroying {} BLAS handles", _pendingBlasDestroy.size());
     VkDevice dv = _device->device();
     for (auto &as : _pendingBlasDestroy)
     {
@@ -94,13 +99,10 @@ static VkDeviceAddress get_buffer_address(VkDevice dev, VkBuffer buf)
 AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<MeshAsset> &mesh)
 {
     if (!mesh) return {};
-    VkBuffer vb = mesh->meshBuffers.vertexBuffer.buffer;
-    if (auto it = _blasByVB.find(vb); it != _blasByVB.end())
-    {
-        return it->second;
-    }
     if (auto it = _blasByMesh.find(mesh.get()); it != _blasByMesh.end())
     {
+        fmt::println("[RT] getOrBuildBLAS reuse by mesh mesh='{}' handle={}", mesh->name,
+                     static_cast<const void *>(it->second.handle));
         return it->second;
     }
 
@@ -113,6 +115,10 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     VkDeviceAddress vaddr = mesh->meshBuffers.vertexBufferAddress;
     VkDeviceAddress iaddr = mesh->meshBuffers.indexBufferAddress;
     const uint32_t vcount = mesh->meshBuffers.vertexCount;
+    VkBuffer vb = mesh->meshBuffers.vertexBuffer.buffer;
+
+    fmt::println("[RT] getOrBuildBLAS build mesh='{}' surfaces={} vcount={}", mesh->name,
+                 mesh->surfaces.size(), vcount);
 
     for (const auto &s: mesh->surfaces)
     {
@@ -199,6 +205,12 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     const VkAccelerationStructureBuildRangeInfoKHR* pRange = ranges.data();
     _resources->immediate_submit([&](VkCommandBuffer cmd) {
         // ppBuildRangeInfos is an array of infoCount pointers; we have 1 build info
+        fmt::println("[RT] building BLAS for mesh='{}' geoms={} primsTotal={} storageSize={} scratchSize={}",
+                     mesh->name,
+                     geoms.size(),
+                     maxPrim.empty() ? 0u : std::accumulate(maxPrim.begin(), maxPrim.end(), 0u),
+                     sizes.accelerationStructureSize,
+                     sizes.buildScratchSize);
         _vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
     });
 
@@ -210,7 +222,6 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     dai.accelerationStructure = blas.handle;
     blas.deviceAddress = _vkGetAccelerationStructureDeviceAddressKHR(_device->device(), &dai);
 
-    _blasByVB.emplace(vb, blas);
     _blasByMesh.emplace(mesh.get(), blas);
     return blas;
 }
@@ -222,6 +233,10 @@ void RayTracingManager::ensure_tlas_storage(VkDeviceSize requiredASSize, VkDevic
     if (_tlas.handle || _tlas.storage.buffer)
     {
         AccelStructureHandle old = _tlas;
+        fmt::println("[RT] ensure_tlas_storage: scheduling old TLAS destroy handle={} buffer={} size={}",
+                     static_cast<const void *>(old.handle),
+                     static_cast<const void *>(old.storage.buffer),
+                     old.storage.info.size);
         dq.push_function([this, old]() {
             if (old.handle)
                 _vkDestroyAccelerationStructureKHR(_device->device(), old.handle, nullptr);
@@ -240,6 +255,11 @@ void RayTracingManager::ensure_tlas_storage(VkDeviceSize requiredASSize, VkDevic
     asci.buffer = _tlas.storage.buffer;
     asci.size = requiredASSize;
     VK_CHECK(_vkCreateAccelerationStructureKHR(_device->device(), &asci, nullptr, &_tlas.handle));
+
+    fmt::println("[RT] ensure_tlas_storage: created TLAS handle={} buffer={} size={}",
+                 static_cast<const void *>(_tlas.handle),
+                 static_cast<const void *>(_tlas.storage.buffer),
+                 requiredASSize);
 }
 
 VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const DrawContext &dc, DeletionQueue& dq)
@@ -248,16 +268,17 @@ VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const Dra
     std::vector<VkAccelerationStructureInstanceKHR> instances;
     instances.reserve(dc.OpaqueSurfaces.size());
 
+    fmt::println("[RT] buildTLASFromDrawContext: opaqueSurfaces={} current TLAS handle={} buffer={}",
+                 dc.OpaqueSurfaces.size(),
+                 static_cast<const void *>(_tlas.handle),
+                 static_cast<const void *>(_tlas.storage.buffer));
+
     for (const auto &r: dc.OpaqueSurfaces)
     {
-        // Find mesh BLAS by vertex buffer, then by mesh pointer (if available).
+        // Find or lazily build BLAS by mesh pointer. We require sourceMesh
+        // for ray tracing; objects without it are skipped from TLAS.
         AccelStructureHandle blas{};
-        auto it = _blasByVB.find(r.vertexBuffer);
-        if (it != _blasByVB.end())
-        {
-            blas = it->second;
-        }
-        else if (r.sourceMesh)
+        if (r.sourceMesh)
         {
             auto itMesh = _blasByMesh.find(r.sourceMesh);
             if (itMesh != _blasByMesh.end())
@@ -392,50 +413,32 @@ VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const Dra
 void RayTracingManager::removeBLASForBuffer(VkBuffer vertexBuffer)
 {
     if (!vertexBuffer) return;
-    VkDevice dv = _device->device();
-    auto it = _blasByVB.find(vertexBuffer);
-    if (it == _blasByVB.end()) return;
 
-    // Defer destruction until after the next fence wait to avoid racing in-flight traces.
-    _pendingBlasDestroy.push_back(it->second);
-
-    // Also erase corresponding mesh-keyed entry if present
-    for (auto mit = _blasByMesh.begin(); mit != _blasByMesh.end(); )
+    // Find any mesh whose vertex buffer matches and evict its BLAS.
+    for (auto it = _blasByMesh.begin(); it != _blasByMesh.end(); )
     {
-        if (mit->second.handle == it->second.handle)
+        const MeshAsset *mesh = it->first;
+        if (mesh && mesh->meshBuffers.vertexBuffer.buffer == vertexBuffer)
         {
-            mit = _blasByMesh.erase(mit);
+            // Defer destruction until after the next fence wait to avoid racing in-flight traces.
+            _pendingBlasDestroy.push_back(it->second);
+            it = _blasByMesh.erase(it);
         }
         else
         {
-            ++mit;
+            ++it;
         }
     }
-    _blasByVB.erase(it);
 }
 
 void RayTracingManager::removeBLASForMesh(const MeshAsset *mesh)
 {
     if (!mesh) return;
-    VkDevice dv = _device->device();
     auto it = _blasByMesh.find(mesh);
     if (it == _blasByMesh.end()) return;
 
     // Defer destruction until after the next fence wait to avoid racing in-flight traces.
     _pendingBlasDestroy.push_back(it->second);
-
-    // Remove any VB-keyed entries that point to the same BLAS
-    for (auto vbit = _blasByVB.begin(); vbit != _blasByVB.end(); )
-    {
-        if (vbit->second.handle == it->second.handle)
-        {
-            vbit = _blasByVB.erase(vbit);
-        }
-        else
-        {
-            ++vbit;
-        }
-    }
 
     _blasByMesh.erase(it);
 }

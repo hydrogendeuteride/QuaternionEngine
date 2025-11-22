@@ -565,9 +565,9 @@ bool RenderGraph::compile()
 				                           ? prev.access
 				                           : _resources.initial_access(RGBufferHandle{id});
 
-			bool needBarrier = !prev.initialized
-			                   || prev.stage != desired.stage
-			                   || prev.access != desired.access;
+            bool needBarrier = !prev.initialized
+                               || prev.stage != desired.stage
+                               || prev.access != desired.access;
 
             if (needBarrier)
             {
@@ -582,8 +582,17 @@ bool RenderGraph::compile()
                 const RGBufferRecord *rec = _resources.get_buffer(RGBufferHandle{id});
                 barrier.buffer = rec ? rec->buffer : VK_NULL_HANDLE;
                 barrier.offset = 0;
-                // If size is unknown or 0 for imported buffers, use WHOLE_SIZE to satisfy VUID 01188
-                barrier.size = (rec && rec->size > 0) ? rec->size : VK_WHOLE_SIZE;
+                // For imported buffers we don't always know the exact VkBuffer size, so use WHOLE_SIZE
+                // to avoid violating VUID-VkBufferMemoryBarrier2-size-01189. For transient buffers
+                // created by the graph, we track the exact size.
+                if (rec && !rec->imported && rec->size > 0)
+                {
+                    barrier.size = rec->size;
+                }
+                else
+                {
+                    barrier.size = VK_WHOLE_SIZE;
+                }
                 pass.preBufferBarriers.push_back(barrier);
 
                 if (rec && !rec->imported)
