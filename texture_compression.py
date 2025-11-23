@@ -9,9 +9,9 @@ except Exception:
     PIL_OK = False
 
 DEFAULT_SUFFIX = {
-    "albedo": ["_albedo", "_basecolor", "_base_colour", "_base_color", "_base", "baseColor"],
-    "mr":     ["_mr", "_orm", "_metalrough", "_metallicroughness", "metallicRoughness"],
-    "normal": ["_normal", "_norm", "_nrm", "_normalgl"]
+    "albedo": ["_albedo", "_basecolor", "_base_colour", "_base_color", "_base", "baseColor", "BaseColor"],
+    "mr":     ["_mr", "_orm", "_metalrough", "_metallicroughness", "metallicRoughness", "Metallic"],
+    "normal": ["_normal", "_norm", "_nrm", "_normalgl", "Normal"]
 }
 
 SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tga", ".tif", ".tiff"}

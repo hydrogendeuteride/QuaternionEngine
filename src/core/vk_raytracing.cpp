@@ -99,6 +99,15 @@ static VkDeviceAddress get_buffer_address(VkDevice dev, VkBuffer buf)
 AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<MeshAsset> &mesh)
 {
     if (!mesh) return {};
+
+    // If uploads are deferred, ensure any pending mesh buffer uploads are flushed
+    // before building a BLAS that reads from those GPU buffers.
+    if (_resources && _resources->deferred_uploads() && _resources->has_pending_uploads())
+    {
+        fmt::println("[RT] getOrBuildBLAS: flushing pending resource uploads before BLAS build");
+        _resources->process_queued_uploads_immediate();
+    }
+
     if (auto it = _blasByMesh.find(mesh.get()); it != _blasByMesh.end())
     {
         fmt::println("[RT] getOrBuildBLAS reuse by mesh mesh='{}' handle={}", mesh->name,
