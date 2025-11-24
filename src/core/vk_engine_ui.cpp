@@ -862,4 +862,3 @@ void vk_engine_draw_debug_ui(VulkanEngine *eng)
         ImGui::End();
     }
 }
-
