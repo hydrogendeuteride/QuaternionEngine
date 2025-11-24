@@ -344,6 +344,28 @@ void SceneManager::addMeshInstance(const std::string &name, std::shared_ptr<Mesh
     dynamicMeshInstances[name] = std::move(inst);
 }
 
+bool SceneManager::getMeshInstanceTransform(const std::string &name, glm::mat4 &outTransform)
+{
+    auto it = dynamicMeshInstances.find(name);
+    if (it == dynamicMeshInstances.end())
+    {
+        return false;
+    }
+    outTransform = it->second.transform;
+    return true;
+}
+
+bool SceneManager::setMeshInstanceTransform(const std::string &name, const glm::mat4 &transform)
+{
+    auto it = dynamicMeshInstances.find(name);
+    if (it == dynamicMeshInstances.end())
+    {
+        return false;
+    }
+    it->second.transform = transform;
+    return true;
+}
+
 bool SceneManager::removeMeshInstance(const std::string &name)
 {
     return dynamicMeshInstances.erase(name) > 0;
@@ -388,6 +410,17 @@ bool SceneManager::removeGLTFInstance(const std::string &name)
     }
 
     dynamicGLTFInstances.erase(it);
+    return true;
+}
+
+bool SceneManager::getGLTFInstanceTransform(const std::string &name, glm::mat4 &outTransform)
+{
+    auto it = dynamicGLTFInstances.find(name);
+    if (it == dynamicGLTFInstances.end())
+    {
+        return false;
+    }
+    outTransform = it->second.transform;
     return true;
 }
 

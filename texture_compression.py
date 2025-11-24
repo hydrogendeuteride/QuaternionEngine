@@ -59,7 +59,7 @@ def parse_gltf_roles(gltf_path: Path):
     def mark(uri, role):
         if not uri:
             return
-        # normal > albedo > mr 우선
+
         prio = {"normal": 3, "albedo": 2, "mr": 1}
         old = roles.get(uri)
         if old is None or prio[role] > prio.get(old, 0):

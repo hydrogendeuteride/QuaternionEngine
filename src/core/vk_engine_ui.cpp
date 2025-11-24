@@ -14,6 +14,7 @@
 #include "render/vk_renderpass_tonemap.h"
 #include "render/vk_renderpass_background.h"
 #include <glm/gtx/euler_angles.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include "render/rg_graph.h"
 #include "core/vk_pipeline_manager.h"
 #include "core/texture_cache.h"
@@ -755,7 +756,23 @@ namespace
         }
 
         SceneManager *sceneMgr = eng->_sceneManager.get();
-        const GPUSceneData &sceneData = sceneMgr->getSceneData();
+
+        // Choose a pick to edit: prefer last pick, then hover.
+        VulkanEngine::PickInfo *pick = nullptr;
+        if (eng->_lastPick.valid)
+        {
+            pick = &eng->_lastPick;
+        }
+        else if (eng->_hoverPick.valid)
+        {
+            pick = &eng->_hoverPick;
+        }
+
+        if (!pick || pick->ownerName.empty())
+        {
+            ImGui::TextUnformatted("No selection for gizmo (pick or hover an instance).");
+            return;
+        }
 
         static ImGuizmo::OPERATION op = ImGuizmo::TRANSLATE;
         static ImGuizmo::MODE mode = ImGuizmo::LOCAL;
@@ -778,24 +795,106 @@ namespace
         {
             None,
             MeshInstance,
-            GLTFInstance,
-            Node
+            GLTFInstance
         };
         GizmoTarget target = GizmoTarget::None;
+
+        if (pick->ownerType == RenderObject::OwnerType::MeshInstance)
+        {
+            if (sceneMgr->getMeshInstanceTransform(pick->ownerName, targetTransform))
+            {
+                target = GizmoTarget::MeshInstance;
+                ImGui::Text("Editing mesh instance: %s", pick->ownerName.c_str());
+            }
+        }
+        else if (pick->ownerType == RenderObject::OwnerType::GLTFInstance)
+        {
+            if (sceneMgr->getGLTFInstanceTransform(pick->ownerName, targetTransform))
+            {
+                target = GizmoTarget::GLTFInstance;
+                ImGui::Text("Editing glTF instance: %s", pick->ownerName.c_str());
+            }
+        }
+
+        if (target == GizmoTarget::None)
+        {
+            ImGui::TextUnformatted("Gizmo only supports dynamic mesh/glTF instances.");
+            return;
+        }
 
         ImGuiIO &io = ImGui::GetIO();
         ImGuizmo::SetOrthographic(false);
         ImGuizmo::SetDrawlist();
         ImGuizmo::SetRect(0.0f, 0.0f, io.DisplaySize.x, io.DisplaySize.y);
 
-        glm::mat4 view = sceneData.view;
-        glm::mat4 proj = sceneData.proj;
+        // Build a distance-based perspective projection for ImGuizmo instead of
+        // using the engine's reversed-Z Vulkan projection.
+        Camera &cam = sceneMgr->getMainCamera();
+        float fovRad = glm::radians(cam.fovDegrees);
+        VkExtent2D extent = eng->_swapchainManager
+                            ? eng->_swapchainManager->swapchainExtent()
+                            : VkExtent2D{1, 1};
+        float aspect = extent.height > 0
+                       ? static_cast<float>(extent.width) / static_cast<float>(extent.height)
+                       : 1.0f;
 
-        proj[1][1] *= -1.0f;
+        // Distance from camera to object; clamp to avoid degenerate planes.
+        glm::vec3 camPos = cam.position;
+        glm::vec3 objPos = pick->worldPos;
+        float dist = glm::length(objPos - camPos);
+        if (!std::isfinite(dist) || dist <= 0.0f)
+        {
+            dist = 1.0f;
+        }
 
+        // Near/far based on distance: keep ratio reasonable for precision.
+        float nearPlane = glm::max(0.05f, dist * 0.05f);
+        float farPlane = glm::max(nearPlane * 50.0f, dist * 2.0f);
+
+        glm::mat4 view = cam.getViewMatrix();
+        glm::mat4 proj = glm::perspective(fovRad, aspect, nearPlane, farPlane);
+
+        glm::mat4 before = targetTransform;
+
+        ImDrawList* dl = ImGui::GetForegroundDrawList();
+        ImGuizmo::SetDrawlist(dl);
+
+        ImGuizmo::SetRect(0.0f, 0.0f, io.DisplaySize.x, io.DisplaySize.y);
         ImGuizmo::Manipulate(&view[0][0], &proj[0][0],
                              op, mode,
                              &targetTransform[0][0]);
+
+        bool changed = false;
+        for (int c = 0; c < 4 && !changed; ++c)
+        {
+            for (int r = 0; r < 4; ++r)
+            {
+                if (before[c][r] != targetTransform[c][r])
+                {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        if (changed)
+        {
+            switch (target)
+            {
+                case GizmoTarget::MeshInstance:
+                    sceneMgr->setMeshInstanceTransform(pick->ownerName, targetTransform);
+                    break;
+                case GizmoTarget::GLTFInstance:
+                    sceneMgr->setGLTFInstanceTransform(pick->ownerName, targetTransform);
+                    break;
+                default:
+                    break;
+            }
+
+            // Keep pick debug info roughly in sync.
+            pick->worldTransform = targetTransform;
+            pick->worldPos = glm::vec3(targetTransform[3]);
+        }
     }
 } // namespace
 

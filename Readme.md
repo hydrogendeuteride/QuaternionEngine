@@ -6,10 +6,10 @@ Work-In-Progress Vulkan render engine
 Current structure:
 - Flexible render graph system with multiple render passes, Hot reloading
 - Deferred rendering
-- PBR (IBL is WIP), cascaded shadows, normal mapping (MikkTSpace tangents optional)
+- PBR, cascaded shadows, normal mapping (MikkTSpace tangents optional)
 - GLTF loading and rendering, primitive creation and rendering.
 - Supports texture compression(BCn, non glTF standard), LRU reload
-- IBL
+- Object clicking, generation.
 
 Work-In-Progress
 - [ ] TAA
