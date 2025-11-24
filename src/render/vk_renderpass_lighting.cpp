@@ -310,6 +310,20 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
 
 void LightingPass::cleanup()
 {
+    if (_context && _context->getResources())
+    {
+        if (_fallbackIbl2D.image)
+        {
+            _context->getResources()->destroy_image(_fallbackIbl2D);
+            _fallbackIbl2D = {};
+        }
+        if (_fallbackBrdfLut2D.image)
+        {
+            _context->getResources()->destroy_image(_fallbackBrdfLut2D);
+            _fallbackBrdfLut2D = {};
+        }
+    }
+
     _deletionQueue.flush();
     fmt::print("LightingPass::cleanup()\n");
 }

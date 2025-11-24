@@ -420,6 +420,14 @@ void VulkanEngine::cleanup()
         print_vma_stats(_deviceManager.get(), "after AssetManager");
         dump_vma_json(_deviceManager.get(), "after_AssetManager");
 
+        // Release IBL GPU resources (spec/diffuse cubes + BRDF LUT)
+        if (_iblManager)
+        {
+            _iblManager->unload();
+        }
+        print_vma_stats(_deviceManager.get(), "after IBLManager");
+        dump_vma_json(_deviceManager.get(), "after_IBLManager");
+
         // Ensure ray tracing resources (BLAS/TLAS/instance buffers) are freed before VMA is destroyed
         if (_rayManager) { _rayManager->cleanup(); }
         print_vma_stats(_deviceManager.get(), "after RTManager");

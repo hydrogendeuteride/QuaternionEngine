@@ -255,15 +255,20 @@ void IBLManager::unload()
     if (_spec.image)
     {
         rm->destroy_image(_spec);
-        _spec = {};
     }
-    if (_diff.image && _diff.image != _spec.image) { rm->destroy_image(_diff); }
-    _diff = {};
+    // Handle potential aliasing: _diff may have been set to _spec in load().
+    if (_diff.image && _diff.image != _spec.image)
+    {
+        rm->destroy_image(_diff);
+    }
     if (_brdf.image)
     {
         rm->destroy_image(_brdf);
-        _brdf = {};
     }
+
+    _spec = {};
+    _diff = {};
+    _brdf = {};
     if (_iblSetLayout && _ctx && _ctx->getDevice())
     {
         vkDestroyDescriptorSetLayout(_ctx->getDevice()->device(), _iblSetLayout, nullptr);

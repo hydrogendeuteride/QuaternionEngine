@@ -64,7 +64,7 @@ void SwapchainManager::init_swapchain()
         VK_CHECK(vkCreateImageView(_deviceManager->device(), &dview_info, nullptr, &_depthImage.imageView));
 
         // GBuffer (SRGB not used to keep linear lighting)
-        _gBufferPosition = _resourceManager->create_image(drawImageExtent, VK_FORMAT_R16G16B16A16_SFLOAT,
+        _gBufferPosition = _resourceManager->create_image(drawImageExtent, VK_FORMAT_R32G32B32A32_SFLOAT,
                                                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
         _gBufferNormal = _resourceManager->create_image(drawImageExtent, VK_FORMAT_R16G16B16A16_SFLOAT,
                                                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);

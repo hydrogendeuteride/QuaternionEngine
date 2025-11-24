@@ -121,17 +121,29 @@ void DeviceManager::init_vulkan(SDL_Window *window)
 
 void DeviceManager::cleanup()
 {
-    // Optional VMA stats print
-    if (_allocator && vmaDebugEnabled())
+    // Always query VMA stats once before destroying the allocator so we can
+    // spot leaks that would trigger the vk_mem_alloc.h assertion:
+    // "Some allocations were not freed before destruction of this memory block!"
+    if (_allocator)
     {
         VmaTotalStatistics stats{};
         vmaCalculateStatistics(_allocator, &stats);
-        const VmaStatistics& s = stats.total.statistics;
-        fmt::print("[VMA] Blocks: {} | Allocations: {} | BlockBytes: {} | AllocationBytes: {}\n",
-                   (size_t)s.blockCount,
-                   (size_t)s.allocationCount,
-                   (unsigned long long)s.blockBytes,
-                   (unsigned long long)s.allocationBytes);
+        const VmaStatistics &s = stats.total.statistics;
+
+        if (s.allocationCount != 0)
+        {
+            fmt::print("[VMA] WARNING: {} live allocations ({} bytes) remain before allocator destruction – this will trip vk_mem_alloc.h assertion: \"Some allocations were not freed before destruction of this memory block!\"\n",
+                       (size_t)s.allocationCount,
+                       (unsigned long long)s.allocationBytes);
+        }
+        else if (vmaDebugEnabled())
+        {
+            fmt::print("[VMA] Blocks: {} | Allocations: {} | BlockBytes: {} | AllocationBytes: {}\n",
+                       (size_t)s.blockCount,
+                       (size_t)s.allocationCount,
+                       (unsigned long long)s.blockBytes,
+                       (unsigned long long)s.allocationBytes);
+        }
     }
     vkDestroySurfaceKHR(_instance, _surface, nullptr);
     _deletionQueue.flush();

@@ -317,6 +317,16 @@ void SceneManager::cleanup()
     clearMeshInstances();
     clearGLTFInstances();
 
+    // On engine shutdown we know VulkanEngine::cleanup() has already called
+    // vkDeviceWaitIdle(), so it is safe to destroy all remaining GLTF scenes
+    // immediately instead of deferring them through pendingGLTFRelease.
+    if (!pendingGLTFRelease.empty())
+    {
+        fmt::println("[SceneManager] cleanup: forcing {} pending GLTF releases before shutdown",
+                     pendingGLTFRelease.size());
+        pendingGLTFRelease.clear(); // drop strong refs → ~LoadedGLTF::clearAll() runs
+    }
+
     // Drop our references to GLTF scenes. Their destructors call clearAll()
     // exactly once to release GPU resources.
     loadedScenes.clear();
