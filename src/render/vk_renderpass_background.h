@@ -19,7 +19,7 @@ public:
     std::vector<ComputeEffect> &getEffects() { return _backgroundEffects; }
 
     std::vector<ComputeEffect> _backgroundEffects;
-    int _currentEffect = 0;
+    int _currentEffect = 2;
 
 private:
     EngineContext *_context = nullptr;
