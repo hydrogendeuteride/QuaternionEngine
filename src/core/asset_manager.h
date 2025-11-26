@@ -12,7 +12,7 @@
 #include <scene/vk_loader.h>
 #include <core/vk_types.h>
 
-#include "vk_materials.h"
+#include "materials.h"
 #include "asset_locator.h"
 
 class VulkanEngine;

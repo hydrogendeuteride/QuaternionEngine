@@ -1,6 +1,6 @@
 #include <compute/vk_compute.h>
 #include <core/engine_context.h>
-#include <render/vk_pipelines.h>
+#include <render/pipelines.h>
 #include <core/vk_initializers.h>
 #include <iostream>
 

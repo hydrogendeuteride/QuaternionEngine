@@ -45,35 +45,36 @@ add_executable (vulkan_engine
   core/ibl_manager.h
   core/ibl_manager.cpp
   # render
-  render/vk_pipelines.h
-  render/vk_pipelines.cpp
-  render/vk_renderpass.h
-  render/vk_renderpass.cpp
-  render/vk_renderpass_background.h
-  render/vk_renderpass_background.cpp
-  render/vk_renderpass_geometry.h
-  render/vk_renderpass_geometry.cpp
-  render/vk_renderpass_lighting.h
-  render/vk_renderpass_lighting.cpp
-  render/vk_renderpass_shadow.h
-  render/vk_renderpass_shadow.cpp
-  render/vk_renderpass_transparent.h
-  render/vk_renderpass_transparent.cpp
-  render/vk_renderpass_imgui.h
-  render/vk_renderpass_imgui.cpp
-  render/vk_renderpass_tonemap.h
-  render/vk_renderpass_tonemap.cpp
-  # render graph (initial skeleton)
-  render/rg_types.h
-  render/rg_graph.h
-  render/rg_graph.cpp
-  render/rg_builder.h
-  render/rg_builder.cpp
-  render/rg_resources.h
-  render/rg_resources.cpp
-  render/vk_materials.h
-  render/vk_materials.cpp
+  render/pipelines.h
+  render/pipelines.cpp
+  render/renderpass.h
+  render/renderpass.cpp
+  render/materials.h
+  render/materials.cpp
   render/primitives.h
+  # render passes
+  render/passes/background.h
+  render/passes/background.cpp
+  render/passes/geometry.h
+  render/passes/geometry.cpp
+  render/passes/lighting.h
+  render/passes/lighting.cpp
+  render/passes/shadow.h
+  render/passes/shadow.cpp
+  render/passes/transparent.h
+  render/passes/transparent.cpp
+  render/passes/imgui_pass.h
+  render/passes/imgui_pass.cpp
+  render/passes/tonemap.h
+  render/passes/tonemap.cpp
+  # render graph
+  render/graph/types.h
+  render/graph/graph.h
+  render/graph/graph.cpp
+  render/graph/builder.h
+  render/graph/builder.cpp
+  render/graph/resources.h
+  render/graph/resources.cpp
   # scene
   scene/vk_scene.h
   scene/vk_scene.cpp
@@ -93,10 +94,12 @@ add_executable (vulkan_engine
 
 set_property(TARGET vulkan_engine PROPERTY CXX_STANDARD 20)
 target_compile_definitions(vulkan_engine PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
-target_include_directories(vulkan_engine PUBLIC 
+target_include_directories(vulkan_engine PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/core"
   "${CMAKE_CURRENT_SOURCE_DIR}/render"
+  "${CMAKE_CURRENT_SOURCE_DIR}/render/passes"
+  "${CMAKE_CURRENT_SOURCE_DIR}/render/graph"
   "${CMAKE_CURRENT_SOURCE_DIR}/scene"
   "${CMAKE_CURRENT_SOURCE_DIR}/compute"
 )

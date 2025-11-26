@@ -1,8 +1,8 @@
 #pragma once
 
 #include <core/vk_types.h>
-#include <render/vk_renderpass.h>
-#include <render/rg_types.h>
+#include <render/renderpass.h>
+#include <render/graph/types.h>
 
 class EngineContext;
 class RenderGraph;

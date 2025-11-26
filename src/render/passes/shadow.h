@@ -1,7 +1,7 @@
 #pragma once
 
-#include "vk_renderpass.h"
-#include <render/rg_types.h>
+#include "render/renderpass.h"
+#include <render/graph/types.h>
 #include <span>
 
 class RenderGraph;

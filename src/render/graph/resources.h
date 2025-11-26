@@ -1,7 +1,7 @@
 #pragma once
 
 #include <core/vk_types.h>
-#include <render/rg_types.h>
+#include <render/graph/types.h>
 #include <string>
 #include <vector>
 #include <unordered_map>

@@ -1,4 +1,4 @@
-#include "vk_renderpass_background.h"
+#include "background.h"
 #include <string_view>
 
 #include "vk_swapchain.h"
@@ -6,7 +6,7 @@
 #include "core/vk_resource.h"
 #include "core/vk_pipeline_manager.h"
 #include "core/asset_manager.h"
-#include "render/rg_graph.h"
+#include "render/graph/graph.h"
 #include <cstring>
 
 #include "frame_resources.h"

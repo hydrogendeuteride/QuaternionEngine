@@ -4,9 +4,9 @@
 #include "vk_initializers.h"
 
 #include "vk_mem_alloc.h"
-#include <render/rg_graph.h>
-#include <render/rg_builder.h>
-#include <render/rg_resources.h>
+#include <render/graph/graph.h>
+#include <render/graph/builder.h>
+#include <render/graph/resources.h>
 
 #include "frame_resources.h"
 

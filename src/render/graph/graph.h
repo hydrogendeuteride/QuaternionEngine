@@ -1,9 +1,9 @@
 #pragma once
 
 #include <core/vk_types.h>
-#include <render/rg_types.h>
-#include <render/rg_resources.h>
-#include <render/rg_builder.h>
+#include <render/graph/types.h>
+#include <render/graph/resources.h>
+#include <render/graph/builder.h>
 
 #include <functional>
 #include <string>

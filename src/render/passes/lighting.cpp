@@ -1,4 +1,4 @@
-#include "vk_renderpass_lighting.h"
+#include "lighting.h"
 
 #include "frame_resources.h"
 #include "vk_descriptor_manager.h"
@@ -6,7 +6,7 @@
 #include "core/engine_context.h"
 #include "core/vk_initializers.h"
 #include "core/vk_resource.h"
-#include "render/vk_pipelines.h"
+#include "render/pipelines.h"
 #include "core/vk_pipeline_manager.h"
 #include "core/asset_manager.h"
 #include "core/vk_descriptors.h"
@@ -15,7 +15,7 @@
 #include "vk_mem_alloc.h"
 #include "vk_sampler_manager.h"
 #include "vk_swapchain.h"
-#include "render/rg_graph.h"
+#include "render/graph/graph.h"
 #include <array>
 #include <cstring>
 

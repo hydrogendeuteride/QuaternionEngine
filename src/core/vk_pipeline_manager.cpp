@@ -3,7 +3,7 @@
 #include <core/engine_context.h>
 #include <core/vk_initializers.h>
 
-#include <render/vk_pipelines.h>
+#include <render/pipelines.h>
 #include <vk_device.h>
 
 #include <filesystem>

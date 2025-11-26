@@ -5,7 +5,7 @@
 
 #include <core/vk_engine.h>
 #include <core/vk_resource.h>
-#include <render/vk_materials.h>
+#include <render/materials.h>
 #include <render/primitives.h>
 #include <scene/tangent_space.h>
 #include <scene/mesh_bvh.h>

@@ -1,4 +1,4 @@
-#include "vk_renderpass_imgui.h"
+#include "imgui_pass.h"
 
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
@@ -7,7 +7,7 @@
 #include "vk_swapchain.h"
 #include "core/vk_initializers.h"
 #include "core/engine_context.h"
-#include "render/rg_graph.h"
+#include "render/graph/graph.h"
 
 void ImGuiPass::init(EngineContext *context)
 {

@@ -28,9 +28,9 @@ Thin scene layer that produces `RenderObject`s for the renderer. It gathers opaq
 
 ### Sorting / Culling
 
-- Opaque (geometry): stable sort by `material` then `indexBuffer` (see `src/render/vk_renderpass_geometry.cpp`).
-- Transparent: sort by camera‑space depth far→near (see `src/render/vk_renderpass_transparent.cpp`).
-- An example frustum test exists in `vk_renderpass_geometry.cpp` (`is_visible`) and can be enabled to cull meshes.
+- Opaque (geometry): stable sort by `material` then `indexBuffer` (see `src/render/passes/geometry.cpp`).
+- Transparent: sort by camera‑space depth far→near (see `src/render/passes/transparent.cpp`).
+- An example frustum test exists in `passes/geometry.cpp` (`is_visible`) and can be enabled to cull meshes.
 
 ### Dynamic Instances
 

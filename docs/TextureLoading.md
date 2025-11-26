@@ -7,7 +7,7 @@ Overview
   - Materials: layouts use `UPDATE_AFTER_BIND`; descriptors can be rewritten after bind.
   - glTF loader: `src/scene/vk_loader.cpp` builds keys, requests handles, and registers descriptor patches with the cache.
   - Primitives/adhoc: `src/core/asset_manager.cpp` builds materials and registers texture watches.
-  - Visibility: `src/render/vk_renderpass_geometry.cpp` and `src/render/vk_renderpass_transparent.cpp` call `TextureCache::markSetUsed(...)` for sets that are actually drawn.
+  - Visibility: `src/render/passes/geometry.cpp` and `src/render/passes/transparent.cpp` call `TextureCache::markSetUsed(...)` for sets that are actually drawn.
 - IBL: high‑dynamic‑range environment textures are typically loaded directly as `.ktx2` via `IBLManager` instead of the generic streaming cache. See “Image‑Based Lighting (IBL)” below.
 
 Data Flow
@@ -114,6 +114,6 @@ Image‑Based Lighting (IBL) Textures
     - binding 1: `COMBINED_IMAGE_SAMPLER` — BRDF LUT 2D.
     - binding 2: `UNIFORM_BUFFER` — SH coefficients (`vec4 sh[9]`, RGB in `.xyz`).
   - Render passes that use IBL fetch this layout from `EngineContext::ibl` and allocate per‑frame sets:
-    - `vk_renderpass_lighting.cpp`: deferred lighting (set=3).
-    - `vk_renderpass_transparent.cpp`: forward/transparent PBR materials (set=3).
-    - `vk_renderpass_background.cpp`: environment background (set=3; only binding 0 is used in the shader).
+    - `passes/lighting.cpp`: deferred lighting (set=3).
+    - `passes/transparent.cpp`: forward/transparent PBR materials (set=3).
+    - `passes/background.cpp`: environment background (set=3; only binding 0 is used in the shader).

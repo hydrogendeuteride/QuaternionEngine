@@ -1,4 +1,4 @@
-#include "vk_renderpass_transparent.h"
+#include "transparent.h"
 
 #include <algorithm>
 #include <unordered_set>
@@ -13,7 +13,7 @@
 #include "core/vk_device.h"
 #include "core/vk_descriptor_manager.h"
 #include "core/frame_resources.h"
-#include "render/rg_graph.h"
+#include "render/graph/graph.h"
 
 void TransparentPass::init(EngineContext *context)
 {

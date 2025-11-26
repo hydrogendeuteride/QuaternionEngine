@@ -6,7 +6,7 @@
 #include "core/texture_cache.h"
 
 #include "core/vk_engine.h"
-#include "render/vk_materials.h"
+#include "render/materials.h"
 #include "core/vk_initializers.h"
 #include "core/vk_types.h"
 #include "core/config.h"

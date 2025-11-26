@@ -1,5 +1,5 @@
-#include <render/rg_builder.h>
-#include <render/rg_resources.h>
+#include "builder.h"
+#include "resources.h"
 
 // ---- RGPassResources ----
 VkImage RGPassResources::image(RGImageHandle h) const

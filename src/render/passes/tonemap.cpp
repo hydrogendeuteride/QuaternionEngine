@@ -1,4 +1,4 @@
-#include "vk_renderpass_tonemap.h"
+#include "tonemap.h"
 
 #include <core/engine_context.h>
 #include <core/vk_descriptors.h>
@@ -8,8 +8,8 @@
 #include <core/vk_device.h>
 #include <core/vk_resource.h>
 #include <vk_sampler_manager.h>
-#include <render/rg_graph.h>
-#include <render/rg_resources.h>
+#include <render/graph/graph.h>
+#include <render/graph/resources.h>
 
 #include "frame_resources.h"
 

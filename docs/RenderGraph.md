@@ -21,15 +21,15 @@ Lightweight render graph that builds a per‑frame DAG from pass declarations, c
 - `RenderGraph::add_pass(name, RGPassType type, BuildCallback build, RecordCallback record)`
   - Declare image/buffer accesses and attachments inside `build` using `RGPassBuilder`.
   - Do your actual rendering/copies in `record` using resolved Vulkan objects from `RGPassResources`.
-  - See: `src/render/rg_graph.h:36`, `src/render/rg_graph.cpp:51`.
+  - See: `src/render/graph/graph.h:36`, `src/render/graph/graph.cpp:51`.
 
-- `RenderGraph::compile()` → builds ordering and per‑pass `Vk*MemoryBarrier2` lists. See `src/render/rg_graph.cpp:83`.
+- `RenderGraph::compile()` → builds ordering and per‑pass `Vk*MemoryBarrier2` lists. See `src/render/graph/graph.cpp:83`.
 
-- `RenderGraph::execute(cmd)` → emits barriers and dynamic rendering begin/end. See `src/render/rg_graph.cpp:592`.
+- `RenderGraph::execute(cmd)` → emits barriers and dynamic rendering begin/end. See `src/render/graph/graph.cpp:592`.
 
-- Import helpers for engine images: `import_draw_image()`, `import_depth_image()`, `import_gbuffer_*()`, `import_swapchain_image(index)`. See `src/render/rg_graph.cpp:740`.
+- Import helpers for engine images: `import_draw_image()`, `import_depth_image()`, `import_gbuffer_*()`, `import_swapchain_image(index)`. See `src/render/graph/graph.cpp:740`.
 
-- Present chain: `add_present_chain(draw, swapchain, appendExtra)` inserts Copy→Present passes and lets you inject extra passes (e.g., ImGui) in between. See `src/render/rg_graph.cpp:705`.
+- Present chain: `add_present_chain(draw, swapchain, appendExtra)` inserts Copy→Present passes and lets you inject extra passes (e.g., ImGui) in between. See `src/render/graph/graph.cpp:705`.
 
 ### Declaring a Pass
 
@@ -75,14 +75,14 @@ void MyPass::register_graph(RenderGraph* graph,
   - `read_buffer(RGBufferHandle, RGBufferUsage)` / `write_buffer(RGBufferHandle, RGBufferUsage)`.
   - Convenience import: `read_buffer(VkBuffer, RGBufferUsage, size, name)` and `write_buffer(VkBuffer, ...)` dedup by raw handle.
 
-See `src/render/rg_builder.h:39` and impl in `src/render/rg_builder.cpp:20`.
+See `src/render/graph/builder.h:39` and impl in `src/render/graph/builder.cpp:20`.
 
 ### Resource Model (`RGResourceRegistry`)
 
 - Imported vs transient resources are tracked uniformly with lifetime indices (`firstUse/lastUse`).
 - Imports are deduplicated by `VkImage`/`VkBuffer` and keep initial layout/stage/access as the starting state.
 - Transients are created via `ResourceManager` and auto‑destroyed at end of frame using the frame deletion queue.
-- See `src/render/rg_resources.h:11` and `src/render/rg_resources.cpp:1`.
+- See `src/render/graph/resources.h:11` and `src/render/graph/resources.cpp:1`.
 
 ### Synchronization and Layouts
 

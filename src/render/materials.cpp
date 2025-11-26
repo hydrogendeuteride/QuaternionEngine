@@ -1,7 +1,7 @@
-#include "vk_materials.h"
+#include "materials.h"
 
 #include "core/vk_engine.h"
-#include "render/vk_pipelines.h"
+#include "render/pipelines.h"
 #include "core/vk_initializers.h"
 #include "core/vk_pipeline_manager.h"
 #include "core/asset_manager.h"

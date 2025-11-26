@@ -202,7 +202,7 @@ Benefits:
 - Integrated barrier management with other passes.
 - Per-frame synchronization tracking.
 
-Reference: `src/render/vk_renderpass_background.cpp`.
+Reference: `src/render/passes/background.cpp`.
 
 ### Synchronization
 
@@ -279,9 +279,9 @@ src/core/
 └── vk_resource.h/cpp           # immediate_submit() for GPU-blocking
 
 src/render/
-├── vk_renderpass_background.cpp  # Example: gradient/sky compute passes
-├── rg_types.h                    # RGPassType::Compute, RGImageUsage::ComputeWrite
-└── rg_graph.h                    # Render graph integration
+├── passes/background.cpp         # Example: gradient/sky compute passes
+├── graph/types.h                 # RGPassType::Compute, RGImageUsage::ComputeWrite
+└── graph/graph.h                 # Render graph integration
 
 shaders/
 ├── gradient_color.comp     # Example: gradient background

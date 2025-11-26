@@ -1,6 +1,6 @@
 #pragma once
 
-#include <render/rg_types.h>
+#include <render/graph/types.h>
 #include <vector>
 
 class RGResourceRegistry;

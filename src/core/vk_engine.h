@@ -16,12 +16,12 @@
 #include <scene/camera.h>
 
 #include "vk_device.h"
-#include "render/vk_renderpass.h"
-#include "render/vk_renderpass_background.h"
+#include "render/renderpass.h"
+#include "render/passes/background.h"
 #include "vk_resource.h"
 #include "vk_swapchain.h"
 #include "scene/vk_scene.h"
-#include "render/vk_materials.h"
+#include "render/materials.h"
 
 #include "frame_resources.h"
 #include "vk_descriptor_manager.h"
@@ -29,7 +29,7 @@
 #include "core/engine_context.h"
 #include "core/vk_pipeline_manager.h"
 #include "core/asset_manager.h"
-#include "render/rg_graph.h"
+#include "render/graph/graph.h"
 #include "core/vk_raytracing.h"
 #include "core/texture_cache.h"
 #include "core/ibl_manager.h"

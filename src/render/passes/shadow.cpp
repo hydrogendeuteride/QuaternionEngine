@@ -1,11 +1,11 @@
-#include "vk_renderpass_shadow.h"
+#include "shadow.h"
 
 #include <unordered_set>
 #include <string>
 
 #include "core/engine_context.h"
-#include "render/rg_graph.h"
-#include "render/rg_builder.h"
+#include "render/graph/graph.h"
+#include "render/graph/builder.h"
 #include "vk_swapchain.h"
 #include "vk_scene.h"
 #include "frame_resources.h"
@@ -15,7 +15,7 @@
 #include "core/vk_initializers.h"
 #include "core/vk_pipeline_manager.h"
 #include "core/asset_manager.h"
-#include "render/vk_pipelines.h"
+#include "render/pipelines.h"
 #include "core/vk_types.h"
 #include "core/config.h"
 

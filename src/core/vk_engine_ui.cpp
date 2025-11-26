@@ -11,11 +11,11 @@
 
 #include "render/primitives.h"
 #include "vk_mem_alloc.h"
-#include "render/vk_renderpass_tonemap.h"
-#include "render/vk_renderpass_background.h"
+#include "render/passes/tonemap.h"
+#include "render/passes/background.h"
 #include <glm/gtx/euler_angles.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include "render/rg_graph.h"
+#include "render/graph/graph.h"
 #include "core/vk_pipeline_manager.h"
 #include "core/texture_cache.h"
 #include "core/ibl_manager.h"

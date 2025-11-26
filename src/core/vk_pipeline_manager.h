@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include <core/vk_types.h>
-#include <render/vk_pipelines.h>
+#include <render/pipelines.h>
 #include <compute/vk_compute.h>
 
 #include <functional>

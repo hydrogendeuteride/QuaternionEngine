@@ -1,4 +1,4 @@
-#include "vk_renderpass_geometry.h"
+#include "geometry.h"
 
 #include <chrono>
 #include <unordered_set>
@@ -14,7 +14,7 @@
 #include "vk_mem_alloc.h"
 #include "vk_scene.h"
 #include "vk_swapchain.h"
-#include "render/rg_graph.h"
+#include "render/graph/graph.h"
 
 // Basic conservative frustum test against RenderObject AABB.
 // Clip space uses Vulkan Z0 (0..w). Returns true if any part of the box is inside.

@@ -1,12 +1,12 @@
-#include "vk_renderpass.h"
+#include "renderpass.h"
 
-#include "vk_renderpass_background.h"
-#include "vk_renderpass_geometry.h"
-#include "vk_renderpass_imgui.h"
-#include "vk_renderpass_lighting.h"
-#include "vk_renderpass_transparent.h"
-#include "vk_renderpass_tonemap.h"
-#include "vk_renderpass_shadow.h"
+#include "passes/background.h"
+#include "passes/geometry.h"
+#include "passes/imgui_pass.h"
+#include "passes/lighting.h"
+#include "passes/transparent.h"
+#include "passes/tonemap.h"
+#include "passes/shadow.h"
 
 void RenderPassManager::init(EngineContext *context)
 {
