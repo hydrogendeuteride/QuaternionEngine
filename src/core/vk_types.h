@@ -70,6 +70,13 @@ struct AllocatedBuffer {
     VmaAllocationInfo info;
 };
 
+struct GPUPunctualLight {
+    glm::vec4 position_radius;
+    glm::vec4 color_intensity;
+};
+
+static constexpr uint32_t kMaxPunctualLights = 64;
+
 struct GPUSceneData {
     glm::mat4 view;
     glm::mat4 proj;
@@ -84,6 +91,9 @@ struct GPUSceneData {
     // Hybrid ray-query options (match shaders/input_structures.glsl)
     glm::uvec4 rtOptions; // x: enabled (1/0), y: cascade mask, z,w: reserved
     glm::vec4  rtParams;  // x: N·L threshold, yzw: reserved
+
+    GPUPunctualLight punctualLights[kMaxPunctualLights];
+    glm::uvec4 lightCounts;
 };
 
 enum class MaterialPass :uint8_t {

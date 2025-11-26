@@ -126,6 +126,18 @@ public:
     bool setGLTFInstanceAnimation(const std::string &instanceName, const std::string &animationName, bool resetTime = true);
     bool setGLTFInstanceAnimationLoop(const std::string &instanceName, bool loop);
 
+    struct PointLight
+    {
+        glm::vec3 position;
+        float radius;
+        glm::vec3 color;
+        float intensity;
+    };
+
+    void addPointLight(const PointLight &light);
+    void clearPointLights();
+    const std::vector<PointLight> &getPointLights() const { return pointLights; }
+
     struct SceneStats
     {
         float scene_update_time = 0.f;
@@ -148,6 +160,7 @@ private:
     Camera mainCamera = {};
     GPUSceneData sceneData = {};
     DrawContext mainDrawContext;
+    std::vector<PointLight> pointLights;
 
     std::unordered_map<std::string, std::shared_ptr<LoadedGLTF> > loadedScenes;
     std::unordered_map<std::string, std::shared_ptr<Node> > loadedNodes;

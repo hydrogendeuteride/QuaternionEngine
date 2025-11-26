@@ -27,6 +27,16 @@ SceneManager::~SceneManager()
                  pendingGLTFRelease.size());
 }
 
+void SceneManager::addPointLight(const PointLight &light)
+{
+    pointLights.push_back(light);
+}
+
+void SceneManager::clearPointLights()
+{
+    pointLights.clear();
+}
+
 void SceneManager::init(EngineContext *context)
 {
     _context = context;
@@ -39,6 +49,21 @@ void SceneManager::init(EngineContext *context)
     sceneData.ambientColor = glm::vec4(0.1f, 0.1f, 0.1f, 1.0f);
     sceneData.sunlightDirection = glm::vec4(-0.2f, -1.0f, -0.3f, 1.0f);
     sceneData.sunlightColor = glm::vec4(1.0f, 1.0f, 1.0f, 3.0f);
+
+    // Seed a couple of default point lights for quick testing.
+    PointLight warmKey{};
+    warmKey.position = glm::vec3(0.0f, 0.0f, 0.0f);
+    warmKey.radius = 25.0f;
+    warmKey.color = glm::vec3(1.0f, 0.95f, 0.8f);
+    warmKey.intensity = 15.0f;
+    addPointLight(warmKey);
+
+    PointLight coolFill{};
+    coolFill.position = glm::vec3(-10.0f, 4.0f, 10.0f);
+    coolFill.radius = 20.0f;
+    coolFill.color = glm::vec3(0.6f, 0.7f, 1.0f);
+    coolFill.intensity = 10.0f;
+    addPointLight(coolFill);
 }
 
 void SceneManager::update_scene()
@@ -289,6 +314,21 @@ void SceneManager::update_scene()
         sceneData.rtOptions = glm::uvec4(rtEnabled, ss.hybridRayCascadesMask, ss.mode, 0u);
         sceneData.rtParams  = glm::vec4(ss.hybridRayNoLThreshold, 0.0f, 0.0f, 0.0f);
     }
+
+    // Fill punctual lights into GPUSceneData
+    const uint32_t lightCount = static_cast<uint32_t>(std::min(pointLights.size(), static_cast<size_t>(kMaxPunctualLights)));
+    for (uint32_t i = 0; i < lightCount; ++i)
+    {
+        const PointLight &pl = pointLights[i];
+        sceneData.punctualLights[i].position_radius = glm::vec4(pl.position, pl.radius);
+        sceneData.punctualLights[i].color_intensity = glm::vec4(pl.color, pl.intensity);
+    }
+    for (uint32_t i = lightCount; i < kMaxPunctualLights; ++i)
+    {
+        sceneData.punctualLights[i].position_radius = glm::vec4(0.0f);
+        sceneData.punctualLights[i].color_intensity = glm::vec4(0.0f);
+    }
+    sceneData.lightCounts = glm::uvec4(lightCount, 0u, 0u, 0u);
 
     auto end = std::chrono::system_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);

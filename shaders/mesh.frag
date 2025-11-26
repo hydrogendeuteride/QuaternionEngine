@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : require
 #include "input_structures.glsl"
 #include "ibl_common.glsl"
+#include "lighting_common.glsl"
 
 layout (location = 0) in vec3 inNormal;
 layout (location = 1) in vec3 inColor;
@@ -11,43 +12,6 @@ layout (location = 3) in vec3 inWorldPos;
 layout (location = 4) in vec4 inTangent;
 
 layout (location = 0) out vec4 outFragColor;
-
-const float PI = 3.14159265359;
-
-vec3 fresnelSchlick(float cosTheta, vec3 F0)
-{
-    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
-}
-
-float DistributionGGX(vec3 N, vec3 H, float roughness)
-{
-    float a      = roughness * roughness;
-    float a2     = a * a;
-    float NdotH  = max(dot(N, H), 0.0);
-    float NdotH2 = NdotH * NdotH;
-
-    float num   = a2;
-    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
-    denom = PI * denom * denom;
-
-    return num / max(denom, 0.001);
-}
-
-float GeometrySchlickGGX(float NdotV, float roughness)
-{
-    float r = (roughness + 1.0);
-    float k = (r * r) / 8.0;
-
-    float denom = NdotV * (1.0 - k) + k;
-    return NdotV / denom;
-}
-
-float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
-{
-    float ggx2 = GeometrySchlickGGX(max(dot(N, V), 0.0), roughness);
-    float ggx1 = GeometrySchlickGGX(max(dot(N, L), 0.0), roughness);
-    return ggx1 * ggx2;
-}
 
 void main()
 {
@@ -73,26 +37,18 @@ void main()
     vec3 N = normalize(T * Nm.x + B * Nm.y + Nn * Nm.z);
     vec3 camPos = vec3(inverse(sceneData.view)[3]);
     vec3 V = normalize(camPos - inWorldPos);
-    vec3 L = normalize(-sceneData.sunlightDirection.xyz);
-    vec3 H = normalize(V + L);
 
-    vec3 F0 = mix(vec3(0.04), albedo, metallic);
-    vec3 F  = fresnelSchlick(max(dot(H, V), 0.0), F0);
-    float NDF = DistributionGGX(N, H, roughness);
-    float G   = GeometrySmith(N, V, L, roughness);
+    // Directional sun term (no shadows in forward path)
+    vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);
+    vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
+    vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a;
 
-    vec3 numerator    = NDF * G * F;
-    float denom       = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0);
-    vec3 specular     = numerator / max(denom, 0.001);
-
-    vec3 kS = F;
-    vec3 kD = vec3(1.0) - kS;
-    kD *= 1.0 - metallic;
-
-    float NdotL = max(dot(N, L), 0.0);
-    vec3 irradiance = sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * NdotL;
-
-    vec3 color = (kD * albedo / PI + specular) * irradiance;
+    // Punctual point lights
+    uint pointCount = sceneData.lightCounts.x;
+    for (uint i = 0u; i < pointCount; ++i)
+    {
+        direct += eval_point_light(sceneData.punctualLights[i], inWorldPos, N, V, albedo, roughness, metallic);
+    }
 
     // IBL: specular from equirect 2D mips; diffuse from SH
     vec3 R = reflect(-V, N);
@@ -101,9 +57,11 @@ void main()
     vec2 uv = dir_to_equirect(R);
     vec3 prefiltered = textureLod(iblSpec2D, uv, lod).rgb;
     vec2 brdf = texture(iblBRDF, vec2(max(dot(N, V), 0.0), roughness)).rg;
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 specIBL = prefiltered * (F0 * brdf.x + brdf.y);
     vec3 diffIBL = (1.0 - metallic) * albedo * sh_eval_irradiance(N);
-    color += diffIBL + specIBL;
+
+    vec3 color = direct + diffIBL + specIBL;
 
     // Alpha from baseColor texture and factor (glTF spec)
     float alpha = clamp(baseTex.a * materialData.colorFactors.a, 0.0, 1.0);

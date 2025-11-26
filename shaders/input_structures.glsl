@@ -1,5 +1,12 @@
 // Maximum number of shadow cascades supported in shaders
 #define MAX_CASCADES 4
+// Maximum number of punctual (point) lights
+#define MAX_PUNCTUAL_LIGHTS 64
+
+struct GPUPunctualLight {
+    vec4 position_radius;
+    vec4 color_intensity;
+};
 
 layout(set = 0, binding = 0) uniform  SceneData{
 
@@ -22,6 +29,9 @@ layout(set = 0, binding = 0) uniform  SceneData{
     uvec4 rtOptions;
     // rtParams.x = N·L threshold; others reserved
     vec4  rtParams;
+
+    GPUPunctualLight punctualLights[MAX_PUNCTUAL_LIGHTS];
+    uvec4 lightCounts;
 } sceneData;
 
 layout(set = 1, binding = 0) uniform GLTFMaterialData{

@@ -10,10 +10,10 @@ Current structure:
 - GLTF loading and rendering, primitive creation and rendering.
 - Supports texture compression(BCn, non glTF standard), LRU reload
 - Object clicking, generation.
+- Multi light system
 
 Work-In-Progress
 - [ ] TAA
-- [ ] Multiple light
 - [ ] SSR
 - [ ] bloom
 - [ ] Planet Rendering
