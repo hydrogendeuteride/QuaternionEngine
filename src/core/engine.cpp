@@ -28,6 +28,7 @@
 #include <array>
 
 #include <iostream>
+#include <cmath>
 #include <glm/gtx/transform.hpp>
 
 #include "config.h"
@@ -229,6 +230,10 @@ void VulkanEngine::init()
     // Create IBL manager early so set=3 layout exists before pipelines are built
     _iblManager = std::make_unique<IBLManager>();
     _iblManager->init(_context.get());
+    if (_textureCache)
+    {
+        _iblManager->set_texture_cache(_textureCache.get());
+    }
     // Publish to context for passes and pipeline layout assembly
     _context->ibl = _iblManager.get();
 
@@ -238,6 +243,13 @@ void VulkanEngine::init()
         ibl.specularCube = _assetManager->assetPath("ibl/docklands.ktx2");
         ibl.diffuseCube  = _assetManager->assetPath("ibl/docklands.ktx2"); // temporary: reuse if separate diffuse not provided
         ibl.brdfLut2D    = _assetManager->assetPath("ibl/brdf_lut.ktx2");
+        // By default, use the same texture for lighting and background; users can point background2D
+        // at a different .ktx2 to decouple them.
+        ibl.background2D = ibl.specularCube;
+        // Treat this as the global/fallback IBL used outside any local volume.
+        _globalIBLPaths = ibl;
+        _hasGlobalIBL = true;
+        _activeIBLVolume = -1;
         _iblManager->load(ibl);
     }
 
@@ -469,6 +481,44 @@ void VulkanEngine::draw()
 {
     _sceneManager->update_scene();
 
+    // Update IBL based on camera position and user-defined reflection volumes.
+    if (_iblManager && _sceneManager)
+    {
+        glm::vec3 camPos = _sceneManager->getMainCamera().position;
+        int newVolume = -1;
+        for (size_t i = 0; i < _iblVolumes.size(); ++i)
+        {
+            const IBLVolume &v = _iblVolumes[i];
+            if (!v.enabled) continue;
+            glm::vec3 local = camPos - v.center;
+            if (std::abs(local.x) <= v.halfExtents.x &&
+                std::abs(local.y) <= v.halfExtents.y &&
+                std::abs(local.z) <= v.halfExtents.z)
+            {
+                newVolume = static_cast<int>(i);
+                break;
+            }
+        }
+        if (newVolume != _activeIBLVolume)
+        {
+            const IBLPaths *paths = nullptr;
+            if (newVolume >= 0)
+            {
+                paths = &_iblVolumes[newVolume].paths;
+            }
+            else if (_hasGlobalIBL)
+            {
+                paths = &_globalIBLPaths;
+            }
+
+            if (paths)
+            {
+                _iblManager->load(*paths);
+            }
+            _activeIBLVolume = newVolume;
+        }
+    }
+
     // Per-frame hover raycast based on last mouse position.
     if (_sceneManager && _mousePosPixels.x >= 0.0f && _mousePosPixels.y >= 0.0f)
     {
@@ -558,6 +608,8 @@ void VulkanEngine::draw()
         RGImageHandle hGBufferNormal = _renderGraph->import_gbuffer_normal();
         RGImageHandle hGBufferAlbedo = _renderGraph->import_gbuffer_albedo();
         RGImageHandle hSwapchain = _renderGraph->import_swapchain_image(swapchainImageIndex);
+        // For debug overlays (IBL volumes), re-use HDR draw image as a color target.
+        RGImageHandle hDebugColor = hDraw;
 
         // Create transient depth targets for cascaded shadow maps (even if RT-only, to keep descriptors stable)
         const VkExtent2D shadowExtent{2048, 2048};

@@ -37,6 +37,36 @@ void SceneManager::clearPointLights()
     pointLights.clear();
 }
 
+bool SceneManager::getPointLight(size_t index, PointLight &outLight) const
+{
+    if (index >= pointLights.size())
+    {
+        return false;
+    }
+    outLight = pointLights[index];
+    return true;
+}
+
+bool SceneManager::setPointLight(size_t index, const PointLight &light)
+{
+    if (index >= pointLights.size())
+    {
+        return false;
+    }
+    pointLights[index] = light;
+    return true;
+}
+
+bool SceneManager::removePointLight(size_t index)
+{
+    if (index >= pointLights.size())
+    {
+        return false;
+    }
+    pointLights.erase(pointLights.begin() + index);
+    return true;
+}
+
 void SceneManager::init(EngineContext *context)
 {
     _context = context;

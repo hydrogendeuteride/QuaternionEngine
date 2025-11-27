@@ -136,6 +136,10 @@ public:
 
     void addPointLight(const PointLight &light);
     void clearPointLights();
+    size_t getPointLightCount() const { return pointLights.size(); }
+    bool getPointLight(size_t index, PointLight &outLight) const;
+    bool setPointLight(size_t index, const PointLight &light);
+    bool removePointLight(size_t index);
     const std::vector<PointLight> &getPointLights() const { return pointLights; }
 
     struct SceneStats

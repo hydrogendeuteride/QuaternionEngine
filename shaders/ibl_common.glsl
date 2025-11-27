@@ -1,10 +1,11 @@
 #ifndef IBL_COMMON_GLSL
 #define IBL_COMMON_GLSL
 
-// IBL bindings (set=3): specular equirect 2D, BRDF LUT, SH UBO.
+// IBL bindings (set=3): specular equirect 2D, BRDF LUT, SH UBO, optional background map.
 layout(set=3, binding=0) uniform sampler2D iblSpec2D;
 layout(set=3, binding=1) uniform sampler2D iblBRDF;
 layout(std140, set=3, binding=2) uniform IBL_SH { vec4 sh[9]; } iblSH;
+layout(set=3, binding=3) uniform sampler2D iblBackground2D;
 
 // Evaluate diffuse irradiance from 2nd-order SH coefficients (9 coeffs).
 // Coefficients are pre-convolved with the Lambert kernel on the CPU.

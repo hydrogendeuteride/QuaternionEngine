@@ -10,14 +10,29 @@
 #include <SDL_stdinc.h>
 
 #include "core/device/device.h"
+#include "core/assets/texture_cache.h"
 
 bool IBLManager::load(const IBLPaths &paths)
 {
     if (_ctx == nullptr || _ctx->getResources() == nullptr) return false;
-    ensureLayout();
     ResourceManager *rm = _ctx->getResources();
 
-    // Load specular environment: prefer cubemap; fallback to 2D equirect with mips
+    // When uploads are deferred into the RenderGraph, any previously queued
+    // image uploads might still reference VkImage handles owned by this
+    // manager. Before destroying or recreating IBL images, flush those
+    // uploads via the immediate path so we never record barriers or copies
+    // for images that have been destroyed.
+    if (rm->deferred_uploads() && rm->has_pending_uploads())
+    {
+        rm->process_queued_uploads_immediate();
+    }
+
+    // Allow reloading at runtime: destroy previous images/SH but keep layout.
+    destroy_images_and_sh();
+    ensureLayout();
+
+    // Load specular environment: prefer cubemap; fallback to 2D equirect with mips.
+    // Also hint the TextureCache (if present) so future switches are cheap.
     if (!paths.specularCube.empty())
     {
         // Try as cubemap first
@@ -222,6 +237,12 @@ bool IBLManager::load(const IBLPaths &paths)
         _diff = _spec;
     }
 
+    // If background is still missing but specular is valid, reuse the specular environment.
+    if (_background.image == VK_NULL_HANDLE && _spec.image != VK_NULL_HANDLE)
+    {
+        _background = _spec;
+    }
+
     // BRDF LUT
     if (!paths.brdfLut2D.empty())
     {
@@ -251,33 +272,15 @@ bool IBLManager::load(const IBLPaths &paths)
 void IBLManager::unload()
 {
     if (_ctx == nullptr || _ctx->getResources() == nullptr) return;
-    auto *rm = _ctx->getResources();
-    if (_spec.image)
-    {
-        rm->destroy_image(_spec);
-    }
-    // Handle potential aliasing: _diff may have been set to _spec in load().
-    if (_diff.image && _diff.image != _spec.image)
-    {
-        rm->destroy_image(_diff);
-    }
-    if (_brdf.image)
-    {
-        rm->destroy_image(_brdf);
-    }
 
-    _spec = {};
-    _diff = {};
-    _brdf = {};
+    // Destroy images and SH buffer first.
+    destroy_images_and_sh();
+
+    // Then release descriptor layout.
     if (_iblSetLayout && _ctx && _ctx->getDevice())
     {
         vkDestroyDescriptorSetLayout(_ctx->getDevice()->device(), _iblSetLayout, nullptr);
         _iblSetLayout = VK_NULL_HANDLE;
-    }
-    if (_shBuffer.buffer)
-    {
-        rm->destroy_buffer(_shBuffer);
-        _shBuffer = {};
     }
 }
 
@@ -293,8 +296,48 @@ bool IBLManager::ensureLayout()
     builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     // binding 2: SH coefficients UBO (vec4[9])
     builder.add_binding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    // binding 3: optional background environment texture (2D equirect)
+    builder.add_binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     _iblSetLayout = builder.build(
         _ctx->getDevice()->device(), VK_SHADER_STAGE_FRAGMENT_BIT,
         nullptr, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
     return _iblSetLayout != VK_NULL_HANDLE;
+}
+
+void IBLManager::destroy_images_and_sh()
+{
+    if (_ctx == nullptr || _ctx->getResources() == nullptr) return;
+    auto *rm = _ctx->getResources();
+
+    if (_spec.image)
+    {
+        rm->destroy_image(_spec);
+    }
+    // Handle potential aliasing: _diff may have been set to _spec in load().
+    if (_diff.image && _diff.image != _spec.image)
+    {
+        rm->destroy_image(_diff);
+    }
+    // _background may alias _spec or _diff; only destroy when unique.
+    if (_background.image &&
+        _background.image != _spec.image &&
+        _background.image != _diff.image)
+    {
+        rm->destroy_image(_background);
+    }
+    if (_brdf.image)
+    {
+        rm->destroy_image(_brdf);
+    }
+
+    if (_shBuffer.buffer)
+    {
+        rm->destroy_buffer(_shBuffer);
+        _shBuffer = {};
+    }
+
+    _spec = {};
+    _diff = {};
+    _background = {};
+    _brdf = {};
 }

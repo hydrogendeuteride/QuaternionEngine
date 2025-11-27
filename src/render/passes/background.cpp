@@ -151,21 +151,37 @@ void BackgroundPass::register_graph(RenderGraph *graph, RGImageHandle drawHandle
                 DescriptorWriter w0; w0.write_buffer(0, ubo.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
                 w0.update_set(ctx->getDevice()->device(), global);
 
-                // IBL set
-                VkImageView specView = _fallbackIblCube.imageView;
-                if (ctx->ibl && ctx->ibl->specular().imageView) specView = ctx->ibl->specular().imageView;
-                VkDescriptorSetLayout iblLayout = (ctx->ibl ? ctx->ibl->descriptorLayout() : _emptySetLayout);
-                VkDescriptorSet ibl = ctx->currentFrame->_frameDescriptors.allocate(
-                    ctx->getDevice()->device(), iblLayout);
-                DescriptorWriter w3;
-                // Bind only specular at binding 0; other bindings are unused in this shader
-                w3.write_image(0, specView, ctx->getSamplers()->defaultLinear(),
-                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-                w3.update_set(ctx->getDevice()->device(), ibl);
+                // IBL/background set (set = 3)
+                VkDescriptorSet ibl = VK_NULL_HANDLE;
+                if (ctx->ibl)
+                {
+                    VkImageView envView = _fallbackIblCube.imageView;
+                    // Prefer a dedicated background texture when available, otherwise reuse specular.
+                    if (ctx->ibl->background().imageView)
+                    {
+                        envView = ctx->ibl->background().imageView;
+                    }
+                    else if (ctx->ibl->specular().imageView)
+                    {
+                        envView = ctx->ibl->specular().imageView;
+                    }
+
+                    VkDescriptorSetLayout iblLayout = ctx->ibl->descriptorLayout();
+                    ibl = ctx->currentFrame->_frameDescriptors.allocate(
+                        ctx->getDevice()->device(), iblLayout);
+                    DescriptorWriter w3;
+                    // Bind background map at binding 3; other bindings are unused in this shader.
+                    w3.write_image(3, envView, ctx->getSamplers()->defaultLinear(),
+                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+                    w3.update_set(ctx->getDevice()->device(), ibl);
+                }
 
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _envPipeline);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _envPipelineLayout, 0, 1, &global, 0, nullptr);
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _envPipelineLayout, 3, 1, &ibl, 0, nullptr);
+                if (ibl != VK_NULL_HANDLE)
+                {
+                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _envPipelineLayout, 3, 1, &ibl, 0, nullptr);
+                }
 
                 VkExtent2D extent = ctx->getDrawExtent();
                 VkViewport vp{0.f, 0.f, float(extent.width), float(extent.height), 0.f, 1.f};

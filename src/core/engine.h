@@ -116,6 +116,21 @@ public:
     // Debug helpers: track spawned IBL test meshes to remove them easily
     std::vector<std::string> _iblTestNames;
 
+    // Simple world-space IBL reflection volumes (axis-aligned boxes).
+    struct IBLVolume
+    {
+        glm::vec3 center{0.0f, 0.0f, 0.0f};
+        glm::vec3 halfExtents{10.0f, 10.0f, 10.0f};
+        IBLPaths paths{};   // HDRI paths for this volume
+        bool enabled{true};
+    };
+    // Global/default IBL used when no volume contains the camera.
+    IBLPaths _globalIBLPaths{};
+    bool _hasGlobalIBL{false};
+    // User-defined local IBL volumes and currently active index (-1 = global).
+    std::vector<IBLVolume> _iblVolumes;
+    int _activeIBLVolume{-1};
+
     struct PickInfo
     {
         MeshAsset *mesh = nullptr;

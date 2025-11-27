@@ -21,6 +21,7 @@
 #include "core/assets/ibl_manager.h"
 #include "context.h"
 #include <core/types.h>
+#include <cstring>
 
 #include "mesh_bvh.h"
 
@@ -138,11 +139,102 @@ namespace
     static void ui_ibl(VulkanEngine *eng)
     {
         if (!eng) return;
+
         if (ImGui::Button("Spawn IBL Test Grid")) { spawn_ibl_test(eng); }
         ImGui::SameLine();
         if (ImGui::Button("Clear IBL Test")) { clear_ibl_test(eng); }
         ImGui::TextUnformatted(
             "5x5 spheres: metallic across columns, roughness across rows.\nExtra: chrome + glass.");
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("IBL Volumes (reflection probes)");
+
+        if (!eng->_iblManager)
+        {
+            ImGui::TextUnformatted("IBLManager not available");
+            return;
+        }
+
+        if (eng->_activeIBLVolume < 0)
+        {
+            ImGui::TextUnformatted("Active IBL: Global");
+        }
+        else
+        {
+            ImGui::Text("Active IBL: Volume %d", eng->_activeIBLVolume);
+        }
+
+        if (ImGui::Button("Add IBL Volume"))
+        {
+            VulkanEngine::IBLVolume vol{};
+            if (eng->_sceneManager)
+            {
+                vol.center = eng->_sceneManager->getMainCamera().position;
+            }
+            vol.halfExtents = glm::vec3(10.0f, 10.0f, 10.0f);
+            vol.paths = eng->_globalIBLPaths;
+            eng->_iblVolumes.push_back(vol);
+        }
+
+        for (size_t i = 0; i < eng->_iblVolumes.size(); ++i)
+        {
+            auto &vol = eng->_iblVolumes[i];
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::Separator();
+            ImGui::Text("Volume %zu", i);
+            ImGui::Checkbox("Enabled", &vol.enabled);
+            ImGui::InputFloat3("Center", &vol.center.x);
+            ImGui::InputFloat3("Half Extents", &vol.halfExtents.x);
+
+            // Simple path editors; store absolute or engine-local paths.
+            char specBuf[256]{};
+            char diffBuf[256]{};
+            char bgBuf[256]{};
+            char brdfBuf[256]{};
+            std::strncpy(specBuf, vol.paths.specularCube.c_str(), sizeof(specBuf) - 1);
+            std::strncpy(diffBuf, vol.paths.diffuseCube.c_str(), sizeof(diffBuf) - 1);
+            std::strncpy(bgBuf, vol.paths.background2D.c_str(), sizeof(bgBuf) - 1);
+            std::strncpy(brdfBuf, vol.paths.brdfLut2D.c_str(), sizeof(brdfBuf) - 1);
+
+            if (ImGui::InputText("Specular path", specBuf, IM_ARRAYSIZE(specBuf)))
+            {
+                vol.paths.specularCube = specBuf;
+            }
+            if (ImGui::InputText("Diffuse path", diffBuf, IM_ARRAYSIZE(diffBuf)))
+            {
+                vol.paths.diffuseCube = diffBuf;
+            }
+            if (ImGui::InputText("Background path", bgBuf, IM_ARRAYSIZE(bgBuf)))
+            {
+                vol.paths.background2D = bgBuf;
+            }
+            if (ImGui::InputText("BRDF LUT path", brdfBuf, IM_ARRAYSIZE(brdfBuf)))
+            {
+                vol.paths.brdfLut2D = brdfBuf;
+            }
+
+            if (ImGui::Button("Reload This Volume IBL"))
+            {
+                if (eng->_iblManager && vol.enabled)
+                {
+                    eng->_iblManager->load(vol.paths);
+                    eng->_activeIBLVolume = static_cast<int>(i);
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Set As Global IBL"))
+            {
+                eng->_globalIBLPaths = vol.paths;
+                eng->_hasGlobalIBL = true;
+                eng->_activeIBLVolume = -1;
+                if (eng->_iblManager)
+                {
+                    eng->_iblManager->load(eng->_globalIBLPaths);
+                }
+            }
+
+            ImGui::PopID();
+        }
     }
 
     // Quick stats & targets overview
@@ -597,6 +689,99 @@ namespace
                 glm::mat4 S = glm::scale(glm::mat4(1.0f), glm::vec3(primScale[0], primScale[1], primScale[2]));
                 glm::mat4 M = T * R * S;
                 eng->_sceneManager->addMeshInstance(primName, mesh, M);
+            }
+        }
+
+        // Point light editor
+        if (eng->_sceneManager)
+        {
+            ImGui::Separator();
+            ImGui::TextUnformatted("Point lights");
+
+            SceneManager *sceneMgr = eng->_sceneManager.get();
+            const auto &lights = sceneMgr->getPointLights();
+            ImGui::Text("Active lights: %zu", lights.size());
+
+            static int selectedLight = -1;
+            if (selectedLight >= static_cast<int>(lights.size()))
+            {
+                selectedLight = static_cast<int>(lights.size()) - 1;
+            }
+
+            if (ImGui::BeginListBox("Light list"))
+            {
+                for (size_t i = 0; i < lights.size(); ++i)
+                {
+                    std::string label = fmt::format("Light {}", i);
+                    const bool isSelected = (selectedLight == static_cast<int>(i));
+                    if (ImGui::Selectable(label.c_str(), isSelected))
+                    {
+                        selectedLight = static_cast<int>(i);
+                    }
+                }
+                ImGui::EndListBox();
+            }
+
+            // Controls for the selected light
+            if (selectedLight >= 0 && selectedLight < static_cast<int>(lights.size()))
+            {
+                SceneManager::PointLight pl{};
+                if (sceneMgr->getPointLight(static_cast<size_t>(selectedLight), pl))
+                {
+                    float pos[3] = {pl.position.x, pl.position.y, pl.position.z};
+                    float col[3] = {pl.color.r, pl.color.g, pl.color.b};
+                    bool changed = false;
+
+                    changed |= ImGui::InputFloat3("Position", pos);
+                    changed |= ImGui::SliderFloat("Radius", &pl.radius, 0.1f, 1000.0f);
+                    changed |= ImGui::ColorEdit3("Color", col);
+                    changed |= ImGui::SliderFloat("Intensity", &pl.intensity, 0.0f, 100.0f);
+
+                    if (changed)
+                    {
+                        pl.position = glm::vec3(pos[0], pos[1], pos[2]);
+                        pl.color = glm::vec3(col[0], col[1], col[2]);
+                        sceneMgr->setPointLight(static_cast<size_t>(selectedLight), pl);
+                    }
+
+                    if (ImGui::Button("Remove selected light"))
+                    {
+                        sceneMgr->removePointLight(static_cast<size_t>(selectedLight));
+                        selectedLight = -1;
+                    }
+                }
+            }
+
+            // Controls for adding a new light
+            ImGui::Separator();
+            ImGui::TextUnformatted("Add point light");
+            static float newPos[3] = {0.0f, 1.0f, 0.0f};
+            static float newRadius = 10.0f;
+            static float newColor[3] = {1.0f, 1.0f, 1.0f};
+            static float newIntensity = 5.0f;
+
+            ImGui::InputFloat3("New position", newPos);
+            ImGui::SliderFloat("New radius", &newRadius, 0.1f, 1000.0f);
+            ImGui::ColorEdit3("New color", newColor);
+            ImGui::SliderFloat("New intensity", &newIntensity, 0.0f, 100.0f);
+
+            if (ImGui::Button("Add point light"))
+            {
+                SceneManager::PointLight pl{};
+                pl.position = glm::vec3(newPos[0], newPos[1], newPos[2]);
+                pl.radius = newRadius;
+                pl.color = glm::vec3(newColor[0], newColor[1], newColor[2]);
+                pl.intensity = newIntensity;
+
+                const size_t oldCount = sceneMgr->getPointLightCount();
+                sceneMgr->addPointLight(pl);
+                selectedLight = static_cast<int>(oldCount);
+            }
+
+            if (ImGui::Button("Clear all lights"))
+            {
+                sceneMgr->clearPointLights();
+                selectedLight = -1;
             }
         }
 

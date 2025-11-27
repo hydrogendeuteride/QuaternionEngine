@@ -16,6 +16,8 @@ void main()
     vec3 worldDir = normalize((inverse(sceneData.view) * vec4(viewDir, 0.0)).xyz);
 
     vec2 uv = dir_to_equirect(worldDir);
-    vec3 col = textureLod(iblSpec2D, uv, 0.0).rgb;
+    // Sample a dedicated background environment map when available.
+    // The engine binds iblBackground2D to a texture that may differ from the IBL specular map.
+    vec3 col = textureLod(iblBackground2D, uv, 0.0).rgb;
     outColor = vec4(col, 1.0);
 }
