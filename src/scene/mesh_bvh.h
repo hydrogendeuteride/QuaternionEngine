@@ -8,7 +8,7 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 
-#include <core/vk_types.h>
+#include <core/types.h>
 #include <bvh/BVH.h>
 
 struct MeshAsset;

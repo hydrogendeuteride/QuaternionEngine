@@ -1,10 +1,10 @@
 #include "materials.h"
 
-#include "core/vk_engine.h"
+#include "core/engine.h"
 #include "render/pipelines.h"
-#include "core/vk_initializers.h"
-#include "core/vk_pipeline_manager.h"
-#include "core/asset_manager.h"
+#include "core/util/initializers.h"
+#include "core/pipeline/manager.h"
+#include "core/assets/manager.h"
 
 namespace vkutil { bool load_shader_module(const char*, VkDevice, VkShaderModule*); }
 

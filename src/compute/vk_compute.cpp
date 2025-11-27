@@ -1,12 +1,12 @@
 #include <compute/vk_compute.h>
-#include <core/engine_context.h>
+#include <core/context.h>
 #include <render/pipelines.h>
-#include <core/vk_initializers.h>
+#include <core/util/initializers.h>
 #include <iostream>
 
-#include "vk_device.h"
-#include "core/vk_resource.h"
-#include "frame_resources.h"
+#include "core/device/device.h"
+#include "core/device/resource.h"
+#include "core/frame/resources.h"
 
 ComputeBinding ComputeBinding::uniformBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size, VkDeviceSize offset)
 {

@@ -3,16 +3,16 @@
 #include <algorithm>
 #include <unordered_set>
 
-#include "ibl_manager.h"
-#include "texture_cache.h"
-#include "vk_sampler_manager.h"
-#include "vk_scene.h"
-#include "vk_swapchain.h"
-#include "core/engine_context.h"
-#include "core/vk_resource.h"
-#include "core/vk_device.h"
-#include "core/vk_descriptor_manager.h"
-#include "core/frame_resources.h"
+#include "core/assets/ibl_manager.h"
+#include "core/assets/texture_cache.h"
+#include "core/pipeline/sampler.h"
+#include "scene/vk_scene.h"
+#include "core/device/swapchain.h"
+#include "core/context.h"
+#include "core/device/resource.h"
+#include "core/device/device.h"
+#include "core/descriptor/manager.h"
+#include "core/frame/resources.h"
 #include "render/graph/graph.h"
 
 void TransparentPass::init(EngineContext *context)

@@ -1,26 +1,26 @@
 #include "lighting.h"
 
-#include "frame_resources.h"
-#include "vk_descriptor_manager.h"
-#include "vk_device.h"
-#include "core/engine_context.h"
-#include "core/vk_initializers.h"
-#include "core/vk_resource.h"
+#include "core/frame/resources.h"
+#include "core/descriptor/manager.h"
+#include "core/device/device.h"
+#include "core/context.h"
+#include "core/util/initializers.h"
+#include "core/device/resource.h"
 #include "render/pipelines.h"
-#include "core/vk_pipeline_manager.h"
-#include "core/asset_manager.h"
-#include "core/vk_descriptors.h"
+#include "core/pipeline/manager.h"
+#include "core/assets/manager.h"
+#include "core/descriptor/descriptors.h"
 #include "core/config.h"
 
 #include "vk_mem_alloc.h"
-#include "vk_sampler_manager.h"
-#include "vk_swapchain.h"
+#include "core/pipeline/sampler.h"
+#include "core/device/swapchain.h"
 #include "render/graph/graph.h"
 #include <array>
 #include <cstring>
 
-#include "ibl_manager.h"
-#include "vk_raytracing.h"
+#include "core/assets/ibl_manager.h"
+#include "core/raytracing/raytracing.h"
 
 void LightingPass::init(EngineContext *context)
 {

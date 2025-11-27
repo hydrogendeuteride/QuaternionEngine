@@ -2,7 +2,7 @@
 
 Optional subsystem that enables hybrid or full ray traced shadows via Ray Query. It builds and caches BLAS per mesh and rebuilds a TLAS from the current `DrawContext` when enabled.
 
-- Files: `src/core/vk_raytracing.h/.cpp`
+- Files: `src/core/raytracing/raytracing.h/.cpp`
 
 ### Device Feature & Extension Enablement
 - Feature detection happens in `DeviceManager::init_vulkan()` and sets:

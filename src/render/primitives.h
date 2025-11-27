@@ -4,7 +4,7 @@
 #include <cmath>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
-#include "core/vk_types.h"
+#include "core/types.h"
 #include "glm/gtx/compatibility.hpp"
 #include "glm/gtx/norm.hpp"
 

@@ -1,8 +1,8 @@
 ﻿#pragma once
 
-#include <core/vk_types.h>
+#include <core/types.h>
 #include <fstream>
-#include <core/vk_initializers.h>
+#include <core/util/initializers.h>
 
 namespace vkutil
 {

@@ -9,7 +9,7 @@ Central allocator and uploader built on VMA. Provides creation helpers, an immed
 - Integrate with `FrameResources` deletion queues to match lifetimes to the frame.
 - Expose a Render Graph pass that batches all pending uploads.
 
-### Key APIs (src/core/vk_resource.h)
+### Key APIs (src/core/frame/resource.h)
 
 - Creation
   - `AllocatedBuffer create_buffer(size, usage, memUsage)`
@@ -37,7 +37,7 @@ Central allocator and uploader built on VMA. Provides creation helpers, an immed
 
 ### Render Graph Interaction
 
-- `register_upload_pass` is called during frame build before other passes (see `src/core/vk_engine.cpp:315`).
+- `register_upload_pass` is called during frame build before other passes (see `src/core/engine.cpp:315`).
 - It uses graph `import_buffer` / `import_image` to deduplicate external resources and attach initial stage/layout.
 - Barriers and final layouts for uploaded images are handled in the pass recording (`generate_mipmaps` path transitions to `SHADER_READ_ONLY_OPTIMAL`).
 

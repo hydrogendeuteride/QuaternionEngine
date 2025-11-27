@@ -1,19 +1,19 @@
 #include "background.h"
 #include <string_view>
 
-#include "vk_swapchain.h"
-#include "core/engine_context.h"
-#include "core/vk_resource.h"
-#include "core/vk_pipeline_manager.h"
-#include "core/asset_manager.h"
+#include "core/device/swapchain.h"
+#include "core/context.h"
+#include "core/device/resource.h"
+#include "core/pipeline/manager.h"
+#include "core/assets/manager.h"
 #include "render/graph/graph.h"
 #include <cstring>
 
-#include "frame_resources.h"
-#include "ibl_manager.h"
-#include "vk_descriptor_manager.h"
-#include "vk_device.h"
-#include "vk_sampler_manager.h"
+#include "core/frame/resources.h"
+#include "core/assets/ibl_manager.h"
+#include "core/descriptor/manager.h"
+#include "core/device/device.h"
+#include "core/pipeline/sampler.h"
 
 void BackgroundPass::init(EngineContext *context)
 {

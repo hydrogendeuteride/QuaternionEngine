@@ -1,7 +1,7 @@
 #include "vk_scene.h"
 
-#include "vk_swapchain.h"
-#include "core/engine_context.h"
+#include "core/device/swapchain.h"
+#include "core/context.h"
 #include "mesh_bvh.h"
 
 #include "glm/gtx/transform.hpp"

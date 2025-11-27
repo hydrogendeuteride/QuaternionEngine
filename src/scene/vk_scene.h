@@ -1,5 +1,5 @@
 #pragma once
-#include <core/vk_types.h>
+#include <core/types.h>
 #include <scene/camera.h>
 #include <unordered_map>
 #include <memory>

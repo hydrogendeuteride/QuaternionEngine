@@ -3,10 +3,10 @@
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_vulkan.h"
-#include "vk_device.h"
-#include "vk_swapchain.h"
-#include "core/vk_initializers.h"
-#include "core/engine_context.h"
+#include "core/device/device.h"
+#include "core/device/swapchain.h"
+#include "core/util/initializers.h"
+#include "core/context.h"
 #include "render/graph/graph.h"
 
 void ImGuiPass::init(EngineContext *context)

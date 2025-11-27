@@ -1,6 +1,6 @@
 #pragma once
 #include "render/renderpass.h"
-#include "core/vk_types.h"
+#include "core/types.h"
 #include <render/graph/types.h>
 
 class ImGuiPass : public IRenderPass

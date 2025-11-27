@@ -4,8 +4,8 @@
 #include <unordered_set>
 #include <chrono>
 
-#include "vk_swapchain.h"
-#include "core/engine_context.h"
+#include "core/device/swapchain.h"
+#include "core/context.h"
 #include "core/config.h"
 #include "glm/gtx/transform.hpp"
 #include <glm/gtc/matrix_transform.hpp>
@@ -15,7 +15,7 @@
 #include <limits>
 #include <cmath>
 
-#include "frame_resources.h"
+#include "core/frame/resources.h"
 #include "core/config.h"
 #include <fmt/core.h>
 

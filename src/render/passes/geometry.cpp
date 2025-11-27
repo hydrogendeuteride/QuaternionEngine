@@ -3,17 +3,17 @@
 #include <chrono>
 #include <unordered_set>
 
-#include "frame_resources.h"
-#include "texture_cache.h"
-#include "vk_descriptor_manager.h"
-#include "vk_device.h"
-#include "core/engine_context.h"
-#include "core/vk_initializers.h"
-#include "core/vk_resource.h"
+#include "core/frame/resources.h"
+#include "core/assets/texture_cache.h"
+#include "core/descriptor/manager.h"
+#include "core/device/device.h"
+#include "core/context.h"
+#include "core/util/initializers.h"
+#include "core/device/resource.h"
 
 #include "vk_mem_alloc.h"
-#include "vk_scene.h"
-#include "vk_swapchain.h"
+#include "scene/vk_scene.h"
+#include "core/device/swapchain.h"
 #include "render/graph/graph.h"
 
 // Basic conservative frustum test against RenderObject AABB.

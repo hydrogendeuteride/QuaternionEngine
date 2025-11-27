@@ -1,5 +1,5 @@
 #pragma once
-#include <core/vk_types.h>
+#include <core/types.h>
 #include <vector>
 #include <memory>
 #include <functional>

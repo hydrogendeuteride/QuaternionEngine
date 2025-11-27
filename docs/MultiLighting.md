@@ -2,7 +2,7 @@
 
 Extends the rendering pipeline to support multiple dynamic point lights alongside the existing directional sun light. All lighting calculations use a shared PBR (Cook-Torrance) BRDF implementation.
 
-- Files: `src/scene/vk_scene.h/.cpp`, `src/core/vk_types.h`, `shaders/lighting_common.glsl`
+- Files: `src/scene/vk_scene.h/.cpp`, `src/core/types.h`, `shaders/lighting_common.glsl`
 
 ### Data Structures
 

@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <core/vk_types.h>
+#include <core/types.h>
 
-#include "core/vk_descriptors.h"
+#include "core/descriptor/descriptors.h"
 #include <unordered_map>
 #include <filesystem>
 

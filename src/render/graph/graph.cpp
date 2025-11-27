@@ -1,7 +1,7 @@
 #include "graph.h"
-#include <core/engine_context.h>
-#include <core/vk_images.h>
-#include <core/vk_initializers.h>
+#include <core/context.h>
+#include <core/device/images.h>
+#include <core/util/initializers.h>
 
 #include <unordered_map>
 #include <unordered_set>
@@ -9,12 +9,12 @@
 #include <algorithm>
 #include <cstdio>
 
-#include <core/vk_swapchain.h>
-#include <core/vk_initializers.h>
-#include <core/vk_debug.h>
+#include <core/device/swapchain.h>
+#include <core/util/initializers.h>
+#include <core/util/debug.h>
 #include <fmt/core.h>
 
-#include "vk_device.h"
+#include "core/device/device.h"
 #include <chrono>
 
 void RenderGraph::init(EngineContext *ctx)

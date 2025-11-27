@@ -3,20 +3,20 @@
 #include <unordered_set>
 #include <string>
 
-#include "core/engine_context.h"
+#include "core/context.h"
 #include "render/graph/graph.h"
 #include "render/graph/builder.h"
-#include "vk_swapchain.h"
-#include "vk_scene.h"
-#include "frame_resources.h"
-#include "vk_descriptor_manager.h"
-#include "vk_device.h"
-#include "vk_resource.h"
-#include "core/vk_initializers.h"
-#include "core/vk_pipeline_manager.h"
-#include "core/asset_manager.h"
+#include "core/device/swapchain.h"
+#include "scene/vk_scene.h"
+#include "core/frame/resources.h"
+#include "core/descriptor/manager.h"
+#include "core/device/device.h"
+#include "core/device/resource.h"
+#include "core/util/initializers.h"
+#include "core/pipeline/manager.h"
+#include "core/assets/manager.h"
 #include "render/pipelines.h"
-#include "core/vk_types.h"
+#include "core/types.h"
 #include "core/config.h"
 
 void ShadowPass::init(EngineContext *context)

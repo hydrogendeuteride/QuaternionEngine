@@ -1,11 +1,11 @@
 #include "resources.h"
-#include <core/engine_context.h>
-#include <core/vk_resource.h>
+#include <core/context.h>
+#include <core/device/resource.h>
 #include <vk_mem_alloc.h>
 #include <core/config.h>
 
-#include "frame_resources.h"
-#include "vk_device.h"
+#include "core/frame/resources.h"
+#include "core/device/device.h"
 
 void RGResourceRegistry::reset()
 {

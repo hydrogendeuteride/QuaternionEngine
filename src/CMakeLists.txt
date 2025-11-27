@@ -1,49 +1,56 @@
 
 # Add source to this project's executable.
-add_executable (vulkan_engine 
+add_executable (vulkan_engine
   main.cpp
-  # core
-  core/vk_types.h
-  core/vk_initializers.cpp
-  core/vk_initializers.h
-  core/vk_images.h
-  core/vk_images.cpp 
-  core/vk_debug.h
-  core/vk_debug.cpp
-  core/vk_descriptors.h
-  core/vk_descriptors.cpp
-  core/vk_device.h
-  core/vk_device.cpp
-  core/vk_swapchain.h
-  core/vk_swapchain.cpp
-  core/vk_resource.h
-  core/vk_resource.cpp
-  core/engine_context.h
-  core/engine_context.cpp
-  core/vk_descriptor_manager.h
-  core/vk_descriptor_manager.cpp
-  core/vk_sampler_manager.h
-  core/vk_sampler_manager.cpp
-  core/asset_locator.h
-  core/asset_locator.cpp
-  core/asset_manager.h
-  core/asset_manager.cpp
-  core/vk_pipeline_manager.h
-  core/vk_pipeline_manager.cpp
-  core/frame_resources.h
-  core/frame_resources.cpp
-  core/texture_cache.h
-  core/texture_cache.cpp
-  core/ktx_loader.h
-  core/ktx_loader.cpp
+  # core root
+  core/types.h
   core/config.h
-  core/vk_engine.h
-  core/vk_engine.cpp
-  core/vk_engine_ui.cpp
-  core/vk_raytracing.h
-  core/vk_raytracing.cpp
-  core/ibl_manager.h
-  core/ibl_manager.cpp
+  core/context.h
+  core/context.cpp
+  core/engine.h
+  core/engine.cpp
+  core/engine_ui.cpp
+  # core/device
+  core/device/device.h
+  core/device/device.cpp
+  core/device/swapchain.h
+  core/device/swapchain.cpp
+  core/device/resource.h
+  core/device/resource.cpp
+  core/device/images.h
+  core/device/images.cpp
+  # core/descriptor
+  core/descriptor/descriptors.h
+  core/descriptor/descriptors.cpp
+  core/descriptor/manager.h
+  core/descriptor/manager.cpp
+  # core/pipeline
+  core/pipeline/manager.h
+  core/pipeline/manager.cpp
+  core/pipeline/sampler.h
+  core/pipeline/sampler.cpp
+  # core/assets
+  core/assets/locator.h
+  core/assets/locator.cpp
+  core/assets/manager.h
+  core/assets/manager.cpp
+  core/assets/texture_cache.h
+  core/assets/texture_cache.cpp
+  core/assets/ktx_loader.h
+  core/assets/ktx_loader.cpp
+  core/assets/ibl_manager.h
+  core/assets/ibl_manager.cpp
+  # core/frame
+  core/frame/resources.h
+  core/frame/resources.cpp
+  # core/util
+  core/util/initializers.h
+  core/util/initializers.cpp
+  core/util/debug.h
+  core/util/debug.cpp
+  # core/raytracing
+  core/raytracing/raytracing.h
+  core/raytracing/raytracing.cpp
   # render
   render/pipelines.h
   render/pipelines.cpp
@@ -97,6 +104,13 @@ target_compile_definitions(vulkan_engine PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 target_include_directories(vulkan_engine PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/core"
+  "${CMAKE_CURRENT_SOURCE_DIR}/core/device"
+  "${CMAKE_CURRENT_SOURCE_DIR}/core/descriptor"
+  "${CMAKE_CURRENT_SOURCE_DIR}/core/pipeline"
+  "${CMAKE_CURRENT_SOURCE_DIR}/core/assets"
+  "${CMAKE_CURRENT_SOURCE_DIR}/core/frame"
+  "${CMAKE_CURRENT_SOURCE_DIR}/core/util"
+  "${CMAKE_CURRENT_SOURCE_DIR}/core/raytracing"
   "${CMAKE_CURRENT_SOURCE_DIR}/render"
   "${CMAKE_CURRENT_SOURCE_DIR}/render/passes"
   "${CMAKE_CURRENT_SOURCE_DIR}/render/graph"

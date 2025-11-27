@@ -1,7 +1,7 @@
 Image-Based Lighting (IBL)
 
 Overview
-- IBL assets (environment maps + BRDF LUT + SH coefficients) are managed by `IBLManager` (`src/core/ibl_manager.{h,cpp}`) and exposed to passes via `EngineContext::ibl`.
+- IBL assets (environment maps + BRDF LUT + SH coefficients) are managed by `IBLManager` (`src/core/assets/ibl_manager.{h,cpp}`) and exposed to passes via `EngineContext::ibl`.
 - Shaders share a common include, `shaders/ibl_common.glsl`, which defines the IBL bindings for descriptor set 3 and helper functions used by deferred, forward, and background passes.
 - The engine currently supports:
   - Specular environment from an equirectangular 2D texture with prefiltered mips (`sampler2D iblSpec2D`).
@@ -11,7 +11,7 @@ Overview
 Data Flow
 - Init:
   - `VulkanEngine::init_vulkan()` creates an `IBLManager`, calls `init(context)`, and publishes it via `EngineContext::ibl`.
-  - The engine optionally loads default IBL assets (`IBLPaths` in `src/core/vk_engine.cpp`), typically a BRDF LUT plus a specular environment `.ktx2`.
+  - The engine optionally loads default IBL assets (`IBLPaths` in `src/core/engine.cpp`), typically a BRDF LUT plus a specular environment `.ktx2`.
 - Loading (IBLManager):
   - `IBLManager::load(const IBLPaths&)`:
     - Specular:

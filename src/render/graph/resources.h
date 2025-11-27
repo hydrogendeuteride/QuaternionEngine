@@ -1,6 +1,6 @@
 #pragma once
 
-#include <core/vk_types.h>
+#include <core/types.h>
 #include <render/graph/types.h>
 #include <string>
 #include <vector>

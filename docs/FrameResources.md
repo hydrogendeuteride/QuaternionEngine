@@ -2,7 +2,7 @@
 
 Per-frame struct that owns the command buffer, semaphores/fence, a transient descriptor allocator, and a small deletion queue. Frames are indexed by `FRAME_OVERLAP` (currently 2) and rotated by `_frameNumber` in `VulkanEngine`.
 
-- File: `src/core/frame_resources.h/.cpp`
+- File: `src/core/frame/resources.h/.cpp`
 
 ### Responsibilities
 - Command recording: `_mainCommandBuffer` allocated from a per-frame `_commandPool` with RESET flag.

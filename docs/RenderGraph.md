@@ -10,7 +10,7 @@ Lightweight render graph that builds a per‑frame DAG from pass declarations, c
 
 ### High‑Level Flow
 
-- Engine creates the graph each frame and imports swapchain/G‑Buffer images: `src/core/vk_engine.cpp:303`.
+- Engine creates the graph each frame and imports swapchain/G‑Buffer images: `src/core/engine.cpp:303`.
 - Each pass registers its work by calling `register_graph(graph, ...)` and declaring resources via a builder.
 - The graph appends a present chain (copy HDR `drawImage` → swapchain, then transition to `PRESENT`), optionally inserting ImGui before present.
 - `compile()` topologically sorts passes by data dependencies (read/write) and computes per‑pass barriers.
@@ -112,7 +112,7 @@ Buffer usage → stage/access examples:
 ### Built‑In Pass Wiring (Current)
 
 - Resource uploads (if any) → Background (compute) → Geometry (G‑Buffer) → Lighting (deferred) → Transparent → CopyToSwapchain → ImGui → PreparePresent.
-- See registrations: `src/core/vk_engine.cpp:321`–`src/core/vk_engine.cpp:352`.
+- See registrations: `src/core/engine.cpp:321`–`src/core/engine.cpp:352`.
 
 ### Notes & Limits
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <core/vk_types.h>
+#include <core/types.h>
 #include <SDL_events.h>
 
 #include "glm/vec3.hpp"

@@ -2,7 +2,7 @@
 
 #include <vector>
 #include <cstddef>
-#include <core/vk_types.h>
+#include <core/types.h>
 
 namespace geom {
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <core/vk_types.h>
-#include <core/vk_descriptors.h>
+#include <core/types.h>
+#include <core/descriptor/descriptors.h>
 
 class VulkanEngine;
 

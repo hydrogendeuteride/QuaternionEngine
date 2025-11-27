@@ -1,17 +1,17 @@
 #include "tonemap.h"
 
-#include <core/engine_context.h>
-#include <core/vk_descriptors.h>
-#include <core/vk_descriptor_manager.h>
-#include <core/vk_pipeline_manager.h>
-#include <core/asset_manager.h>
-#include <core/vk_device.h>
-#include <core/vk_resource.h>
-#include <vk_sampler_manager.h>
+#include <core/context.h>
+#include <core/descriptor/descriptors.h>
+#include <core/descriptor/manager.h>
+#include <core/pipeline/manager.h>
+#include <core/assets/manager.h>
+#include <core/device/device.h>
+#include <core/device/resource.h>
+#include <core/pipeline/sampler.h>
 #include <render/graph/graph.h>
 #include <render/graph/resources.h>
 
-#include "frame_resources.h"
+#include "core/frame/resources.h"
 
 struct TonemapPush
 {

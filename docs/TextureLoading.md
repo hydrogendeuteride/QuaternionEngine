@@ -1,12 +1,12 @@
 Texture Loading & Streaming
 
 Overview
-- Streaming cache: `src/core/texture_cache.{h,cpp}` asynchronously decodes images (stb_image) on a small worker pool (1–4 threads, clamped by hardware concurrency) and uploads them via `ResourceManager` with optional mipmaps. For FilePath keys, a sibling `<stem>.ktx2` (or direct `.ktx2`) is preferred over PNG/JPEG. Descriptors registered up‑front are patched in‑place once the texture becomes resident. Large decodes can be downscaled on workers before upload to cap peak memory.
-- Uploads: `src/core/vk_resource.{h,cpp}` stages pixel data and either submits immediately or registers a Render Graph transfer pass. Mipmaps use `vkutil::generate_mipmaps(...)` and finish in `SHADER_READ_ONLY_OPTIMAL`.
+- Streaming cache: `src/core/assets/texture_cache.{h,cpp}` asynchronously decodes images (stb_image) on a small worker pool (1–4 threads, clamped by hardware concurrency) and uploads them via `ResourceManager` with optional mipmaps. For FilePath keys, a sibling `<stem>.ktx2` (or direct `.ktx2`) is preferred over PNG/JPEG. Descriptors registered up‑front are patched in‑place once the texture becomes resident. Large decodes can be downscaled on workers before upload to cap peak memory.
+- Uploads: `src/core/frame/resource.{h,cpp}` stages pixel data and either submits immediately or registers a Render Graph transfer pass. Mipmaps use `vkutil::generate_mipmaps(...)` and finish in `SHADER_READ_ONLY_OPTIMAL`.
 - Integration points:
   - Materials: layouts use `UPDATE_AFTER_BIND`; descriptors can be rewritten after bind.
   - glTF loader: `src/scene/vk_loader.cpp` builds keys, requests handles, and registers descriptor patches with the cache.
-  - Primitives/adhoc: `src/core/asset_manager.cpp` builds materials and registers texture watches.
+  - Primitives/adhoc: `src/core/assets/manager.cpp` builds materials and registers texture watches.
   - Visibility: `src/render/passes/geometry.cpp` and `src/render/passes/transparent.cpp` call `TextureCache::markSetUsed(...)` for sets that are actually drawn.
 - IBL: high‑dynamic‑range environment textures are typically loaded directly as `.ktx2` via `IBLManager` instead of the generic streaming cache. See “Image‑Based Lighting (IBL)” below.
 
@@ -32,11 +32,11 @@ Data Flow
   - `evictToBudget(bytes)` rewrites watchers to fallbacks, destroys images, and marks entries `Evicted`. Evicted entries can reload automatically when seen again and a short cooldown has passed (default ~2 frames), avoiding immediate thrash.
 
 Runtime UI
-- ImGui → Debug → Textures (see `src/core/vk_engine.cpp`)
+- ImGui → Debug → Textures (see `src/core/engine.cpp`)
   - Shows: device‑local budget/usage (from VMA), texture streaming budget (~35% of device‑local by default), resident MiB, CPU source MiB, counts per state, and a Top‑N table of consumers.
   - Controls: `Loads/Frame`, `Upload Budget (MiB)` (byte‑based throttle), `Keep Source Bytes`, `CPU Source Budget (MiB)`, `Max Upload Dimension` (progressive downscale cap), and `Trim To Budget Now`.
 
-Key APIs (src/core/texture_cache.h)
+Key APIs (src/core/assets/texture_cache.h)
 - `TextureHandle request(const TextureKey&, VkSampler)`
 - `void watchBinding(TextureHandle, VkDescriptorSet, uint32_t binding, VkSampler, VkImageView fallback)`
 - `void unwatchSet(VkDescriptorSet)` — call before destroying descriptor pools/sets
@@ -49,11 +49,11 @@ Defaults & Budgets
 - Worker threads: 1–4 decode threads depending on hardware.
 - Loads per pump: default 4.
 - Upload byte budget: default 128 MiB per frame.
-- GPU budget: unlimited until the engine sets one each frame. The engine queries ~35% of device‑local memory (via VMA) and calls `set_gpu_budget_bytes(...)`, then runs `evictToBudget(...)` and `pumpLoads(...)` during the frame loop (`src/core/vk_engine.cpp`).
+- GPU budget: unlimited until the engine sets one each frame. The engine queries ~35% of device‑local memory (via VMA) and calls `set_gpu_budget_bytes(...)`, then runs `evictToBudget(...)` and `pumpLoads(...)` during the frame loop (`src/core/engine.cpp`).
 - CPU source bytes: default budget 64 MiB; `keep_source_bytes` defaults to false. Retention only applies to entries created from Bytes keys.
 
 Examples
-- Asset materials (`src/core/asset_manager.cpp`)
+- Asset materials (`src/core/assets/manager.cpp`)
   - Create materials with visible fallbacks (checkerboard/white/flat‑normal), then:
     - Build a key from an asset path, `request(key, sampler)`, and `watchBinding(handle, materialSet, binding, sampler, fallbackView)` for albedo (1), metal‑rough (2), normal (3).
 - glTF loader (`src/scene/vk_loader.cpp`)
@@ -92,7 +92,7 @@ Operational Tips
 - To debug VMA allocations and name images, set `VE_VMA_DEBUG=1`.
 
 Image‑Based Lighting (IBL) Textures
-- Manager: `src/core/ibl_manager.{h,cpp}` owns IBL GPU resources and the shared descriptor set layout for set=3.
+- Manager: `src/core/assets/ibl_manager.{h,cpp}` owns IBL GPU resources and the shared descriptor set layout for set=3.
 - Inputs (`IBLPaths`):
   - `specularCube`: preferred is a GPU‑ready `.ktx2` (BC6H or `R16G16B16A16_SFLOAT`) containing either a cubemap or an equirectangular 2D env with prefiltered mips.
   - `diffuseCube`: optional `.ktx2` cubemap for diffuse irradiance. If missing, diffuse IBL falls back to SH only.
