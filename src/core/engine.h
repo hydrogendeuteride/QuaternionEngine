@@ -174,6 +174,9 @@ public:
     // Debug: draw mesh BVH boxes for last pick
     bool _debugDrawBVH = false;
 
+    // Last click selection (CPU ray or ID-buffer). Useful for game/editor code.
+    const PickInfo &get_last_pick() const { return _lastPick; }
+
     // Debug: persistent pass enable overrides (by pass name)
     std::unordered_map<std::string, bool> _rgPassToggles;
 
