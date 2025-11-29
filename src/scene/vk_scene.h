@@ -50,6 +50,9 @@ struct DrawContext
     std::vector<RenderObject> TransparentSurfaces;
     // Monotonic counter used to assign stable per-frame object IDs.
     uint32_t nextID = 1;
+    // Optional per-instance glTF node local overrides (additive layer in local space).
+    // When non-null, MeshNode::Draw will rebuild world transforms using these offsets.
+    const std::unordered_map<const Node*, glm::mat4> *gltfNodeLocalOverrides = nullptr;
 };
 
 class SceneManager
@@ -105,6 +108,10 @@ public:
     {
         std::shared_ptr<LoadedGLTF> scene;
         glm::mat4 transform{1.f};
+        LoadedGLTF::AnimationState animation;
+        // Per-instance local-space pose offsets for nodes in this glTF scene.
+        // The offset matrix is post-multiplied onto the node's localTransform.
+        std::unordered_map<const Node*, glm::mat4> nodeLocalOverrides;
     };
 
     void addGLTFInstance(const std::string &name, std::shared_ptr<LoadedGLTF> scene,
@@ -113,6 +120,14 @@ public:
     bool getGLTFInstanceTransform(const std::string &name, glm::mat4 &outTransform);
     bool setGLTFInstanceTransform(const std::string &name, const glm::mat4 &transform);
     void clearGLTFInstances();
+    // Per-instance glTF node pose overrides (local-space, layered on top of animation/base TRS).
+    // 'offset' is post-multiplied onto the node's localTransform for this instance only.
+    bool setGLTFInstanceNodeOffset(const std::string &instanceName,
+                                   const std::string &nodeName,
+                                   const glm::mat4 &offset);
+    bool clearGLTFInstanceNodeOffset(const std::string &instanceName,
+                                     const std::string &nodeName);
+    void clearGLTFInstanceNodeOffsets(const std::string &instanceName);
 
     // Animation control helpers (glTF)
     // Note: a LoadedGLTF may be shared by multiple instances; changing
@@ -167,6 +182,8 @@ private:
     std::vector<PointLight> pointLights;
 
     std::unordered_map<std::string, std::shared_ptr<LoadedGLTF> > loadedScenes;
+    // Per-named static glTF scene animation state (independent of instances).
+    std::unordered_map<std::string, LoadedGLTF::AnimationState> sceneAnimations;
     std::unordered_map<std::string, std::shared_ptr<Node> > loadedNodes;
     std::unordered_map<std::string, MeshInstance> dynamicMeshInstances;
     std::unordered_map<std::string, GLTFInstance> dynamicGLTFInstances;

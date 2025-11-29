@@ -81,7 +81,33 @@ Docs: `docs/Scene.md`
   - `bool setGLTFInstanceAnimationLoop(const std::string &instanceName, bool loop);`
 - Notes:
   - All functions return `bool` indicating whether the named scene/instance exists.
-  - `SceneManager::update_scene()` advances active animations each frame using engine delta time.
+  - Animation state is **independent per scene and per instance**:
+    - Each named scene has its own `AnimationState`.
+    - Each glTF instance has its own `AnimationState`, even when sharing the same `LoadedGLTF`.
+  - An index `< 0` (e.g. `-1`) disables animation for that scene/instance (pose is frozen at the last evaluated state).
+  - `SceneManager::update_scene()` advances each active animation state every frame using engine delta time.
+
+### Per‑Instance Node / Joint Control (Non‑Skinned)
+
+For rigid models and simple “joints” (e.g. flaps, doors, turrets), you can apply local‑space pose offsets to individual glTF nodes per instance:
+
+- `bool setGLTFInstanceNodeOffset(const std::string &instanceName, const std::string &nodeName, const glm::mat4 &offset);`
+- `bool clearGLTFInstanceNodeOffset(const std::string &instanceName, const std::string &nodeName);`
+- `void clearGLTFInstanceNodeOffsets(const std::string &instanceName);`
+
+Typical usage:
+
+- Use glTF animation for the base motion (e.g. gear deployment).
+- Layer game‑driven offsets on top for per‑instance control:
+
+  ```cpp
+  // Rotate a control surface on one aircraft instance
+  glm::mat4 offset =
+      glm::rotate(glm::mat4(1.f),
+                  glm::radians(aileronDegrees),
+                  glm::vec3(1.f, 0.f, 0.f));
+  sceneMgr->setGLTFInstanceNodeOffset("plane01", "LeftAileron", offset);
+  ```
 
 ### Point Lights
 
@@ -163,4 +189,3 @@ These are primarily debug/editor features but can be kept in a game build to pro
     - Point‑light editor UI built on `SceneManager` light APIs.
   - Object gizmo (ImGuizmo):
     - Uses last pick / hover pick as the current target and manipulates transforms via `setMeshInstanceTransform` / `setGLTFInstanceTransform`.
-

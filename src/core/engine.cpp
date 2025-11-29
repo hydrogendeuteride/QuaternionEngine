@@ -1044,9 +1044,56 @@ void VulkanEngine::init_pipelines()
     metalRoughMaterial.build_pipelines(this);
 }
 
+namespace
+{
+    // Rebuild a node's world transform in glTF local space, layering per-instance
+    // local offsets on top of the base localTransform at each node in the chain.
+    glm::mat4 build_node_world_with_overrides(const Node *node,
+                                              const std::unordered_map<const Node*, glm::mat4> &overrides)
+    {
+        if (!node)
+        {
+            return glm::mat4(1.0f);
+        }
+
+        std::vector<const Node*> chain;
+        const Node *cur = node;
+        while (cur)
+        {
+            chain.push_back(cur);
+            std::shared_ptr<Node> parent = cur->parent.lock();
+            cur = parent ? parent.get() : nullptr;
+        }
+
+        glm::mat4 world(1.0f);
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it)
+        {
+            const Node *n = *it;
+            glm::mat4 local = n->localTransform;
+            auto ovIt = overrides.find(n);
+            if (ovIt != overrides.end())
+            {
+                // Layer the override in local space for this instance.
+                local = local * ovIt->second;
+            }
+            world = world * local;
+        }
+        return world;
+    }
+}
+
 void MeshNode::Draw(const glm::mat4 &topMatrix, DrawContext &ctx)
 {
-    glm::mat4 nodeMatrix = topMatrix * worldTransform;
+    glm::mat4 nodeMatrix;
+    if (ctx.gltfNodeLocalOverrides && !ctx.gltfNodeLocalOverrides->empty())
+    {
+        glm::mat4 world = build_node_world_with_overrides(this, *ctx.gltfNodeLocalOverrides);
+        nodeMatrix = topMatrix * world;
+    }
+    else
+    {
+        nodeMatrix = topMatrix * worldTransform;
+    }
 
     if (!mesh)
     {

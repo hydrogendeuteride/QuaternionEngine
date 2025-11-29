@@ -43,9 +43,12 @@ Thin scene layer that produces `RenderObject`s for the renderer. It gathers opaq
 
 ### GLTF Animation / “Actions”
 
-GLTF files can contain one or more animation clips (e.g. `Idle`, `Walk`, `Run`). The loader (`LoadedGLTF`) parses these into `LoadedGLTF::Animation` objects, and `SceneManager` exposes a thin API to pick which clip is currently playing.
+GLTF files can contain one or more animation clips (e.g. `Idle`, `Walk`, `Run`). The loader (`LoadedGLTF`) parses these into `LoadedGLTF::Animation` objects. Animation *state* (which clip, time, loop flag) is stored outside the glTF asset:
 
-> Note: a `LoadedGLTF` is typically shared by multiple instances. Changing the active animation on a shared `LoadedGLTF` will affect all instances that point to it. If you want per‑character independent actions, load separate `LoadedGLTF` objects (one per character) or duplicate the asset in your game layer.
+- One `AnimationState` per named static scene (for `loadScene`).
+- One `AnimationState` per runtime glTF instance (`SceneManager::GLTFInstance`).
+
+This means that **animation is independent per scene and per instance**, even if they share the same underlying `LoadedGLTF` asset and meshes.
 
 **Static scenes (loaded via `loadScene`)**
 
@@ -54,19 +57,19 @@ Example: engine default scene in `VulkanEngine::init()`:
 - `structure` is loaded and registered via:
   - `sceneManager->loadScene("structure", structureFile);`
 
-To control its animation:
+To control its animation state:
 
-- By index:
+- By index (per‑scene state):
   - `scene->setSceneAnimation("structure", 0);        // first clip`
   - `scene->setSceneAnimation("structure", 1, true);  // second clip, reset time`
-- By name (matches glTF animation name):
+- By name (per‑scene state; matches glTF animation name):
   - `scene->setSceneAnimation("structure", "Idle");`
   - `scene->setSceneAnimation("structure", "Run");`
-- Looping:
+- Looping (per‑scene state):
   - `scene->setSceneAnimationLoop("structure", true);   // enable loop`
   - `scene->setSceneAnimationLoop("structure", false);  // play once and stop at end`
 
-All functions return `bool` to indicate whether the scene name was found.
+All functions return `bool` to indicate whether the scene name was found. A negative index (e.g. `-1`) disables animation for that scene (pose stays at the last evaluated frame).
 
 **Runtime GLTF instances**
 
@@ -74,17 +77,35 @@ GLTF instances are created via:
 
 - `scene->addGLTFInstance("player", playerGltf, playerTransform);`
 
-You can treat each instance as an “actor” and drive its current action from your game state:
+You can treat each instance as an “actor” and drive its current action from your game state. Each instance has its own `AnimationState`, even if multiple instances share the same `LoadedGLTF`.
 
-- By index:
+- By index (per‑instance state):
   - `scene->setGLTFInstanceAnimation("player", 0);`
-- By name:
+  - `scene->setGLTFInstanceAnimation("player", -1);   // disable animation for this actor`
+- By name (per‑instance state):
   - `scene->setGLTFInstanceAnimation("player", "Idle");`
   - `scene->setGLTFInstanceAnimation("player", "Run");`
-- Looping:
+- Looping (per‑instance state):
   - `scene->setGLTFInstanceAnimationLoop("player", true);`
 
-These helpers forward to the underlying `LoadedGLTF`’s `setActiveAnimation(...)` and `animationLoop` fields. `SceneManager::update_scene()` advances animations every frame using a per‑frame `dt`, so once you select an action, it will keep playing automatically until you change it or disable looping.
+These helpers update the instance’s `AnimationState`. `SceneManager::update_scene()` advances each instance’s state every frame using a per‑frame `dt` before drawing, so once you select an action, it will keep playing automatically until you change it or disable looping for that instance.
+
+### Per‑Instance Node / Joint Overrides
+
+For non‑skinned models (rigid parts), you can apply local‑space pose offsets to specific glTF nodes on a **per‑instance** basis. This is useful for things like control surfaces, doors, or turrets layered on top of an existing animation.
+
+- API (on `SceneManager`):
+  - `bool setGLTFInstanceNodeOffset(const std::string &instanceName, const std::string &nodeName, const glm::mat4 &offset);`
+  - `bool clearGLTFInstanceNodeOffset(const std::string &instanceName, const std::string &nodeName);`
+  - `void clearGLTFInstanceNodeOffsets(const std::string &instanceName);`
+
+Notes:
+
+- Offsets are **local‑space** post‑multipliers:
+  - Effective local transform = `node.localTransform * offset`.
+- Offsets are *per instance*:
+  - Different instances of the same glTF can have different joint poses at the same animation time.
+- Overrides are applied during draw via `DrawContext::gltfNodeLocalOverrides` and `MeshNode::Draw`, without modifying the shared glTF asset.
 
 ### GPU Scene Data
 

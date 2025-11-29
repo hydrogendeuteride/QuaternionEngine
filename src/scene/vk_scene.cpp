@@ -123,6 +123,7 @@ void SceneManager::update_scene()
     mainDrawContext.OpaqueSurfaces.clear();
     mainDrawContext.TransparentSurfaces.clear();
     mainDrawContext.nextID = 1;
+    mainDrawContext.gltfNodeLocalOverrides = nullptr;
 
     mainCamera.update();
 
@@ -140,30 +141,6 @@ void SceneManager::update_scene()
         dt = 0.1f;
     }
 
-    // Advance glTF animations once per unique LoadedGLTF
-    if (dt > 0.f)
-    {
-        std::unordered_set<LoadedGLTF *> animatedScenes;
-
-        auto updateSceneAnim = [&](std::shared_ptr<LoadedGLTF> &scene) {
-            if (!scene) return;
-            LoadedGLTF *ptr = scene.get();
-            if (animatedScenes.insert(ptr).second)
-            {
-                ptr->updateAnimation(dt);
-            }
-        };
-
-        for (auto &[name, scene] : loadedScenes)
-        {
-            updateSceneAnim(scene);
-        }
-        for (auto &[name, inst] : dynamicGLTFInstances)
-        {
-            updateSceneAnim(inst.scene);
-        }
-    }
-
     auto tagOwner = [&](RenderObject::OwnerType type, const std::string &name,
                         size_t opaqueBegin, size_t transpBegin)
     {
@@ -179,29 +156,57 @@ void SceneManager::update_scene()
         }
     };
 
-    // Draw all loaded GLTF scenes (static world)
+    // Draw all loaded GLTF scenes (static world), advancing their independent animation states.
     for (auto &[name, scene] : loadedScenes)
     {
-        if (scene)
+        if (!scene)
         {
-            const size_t opaqueStart = mainDrawContext.OpaqueSurfaces.size();
-            const size_t transpStart = mainDrawContext.TransparentSurfaces.size();
-            scene->Draw(glm::mat4{1.f}, mainDrawContext);
-            tagOwner(RenderObject::OwnerType::StaticGLTF, name, opaqueStart, transpStart);
+            continue;
         }
+
+        // Advance this scene's animation state (independent of instances).
+        if (dt > 0.f)
+        {
+            auto &animState = sceneAnimations[name];
+            scene->updateAnimation(dt, animState);
+        }
+
+        const size_t opaqueStart = mainDrawContext.OpaqueSurfaces.size();
+        const size_t transpStart = mainDrawContext.TransparentSurfaces.size();
+        mainDrawContext.gltfNodeLocalOverrides = nullptr;
+        scene->Draw(glm::mat4{1.f}, mainDrawContext);
+        mainDrawContext.gltfNodeLocalOverrides = nullptr;
+        tagOwner(RenderObject::OwnerType::StaticGLTF, name, opaqueStart, transpStart);
     }
 
-    // dynamic GLTF instances
-    for (const auto &kv: dynamicGLTFInstances)
+    // dynamic GLTF instances (each with its own animation state)
+    for (auto &kv : dynamicGLTFInstances)
     {
-        const GLTFInstance &inst = kv.second;
-        if (inst.scene)
+        GLTFInstance &inst = kv.second;
+        if (!inst.scene)
         {
-            const size_t opaqueStart = mainDrawContext.OpaqueSurfaces.size();
-            const size_t transpStart = mainDrawContext.TransparentSurfaces.size();
-            inst.scene->Draw(inst.transform, mainDrawContext);
-            tagOwner(RenderObject::OwnerType::GLTFInstance, kv.first, opaqueStart, transpStart);
+            continue;
         }
+
+        if (dt > 0.f)
+        {
+            inst.scene->updateAnimation(dt, inst.animation);
+        }
+
+        const size_t opaqueStart = mainDrawContext.OpaqueSurfaces.size();
+        const size_t transpStart = mainDrawContext.TransparentSurfaces.size();
+        // Enable per-instance node pose overrides while drawing this instance.
+        if (!inst.nodeLocalOverrides.empty())
+        {
+            mainDrawContext.gltfNodeLocalOverrides = &inst.nodeLocalOverrides;
+        }
+        else
+        {
+            mainDrawContext.gltfNodeLocalOverrides = nullptr;
+        }
+        inst.scene->Draw(inst.transform, mainDrawContext);
+        mainDrawContext.gltfNodeLocalOverrides = nullptr;
+        tagOwner(RenderObject::OwnerType::GLTFInstance, kv.first, opaqueStart, transpStart);
     }
 
     // Default primitives are added as dynamic instances by the engine.
@@ -371,7 +376,21 @@ void SceneManager::loadScene(const std::string &name, std::shared_ptr<LoadedGLTF
     {
         scene->debugName = name;
     }
-    loadedScenes[name] = std::move(scene);
+    loadedScenes[name] = scene;
+
+    // Initialize default animation state for this named scene (play first clip if present).
+    if (scene && !scene->animations.empty())
+    {
+        LoadedGLTF::AnimationState st{};
+        st.activeAnimation = 0;
+        st.animationTime = 0.0f;
+        st.animationLoop = true;
+        sceneAnimations[name] = st;
+    }
+    else
+    {
+        sceneAnimations.erase(name);
+    }
 }
 
 std::shared_ptr<LoadedGLTF> SceneManager::getScene(const std::string &name)
@@ -400,6 +419,7 @@ void SceneManager::cleanup()
     // Drop our references to GLTF scenes. Their destructors call clearAll()
     // exactly once to release GPU resources.
     loadedScenes.clear();
+    sceneAnimations.clear();
     loadedNodes.clear();
 }
 
@@ -453,7 +473,16 @@ void SceneManager::addGLTFInstance(const std::string &name, std::shared_ptr<Load
     fmt::println("[SceneManager] addGLTFInstance '{}' (scene='{}')",
                  name,
                  scene->debugName.empty() ? "<unnamed>" : scene->debugName.c_str());
-    dynamicGLTFInstances[name] = GLTFInstance{std::move(scene), transform};
+    GLTFInstance inst{};
+    inst.scene = std::move(scene);
+    inst.transform = transform;
+    if (inst.scene && !inst.scene->animations.empty())
+    {
+        inst.animation.activeAnimation = 0;
+        inst.animation.animationTime = 0.0f;
+        inst.animation.animationLoop = true;
+    }
+    dynamicGLTFInstances[name] = std::move(inst);
 }
 
 bool SceneManager::removeGLTFInstance(const std::string &name)
@@ -519,6 +548,71 @@ void SceneManager::clearGLTFInstances()
                  pendingGLTFRelease.size());
 }
 
+bool SceneManager::setGLTFInstanceNodeOffset(const std::string &instanceName,
+                                             const std::string &nodeName,
+                                             const glm::mat4 &offset)
+{
+    auto it = dynamicGLTFInstances.find(instanceName);
+    if (it == dynamicGLTFInstances.end())
+    {
+        return false;
+    }
+    GLTFInstance &inst = it->second;
+    if (!inst.scene)
+    {
+        return false;
+    }
+
+    auto nodePtr = inst.scene->getNode(nodeName);
+    if (!nodePtr)
+    {
+        return false;
+    }
+
+    inst.nodeLocalOverrides[nodePtr.get()] = offset;
+    return true;
+}
+
+bool SceneManager::clearGLTFInstanceNodeOffset(const std::string &instanceName,
+                                               const std::string &nodeName)
+{
+    auto it = dynamicGLTFInstances.find(instanceName);
+    if (it == dynamicGLTFInstances.end())
+    {
+        return false;
+    }
+    GLTFInstance &inst = it->second;
+    if (!inst.scene)
+    {
+        return false;
+    }
+
+    auto nodePtr = inst.scene->getNode(nodeName);
+    if (!nodePtr)
+    {
+        return false;
+    }
+
+    auto ovIt = inst.nodeLocalOverrides.find(nodePtr.get());
+    if (ovIt == inst.nodeLocalOverrides.end())
+    {
+        return false;
+    }
+
+    inst.nodeLocalOverrides.erase(ovIt);
+    return true;
+}
+
+void SceneManager::clearGLTFInstanceNodeOffsets(const std::string &instanceName)
+{
+    auto it = dynamicGLTFInstances.find(instanceName);
+    if (it == dynamicGLTFInstances.end())
+    {
+        return;
+    }
+    it->second.nodeLocalOverrides.clear();
+}
+
 bool SceneManager::setSceneAnimation(const std::string &sceneName, int animationIndex, bool resetTime)
 {
     auto it = loadedScenes.find(sceneName);
@@ -527,7 +621,8 @@ bool SceneManager::setSceneAnimation(const std::string &sceneName, int animation
         return false;
     }
 
-    it->second->setActiveAnimation(animationIndex, resetTime);
+    auto &animState = sceneAnimations[sceneName];
+    it->second->setActiveAnimation(animState, animationIndex, resetTime);
     return true;
 }
 
@@ -539,7 +634,8 @@ bool SceneManager::setSceneAnimation(const std::string &sceneName, const std::st
         return false;
     }
 
-    it->second->setActiveAnimation(animationName, resetTime);
+    auto &animState = sceneAnimations[sceneName];
+    it->second->setActiveAnimation(animState, animationName, resetTime);
     return true;
 }
 
@@ -551,7 +647,8 @@ bool SceneManager::setSceneAnimationLoop(const std::string &sceneName, bool loop
         return false;
     }
 
-    it->second->animationLoop = loop;
+    auto &animState = sceneAnimations[sceneName];
+    animState.animationLoop = loop;
     return true;
 }
 
@@ -563,7 +660,8 @@ bool SceneManager::setGLTFInstanceAnimation(const std::string &instanceName, int
         return false;
     }
 
-    it->second.scene->setActiveAnimation(animationIndex, resetTime);
+    LoadedGLTF::AnimationState &animState = it->second.animation;
+    it->second.scene->setActiveAnimation(animState, animationIndex, resetTime);
     return true;
 }
 
@@ -575,7 +673,8 @@ bool SceneManager::setGLTFInstanceAnimation(const std::string &instanceName, con
         return false;
     }
 
-    it->second.scene->setActiveAnimation(animationName, resetTime);
+    LoadedGLTF::AnimationState &animState = it->second.animation;
+    it->second.scene->setActiveAnimation(animState, animationName, resetTime);
     return true;
 }
 
@@ -587,6 +686,6 @@ bool SceneManager::setGLTFInstanceAnimationLoop(const std::string &instanceName,
         return false;
     }
 
-    it->second.scene->animationLoop = loop;
+    it->second.animation.animationLoop = loop;
     return true;
 }

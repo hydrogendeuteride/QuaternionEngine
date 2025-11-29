@@ -98,20 +98,24 @@ struct LoadedGLTF : public IRenderable
         std::vector<AnimationChannel> channels;
     };
 
+    struct AnimationState
+    {
+        int activeAnimation = -1;
+        float animationTime = 0.f;
+        bool animationLoop = true;
+    };
+
     std::vector<Animation> animations;
-    int activeAnimation = -1;
-    float animationTime = 0.f;
-    bool animationLoop = true;
 
     // Optional debug name (e.g., key used when loaded into SceneManager)
     std::string debugName;
 
     // Animation helpers
-    void updateAnimation(float dt);
+    void updateAnimation(float dt, AnimationState &state);
     void refreshAllTransforms();
     std::shared_ptr<Node> getNode(const std::string &name);
-    void setActiveAnimation(int index, bool resetTime = true);
-    void setActiveAnimation(const std::string &name, bool resetTime = true);
+    void setActiveAnimation(AnimationState &state, int index, bool resetTime = true);
+    void setActiveAnimation(AnimationState &state, const std::string &name, bool resetTime = true);
 
     ~LoadedGLTF()
     {

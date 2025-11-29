@@ -832,12 +832,8 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
             }
         }
 
-        if (!file.animations.empty())
-        {
-            file.activeAnimation = 0;
-            file.animationTime = 0.0f;
-            file.animationLoop = true;
-        }
+        // Default animation state is now owned by SceneManager per static scene / instance.
+        // LoadedGLTF only stores shared animation clips.
     }
 
     // We no longer need glTF-owned buffer payloads; free any large vectors
@@ -896,62 +892,72 @@ void LoadedGLTF::refreshAllTransforms()
     }
 }
 
-void LoadedGLTF::setActiveAnimation(int index, bool resetTime)
+void LoadedGLTF::setActiveAnimation(AnimationState &state, int index, bool resetTime)
 {
     if (animations.empty())
     {
-        activeAnimation = -1;
+        state.activeAnimation = -1;
         return;
     }
 
-    if (index < 0 || index >= static_cast<int>(animations.size()))
+    if (index < 0)
+    {
+        state.activeAnimation = -1;
+        if (resetTime)
+        {
+            state.animationTime = 0.0f;
+        }
+        return;
+    }
+
+    if (index >= static_cast<int>(animations.size()))
     {
         index = 0;
     }
 
-    activeAnimation = index;
+    state.activeAnimation = index;
     if (resetTime)
     {
-        animationTime = 0.0f;
+        state.animationTime = 0.0f;
     }
 }
 
-void LoadedGLTF::setActiveAnimation(const std::string &name, bool resetTime)
+void LoadedGLTF::setActiveAnimation(AnimationState &state, const std::string &name, bool resetTime)
 {
     for (size_t i = 0; i < animations.size(); ++i)
     {
         if (animations[i].name == name)
         {
-            setActiveAnimation(static_cast<int>(i), resetTime);
+            setActiveAnimation(state, static_cast<int>(i), resetTime);
             return;
         }
     }
 }
 
-void LoadedGLTF::updateAnimation(float dt)
+void LoadedGLTF::updateAnimation(float dt, AnimationState &state)
 {
     if (animations.empty()) return;
-    if (activeAnimation < 0 || activeAnimation >= static_cast<int>(animations.size())) return;
+    if (state.activeAnimation < 0 || state.activeAnimation >= static_cast<int>(animations.size())) return;
     if (dt <= 0.0f) return;
 
-    Animation &clip = animations[activeAnimation];
+    Animation &clip = animations[state.activeAnimation];
     if (clip.duration <= 0.0f) return;
 
-    animationTime += dt;
-    if (animationLoop)
+    state.animationTime += dt;
+    if (state.animationLoop)
     {
-        animationTime = std::fmod(animationTime, clip.duration);
-        if (animationTime < 0.0f)
+        state.animationTime = std::fmod(state.animationTime, clip.duration);
+        if (state.animationTime < 0.0f)
         {
-            animationTime += clip.duration;
+            state.animationTime += clip.duration;
         }
     }
-    else if (animationTime > clip.duration)
+    else if (state.animationTime > clip.duration)
     {
-        animationTime = clip.duration;
+        state.animationTime = clip.duration;
     }
 
-    float t = animationTime;
+    float t = state.animationTime;
 
     for (auto &ch: clip.channels)
     {
