@@ -9,10 +9,8 @@ class Camera {
 public:
     glm::vec3 velocity;
     glm::vec3 position;
-    // vertical rotation
-    float pitch { 0.f };
-    // horizontal rotation
-    float yaw { 0.f };
+    // Orientation stored as a quaternion (local -> world).
+    glm::quat orientation { 1.0f, 0.0f, 0.0f, 0.0f };
 
     // Movement/look tuning
     float moveSpeed { 0.03f };

@@ -73,8 +73,7 @@ void SceneManager::init(EngineContext *context)
 
     mainCamera.velocity = glm::vec3(0.f);
     mainCamera.position = glm::vec3(30.f, -00.f, 85.f);
-    mainCamera.pitch = 0;
-    mainCamera.yaw = 0;
+    mainCamera.orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 
     sceneData.ambientColor = glm::vec4(0.1f, 0.1f, 0.1f, 1.0f);
     sceneData.sunlightDirection = glm::vec4(-0.2f, -1.0f, -0.3f, 1.0f);
@@ -204,7 +203,8 @@ void SceneManager::update_scene()
         {
             mainDrawContext.gltfNodeLocalOverrides = nullptr;
         }
-        inst.scene->Draw(inst.transform, mainDrawContext);
+        glm::mat4 instanceTransform = make_trs_matrix(inst.translation, inst.rotation, inst.scale);
+        inst.scene->Draw(instanceTransform, mainDrawContext);
         mainDrawContext.gltfNodeLocalOverrides = nullptr;
         tagOwner(RenderObject::OwnerType::GLTFInstance, kv.first, opaqueStart, transpStart);
     }
@@ -216,6 +216,7 @@ void SceneManager::update_scene()
     {
         const MeshInstance &inst = kv.second;
         if (!inst.mesh || inst.mesh->surfaces.empty()) continue;
+        glm::mat4 instanceTransform = make_trs_matrix(inst.translation, inst.rotation, inst.scale);
         uint32_t surfaceIndex = 0;
         for (const auto &surf: inst.mesh->surfaces)
         {
@@ -231,7 +232,7 @@ void SceneManager::update_scene()
             {
                 obj.bounds.type = *inst.boundsTypeOverride;
             }
-            obj.transform = inst.transform;
+            obj.transform = instanceTransform;
             obj.sourceMesh = inst.mesh.get();
             obj.surfaceIndex = surfaceIndex++;
             obj.objectID = mainDrawContext.nextID++;
@@ -429,7 +430,7 @@ void SceneManager::addMeshInstance(const std::string &name, std::shared_ptr<Mesh
     if (!mesh) return;
     MeshInstance inst{};
     inst.mesh = std::move(mesh);
-    inst.transform = transform;
+    decompose_trs_matrix(transform, inst.translation, inst.rotation, inst.scale);
     inst.boundsTypeOverride = boundsType;
     dynamicMeshInstances[name] = std::move(inst);
 }
@@ -441,7 +442,8 @@ bool SceneManager::getMeshInstanceTransform(const std::string &name, glm::mat4 &
     {
         return false;
     }
-    outTransform = it->second.transform;
+    const MeshInstance &inst = it->second;
+    outTransform = make_trs_matrix(inst.translation, inst.rotation, inst.scale);
     return true;
 }
 
@@ -452,7 +454,8 @@ bool SceneManager::setMeshInstanceTransform(const std::string &name, const glm::
     {
         return false;
     }
-    it->second.transform = transform;
+    MeshInstance &inst = it->second;
+    decompose_trs_matrix(transform, inst.translation, inst.rotation, inst.scale);
     return true;
 }
 
@@ -475,7 +478,7 @@ void SceneManager::addGLTFInstance(const std::string &name, std::shared_ptr<Load
                  scene->debugName.empty() ? "<unnamed>" : scene->debugName.c_str());
     GLTFInstance inst{};
     inst.scene = std::move(scene);
-    inst.transform = transform;
+    decompose_trs_matrix(transform, inst.translation, inst.rotation, inst.scale);
     if (inst.scene && !inst.scene->animations.empty())
     {
         inst.animation.activeAnimation = 0;
@@ -519,7 +522,8 @@ bool SceneManager::getGLTFInstanceTransform(const std::string &name, glm::mat4 &
     {
         return false;
     }
-    outTransform = it->second.transform;
+    const GLTFInstance &inst = it->second;
+    outTransform = make_trs_matrix(inst.translation, inst.rotation, inst.scale);
     return true;
 }
 
@@ -527,7 +531,8 @@ bool SceneManager::setGLTFInstanceTransform(const std::string &name, const glm::
 {
     auto it = dynamicGLTFInstances.find(name);
     if (it == dynamicGLTFInstances.end()) return false;
-    it->second.transform = transform;
+    GLTFInstance &inst = it->second;
+    decompose_trs_matrix(transform, inst.translation, inst.rotation, inst.scale);
     return true;
 }
 

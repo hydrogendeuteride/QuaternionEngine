@@ -24,6 +24,37 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+// Helper utilities for TRS (translation-rotation-scale) transforms using quaternions.
+inline glm::mat4 make_trs_matrix(const glm::vec3 &translation,
+                                 const glm::quat &rotation,
+                                 const glm::vec3 &scale)
+{
+    glm::mat4 tm = glm::translate(glm::mat4(1.0f), translation);
+    glm::mat4 rm = glm::mat4_cast(rotation);
+    glm::mat4 sm = glm::scale(glm::mat4(1.0f), scale);
+    return tm * rm * sm;
+}
+
+inline void decompose_trs_matrix(const glm::mat4 &m,
+                                 glm::vec3 &out_translation,
+                                 glm::quat &out_rotation,
+                                 glm::vec3 &out_scale)
+{
+    out_translation = glm::vec3(m[3]);
+
+    glm::vec3 col0 = glm::vec3(m[0]);
+    glm::vec3 col1 = glm::vec3(m[1]);
+    glm::vec3 col2 = glm::vec3(m[2]);
+
+    out_scale = glm::vec3(glm::length(col0), glm::length(col1), glm::length(col2));
+    if (out_scale.x != 0.0f) col0 /= out_scale.x;
+    if (out_scale.y != 0.0f) col1 /= out_scale.y;
+    if (out_scale.z != 0.0f) col2 /= out_scale.z;
+
+    glm::mat3 rot_mat(col0, col1, col2);
+    out_rotation = glm::quat_cast(rot_mat);
+}
+
 
 #define VK_CHECK(x)                                                     \
     do {                                                                \
@@ -169,10 +200,7 @@ struct Node : public IRenderable {
 
     void updateLocalFromTRS()
     {
-        glm::mat4 tm = glm::translate(glm::mat4(1.0f), translation);
-        glm::mat4 rm = glm::mat4_cast(rotation);
-        glm::mat4 sm = glm::scale(glm::mat4(1.0f), scale);
-        localTransform = tm * rm * sm;
+        localTransform = make_trs_matrix(translation, rotation, scale);
     }
 
     void setTRS(const glm::vec3 &t, const glm::quat &r, const glm::vec3 &s)

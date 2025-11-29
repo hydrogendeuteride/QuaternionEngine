@@ -91,7 +91,9 @@ public:
     struct MeshInstance
     {
         std::shared_ptr<MeshAsset> mesh;
-        glm::mat4 transform{1.f};
+        glm::vec3 translation{0.0f, 0.0f, 0.0f};
+        glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+        glm::vec3 scale{1.0f, 1.0f, 1.0f};
         std::optional<BoundsType> boundsTypeOverride;
     };
 
@@ -107,7 +109,9 @@ public:
     struct GLTFInstance
     {
         std::shared_ptr<LoadedGLTF> scene;
-        glm::mat4 transform{1.f};
+        glm::vec3 translation{0.0f, 0.0f, 0.0f};
+        glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+        glm::vec3 scale{1.0f, 1.0f, 1.0f};
         LoadedGLTF::AnimationState animation;
         // Per-instance local-space pose offsets for nodes in this glTF scene.
         // The offset matrix is post-multiplied onto the node's localTransform.

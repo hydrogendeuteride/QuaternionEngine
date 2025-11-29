@@ -671,18 +671,10 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
                            glm::mat4 m(1.0f);
                            memcpy(&m, matrix.data(), sizeof(matrix));
 
-                           glm::vec3 t = glm::vec3(m[3]);
-                           glm::vec3 col0 = glm::vec3(m[0]);
-                           glm::vec3 col1 = glm::vec3(m[1]);
-                           glm::vec3 col2 = glm::vec3(m[2]);
-
-                           glm::vec3 s(glm::length(col0), glm::length(col1), glm::length(col2));
-                           if (s.x != 0.0f) col0 /= s.x;
-                           if (s.y != 0.0f) col1 /= s.y;
-                           if (s.z != 0.0f) col2 /= s.z;
-                           glm::mat3 rotMat(col0, col1, col2);
-                           glm::quat r = glm::quat_cast(rotMat);
-
+                           glm::vec3 t;
+                           glm::quat r;
+                           glm::vec3 s;
+                           decompose_trs_matrix(m, t, r, s);
                            newNode->setTRS(t, r, s);
                        },
                        [&](fastgltf::Node::TRS transform) {

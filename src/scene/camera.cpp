@@ -38,10 +38,21 @@ void Camera::processSDLEvent(SDL_Event& e)
     }
 
     if (e.type == SDL_MOUSEMOTION && rmbDown) {
-        // Mouse right (xrel > 0) turns view right with -Z-forward
-        yaw += (float)e.motion.xrel * lookSensitivity;   // axis = +Y
-        // Mouse up (yrel < 0) looks up with -Z-forward
-        pitch -= (float)e.motion.yrel * lookSensitivity;
+        // Convert mouse motion to incremental yaw/pitch angles.
+        float dx = static_cast<float>(e.motion.xrel) * lookSensitivity;
+        float dy = static_cast<float>(e.motion.yrel) * lookSensitivity;
+
+        // Mouse right (xrel > 0) turns view right with -Z-forward: yaw around +Y.
+        glm::quat yawRotation = glm::angleAxis(dx, glm::vec3 { 0.f, 1.f, 0.f });
+
+        // Mouse up (yrel < 0) looks up with -Z-forward: negative dy.
+        float pitchDelta = -dy;
+        // Pitch around the camera's local X (right) axis in world space.
+        glm::vec3 right = glm::rotate(orientation, glm::vec3 { 1.f, 0.f, 0.f });
+        glm::quat pitchRotation = glm::angleAxis(pitchDelta, glm::vec3(right));
+
+        // Apply yaw, then pitch, to the current orientation.
+        orientation = glm::normalize(pitchRotation * yawRotation * orientation);
     }
 
     if (e.type == SDL_MOUSEWHEEL) {
@@ -72,12 +83,6 @@ glm::mat4 Camera::getViewMatrix()
 
 glm::mat4 Camera::getRotationMatrix()
 {
-    // fairly typical FPS style camera. we join the pitch and yaw rotations into
-    // the final rotation matrix
-
-    glm::quat pitchRotation = glm::angleAxis(pitch, glm::vec3 { 1.f, 0.f, 0.f });
-    // Yaw around +Y keeps mouse-right -> turn-right with -Z-forward
-    glm::quat yawRotation = glm::angleAxis(yaw, glm::vec3 { 0.f, 1.f, 0.f });
-
-    return glm::toMat4(yawRotation) * glm::toMat4(pitchRotation);
+    // Use the stored quaternion orientation directly.
+    return glm::toMat4(orientation);
 }
