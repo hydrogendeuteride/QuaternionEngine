@@ -237,7 +237,29 @@ bool IBLManager::load(const IBLPaths &paths)
         _diff = _spec;
     }
 
-    // If background is still missing but specular is valid, reuse the specular environment.
+    if (!paths.background2D.empty())
+    {
+        ktxutil::Ktx2D bg{};
+        if (ktxutil::load_ktx2_2d(paths.background2D.c_str(), bg))
+        {
+            std::vector<ResourceManager::MipLevelCopy> lv;
+            lv.reserve(bg.mipLevels);
+            for (uint32_t mip = 0; mip < bg.mipLevels; ++mip)
+            {
+                const auto &r = bg.copies[mip];
+                lv.push_back(ResourceManager::MipLevelCopy{
+                    .offset = r.bufferOffset,
+                    .length = 0,
+                    .width  = r.imageExtent.width,
+                    .height = r.imageExtent.height,
+                });
+            }
+            _background = rm->create_image_compressed(
+                bg.bytes.data(), bg.bytes.size(), bg.fmt, lv,
+                VK_IMAGE_USAGE_SAMPLED_BIT);
+        }
+    }
+
     if (_background.image == VK_NULL_HANDLE && _spec.image != VK_NULL_HANDLE)
     {
         _background = _spec;

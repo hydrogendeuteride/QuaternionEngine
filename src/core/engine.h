@@ -26,6 +26,7 @@
 #include "frame/resources.h"
 #include "descriptor/manager.h"
 #include "pipeline/sampler.h"
+#include "render/passes/ssr.h"
 #include "core/context.h"
 #include "core/pipeline/manager.h"
 #include "core/assets/manager.h"

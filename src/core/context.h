@@ -75,6 +75,7 @@ public:
 
     // Runtime settings visible to passes/shaders
     ShadowSettings shadowSettings{};
+    bool enableSSR = false;                      // optional screen-space reflections toggle
 
     // Ray tracing manager (optional, nullptr if unsupported)
     RayTracingManager* ray = nullptr;

@@ -268,6 +268,8 @@ void VulkanEngine::init()
 
     _resourceManager->set_deferred_uploads(true);
 
+    _context->enableSSR = true;
+
     //everything went fine
     _isInitialized = true;
 }
@@ -716,16 +718,49 @@ void VulkanEngine::draw()
                 lighting->register_graph(_renderGraph.get(), hDraw, hGBufferPosition, hGBufferNormal, hGBufferAlbedo,
                                          std::span<RGImageHandle>(hShadowCascades.data(), hShadowCascades.size()));
             }
+
+            // Optional Screen Space Reflections pass: consumes HDR draw + G-Buffer and
+            // produces an SSR-augmented HDR image. Controlled by EngineContext::enableSSR.
+            RGImageHandle hSSR{};
+            SSRPass *ssr = _renderPassManager->getPass<SSRPass>();
+            const bool ssrEnabled = (_context && _context->enableSSR && ssr != nullptr);
+            if (ssrEnabled)
+            {
+                RGImageDesc ssrDesc{};
+                ssrDesc.name = "hdr.ssr";
+                ssrDesc.format = _swapchainManager->drawImage().imageFormat;
+                ssrDesc.extent = _drawExtent;
+                ssrDesc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+                                | VK_IMAGE_USAGE_SAMPLED_BIT
+                                | VK_IMAGE_USAGE_STORAGE_BIT;
+                hSSR = _renderGraph->create_image(ssrDesc);
+
+                ssr->register_graph(_renderGraph.get(),
+                                    hDraw,
+                                    hGBufferPosition,
+                                    hGBufferNormal,
+                                    hGBufferAlbedo,
+                                    hSSR);
+            }
+
             if (auto *transparent = _renderPassManager->getPass<TransparentPass>())
             {
-                transparent->register_graph(_renderGraph.get(), hDraw, hDepth);
+                // Transparent objects draw on top of either the SSR output or the raw HDR draw.
+                RGImageHandle hdrTarget = (ssrEnabled && hSSR.valid()) ? hSSR : hDraw;
+                transparent->register_graph(_renderGraph.get(), hdrTarget, hDepth);
             }
             imguiPass = _renderPassManager->getImGuiPass();
 
             // Optional Tonemap pass: sample HDR draw -> LDR intermediate
             if (auto *tonemap = _renderPassManager->getPass<TonemapPass>())
             {
-                finalColor = tonemap->register_graph(_renderGraph.get(), hDraw);
+                RGImageHandle hdrInput = (ssrEnabled && hSSR.valid()) ? hSSR : hDraw;
+                finalColor = tonemap->register_graph(_renderGraph.get(), hdrInput);
+            }
+            else
+            {
+                // If tonemapping is disabled, present whichever HDR buffer we ended up with.
+                finalColor = (ssrEnabled && hSSR.valid()) ? hSSR : hDraw;
             }
         }
 

@@ -11,10 +11,10 @@ Current structure:
 - Supports texture compression(BCn, non glTF standard), LRU reload
 - Object clicking, generation.
 - Multi light system
+- SSR
 
 Work-In-Progress
-- [ ] TAA
-- [ ] SSR
+- [ ] AA
 - [ ] bloom
 - [ ] Planet Rendering
 

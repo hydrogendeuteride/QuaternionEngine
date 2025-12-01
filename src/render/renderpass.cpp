@@ -4,6 +4,7 @@
 #include "passes/geometry.h"
 #include "passes/imgui_pass.h"
 #include "passes/lighting.h"
+#include "passes/ssr.h"
 #include "passes/transparent.h"
 #include "passes/tonemap.h"
 #include "passes/shadow.h"
@@ -28,6 +29,11 @@ void RenderPassManager::init(EngineContext *context)
     auto lightingPass = std::make_unique<LightingPass>();
     lightingPass->init(context);
     addPass(std::move(lightingPass));
+
+    // Screen Space Reflections pass (wired between lighting and transparent)
+    auto ssrPass = std::make_unique<SSRPass>();
+    ssrPass->init(context);
+    addPass(std::move(ssrPass));
 
     auto transparentPass = std::make_unique<TransparentPass>();
     transparentPass->init(context);
