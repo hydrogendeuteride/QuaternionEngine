@@ -353,9 +353,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         materials.push_back(newMat);
         file.materials[mat.name.c_str()] = newMat;
 
-        GLTFMetallic_Roughness::MaterialConstants constants;
-        // Defaults
-        constants.extra[0].x = 1.0f; // normalScale
+        GLTFMetallic_Roughness::MaterialConstants constants{};
         constants.colorFactors.x = mat.pbrData.baseColorFactor[0];
         constants.colorFactors.y = mat.pbrData.baseColorFactor[1];
         constants.colorFactors.z = mat.pbrData.baseColorFactor[2];
@@ -363,6 +361,11 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
 
         constants.metal_rough_factors.x = mat.pbrData.metallicFactor;
         constants.metal_rough_factors.y = mat.pbrData.roughnessFactor;
+        constants.extra[0].x = 1.0f;
+        constants.extra[0].y = mat.occlusionTexture.has_value() ? mat.occlusionTexture->strength : 1.0f;
+        constants.extra[1].x = mat.emissiveFactor[0];
+        constants.extra[1].y = mat.emissiveFactor[1];
+        constants.extra[1].z = mat.emissiveFactor[2];
         // write material parameters to buffer
         sceneMaterialConstants[data_index] = constants;
 
@@ -380,6 +383,10 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         materialResources.metalRoughSampler = engine->_samplerManager->defaultLinear();
         materialResources.normalImage = engine->_flatNormalImage;
         materialResources.normalSampler = engine->_samplerManager->defaultLinear();
+        materialResources.occlusionImage = engine->_whiteImage;
+        materialResources.occlusionSampler = engine->_samplerManager->defaultLinear();
+        materialResources.emissiveImage = engine->_blackImage;
+        materialResources.emissiveSampler = engine->_samplerManager->defaultLinear();
 
         // set the uniform buffer for the material data
         materialResources.dataBuffer = file.materialDataBuffer.buffer;
@@ -389,6 +396,8 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         TextureCache::TextureHandle hColor = TextureCache::InvalidHandle;
         TextureCache::TextureHandle hMRO  = TextureCache::InvalidHandle;
         TextureCache::TextureHandle hNorm = TextureCache::InvalidHandle;
+        TextureCache::TextureHandle hOcc  = TextureCache::InvalidHandle;
+        TextureCache::TextureHandle hEmissive = TextureCache::InvalidHandle;
 
         if (cache && mat.pbrData.baseColorTexture.has_value())
         {
@@ -415,6 +424,35 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
             {
                 hMRO = cache->request(key, sampler);
                 materialResources.metalRoughSampler = sampler;
+            }
+        }
+
+        if (cache && mat.occlusionTexture.has_value())
+        {
+            const auto &tex = gltf.textures[mat.occlusionTexture->textureIndex];
+            const size_t imgIndex = tex.imageIndex.value();
+            const bool hasSampler = tex.samplerIndex.has_value();
+            const VkSampler sampler = hasSampler ? file.samplers[tex.samplerIndex.value()] : engine->_samplerManager->defaultLinear();
+            auto key = buildTextureKey(imgIndex, false);
+            key.channels = TextureCache::TextureKey::ChannelsHint::R;
+            if (key.hash != 0)
+            {
+                hOcc = cache->request(key, sampler);
+                materialResources.occlusionSampler = sampler;
+            }
+        }
+
+        if (cache && mat.emissiveTexture.has_value())
+        {
+            const auto &tex = gltf.textures[mat.emissiveTexture->textureIndex];
+            const size_t imgIndex = tex.imageIndex.value();
+            const bool hasSampler = tex.samplerIndex.has_value();
+            const VkSampler sampler = hasSampler ? file.samplers[tex.samplerIndex.value()] : engine->_samplerManager->defaultLinear();
+            auto key = buildTextureKey(imgIndex, true);
+            if (key.hash != 0)
+            {
+                hEmissive = cache->request(key, sampler);
+                materialResources.emissiveSampler = sampler;
             }
         }
 
@@ -455,6 +493,16 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
             {
                 cache->watchBinding(hNorm, newMat->data.materialSet, 3u, materialResources.normalSampler,
                                     engine->_flatNormalImage.imageView);
+            }
+            if (hOcc != TextureCache::InvalidHandle)
+            {
+                cache->watchBinding(hOcc, newMat->data.materialSet, 4u, materialResources.occlusionSampler,
+                                    engine->_whiteImage.imageView);
+            }
+            if (hEmissive != TextureCache::InvalidHandle)
+            {
+                cache->watchBinding(hEmissive, newMat->data.materialSet, 5u, materialResources.emissiveSampler,
+                                    engine->_blackImage.imageView);
             }
         }
 

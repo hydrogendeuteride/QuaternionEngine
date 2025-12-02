@@ -39,6 +39,7 @@ void LightingPass::init(EngineContext *context)
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         _gBufferInputDescriptorLayout = builder.build(
             _context->getDevice()->device(), VK_SHADER_STAGE_FRAGMENT_BIT,
             nullptr, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
@@ -54,6 +55,8 @@ void LightingPass::init(EngineContext *context)
         writer.write_image(1, _context->getSwapchain()->gBufferNormal().imageView, _context->getSamplers()->defaultLinear(),
                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.write_image(2, _context->getSwapchain()->gBufferAlbedo().imageView, _context->getSamplers()->defaultLinear(),
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.write_image(3, _context->getSwapchain()->gBufferExtra().imageView, _context->getSamplers()->defaultLinear(),
                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.update_set(_context->getDevice()->device(), _gBufferInputDescriptorSet);
     }
@@ -136,9 +139,11 @@ void LightingPass::register_graph(RenderGraph *graph,
                                   RGImageHandle gbufferPosition,
                                   RGImageHandle gbufferNormal,
                                   RGImageHandle gbufferAlbedo,
+                                  RGImageHandle gbufferExtra,
                                   std::span<RGImageHandle> shadowCascades)
 {
-    if (!graph || !drawHandle.valid() || !gbufferPosition.valid() || !gbufferNormal.valid() || !gbufferAlbedo.valid())
+    if (!graph || !drawHandle.valid() || !gbufferPosition.valid() || !gbufferNormal.valid() || !gbufferAlbedo.valid() ||
+        !gbufferExtra.valid())
     {
         return;
     }
@@ -146,11 +151,12 @@ void LightingPass::register_graph(RenderGraph *graph,
     graph->add_pass(
         "Lighting",
         RGPassType::Graphics,
-        [drawHandle, gbufferPosition, gbufferNormal, gbufferAlbedo, shadowCascades](RGPassBuilder &builder, EngineContext *)
+        [drawHandle, gbufferPosition, gbufferNormal, gbufferAlbedo, gbufferExtra, shadowCascades](RGPassBuilder &builder, EngineContext *)
         {
             builder.read(gbufferPosition, RGImageUsage::SampledFragment);
             builder.read(gbufferNormal, RGImageUsage::SampledFragment);
             builder.read(gbufferAlbedo, RGImageUsage::SampledFragment);
+            builder.read(gbufferExtra, RGImageUsage::SampledFragment);
             for (size_t i = 0; i < shadowCascades.size(); ++i)
             {
                 if (shadowCascades[i].valid()) builder.read(shadowCascades[i], RGImageUsage::SampledFragment);

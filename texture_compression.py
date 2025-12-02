@@ -9,9 +9,11 @@ except Exception:
     PIL_OK = False
 
 DEFAULT_SUFFIX = {
-    "albedo": ["_albedo", "_basecolor", "_base_colour", "_base_color", "_base", "baseColor", "BaseColor"],
-    "mr":     ["_mr", "_orm", "_metalrough", "_metallicroughness", "metallicRoughness", "Metallic"],
-    "normal": ["_normal", "_norm", "_nrm", "_normalgl", "Normal"]
+    "albedo":    ["_albedo", "_basecolor", "_base_colour", "_base_color", "_base", "baseColor", "BaseColor"],
+    "mr":        ["_mr", "_orm", "_metalrough", "_metallicroughness", "metallicRoughness", "Metallic"],
+    "normal":    ["_normal", "_norm", "_nrm", "_normalgl", "Normal"],
+    "occlusion": ["_occlusion", "_occ", "_ao"],
+    "emissive":  ["_emissive", "_emission", "_emit"],
 }
 
 SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tga", ".tif", ".tiff"}
@@ -34,8 +36,8 @@ def detect_role_by_suffix(stem, rx):
     return None
 
 def parse_gltf_roles(gltf_path: Path):
-    """glTF(.gltf JSON) to get image role"""
-    roles = {}  # uri-> role (albedo/mr/normal)
+    """glTF(.gltf JSON) to get image role (albedo/mr/normal/occlusion/emissive)"""
+    roles = {}  # uri -> role
     if not gltf_path.exists():
         return roles
     if gltf_path.suffix.lower() == ".gltf":
@@ -60,9 +62,16 @@ def parse_gltf_roles(gltf_path: Path):
         if not uri:
             return
 
-        prio = {"normal": 3, "albedo": 2, "mr": 1}
+        prio = {
+            "normal":    4,
+            "albedo":    3,
+            "emissive":  3,
+            "mr":        2,
+            "occlusion": 2,
+        }
+        new_prio = prio.get(role, 0)
         old = roles.get(uri)
-        if old is None or prio[role] > prio.get(old, 0):
+        if old is None or new_prio > prio.get(old, 0):
             roles[uri] = role
 
     for mat in materials:
@@ -70,6 +79,8 @@ def parse_gltf_roles(gltf_path: Path):
         base = pbr.get("baseColorTexture", {})
         mr   = pbr.get("metallicRoughnessTexture", {})
         nor  = mat.get("normalTexture", {})
+        occ  = mat.get("occlusionTexture", {})
+        emis = mat.get("emissiveTexture", {})
 
         if "index" in base and base["index"] in tex_to_uri:
             mark(tex_to_uri[base["index"]], "albedo")
@@ -77,6 +88,10 @@ def parse_gltf_roles(gltf_path: Path):
             mark(tex_to_uri[mr["index"]], "mr")
         if "index" in nor and nor["index"] in tex_to_uri:
             mark(tex_to_uri[nor["index"]], "normal")
+        if "index" in occ and occ["index"] in tex_to_uri:
+            mark(tex_to_uri[occ["index"]], "occlusion")
+        if "index" in emis and emis["index"] in tex_to_uri:
+            mark(tex_to_uri[emis["index"]], "emissive")
 
     return roles
 
@@ -100,6 +115,9 @@ def decide_targets(role, albedo_target, img_path):
     if role == "normal":
         return "bc5", "linear"
     if role == "mr":
+        return "bc7", "linear"
+    if role == "occlusion":
+        # AO is data, not color
         return "bc7", "linear"
     # albedo
     if albedo_target == "auto":
@@ -177,6 +195,8 @@ def main():
                    help="albedo suffix CSV (Base: %s)" % ",".join(DEFAULT_SUFFIX["albedo"]))
     p.add_argument("--suffix-mr", default=",".join(DEFAULT_SUFFIX["mr"]))
     p.add_argument("--suffix-normal", default=",".join(DEFAULT_SUFFIX["normal"]))
+    p.add_argument("--suffix-occlusion", default=",".join(DEFAULT_SUFFIX["occlusion"]))
+    p.add_argument("--suffix-emissive", default=",".join(DEFAULT_SUFFIX["emissive"]))
     p.add_argument("--albedo-target", choices=["auto", "bc1", "bc3", "bc7"], default="bc7",
                    help="albedo BC format(auto=non alpha BC1, alpha BC3)")
     p.add_argument("--uastc-quality", type=int, default=2, help="UASTC quality(0~4)")
@@ -194,6 +214,8 @@ def main():
         "albedo": build_suffix_regex([s.strip() for s in opts.suffix_albedo.split(",") if s.strip()]),
         "mr":     build_suffix_regex([s.strip() for s in opts.suffix_mr.split(",") if s.strip()]),
         "normal": build_suffix_regex([s.strip() for s in opts.suffix_normal.split(",") if s.strip()]),
+        "occlusion": build_suffix_regex([s.strip() for s in opts.suffix_occlusion.split(",") if s.strip()]),
+        "emissive":  build_suffix_regex([s.strip() for s in opts.suffix_emissive.split(",") if s.strip()]),
     }
 
     gltf_roles = {}

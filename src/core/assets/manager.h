@@ -28,10 +28,14 @@ public:
         // Optional tangent-space normal map for PBR (placeholder; not wired yet)
         // When enabled later, this will be sampled in shaders and requires tangents.
         std::string normalPath;
+        std::string occlusionPath;
+        std::string emissivePath;
 
         bool albedoSRGB = true;
         bool metalRoughSRGB = false;
         bool normalSRGB = false; // normal maps are typically non-sRGB
+        bool occlusionSRGB = false;
+        bool emissiveSRGB = true;
 
         GLTFMetallic_Roughness::MaterialConstants constants{};
 

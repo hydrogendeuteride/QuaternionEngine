@@ -208,12 +208,16 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
         AllocatedBuffer matBuffer = createMaterialBufferWithConstants(opt.constants);
 
         GLTFMetallic_Roughness::MaterialResources res{};
-        res.colorImage = _engine->_errorCheckerboardImage; // visible fallback for albedo
+        res.colorImage = _engine->_errorCheckerboardImage;
         res.colorSampler = _engine->_samplerManager->defaultLinear();
         res.metalRoughImage = _engine->_whiteImage;
         res.metalRoughSampler = _engine->_samplerManager->defaultLinear();
         res.normalImage = _engine->_flatNormalImage;
         res.normalSampler = _engine->_samplerManager->defaultLinear();
+        res.occlusionImage = _engine->_whiteImage;
+        res.occlusionSampler = _engine->_samplerManager->defaultLinear();
+        res.emissiveImage = _engine->_blackImage;
+        res.emissiveSampler = _engine->_samplerManager->defaultLinear();
         res.dataBuffer = matBuffer.buffer;
         res.dataBufferOffset = 0;
 
@@ -265,6 +269,27 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
                     VkSampler samp = _engine->_samplerManager->defaultLinear();
                     auto handle = cache->request(key, samp);
                     cache->watchBinding(handle, mat->data.materialSet, 3u, samp, _engine->_flatNormalImage.imageView);
+                }
+            }
+            if (!opt.occlusionPath.empty())
+            {
+                auto key = buildKey(opt.occlusionPath, opt.occlusionSRGB);
+                key.channels = TextureCache::TextureKey::ChannelsHint::R;
+                if (key.hash != 0)
+                {
+                    VkSampler samp = _engine->_samplerManager->defaultLinear();
+                    auto handle = cache->request(key, samp);
+                    cache->watchBinding(handle, mat->data.materialSet, 4u, samp, _engine->_whiteImage.imageView);
+                }
+            }
+            if (!opt.emissivePath.empty())
+            {
+                auto key = buildKey(opt.emissivePath, opt.emissiveSRGB);
+                if (key.hash != 0)
+                {
+                    VkSampler samp = _engine->_samplerManager->defaultLinear();
+                    auto handle = cache->request(key, samp);
+                    cache->watchBinding(handle, mat->data.materialSet, 5u, samp, _engine->_blackImage.imageView);
                 }
             }
         }
@@ -466,6 +491,10 @@ AllocatedBuffer AssetManager::createMaterialBufferWithConstants(
     {
         matConstants->extra[0].x = 1.0f; // normal scale default
     }
+    if (matConstants->extra[0].y == 0.0f)
+    {
+        matConstants->extra[0].y = 1.0f;
+    }
     // Ensure writes are visible on non-coherent memory
     vmaFlushAllocation(_engine->_deviceManager->allocator(), matBuffer.allocation, 0,
                        sizeof(GLTFMetallic_Roughness::MaterialConstants));
@@ -525,6 +554,10 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const std::string &name,
         matResources.metalRoughSampler = _engine->_samplerManager->defaultLinear();
         matResources.normalImage = _engine->_flatNormalImage;
         matResources.normalSampler = _engine->_samplerManager->defaultLinear();
+        matResources.occlusionImage = _engine->_whiteImage;
+        matResources.occlusionSampler = _engine->_samplerManager->defaultLinear();
+        matResources.emissiveImage = _engine->_blackImage;
+        matResources.emissiveSampler = _engine->_samplerManager->defaultLinear();
 
         AllocatedBuffer matBuffer = createMaterialBufferWithConstants({});
         matResources.dataBuffer = matBuffer.buffer;
@@ -569,6 +602,10 @@ std::shared_ptr<GLTFMaterial> AssetManager::createMaterialFromConstants(
     res.metalRoughSampler = _engine->_samplerManager->defaultLinear();
     res.normalImage = _engine->_flatNormalImage;
     res.normalSampler = _engine->_samplerManager->defaultLinear();
+    res.occlusionImage = _engine->_whiteImage;
+    res.occlusionSampler = _engine->_samplerManager->defaultLinear();
+    res.emissiveImage = _engine->_blackImage;
+    res.emissiveSampler = _engine->_samplerManager->defaultLinear();
 
     AllocatedBuffer buf = createMaterialBufferWithConstants(constants);
     res.dataBuffer = buf.buffer;

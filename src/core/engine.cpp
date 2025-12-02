@@ -613,6 +613,7 @@ void VulkanEngine::draw()
         RGImageHandle hGBufferPosition = _renderGraph->import_gbuffer_position();
         RGImageHandle hGBufferNormal = _renderGraph->import_gbuffer_normal();
         RGImageHandle hGBufferAlbedo = _renderGraph->import_gbuffer_albedo();
+        RGImageHandle hGBufferExtra = _renderGraph->import_gbuffer_extra();
         RGImageHandle hSwapchain = _renderGraph->import_swapchain_image(swapchainImageIndex);
         // For debug overlays (IBL volumes), re-use HDR draw image as a color target.
         RGImageHandle hDebugColor = hDraw;
@@ -656,7 +657,7 @@ void VulkanEngine::draw()
             if (auto *geometry = _renderPassManager->getPass<GeometryPass>())
             {
                 RGImageHandle hID = _renderGraph->import_id_buffer();
-                geometry->register_graph(_renderGraph.get(), hGBufferPosition, hGBufferNormal, hGBufferAlbedo, hID, hDepth);
+                geometry->register_graph(_renderGraph.get(), hGBufferPosition, hGBufferNormal, hGBufferAlbedo, hGBufferExtra, hID, hDepth);
 
                 // If ID-buffer picking is enabled and a pick was requested this frame,
                 // add a small transfer pass to read back 1 pixel from the ID buffer.
@@ -719,7 +720,7 @@ void VulkanEngine::draw()
             }
             if (auto *lighting = _renderPassManager->getPass<LightingPass>())
             {
-                lighting->register_graph(_renderGraph.get(), hDraw, hGBufferPosition, hGBufferNormal, hGBufferAlbedo,
+                lighting->register_graph(_renderGraph.get(), hDraw, hGBufferPosition, hGBufferNormal, hGBufferAlbedo, hGBufferExtra,
                                          std::span<RGImageHandle>(hShadowCascades.data(), hShadowCascades.size()));
             }
 

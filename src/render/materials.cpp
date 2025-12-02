@@ -20,6 +20,8 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine *engine)
     layoutBuilder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     layoutBuilder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     layoutBuilder.add_binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    layoutBuilder.add_binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    layoutBuilder.add_binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
     materialLayout = layoutBuilder.build(engine->_deviceManager->device(),
                                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -93,9 +95,10 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine *engine)
             engine->_swapchainManager->gBufferPosition().imageFormat,
             engine->_swapchainManager->gBufferNormal().imageFormat,
             engine->_swapchainManager->gBufferAlbedo().imageFormat,
-            engine->_swapchainManager->idBuffer().imageFormat
+            engine->_swapchainManager->idBuffer().imageFormat,
+            engine->_swapchainManager->gBufferExtra().imageFormat
         };
-        b.set_color_attachment_formats(std::span<VkFormat>(gFormats, 4));
+        b.set_color_attachment_formats(std::span<VkFormat>(gFormats, 5));
         b.set_depth_format(engine->_swapchainManager->depthImage().imageFormat);
     };
     engine->_pipelineManager->registerGraphics("mesh.gbuffer", gbufferInfo);
@@ -138,6 +141,10 @@ MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, Materia
     writer.write_image(2, resources.metalRoughImage.imageView, resources.metalRoughSampler,
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     writer.write_image(3, resources.normalImage.imageView, resources.normalSampler,
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    writer.write_image(4, resources.occlusionImage.imageView, resources.occlusionSampler,
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    writer.write_image(5, resources.emissiveImage.imageView, resources.emissiveSampler,
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
     writer.update_set(device, matData.materialSet);

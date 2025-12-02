@@ -11,6 +11,7 @@ layout(location=0) out vec4 outColor;
 layout(set=1, binding=0) uniform sampler2D posTex;
 layout(set=1, binding=1) uniform sampler2D normalTex;
 layout(set=1, binding=2) uniform sampler2D albedoTex;
+layout(set=1, binding=3) uniform sampler2D extraTex;
 layout(set=2, binding=0) uniform sampler2D shadowTex[4];
 // TLAS for ray query (optional, guarded by sceneData.rtOptions.x)
 #ifdef GL_EXT_ray_query
@@ -279,6 +280,10 @@ void main(){
     vec3 albedo = albedoSample.rgb;
     float metallic = clamp(albedoSample.a, 0.0, 1.0);
 
+    vec4 extraSample = texture(extraTex, inUV);
+    float ao = extraSample.x;
+    vec3 emissive = extraSample.yzw;
+
     vec3 camPos = vec3(inverse(sceneData.view)[3]);
     vec3 V = normalize(camPos - pos);
 
@@ -340,7 +345,8 @@ void main(){
     vec3 specIBL = prefiltered * (F0 * brdf.x + brdf.y);
     vec3 diffIBL = (1.0 - metallic) * albedo * sh_eval_irradiance(N);
 
-    vec3 color = direct + diffIBL + specIBL;
+    vec3 indirect = diffIBL + specIBL;
+    vec3 color = direct + indirect * ao + emissive;
 
     outColor = vec4(color, 1.0);
 }

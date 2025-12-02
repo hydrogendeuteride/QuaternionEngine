@@ -61,7 +61,18 @@ void main()
     vec3 specIBL = prefiltered * (F0 * brdf.x + brdf.y);
     vec3 diffIBL = (1.0 - metallic) * albedo * sh_eval_irradiance(N);
 
-    vec3 color = direct + diffIBL + specIBL;
+    // Ambient occlusion from texture + strength (indirect only)
+    float aoStrength = clamp(materialData.extra[0].y, 0.0, 1.0);
+    float aoTex = texture(occlusionTex, inUV).r;
+    float ao = 1.0 - aoStrength + aoStrength * aoTex;
+
+    // Emissive from texture and factor
+    vec3 emissiveFactor = materialData.extra[1].rgb;
+    vec3 emissiveTex = texture(emissiveTex, inUV).rgb;
+    vec3 emissive = emissiveTex * emissiveFactor;
+
+    vec3 indirect = diffIBL + specIBL;
+    vec3 color = direct + indirect * ao + emissive;
 
     // Alpha from baseColor texture and factor (glTF spec)
     float alpha = clamp(baseTex.a * materialData.colorFactors.a, 0.0, 1.0);

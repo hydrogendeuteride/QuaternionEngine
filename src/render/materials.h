@@ -30,6 +30,10 @@ struct GLTFMetallic_Roughness
         VkSampler metalRoughSampler;
         AllocatedImage normalImage;
         VkSampler normalSampler;
+        AllocatedImage occlusionImage;
+        VkSampler occlusionSampler;
+        AllocatedImage emissiveImage;
+        VkSampler emissiveSampler;
         VkBuffer dataBuffer;
         uint32_t dataBufferOffset;
     };

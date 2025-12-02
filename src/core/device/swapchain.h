@@ -29,6 +29,7 @@ public:
     AllocatedImage gBufferPosition() const { return _gBufferPosition; }
     AllocatedImage gBufferNormal() const { return _gBufferNormal; }
     AllocatedImage gBufferAlbedo() const { return _gBufferAlbedo; }
+    AllocatedImage gBufferExtra() const { return _gBufferExtra; }
     AllocatedImage idBuffer() const { return _idBuffer; }
     VkExtent2D windowExtent() const { return _windowExtent; }
 
@@ -51,6 +52,7 @@ private:
     AllocatedImage _gBufferPosition = {};
     AllocatedImage _gBufferNormal = {};
     AllocatedImage _gBufferAlbedo = {};
+    AllocatedImage _gBufferExtra = {};
     AllocatedImage _idBuffer = {};
 
     DeletionQueue _deletionQueue;

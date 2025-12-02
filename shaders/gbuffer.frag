@@ -13,6 +13,7 @@ layout(location = 0) out vec4 outPos;
 layout(location = 1) out vec4 outNorm;
 layout(location = 2) out vec4 outAlbedo;
 layout(location = 3) out uint outObjectID;
+layout(location = 4) out vec4 outExtra;
 
 // Keep push constants layout in sync with mesh.vert / GPUDrawPushConstants
 struct Vertex {
@@ -58,5 +59,13 @@ void main() {
     outPos = vec4(inWorldPos, 1.0);
     outNorm = vec4(Nw, roughness);
     outAlbedo = vec4(albedo, metallic);
+    // Extra G-buffer: x = AO, yzw = emissive
+    float aoStrength = clamp(materialData.extra[0].y, 0.0, 1.0);
+    float aoTex = texture(occlusionTex, inUV).r;
+    float ao = 1.0 - aoStrength + aoStrength * aoTex;
+    vec3 emissiveFactor = materialData.extra[1].rgb;
+    vec3 emissiveTex = texture(emissiveTex, inUV).rgb;
+    vec3 emissive = emissiveTex * emissiveFactor;
+    outExtra = vec4(ao, emissive);
     outObjectID = PushConstants.objectID;
 }
