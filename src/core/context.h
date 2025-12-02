@@ -76,6 +76,9 @@ public:
     // Runtime settings visible to passes/shaders
     ShadowSettings shadowSettings{};
     bool enableSSR = false;                      // optional screen-space reflections toggle
+    // Reflection mode for SSR/RT reflections; encoded into sceneData.rtOptions.w
+    // 0 = SSR only, 1 = SSR + RT fallback, 2 = RT only
+    uint32_t reflectionMode = 0;
 
     // Ray tracing manager (optional, nullptr if unsupported)
     RayTracingManager* ray = nullptr;

@@ -602,6 +602,34 @@ namespace
     static void ui_postfx(VulkanEngine *eng)
     {
         if (!eng) return;
+        if (!eng->_context) return;
+
+        EngineContext *ctx = eng->_context.get();
+
+        ImGui::TextUnformatted("Reflections");
+        bool ssrEnabled = ctx->enableSSR;
+        if (ImGui::Checkbox("Enable Screen-Space Reflections", &ssrEnabled))
+        {
+            ctx->enableSSR = ssrEnabled;
+        }
+
+        int reflMode = static_cast<int>(ctx->reflectionMode);
+        ImGui::TextUnformatted("Reflection Mode");
+        ImGui::RadioButton("SSR only", &reflMode, 0);
+        ImGui::SameLine();
+        ImGui::RadioButton("SSR + RT fallback", &reflMode, 1);
+        ImGui::SameLine();
+        ImGui::RadioButton("RT only", &reflMode, 2);
+
+        const bool rq = eng->_deviceManager->supportsRayQuery();
+        const bool as = eng->_deviceManager->supportsAccelerationStructure();
+        if (!(rq && as) && reflMode != 0)
+        {
+            reflMode = 0; // guard for unsupported HW
+        }
+        ctx->reflectionMode = static_cast<uint32_t>(reflMode);
+
+        ImGui::Separator();
         if (auto *tm = eng->_renderPassManager ? eng->_renderPassManager->getPass<TonemapPass>() : nullptr)
         {
             float exp = tm->exposure();

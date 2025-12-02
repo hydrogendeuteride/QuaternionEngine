@@ -1,5 +1,6 @@
 #include "ssr.h"
 
+#include "raytracing.h"
 #include "core/frame/resources.h"
 #include "core/descriptor/manager.h"
 #include "core/descriptor/descriptors.h"
@@ -38,16 +39,15 @@ void SSRPass::init(EngineContext *context)
             VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
     }
 
-    // Graphics pipeline: fullscreen triangle, no depth, HDR color attachment.
-    GraphicsPipelineCreateInfo info{};
-    info.vertexShaderPath = _context->getAssets()->shaderPath("fullscreen.vert.spv");
-    info.fragmentShaderPath = _context->getAssets()->shaderPath("ssr.frag.spv");
-    info.setLayouts = {
-        _context->getDescriptorLayouts()->gpuSceneDataLayout(), // set = 0 (sceneData UBO)
+    // Graphics pipelines: fullscreen triangle, no depth, HDR color attachment.
+    GraphicsPipelineCreateInfo baseInfo{};
+    baseInfo.vertexShaderPath = _context->getAssets()->shaderPath("fullscreen.vert.spv");
+    baseInfo.setLayouts = {
+        _context->getDescriptorLayouts()->gpuSceneDataLayout(), // set = 0 (sceneData UBO + optional TLAS)
         _inputSetLayout                                         // set = 1 (HDR + GBuffer)
     };
 
-    info.configure = [this](PipelineBuilder &b)
+    baseInfo.configure = [this](PipelineBuilder &b)
     {
         b.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
         b.set_polygon_mode(VK_POLYGON_MODE_FILL);
@@ -61,7 +61,15 @@ void SSRPass::init(EngineContext *context)
         }
     };
 
-    _context->pipelines->createGraphicsPipeline("ssr", info);
+    // Non-RT variant (pure screen-space reflections).
+    GraphicsPipelineCreateInfo infoNoRT = baseInfo;
+    infoNoRT.fragmentShaderPath = _context->getAssets()->shaderPath("ssr.frag.spv");
+    _context->pipelines->createGraphicsPipeline("ssr.nort", infoNoRT);
+
+    // RT-assisted variant (SSR + ray-query fallback using TLAS).
+    GraphicsPipelineCreateInfo infoRT = baseInfo;
+    infoRT.fragmentShaderPath = _context->getAssets()->shaderPath("ssr_rt.frag.spv");
+    _context->pipelines->createGraphicsPipeline("ssr.rt", infoRT);
 }
 
 void SSRPass::cleanup()
@@ -148,10 +156,21 @@ void SSRPass::draw_ssr(VkCommandBuffer cmd,
         return;
     }
 
-    // Fetch (or refresh) pipeline for hot-reload support.
-    if (!pipelineManager->getGraphics("ssr", _pipeline, _pipelineLayout))
+    // Choose RT variant only if TLAS is valid; otherwise fall back to non-RT.
+    const bool haveRTFeatures = deviceManager->supportsAccelerationStructure();
+    const VkAccelerationStructureKHR tlas = (ctxLocal->ray ? ctxLocal->ray->tlas() : VK_NULL_HANDLE);
+    const VkDeviceAddress tlasAddr = (ctxLocal->ray ? ctxLocal->ray->tlasAddress() : 0);
+    const bool useRT = haveRTFeatures && (tlas != VK_NULL_HANDLE) && (tlasAddr != 0);
+
+    const char *pipeName = useRT ? "ssr.rt" : "ssr.nort";
+    if (!pipelineManager->getGraphics(pipeName, _pipeline, _pipelineLayout))
     {
-        return;
+        // Try the other variant as a fallback.
+        const char *fallback = useRT ? "ssr.nort" : "ssr.rt";
+        if (!pipelineManager->getGraphics(fallback, _pipeline, _pipelineLayout))
+        {
+            return;
+        }
     }
 
     // Scene UBO (set=0, binding=0) – mirror LightingPass behavior.
@@ -175,6 +194,10 @@ void SSRPass::draw_ssr(VkCommandBuffer cmd,
     {
         DescriptorWriter writer;
         writer.write_buffer(0, sceneBuf.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        if (useRT)
+        {
+            writer.write_acceleration_structure(1, tlas);
+        }
         writer.update_set(deviceManager->device(), globalSet);
     }
 

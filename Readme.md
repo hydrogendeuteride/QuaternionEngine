@@ -1,5 +1,5 @@
 # CopernicusEngine
-Multi-purpose Vulkan render engine specialized for physics simulation and solar system visualization
+Multipurpose Vulkan render engine specialized for physics simulation and solar system visualization
 
 ## Introduction
 Work-In-Progress Vulkan render engine

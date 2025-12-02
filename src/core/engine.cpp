@@ -569,8 +569,12 @@ void VulkanEngine::draw()
     //now that we are sure that the commands finished executing, we can safely reset the command buffer to begin recording again.
     VK_CHECK(vkResetCommandBuffer(get_current_frame()._mainCommandBuffer, 0));
 
-    // Build or update TLAS for current frame now that the previous frame is idle
-    if (_rayManager && _context->shadowSettings.mode != 0u)
+    // Build or update TLAS for current frame now that the previous frame is idle.
+    // TLAS is used for hybrid/full RT shadows and RT-assisted SSR reflections.
+    // For reflections, only build TLAS when RT is actually enabled (reflectionMode != 0).
+    if (_rayManager &&
+        (_context->shadowSettings.mode != 0u ||
+         (_context->enableSSR && _context->reflectionMode != 0u)))
     {
         _rayManager->buildTLASFromDrawContext(_context->getMainDrawContext(), get_current_frame()._deletionQueue);
     }

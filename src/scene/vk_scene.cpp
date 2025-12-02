@@ -347,7 +347,10 @@ void SceneManager::update_scene()
     {
         const auto &ss = _context->shadowSettings;
         const uint32_t rtEnabled = (ss.mode != 0) ? 1u : 0u;
-        sceneData.rtOptions = glm::uvec4(rtEnabled, ss.hybridRayCascadesMask, ss.mode, 0u);
+        const uint32_t reflMode = _context->reflectionMode;
+        // rtOptions.x = RT shadows enabled, y = cascade mask, z = shadow mode, w = reflection mode (SSR/RT)
+        sceneData.rtOptions = glm::uvec4(rtEnabled, ss.hybridRayCascadesMask, ss.mode, reflMode);
+        // rtParams.x = N·L threshold for hybrid shadows; remaining components reserved
         sceneData.rtParams  = glm::vec4(ss.hybridRayNoLThreshold, 0.0f, 0.0f, 0.0f);
     }
 
