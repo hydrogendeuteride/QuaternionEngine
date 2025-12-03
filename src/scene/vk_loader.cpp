@@ -612,8 +612,24 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
                                                               });
             }
 
-            // Generate tangents if missing and we have UVs
-            if (!hasTangents)
+            // Generate tangents only when needed for normal mapping.
+            // If the bound material has no normal map, we can skip TBN generation.
+            bool materialHasNormalMap = false;
+            if (p.materialIndex.has_value())
+            {
+                size_t matIndex = p.materialIndex.value();
+                if (matIndex < gltf.materials.size())
+                {
+                    materialHasNormalMap = gltf.materials[matIndex].normalTexture.has_value();
+                }
+            }
+            else if (!gltf.materials.empty())
+            {
+                // Primitives without an explicit material fall back to material 0.
+                materialHasNormalMap = gltf.materials[0].normalTexture.has_value();
+            }
+
+            if (!hasTangents && materialHasNormalMap)
             {
                 size_t primIndexStart = newSurface.startIndex;
                 size_t primIndexCount = newSurface.count;

@@ -10,7 +10,7 @@ except Exception:
 
 DEFAULT_SUFFIX = {
     "albedo":    ["_albedo", "_basecolor", "_base_colour", "_base_color", "_base", "baseColor", "BaseColor"],
-    "mr":        ["_mr", "_orm", "_metalrough", "_metallicroughness", "metallicRoughness", "Metallic"],
+    "mr":        ["_mr", "_orm", "_metalrough", "_metallicroughness", "metallicRoughness", "Metallic", "Metalness"],
     "normal":    ["_normal", "_norm", "_nrm", "_normalgl", "Normal"],
     "occlusion": ["_occlusion", "_occ", "_ao"],
     "emissive":  ["_emissive", "_emission", "_emit"],

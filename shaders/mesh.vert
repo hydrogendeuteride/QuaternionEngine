@@ -37,15 +37,19 @@ void main()
 {
     Vertex v = PushConstants.vertexBuffer.vertices[gl_VertexIndex];
 
-    vec4 worldPos = PushConstants.render_matrix * vec4(v.position, 1.0f);
+    mat3 M = mat3(PushConstants.render_matrix);
+    mat3 normalMatrix = transpose(inverse(M));
+
+    vec4 worldPos = PushConstants.render_matrix * vec4(v.position, 1.0);
     gl_Position = sceneData.viewproj * worldPos;
 
-    outNormal = (PushConstants.render_matrix * vec4(v.normal, 0.f)).xyz;
-    vec3 worldTangent = (PushConstants.render_matrix * vec4(v.tangent.xyz, 0.f)).xyz;
-    outTangent = vec4(normalize(worldTangent), v.tangent.w);
-    // Pass pure vertex color; apply baseColorFactor only in fragment
+    outNormal = normalize(normalMatrix * v.normal);
+
+    vec3 worldTangent = normalize(normalMatrix * v.tangent.xyz);
+    outTangent = vec4(worldTangent, v.tangent.w);
+
     outColor = v.color.xyz;
-    outUV.x = v.uv_x;
-    outUV.y = v.uv_y;
+    outUV    = vec2(v.uv_x, v.uv_y);
     outWorldPos = worldPos.xyz;
 }
+
