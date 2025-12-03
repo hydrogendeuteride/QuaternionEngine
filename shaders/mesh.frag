@@ -17,6 +17,14 @@ void main()
 {
     // Base color with material factor and texture
     vec4 baseTex = texture(colorTex, inUV);
+    // Alpha from baseColor texture and factor (glTF spec)
+    float alpha = clamp(baseTex.a * materialData.colorFactors.a, 0.0, 1.0);
+    // Optional alpha-cutout support for MASK materials (alphaCutoff > 0)
+    float alphaCutoff = materialData.extra[2].x;
+    if (alphaCutoff > 0.0 && alpha < alphaCutoff)
+    {
+        discard;
+    }
     vec3 albedo = inColor * baseTex.rgb * materialData.colorFactors.rgb;
     // glTF: metallicRoughnessTexture uses G=roughness, B=metallic
     vec2 mrTex = texture(metalRoughTex, inUV).gb;
@@ -74,7 +82,5 @@ void main()
     vec3 indirect = diffIBL + specIBL;
     vec3 color = direct + indirect * ao + emissive;
 
-    // Alpha from baseColor texture and factor (glTF spec)
-    float alpha = clamp(baseTex.a * materialData.colorFactors.a, 0.0, 1.0);
     outFragColor = vec4(color, alpha);
 }

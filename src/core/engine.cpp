@@ -204,6 +204,10 @@ void VulkanEngine::init()
     _textureCache->set_max_bytes_per_pump(128ull * 1024ull * 1024ull); // 128 MiB/frame
     _textureCache->set_max_upload_dimension(4096);
 
+    // Async asset loader for background glTF + texture jobs
+    _asyncLoader = std::make_unique<AsyncAssetLoader>();
+    _asyncLoader->init(this, _assetManager.get(), _textureCache.get(), 1);
+
     // Optional ray tracing manager if supported and extensions enabled
     if (_deviceManager->supportsRayQuery() && _deviceManager->supportsAccelerationStructure())
     {
@@ -375,8 +379,26 @@ bool VulkanEngine::addGLTFInstance(const std::string &instanceName,
     return true;
 }
 
+uint32_t VulkanEngine::loadGLTFAsync(const std::string &sceneName,
+                                     const std::string &modelRelativePath,
+                                     const glm::mat4 &transform)
+{
+    if (!_asyncLoader || !_assetManager || !_sceneManager)
+    {
+        return 0;
+    }
+
+    return _asyncLoader->load_gltf_async(sceneName, modelRelativePath, transform);
+}
+
 void VulkanEngine::cleanup()
 {
+    if (_asyncLoader)
+    {
+        _asyncLoader->shutdown();
+        _asyncLoader.reset();
+    }
+
     vkDeviceWaitIdle(_deviceManager->device());
 
     print_vma_stats(_deviceManager.get(), "begin");
@@ -481,6 +503,12 @@ void VulkanEngine::cleanup()
 
 void VulkanEngine::draw()
 {
+    // Integrate any completed async asset jobs into the scene before updating.
+    if (_asyncLoader && _sceneManager)
+    {
+        _asyncLoader->pump_main_thread(*_sceneManager);
+    }
+
     _sceneManager->update_scene();
 
     // Update IBL based on camera position and user-defined reflection volumes.

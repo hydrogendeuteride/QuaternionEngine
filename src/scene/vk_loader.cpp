@@ -161,7 +161,9 @@ VkSamplerMipmapMode extract_mipmap_mode(fastgltf::Filter filter)
 
 //< filters
 
-std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::string_view filePath)
+std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
+                                                     std::string_view filePath,
+                                                     const GLTFLoadCallbacks *cb)
 {
     //> load_1
     fmt::println("[GLTF] loadGltf begin: '{}'", filePath);
@@ -216,6 +218,24 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         return {};
     }
     //< load_1
+    // Simple helpers for progress/cancellation callbacks (if provided)
+    auto report_progress = [&](float v)
+    {
+        if (cb && cb->on_progress)
+        {
+            float clamped = std::clamp(v, 0.0f, 1.0f);
+            cb->on_progress(clamped);
+        }
+    };
+    auto is_cancelled = [&]() -> bool
+    {
+        if (cb && cb->is_cancelled)
+        {
+            return cb->is_cancelled();
+        }
+        return false;
+    };
+
     //> load_2
     // we can stimate the descriptors we will need accurately
     fmt::println("[GLTF] loadGltf: materials={} meshes={} images={} samplers={} (creating descriptor pool)",
@@ -235,6 +255,8 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
     fmt::println("[GLTF] loadGltf: descriptor pool initialized for '{}' (materials={})",
                  filePath,
                  gltf.materials.size());
+
+    report_progress(0.1f);
     //< load_2
     //> load_samplers
 
@@ -270,6 +292,8 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         file.samplers.push_back(newSampler);
     }
     //< load_samplers
+
+    report_progress(0.2f);
     //> load_arrays
     // temporal arrays for all the objects to use while creating the GLTF data
     std::vector<std::shared_ptr<MeshAsset> > meshes;
@@ -349,6 +373,8 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
     //> load_material
     for (fastgltf::Material &mat: gltf.materials)
     {
+        if (is_cancelled()) return {};
+
         std::shared_ptr<GLTFMaterial> newMat = std::make_shared<GLTFMaterial>();
         materials.push_back(newMat);
         file.materials[mat.name.c_str()] = newMat;
@@ -361,11 +387,20 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
 
         constants.metal_rough_factors.x = mat.pbrData.metallicFactor;
         constants.metal_rough_factors.y = mat.pbrData.roughnessFactor;
+        // extra[0].x: normalScale (default 1.0)
         constants.extra[0].x = 1.0f;
+        // extra[0].y: occlusionStrength (0..1, default 1.0)
         constants.extra[0].y = mat.occlusionTexture.has_value() ? mat.occlusionTexture->strength : 1.0f;
+        // extra[1].rgb: emissiveFactor
         constants.extra[1].x = mat.emissiveFactor[0];
         constants.extra[1].y = mat.emissiveFactor[1];
         constants.extra[1].z = mat.emissiveFactor[2];
+        // extra[2].x: alphaCutoff for MASK materials (>0 enables alpha test)
+        constants.extra[2].x = 0.0f;
+        if (mat.alphaMode == fastgltf::AlphaMode::Mask)
+        {
+            constants.extra[2].x = static_cast<float>(mat.alphaCutoff);
+        }
         // write material parameters to buffer
         sceneMaterialConstants[data_index] = constants;
 
@@ -510,6 +545,12 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
     }
     //< load_material
 
+    // Rough progress after materials and texture requests
+    if (!gltf.meshes.empty())
+    {
+        report_progress(0.25f);
+    }
+
     // Flush material constants buffer so GPU sees updated data on non-coherent memory
     if (!gltf.materials.empty())
     {
@@ -522,8 +563,11 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
     std::vector<uint32_t> indices;
     std::vector<Vertex> vertices;
 
-    for (fastgltf::Mesh &mesh: gltf.meshes)
+    for (size_t meshIndex = 0; meshIndex < gltf.meshes.size(); ++meshIndex)
     {
+        if (is_cancelled()) return {};
+
+        fastgltf::Mesh &mesh = gltf.meshes[meshIndex];
         std::shared_ptr<MeshAsset> newmesh = std::make_shared<MeshAsset>();
         meshes.push_back(newmesh);
         file.meshes[mesh.name.c_str()] = newmesh;
@@ -704,11 +748,18 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         };
         shrink_if_huge(indices, sizeof(uint32_t));
         shrink_if_huge(vertices, sizeof(Vertex));
+
+        // Update progress based on meshes built so far; meshes/BVH/uploads get 0.6 of the range.
+        float meshFrac = static_cast<float>(meshIndex + 1) / static_cast<float>(gltf.meshes.size());
+        report_progress(0.2f + meshFrac * 0.6f);
     }
     //> load_nodes
     // load all nodes and their meshes
-    for (fastgltf::Node &node: gltf.nodes)
+    for (size_t nodeIndex = 0; nodeIndex < gltf.nodes.size(); ++nodeIndex)
     {
+        if (is_cancelled()) return {};
+
+        fastgltf::Node &node = gltf.nodes[nodeIndex];
         std::shared_ptr<Node> newNode;
 
         // find if the node has a mesh, and if it does hook it to the mesh pointer and allocate it with the meshnode class
@@ -752,6 +803,14 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
                        }
                    },
                    node.transform);
+
+        // Node building and hierarchy wiring shares a small slice of progress.
+        if (!gltf.nodes.empty())
+        {
+            float nodeFrac = static_cast<float>(nodeIndex + 1) / static_cast<float>(gltf.nodes.size());
+            // Reserve 0.1 of the total range for nodes/animations/transforms.
+            report_progress(0.8f + nodeFrac * 0.1f);
+        }
     }
     //< load_nodes
     //> load_graph
@@ -892,6 +951,8 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
         // LoadedGLTF only stores shared animation clips.
     }
 
+    report_progress(0.95f);
+
     // We no longer need glTF-owned buffer payloads; free any large vectors
     for (auto &buf : gltf.buffers)
     {
@@ -918,6 +979,8 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::
                  file.samplers.size(),
                  file.animations.size(),
                  file.debugName.empty() ? "<none>" : file.debugName);
+
+    report_progress(1.0f);
     return scene;
     //< load_graph
 }

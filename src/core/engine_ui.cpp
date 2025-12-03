@@ -379,6 +379,97 @@ namespace
         }
     }
 
+    static const char *job_state_name(AsyncAssetLoader::JobState s)
+    {
+        using JS = AsyncAssetLoader::JobState;
+        switch (s)
+        {
+            case JS::Pending:   return "Pending";
+            case JS::Running:   return "Running";
+            case JS::Completed: return "Completed";
+            case JS::Failed:    return "Failed";
+            case JS::Cancelled: return "Cancelled";
+            default:            return "?";
+        }
+    }
+
+    static void ui_async_assets(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_asyncLoader)
+        {
+            ImGui::TextUnformatted("AsyncAssetLoader not available");
+            return;
+        }
+
+        std::vector<AsyncAssetLoader::DebugJob> jobs;
+        eng->_asyncLoader->debug_snapshot(jobs);
+
+        ImGui::Text("Active jobs: %zu", jobs.size());
+        ImGui::Separator();
+
+        if (!jobs.empty())
+        {
+            if (ImGui::BeginTable("async_jobs", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+            {
+                ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 40);
+                ImGui::TableSetupColumn("Scene");
+                ImGui::TableSetupColumn("Model");
+                ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 90);
+                ImGui::TableSetupColumn("Progress", ImGuiTableColumnFlags_WidthFixed, 180);
+                ImGui::TableHeadersRow();
+
+                for (const auto &j : jobs)
+                {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::Text("%u", j.id);
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::TextUnformatted(j.scene_name.c_str());
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::TextUnformatted(j.model_relative_path.c_str());
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::TextUnformatted(job_state_name(j.state));
+                    ImGui::TableSetColumnIndex(4);
+                    float p = j.progress;
+                    ImGui::ProgressBar(p, ImVec2(-FLT_MIN, 0.0f));
+                    if (j.texture_count > 0)
+                    {
+                        ImGui::SameLine();
+                        ImGui::Text("(%zu/%zu tex)", j.textures_resident, j.texture_count);
+                    }
+                }
+                ImGui::EndTable();
+            }
+        }
+        else
+        {
+            ImGui::TextUnformatted("No async asset jobs currently running.");
+        }
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Spawn async glTF instance");
+        static char gltfPath[256] = "mirage2000/scene.gltf";
+        static char gltfName[128] = "async_gltf_01";
+        static float gltfPos[3] = {0.0f, 0.0f, 0.0f};
+        static float gltfRot[3] = {0.0f, 0.0f, 0.0f};
+        static float gltfScale[3] = {1.0f, 1.0f, 1.0f};
+        ImGui::InputText("Model path (assets/models/...)", gltfPath, IM_ARRAYSIZE(gltfPath));
+        ImGui::InputText("Instance name", gltfName, IM_ARRAYSIZE(gltfName));
+        ImGui::InputFloat3("Position", gltfPos);
+        ImGui::InputFloat3("Rotation (deg XYZ)", gltfRot);
+        ImGui::InputFloat3("Scale", gltfScale);
+        if (ImGui::Button("Load glTF async"))
+        {
+            glm::mat4 T = glm::translate(glm::mat4(1.0f), glm::vec3(gltfPos[0], gltfPos[1], gltfPos[2]));
+            glm::mat4 R = glm::eulerAngleXYZ(glm::radians(gltfRot[0]),
+                                             glm::radians(gltfRot[1]),
+                                             glm::radians(gltfRot[2]));
+            glm::mat4 S = glm::scale(glm::mat4(1.0f), glm::vec3(gltfScale[0], gltfScale[1], gltfScale[2]));
+            glm::mat4 M = T * R * S;
+            eng->loadGLTFAsync(gltfName, gltfPath, M);
+        }
+    }
+
     // Shadows / Ray Query controls
     static void ui_shadows(VulkanEngine *eng)
     {
@@ -1162,6 +1253,11 @@ void vk_engine_draw_debug_ui(VulkanEngine *eng)
             if (ImGui::BeginTabItem("Scene"))
             {
                 ui_scene(eng);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Async Assets"))
+            {
+                ui_async_assets(eng);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Textures"))

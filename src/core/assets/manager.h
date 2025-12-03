@@ -8,9 +8,11 @@
 #include <filesystem>
 #include <vector>
 #include <utility>
+#include <mutex>
 
 #include <scene/vk_loader.h>
 #include <core/types.h>
+#include <core/assets/texture_cache.h>
 
 #include "render/materials.h"
 #include "locator.h"
@@ -82,6 +84,8 @@ public:
     std::string assetPath(std::string_view name) const;
 
     std::optional<std::shared_ptr<LoadedGLTF> > loadGLTF(std::string_view nameOrPath);
+    std::optional<std::shared_ptr<LoadedGLTF> > loadGLTF(std::string_view nameOrPath,
+                                                         const GLTFLoadCallbacks *cb);
 
     // Queue texture loads for a glTF file ahead of time. This parses the glTF,
     // builds TextureCache keys for referenced images (both external URIs and
@@ -89,6 +93,12 @@ public:
     // Actual uploads happen via the normal per-frame pump.
     // Returns number of textures scheduled.
     size_t prefetchGLTFTextures(std::string_view nameOrPath);
+    struct GLTFTexturePrefetchResult
+    {
+        size_t scheduled = 0;
+        std::vector<TextureCache::TextureHandle> handles;
+    };
+    GLTFTexturePrefetchResult prefetchGLTFTexturesWithHandles(std::string_view nameOrPath);
 
     std::shared_ptr<MeshAsset> createMesh(const MeshCreateInfo &info);
 
@@ -116,6 +126,7 @@ private:
     AssetLocator _locator;
 
     std::unordered_map<std::string, std::weak_ptr<LoadedGLTF> > _gltfCacheByPath;
+    mutable std::mutex _gltfMutex;
     std::unordered_map<std::string, std::shared_ptr<MeshAsset> > _meshCache;
     std::unordered_map<std::string, AllocatedBuffer> _meshMaterialBuffers;
     std::unordered_map<std::string, std::vector<AllocatedImage> > _meshOwnedImages;

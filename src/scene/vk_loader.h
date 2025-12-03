@@ -8,6 +8,7 @@
 #include "core/descriptor/descriptors.h"
 #include <unordered_map>
 #include <filesystem>
+#include <functional>
 
 class VulkanEngine;
 
@@ -57,6 +58,12 @@ struct MeshAsset
 
     // Optional CPU BVH for precise picking / queries.
     std::shared_ptr<MeshBVH> bvh;
+};
+
+struct GLTFLoadCallbacks
+{
+    std::function<void(float)> on_progress; // range 0..1
+    std::function<bool()> is_cancelled;     // optional, may be null
 };
 
 struct LoadedGLTF : public IRenderable
@@ -133,4 +140,6 @@ private:
     void clearAll();
 };
 
-std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine, std::string_view filePath);
+std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
+                                                     std::string_view filePath,
+                                                     const GLTFLoadCallbacks *cb = nullptr);

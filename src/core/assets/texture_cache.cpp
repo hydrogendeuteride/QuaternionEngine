@@ -941,3 +941,10 @@ void TextureCache::debug_snapshot(std::vector<DebugRow> &outRows, DebugStats &ou
         return a.bytes > b.bytes;
     });
 }
+
+TextureCache::EntryState TextureCache::state(TextureHandle handle) const
+{
+    if (handle == InvalidHandle) return EntryState::Unloaded;
+    if (handle >= _entries.size()) return EntryState::Unloaded;
+    return _entries[handle].state;
+}

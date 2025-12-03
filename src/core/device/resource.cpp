@@ -221,7 +221,10 @@ AllocatedImage ResourceManager::create_image(const void *data, VkExtent3D size, 
         ? static_cast<uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1
         : 1;
 
-    _pendingImageUploads.push_back(std::move(pending));
+    {
+        std::lock_guard<std::mutex> lk(_pendingMutex);
+        _pendingImageUploads.push_back(std::move(pending));
+    }
 
     if (!_deferUploads)
     {
@@ -258,7 +261,10 @@ AllocatedImage ResourceManager::create_image(const void *data, VkExtent3D size, 
     pending.mipLevels = (mipmapped && mipLevelsOverride > 0) ? mipLevelsOverride
                         : (mipmapped ? static_cast<uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1 : 1);
 
-    _pendingImageUploads.push_back(std::move(pending));
+    {
+        std::lock_guard<std::mutex> lk(_pendingMutex);
+        _pendingImageUploads.push_back(std::move(pending));
+    }
 
     if (!_deferUploads)
     {
@@ -340,7 +346,10 @@ GPUMeshBuffers ResourceManager::uploadMesh(std::span<uint32_t> indices, std::spa
         .stagingOffset = vertexBufferSize,
     });
 
-    _pendingBufferUploads.push_back(std::move(pending));
+    {
+        std::lock_guard<std::mutex> lk(_pendingMutex);
+        _pendingBufferUploads.push_back(std::move(pending));
+    }
 
     if (!_deferUploads)
     {
@@ -352,29 +361,43 @@ GPUMeshBuffers ResourceManager::uploadMesh(std::span<uint32_t> indices, std::spa
 
 bool ResourceManager::has_pending_uploads() const
 {
+    std::lock_guard<std::mutex> lk(_pendingMutex);
     return !_pendingBufferUploads.empty() || !_pendingImageUploads.empty();
 }
 
 void ResourceManager::clear_pending_uploads()
 {
-    for (auto &upload : _pendingBufferUploads)
+    std::vector<PendingBufferUpload> buffers;
+    std::vector<PendingImageUpload> images;
+    {
+        std::lock_guard<std::mutex> lk(_pendingMutex);
+        buffers.swap(_pendingBufferUploads);
+        images.swap(_pendingImageUploads);
+    }
+
+    for (auto &upload : buffers)
     {
         destroy_buffer(upload.staging);
     }
-    for (auto &upload : _pendingImageUploads)
+    for (auto &upload : images)
     {
         destroy_buffer(upload.staging);
     }
-    _pendingBufferUploads.clear();
-    _pendingImageUploads.clear();
 }
 
 void ResourceManager::process_queued_uploads_immediate()
 {
-    if (!has_pending_uploads()) return;
+    std::vector<PendingBufferUpload> buffers;
+    std::vector<PendingImageUpload> images;
+    {
+        std::lock_guard<std::mutex> lk(_pendingMutex);
+        if (_pendingBufferUploads.empty() && _pendingImageUploads.empty()) return;
+        buffers.swap(_pendingBufferUploads);
+        images.swap(_pendingImageUploads);
+    }
 
     immediate_submit([&](VkCommandBuffer cmd) {
-        for (auto &bufferUpload : _pendingBufferUploads)
+        for (auto &bufferUpload : buffers)
         {
             for (const auto &copy : bufferUpload.copies)
             {
@@ -386,7 +409,7 @@ void ResourceManager::process_queued_uploads_immediate()
             }
         }
 
-        for (auto &imageUpload : _pendingImageUploads)
+        for (auto &imageUpload : images)
         {
             vkutil::transition_image(cmd, imageUpload.image, imageUpload.initialLayout,
                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -434,15 +457,26 @@ void ResourceManager::process_queued_uploads_immediate()
         }
     });
 
-    clear_pending_uploads();
+    for (auto &upload : buffers)
+    {
+        destroy_buffer(upload.staging);
+    }
+    for (auto &upload : images)
+    {
+        destroy_buffer(upload.staging);
+    }
 }
 
 void ResourceManager::register_upload_pass(RenderGraph &graph, FrameResources &frame)
 {
-    if (_pendingBufferUploads.empty() && _pendingImageUploads.empty()) return;
-
-    auto bufferUploads = std::make_shared<std::vector<PendingBufferUpload>>(std::move(_pendingBufferUploads));
-    auto imageUploads = std::make_shared<std::vector<PendingImageUpload>>(std::move(_pendingImageUploads));
+    std::shared_ptr<std::vector<PendingBufferUpload>> bufferUploads;
+    std::shared_ptr<std::vector<PendingImageUpload>> imageUploads;
+    {
+        std::lock_guard<std::mutex> lk(_pendingMutex);
+        if (_pendingBufferUploads.empty() && _pendingImageUploads.empty()) return;
+        bufferUploads = std::make_shared<std::vector<PendingBufferUpload>>(std::move(_pendingBufferUploads));
+        imageUploads = std::make_shared<std::vector<PendingImageUpload>>(std::move(_pendingImageUploads));
+    }
 
     struct BufferBinding
     {
@@ -680,7 +714,10 @@ AllocatedImage ResourceManager::create_image_compressed(const void* bytes, size_
         pending.copies.push_back(region);
     }
 
-    _pendingImageUploads.push_back(std::move(pending));
+    {
+        std::lock_guard<std::mutex> lk(_pendingMutex);
+        _pendingImageUploads.push_back(std::move(pending));
+    }
 
     if (!_deferUploads)
     {
@@ -756,7 +793,10 @@ AllocatedImage ResourceManager::create_image_compressed_layers(const void* bytes
     pending.mipLevels = mipLevels;
     pending.copies.assign(regions.begin(), regions.end());
 
-    _pendingImageUploads.push_back(std::move(pending));
+    {
+        std::lock_guard<std::mutex> lk(_pendingMutex);
+        _pendingImageUploads.push_back(std::move(pending));
+    }
 
     if (!_deferUploads)
     {

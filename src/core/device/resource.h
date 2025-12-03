@@ -2,6 +2,7 @@
 #include <core/types.h>
 #include <functional>
 #include <vector>
+#include <mutex>
 
 class DeviceManager;
 class RenderGraph;
@@ -96,8 +97,6 @@ public:
     void immediate_submit(std::function<void(VkCommandBuffer)> &&function) const;
 
     bool has_pending_uploads() const;
-    const std::vector<PendingBufferUpload> &pending_buffer_uploads() const { return _pendingBufferUploads; }
-    const std::vector<PendingImageUpload> &pending_image_uploads() const { return _pendingImageUploads; }
     void clear_pending_uploads();
     void process_queued_uploads_immediate();
 
@@ -119,4 +118,6 @@ private:
     bool _deferUploads = false;
 
     DeletionQueue _deletionQueue;
+
+    mutable std::mutex _pendingMutex;
 };

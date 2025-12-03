@@ -36,7 +36,15 @@ layout(push_constant) uniform constants
 
 void main() {
     // Apply baseColor texture and baseColorFactor once
-    vec3 albedo = inColor * texture(colorTex, inUV).rgb * materialData.colorFactors.rgb;
+    vec4 baseTex = texture(colorTex, inUV);
+    // Alpha from baseColor texture and factor, used for cutouts on MASK materials.
+    float alpha = clamp(baseTex.a * materialData.colorFactors.a, 0.0, 1.0);
+    float alphaCutoff = materialData.extra[2].x;
+    if (alphaCutoff > 0.0 && alpha < alphaCutoff)
+    {
+        discard;
+    }
+    vec3 albedo = inColor * baseTex.rgb * materialData.colorFactors.rgb;
 
     // glTF metallic-roughness in G (roughness) and B (metallic)
     vec2 mrTex = texture(metalRoughTex, inUV).gb;

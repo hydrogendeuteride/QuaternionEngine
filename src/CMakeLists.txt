@@ -34,6 +34,8 @@ add_executable (vulkan_engine
   core/assets/locator.cpp
   core/assets/manager.h
   core/assets/manager.cpp
+  core/assets/async_loader.h
+  core/assets/async_loader.cpp
   core/assets/texture_cache.h
   core/assets/texture_cache.cpp
   core/assets/ktx_loader.h

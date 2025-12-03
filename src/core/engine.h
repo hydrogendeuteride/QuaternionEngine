@@ -30,6 +30,7 @@
 #include "core/context.h"
 #include "core/pipeline/manager.h"
 #include "core/assets/manager.h"
+#include "core/assets/async_loader.h"
 #include "render/graph/graph.h"
 #include "core/raytracing/raytracing.h"
 #include "core/assets/texture_cache.h"
@@ -70,6 +71,7 @@ public:
     std::unique_ptr<SceneManager> _sceneManager;
     std::unique_ptr<PipelineManager> _pipelineManager;
     std::unique_ptr<AssetManager> _assetManager;
+    std::unique_ptr<AsyncAssetLoader> _asyncLoader;
     std::unique_ptr<RenderGraph> _renderGraph;
     std::unique_ptr<RayTracingManager> _rayManager;
     std::unique_ptr<TextureCache> _textureCache;
@@ -201,6 +203,12 @@ public:
     bool addGLTFInstance(const std::string &instanceName,
                          const std::string &modelRelativePath,
                          const glm::mat4 &transform = glm::mat4(1.f));
+
+    // Asynchronous glTF load that reports progress via AsyncAssetLoader.
+    // Returns a JobID that can be queried via AsyncAssetLoader.
+    uint32_t loadGLTFAsync(const std::string &sceneName,
+                           const std::string &modelRelativePath,
+                           const glm::mat4 &transform = glm::mat4(1.f));
 
 	bool resize_requested{false};
 	bool freeze_rendering{false};

@@ -52,7 +52,10 @@ void AssetManager::cleanup()
     _meshCache.clear();
     _meshMaterialBuffers.clear();
     _meshOwnedImages.clear();
-    _gltfCacheByPath.clear();
+    {
+        std::lock_guard<std::mutex> lock(_gltfMutex);
+        _gltfCacheByPath.clear();
+    }
 }
 
 std::string AssetManager::shaderPath(std::string_view name) const
@@ -72,6 +75,12 @@ std::string AssetManager::modelPath(std::string_view name) const
 
 std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_view nameOrPath)
 {
+    return loadGLTF(nameOrPath, nullptr);
+}
+
+std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_view nameOrPath,
+                                                                   const GLTFLoadCallbacks *cb)
+{
     if (!_engine) return {};
     if (nameOrPath.empty()) return {};
 
@@ -82,18 +91,22 @@ std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_v
     keyPath = std::filesystem::weakly_canonical(keyPath, ec);
     std::string key = (ec ? resolved : keyPath.string());
 
-    if (auto it = _gltfCacheByPath.find(key); it != _gltfCacheByPath.end())
     {
-        if (auto sp = it->second.lock())
+        std::lock_guard<std::mutex> lock(_gltfMutex);
+        if (auto it = _gltfCacheByPath.find(key); it != _gltfCacheByPath.end())
         {
-            fmt::println("[AssetManager] loadGLTF cache hit key='{}' path='{}' ptr={}", key, resolved,
-                         static_cast<const void *>(sp.get()));
-            return sp;
+            if (auto sp = it->second.lock())
+            {
+                fmt::println("[AssetManager] loadGLTF cache hit key='{}' path='{}' ptr={}", key, resolved,
+                             static_cast<const void *>(sp.get()));
+                return sp;
+            }
+            fmt::println("[AssetManager] loadGLTF cache expired key='{}' path='{}' (reloading)", key, resolved);
+            _gltfCacheByPath.erase(it);
         }
-        fmt::println("[AssetManager] loadGLTF cache expired key='{}' path='{}' (reloading)", key, resolved);
     }
 
-    auto loaded = loadGltf(_engine, resolved);
+    auto loaded = loadGltf(_engine, resolved, cb);
     if (!loaded.has_value()) return {};
 
     if (loaded.value())
@@ -106,7 +119,10 @@ std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_v
         fmt::println("[AssetManager] loadGLTF got empty scene for key='{}' path='{}'", key, resolved);
     }
 
-    _gltfCacheByPath[key] = loaded.value();
+    {
+        std::lock_guard<std::mutex> lock(_gltfMutex);
+        _gltfCacheByPath[key] = loaded.value();
+    }
     return loaded;
 }
 
@@ -336,10 +352,11 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
     return mesh;
 }
 
-size_t AssetManager::prefetchGLTFTextures(std::string_view nameOrPath)
+AssetManager::GLTFTexturePrefetchResult AssetManager::prefetchGLTFTexturesWithHandles(std::string_view nameOrPath)
 {
-    if (!_engine || !_engine->_context || !_engine->_context->textures) return 0;
-    if (nameOrPath.empty()) return 0;
+    GLTFTexturePrefetchResult result{};
+    if (!_engine || !_engine->_context || !_engine->_context->textures) return result;
+    if (nameOrPath.empty()) return result;
 
     std::string resolved = assetPath(nameOrPath);
     std::filesystem::path path = resolved;
@@ -348,28 +365,28 @@ size_t AssetManager::prefetchGLTFTextures(std::string_view nameOrPath)
     constexpr auto gltfOptions = fastgltf::Options::DontRequireValidAssetMember | fastgltf::Options::AllowDouble |
                                  fastgltf::Options::LoadGLBBuffers | fastgltf::Options::LoadExternalBuffers;
     fastgltf::GltfDataBuffer data;
-    if (!data.loadFromFile(path)) return 0;
+    if (!data.loadFromFile(path)) return result;
 
     fastgltf::Asset gltf;
-    size_t scheduled = 0;
 
     auto type = fastgltf::determineGltfFileType(&data);
     if (type == fastgltf::GltfType::glTF)
     {
         auto load = parser.loadGLTF(&data, path.parent_path(), gltfOptions);
-        if (load) gltf = std::move(load.get()); else return 0;
+        if (load) gltf = std::move(load.get()); else return result;
     }
     else if (type == fastgltf::GltfType::GLB)
     {
         auto load = parser.loadBinaryGLTF(&data, path.parent_path(), gltfOptions);
-        if (load) gltf = std::move(load.get()); else return 0;
+        if (load) gltf = std::move(load.get()); else return result;
     }
     else
     {
-        return 0;
+        return result;
     }
 
     TextureCache *cache = _engine->_context->textures;
+    const std::filesystem::path baseDir = path.parent_path();
 
     auto enqueueTex = [&](size_t imgIndex, bool srgb)
     {
@@ -382,10 +399,15 @@ size_t AssetManager::prefetchGLTFTextures(std::string_view nameOrPath)
         std::visit(fastgltf::visitor{
             [&](fastgltf::sources::URI &filePath)
             {
-                const std::string p(filePath.uri.path().begin(), filePath.uri.path().end());
+                const std::string rel(filePath.uri.path().begin(), filePath.uri.path().end());
+                std::filesystem::path resolvedImg = std::filesystem::path(rel);
+                if (resolvedImg.is_relative())
+                {
+                    resolvedImg = baseDir / resolvedImg;
+                }
                 key.kind = TextureCache::TextureKey::SourceKind::FilePath;
-                key.path = p;
-                std::string id = std::string("GLTF-PREF:") + p + (srgb ? "#sRGB" : "#UNORM");
+                key.path = resolvedImg.string();
+                std::string id = std::string("GLTF:") + key.path + (srgb ? "#sRGB" : "#UNORM");
                 key.hash = texcache::fnv1a64(id);
             },
             [&](fastgltf::sources::Vector &vector)
@@ -418,8 +440,9 @@ size_t AssetManager::prefetchGLTFTextures(std::string_view nameOrPath)
         if (key.hash != 0)
         {
             VkSampler samp = _engine->_samplerManager->defaultLinear();
-            cache->request(key, samp);
-            scheduled++;
+            TextureCache::TextureHandle handle = cache->request(key, samp);
+            result.handles.push_back(handle);
+            result.scheduled++;
         }
     };
 
@@ -443,7 +466,12 @@ size_t AssetManager::prefetchGLTFTextures(std::string_view nameOrPath)
         }, buf.data);
     }
 
-    return scheduled;
+    return result;
+}
+
+size_t AssetManager::prefetchGLTFTextures(std::string_view nameOrPath)
+{
+    return prefetchGLTFTexturesWithHandles(nameOrPath).scheduled;
 }
 
 static Bounds compute_bounds(std::span<Vertex> vertices)

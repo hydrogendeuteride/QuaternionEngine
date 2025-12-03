@@ -42,6 +42,8 @@ public:
     using TextureHandle = uint32_t;
     static constexpr TextureHandle InvalidHandle = 0xFFFFFFFFu;
 
+    enum class EntryState : uint8_t { Unloaded = 0, Loading = 1, Resident = 2, Evicted = 3 };
+
     void init(EngineContext *ctx);
     void cleanup();
 
@@ -83,6 +85,8 @@ public:
         size_t countUnloaded{0};
     };
     void debug_snapshot(std::vector<DebugRow>& outRows, DebugStats& outStats) const;
+    // Read-only per-handle state query (main-thread only).
+    EntryState state(TextureHandle handle) const;
     size_t resident_bytes() const { return _residentBytes; }
     // CPU-side source bytes currently retained (compressed image payloads kept
     // for potential re-decode). Only applies to entries created with Bytes keys.
@@ -125,8 +129,6 @@ private:
         VkSampler sampler{VK_NULL_HANDLE};
         VkImageView fallbackView{VK_NULL_HANDLE};
     };
-
-    enum class EntryState : uint8_t { Unloaded, Loading, Resident, Evicted };
 
     struct Entry
     {
