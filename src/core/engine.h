@@ -210,6 +210,10 @@ public:
                            const std::string &modelRelativePath,
                            const glm::mat4 &transform = glm::mat4(1.f));
 
+    // Preload textures for an already-loaded scene instance so they are
+    // available before the object becomes visible (visibility-driven loading).
+    void preloadInstanceTextures(const std::string &instanceName);
+
 	bool resize_requested{false};
 	bool freeze_rendering{false};
 

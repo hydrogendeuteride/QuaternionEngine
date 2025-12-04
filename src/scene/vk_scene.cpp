@@ -518,6 +518,16 @@ bool SceneManager::removeGLTFInstance(const std::string &name)
     return true;
 }
 
+std::shared_ptr<LoadedGLTF> SceneManager::getGLTFInstanceScene(const std::string &instanceName) const
+{
+    auto it = dynamicGLTFInstances.find(instanceName);
+    if (it != dynamicGLTFInstances.end())
+    {
+        return it->second.scene;
+    }
+    return nullptr;
+}
+
 bool SceneManager::getGLTFInstanceTransform(const std::string &name, glm::mat4 &outTransform)
 {
     auto it = dynamicGLTFInstances.find(name);

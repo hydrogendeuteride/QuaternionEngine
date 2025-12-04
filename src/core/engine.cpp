@@ -206,7 +206,7 @@ void VulkanEngine::init()
 
     // Async asset loader for background glTF + texture jobs
     _asyncLoader = std::make_unique<AsyncAssetLoader>();
-    _asyncLoader->init(this, _assetManager.get(), _textureCache.get(), 1);
+    _asyncLoader->init(this, _assetManager.get(), _textureCache.get(), 4);
 
     // Optional ray tracing manager if supported and extensions enabled
     if (_deviceManager->supportsRayQuery() && _deviceManager->supportsAccelerationStructure())
@@ -342,6 +342,7 @@ void VulkanEngine::init_default_data()
     }
 
     addGLTFInstance("mirage", "mirage2000/scene.gltf", glm::mat4(1.0f));
+    preloadInstanceTextures("mirage");
 
     _mainDeletionQueue.push_function([&]() {
         _resourceManager->destroy_image(_whiteImage);
@@ -389,6 +390,36 @@ uint32_t VulkanEngine::loadGLTFAsync(const std::string &sceneName,
     }
 
     return _asyncLoader->load_gltf_async(sceneName, modelRelativePath, transform);
+}
+
+void VulkanEngine::preloadInstanceTextures(const std::string &instanceName)
+{
+    if (!_textureCache || !_sceneManager)
+    {
+        return;
+    }
+
+    auto gltfScene = _sceneManager->getGLTFInstanceScene(instanceName);
+    if (!gltfScene)
+    {
+        return;
+    }
+
+    uint32_t frame = static_cast<uint32_t>(_frameNumber);
+    uint32_t count = 0;
+
+    // Mark all materials in this glTF scene as used so TextureCache will
+    // schedule their textures for upload before the object is visible.
+    for (const auto &[name, material] : gltfScene->materials)
+    {
+        if (material && material->data.materialSet)
+        {
+            _textureCache->markSetUsed(material->data.materialSet, frame);
+            ++count;
+        }
+    }
+
+    fmt::println("[Engine] Preloaded {} material sets for instance '{}'", count, instanceName);
 }
 
 void VulkanEngine::cleanup()

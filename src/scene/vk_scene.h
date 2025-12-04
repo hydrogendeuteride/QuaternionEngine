@@ -177,6 +177,9 @@ public:
 
     const PickingDebug &getPickingDebug() const { return pickingDebug; }
 
+    // Returns the LoadedGLTF scene for a named GLTF instance, or nullptr if not found.
+    std::shared_ptr<LoadedGLTF> getGLTFInstanceScene(const std::string &instanceName) const;
+
 private:
     EngineContext *_context = nullptr;
 

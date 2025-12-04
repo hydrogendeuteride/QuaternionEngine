@@ -467,6 +467,7 @@ namespace
             glm::mat4 S = glm::scale(glm::mat4(1.0f), glm::vec3(gltfScale[0], gltfScale[1], gltfScale[2]));
             glm::mat4 M = T * R * S;
             eng->loadGLTFAsync(gltfName, gltfPath, M);
+            eng->preloadInstanceTextures(gltfName);
         }
     }
 
