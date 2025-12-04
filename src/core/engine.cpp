@@ -356,7 +356,8 @@ void VulkanEngine::init_default_data()
 
 bool VulkanEngine::addGLTFInstance(const std::string &instanceName,
                                    const std::string &modelRelativePath,
-                                   const glm::mat4 &transform)
+                                   const glm::mat4 &transform,
+                                   bool preloadTextures)
 {
     if (!_assetManager || !_sceneManager)
     {
@@ -377,19 +378,46 @@ bool VulkanEngine::addGLTFInstance(const std::string &instanceName,
     }
 
     _sceneManager->addGLTFInstance(instanceName, *gltf, transform);
+
+    // Optionally preload textures for runtime-added instances
+    if (preloadTextures && _textureCache && _resourceManager)
+    {
+        uint32_t frame = static_cast<uint32_t>(_frameNumber);
+        uint32_t count = 0;
+
+        for (const auto &[name, material] : (*gltf)->materials)
+        {
+            if (material && material->data.materialSet)
+            {
+                _textureCache->markSetUsed(material->data.materialSet, frame);
+                ++count;
+            }
+        }
+
+        if (count > 0)
+        {
+            fmt::println("[Engine] Marked {} materials for preloading in instance '{}'",
+                         count, instanceName);
+
+            // Trigger immediate texture loading pump to start upload
+            _textureCache->pumpLoads(*_resourceManager, get_current_frame());
+        }
+    }
+
     return true;
 }
 
 uint32_t VulkanEngine::loadGLTFAsync(const std::string &sceneName,
                                      const std::string &modelRelativePath,
-                                     const glm::mat4 &transform)
+                                     const glm::mat4 &transform,
+                                     bool preloadTextures)
 {
     if (!_asyncLoader || !_assetManager || !_sceneManager)
     {
         return 0;
     }
 
-    return _asyncLoader->load_gltf_async(sceneName, modelRelativePath, transform);
+    return _asyncLoader->load_gltf_async(sceneName, modelRelativePath, transform, preloadTextures);
 }
 
 void VulkanEngine::preloadInstanceTextures(const std::string &instanceName)

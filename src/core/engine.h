@@ -200,15 +200,19 @@ public:
 
     // Convenience helper: load a glTF from assets/models and add it as a runtime instance.
     // modelRelativePath is relative to the AssetManager model root.
+    // If preloadTextures is true, textures will be immediately marked for loading to VRAM.
     bool addGLTFInstance(const std::string &instanceName,
                          const std::string &modelRelativePath,
-                         const glm::mat4 &transform = glm::mat4(1.f));
+                         const glm::mat4 &transform = glm::mat4(1.f),
+                         bool preloadTextures = false);
 
     // Asynchronous glTF load that reports progress via AsyncAssetLoader.
     // Returns a JobID that can be queried via AsyncAssetLoader.
+    // If preloadTextures is true, textures will be immediately marked for loading to VRAM.
     uint32_t loadGLTFAsync(const std::string &sceneName,
                            const std::string &modelRelativePath,
-                           const glm::mat4 &transform = glm::mat4(1.f));
+                           const glm::mat4 &transform = glm::mat4(1.f),
+                           bool preloadTextures = false);
 
     // Preload textures for an already-loaded scene instance so they are
     // available before the object becomes visible (visibility-driven loading).

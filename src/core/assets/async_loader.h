@@ -38,7 +38,8 @@ public:
 
     JobID load_gltf_async(const std::string &scene_name,
                           const std::string &model_relative_path,
-                          const glm::mat4 &transform);
+                          const glm::mat4 &transform,
+                          bool preload_textures = false);
 
     bool get_job_status(JobID id, JobState &out_state, float &out_progress, std::string *out_error = nullptr);
 
@@ -65,6 +66,7 @@ private:
         std::string scene_name;
         std::string model_relative_path;
         glm::mat4 transform{1.0f};
+        bool preload_textures{false};
 
         std::shared_ptr<LoadedGLTF> scene;
 

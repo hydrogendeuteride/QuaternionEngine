@@ -70,7 +70,8 @@ void AsyncAssetLoader::stop_workers()
 
 AsyncAssetLoader::JobID AsyncAssetLoader::load_gltf_async(const std::string &scene_name,
                                                           const std::string &model_relative_path,
-                                                          const glm::mat4 &transform)
+                                                          const glm::mat4 &transform,
+                                                          bool preload_textures)
 {
     if (!_assets)
     {
@@ -83,6 +84,7 @@ AsyncAssetLoader::JobID AsyncAssetLoader::load_gltf_async(const std::string &sce
     job->scene_name = scene_name;
     job->model_relative_path = model_relative_path;
     job->transform = transform;
+    job->preload_textures = preload_textures;
     job->progress.store(0.0f, std::memory_order_relaxed);
     job->state.store(JobState::Pending, std::memory_order_relaxed);
 
@@ -232,6 +234,31 @@ void AsyncAssetLoader::pump_main_thread(SceneManager &scene)
                     job->scene->debugName = job->model_relative_path;
                 }
                 scene.addGLTFInstance(job->scene_name, job->scene, job->transform);
+
+                // Optionally preload textures (same logic as addGLTFInstance)
+                if (job->preload_textures && _textures && _engine && _engine->_resourceManager)
+                {
+                    uint32_t frame = static_cast<uint32_t>(_engine->_frameNumber);
+                    uint32_t count = 0;
+
+                    for (const auto &[name, material] : job->scene->materials)
+                    {
+                        if (material && material->data.materialSet)
+                        {
+                            _textures->markSetUsed(material->data.materialSet, frame);
+                            ++count;
+                        }
+                    }
+
+                    if (count > 0)
+                    {
+                        fmt::println("[AsyncLoader] Marked {} materials for preloading in '{}'",
+                                     count, job->scene_name);
+
+                        // Trigger immediate texture loading pump to start upload
+                        _textures->pumpLoads(*_engine->_resourceManager, _engine->get_current_frame());
+                    }
+                }
             }
             job->committed_to_scene = true;
         }
