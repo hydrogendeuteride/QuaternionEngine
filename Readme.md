@@ -1,4 +1,4 @@
-# CopernicusEngine
+# QuaternionEngine
 Multipurpose Vulkan render engine specialized for physics simulation and solar system visualization
 
 ![](vk.png)
