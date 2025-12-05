@@ -220,8 +220,28 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
     {
         const auto &opt = info.material.options;
 
-        // Fallbacks are bound now; real textures will patch in via TextureCache
-        AllocatedBuffer matBuffer = createMaterialBufferWithConstants(opt.constants);
+        GLTFMetallic_Roughness::MaterialConstants constants = opt.constants;
+
+        if (!opt.occlusionPath.empty())
+        {
+            if (constants.extra[0].y == 0.0f && constants.extra[0].z == 0.0f)
+            {
+                constants.extra[0].y = 1.0f; // AO strength
+                constants.extra[0].z = 1.0f; // hasAO flag
+            }
+        }
+
+        if (!opt.emissivePath.empty())
+        {
+            if (constants.extra[1].x == 0.0f &&
+                constants.extra[1].y == 0.0f &&
+                constants.extra[1].z == 0.0f)
+            {
+                constants.extra[1] = glm::vec4(1.0f, 1.0f, 1.0f, constants.extra[1].w);
+            }
+        }
+
+        AllocatedBuffer matBuffer = createMaterialBufferWithConstants(constants);
 
         GLTFMetallic_Roughness::MaterialResources res{};
         res.colorImage = _engine->_errorCheckerboardImage;
@@ -518,10 +538,6 @@ AllocatedBuffer AssetManager::createMaterialBufferWithConstants(
     if (matConstants->extra[0].x == 0.0f)
     {
         matConstants->extra[0].x = 1.0f; // normal scale default
-    }
-    if (matConstants->extra[0].y == 0.0f)
-    {
-        matConstants->extra[0].y = 1.0f;
     }
     // Ensure writes are visible on non-coherent memory
     vmaFlushAllocation(_engine->_deviceManager->allocator(), matBuffer.allocation, 0,

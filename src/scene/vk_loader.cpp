@@ -389,12 +389,35 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
         constants.metal_rough_factors.y = mat.pbrData.roughnessFactor;
         // extra[0].x: normalScale (default 1.0)
         constants.extra[0].x = 1.0f;
-        // extra[0].y: occlusionStrength (0..1, default 1.0)
-        constants.extra[0].y = mat.occlusionTexture.has_value() ? mat.occlusionTexture->strength : 1.0f;
+        // extra[0].y: occlusionStrength (0..1)
+        // extra[0].z: hasAO flag (1.0 if an occlusionTexture is present, 0.0 otherwise)
+        if (mat.occlusionTexture.has_value())
+        {
+            constants.extra[0].y = mat.occlusionTexture->strength;
+            constants.extra[0].z = 1.0f;
+        }
+        else
+        {
+            constants.extra[0].y = 0.0f;
+            constants.extra[0].z = 0.0f;
+        }
         // extra[1].rgb: emissiveFactor
         constants.extra[1].x = mat.emissiveFactor[0];
         constants.extra[1].y = mat.emissiveFactor[1];
         constants.extra[1].z = mat.emissiveFactor[2];
+        // If an emissive texture is present but the factor is left at 0,
+        // default to white so the texture is visible (common authoring pattern).
+        if (mat.emissiveTexture.has_value())
+        {
+            if (constants.extra[1].x == 0.0f &&
+                constants.extra[1].y == 0.0f &&
+                constants.extra[1].z == 0.0f)
+            {
+                constants.extra[1].x = 1.0f;
+                constants.extra[1].y = 1.0f;
+                constants.extra[1].z = 1.0f;
+            }
+        }
         // extra[2].x: alphaCutoff for MASK materials (>0 enables alpha test)
         constants.extra[2].x = 0.0f;
         if (mat.alphaMode == fastgltf::AlphaMode::Mask)

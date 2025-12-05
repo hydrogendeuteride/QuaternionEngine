@@ -68,9 +68,15 @@ void main() {
     outNorm = vec4(Nw, roughness);
     outAlbedo = vec4(albedo, metallic);
     // Extra G-buffer: x = AO, yzw = emissive
+    // extra[0].y = AO strength, extra[0].z = hasAO flag (1 = use AO texture)
+    float hasAO = materialData.extra[0].z;
     float aoStrength = clamp(materialData.extra[0].y, 0.0, 1.0);
     float aoTex = texture(occlusionTex, inUV).r;
-    float ao = 1.0 - aoStrength + aoStrength * aoTex;
+    float ao = 1.0;
+    if (hasAO > 0.5)
+    {
+        ao = 1.0 - aoStrength + aoStrength * aoTex;
+    }
     vec3 emissiveFactor = materialData.extra[1].rgb;
     vec3 emissiveTex = texture(emissiveTex, inUV).rgb;
     vec3 emissive = emissiveTex * emissiveFactor;

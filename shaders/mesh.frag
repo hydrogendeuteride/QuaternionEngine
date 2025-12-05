@@ -70,9 +70,15 @@ void main()
     vec3 diffIBL = (1.0 - metallic) * albedo * sh_eval_irradiance(N);
 
     // Ambient occlusion from texture + strength (indirect only)
+    // extra[0].y = AO strength, extra[0].z = hasAO flag (1 = use AO texture)
+    float hasAO = materialData.extra[0].z;
     float aoStrength = clamp(materialData.extra[0].y, 0.0, 1.0);
     float aoTex = texture(occlusionTex, inUV).r;
-    float ao = 1.0 - aoStrength + aoStrength * aoTex;
+    float ao = 1.0;
+    if (hasAO > 0.5)
+    {
+        ao = 1.0 - aoStrength + aoStrength * aoTex;
+    }
 
     // Emissive from texture and factor
     vec3 emissiveFactor = materialData.extra[1].rgb;

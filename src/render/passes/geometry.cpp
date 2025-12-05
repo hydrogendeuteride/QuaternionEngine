@@ -91,12 +91,12 @@ void GeometryPass::register_graph(RenderGraph *graph,
             builder.write_color(gbufferPosition, true, clear);
             builder.write_color(gbufferNormal, true, clear);
             builder.write_color(gbufferAlbedo, true, clear);
-            VkClearValue clearExtra{};
-            clearExtra.color = {{1.f, 0.f, 0.f, 0.f}}; // AO=1, emissive=0
-            builder.write_color(gbufferExtra, true, clearExtra);
             VkClearValue clearID{};
             clearID.color.uint32[0] = 0u;
             builder.write_color(idHandle, true, clearID);
+            VkClearValue clearExtra{};
+            clearExtra.color = {{1.f, 0.f, 0.f, 0.f}}; // AO=1, emissive=0
+            builder.write_color(gbufferExtra, true, clearExtra);
 
             // Reverse-Z: clear depth to 0.0
             VkClearValue depthClear{};
