@@ -9,6 +9,9 @@ layout(push_constant) uniform Push
 {
     float exposure;
     int   mode;
+    int   bloomEnabled;
+    float bloomThreshold;
+    float bloomIntensity;
 } pc;
 
 vec3 reinhard(vec3 x)
@@ -31,6 +34,34 @@ vec3 aces_tonemap(vec3 x)
 void main()
 {
     vec3 hdr = texture(uHdr, inUV).rgb;
+
+    // Simple bloom in HDR space: gather bright neighbors and add a small blurred contribution.
+    if (pc.bloomEnabled != 0)
+    {
+        vec2 texel = 1.0 / vec2(textureSize(uHdr, 0));
+        vec3 bloom = vec3(0.0);
+        int radius = 2;
+        int count = 0;
+        for (int x = -radius; x <= radius; ++x)
+        {
+            for (int y = -radius; y <= radius; ++y)
+            {
+                vec2 offset = vec2(x, y) * texel;
+                vec3 c = texture(uHdr, clamp(inUV + offset, vec2(0.0), vec2(1.0))).rgb;
+                float bright = max(max(c.r, c.g), c.b) - pc.bloomThreshold;
+                if (bright > 0.0)
+                {
+                    bloom += c * bright;
+                    count++;
+                }
+            }
+        }
+        if (count > 0)
+        {
+            bloom /= float(count);
+        }
+        hdr += pc.bloomIntensity * bloom;
+    }
 
     // Simple exposure
     float exposure = max(pc.exposure, 0.0001);

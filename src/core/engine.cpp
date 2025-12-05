@@ -42,6 +42,7 @@
 #include "render/passes/imgui_pass.h"
 #include "render/passes/lighting.h"
 #include "render/passes/transparent.h"
+#include "render/passes/fxaa.h"
 #include "render/passes/tonemap.h"
 #include "render/passes/shadow.h"
 #include "device/resource.h"
@@ -848,6 +849,12 @@ void VulkanEngine::draw()
             {
                 RGImageHandle hdrInput = (ssrEnabled && hSSR.valid()) ? hSSR : hDraw;
                 finalColor = tonemap->register_graph(_renderGraph.get(), hdrInput);
+
+                // Optional FXAA pass: runs on LDR tonemapped output.
+                if (auto *fxaa = _renderPassManager->getPass<FxaaPass>())
+                {
+                    finalColor = fxaa->register_graph(_renderGraph.get(), finalColor);
+                }
             }
             else
             {

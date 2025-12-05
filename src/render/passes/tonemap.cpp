@@ -17,6 +17,9 @@ struct TonemapPush
 {
     float exposure;
     int mode;
+    int bloomEnabled;
+    float bloomThreshold;
+    float bloomIntensity;
 };
 
 void TonemapPass::init(EngineContext *context)
@@ -72,7 +75,9 @@ RGImageHandle TonemapPass::register_graph(RenderGraph *graph, RGImageHandle hdrI
     desc.name = "ldr.tonemap";
     desc.format = VK_FORMAT_R8G8B8A8_UNORM;
     desc.extent = _context->getDrawExtent();
-    desc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    desc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+                 | VK_IMAGE_USAGE_SAMPLED_BIT
+                 | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     RGImageHandle ldr = graph->create_image(desc);
 
     graph->add_pass(
@@ -109,7 +114,12 @@ void TonemapPass::draw_tonemap(VkCommandBuffer cmd, EngineContext *ctx, const RG
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &set, 0, nullptr);
 
-    TonemapPush push{_exposure, _mode};
+    TonemapPush push{};
+    push.exposure = _exposure;
+    push.mode = _mode;
+    push.bloomEnabled = _bloomEnabled ? 1 : 0;
+    push.bloomThreshold = _bloomThreshold;
+    push.bloomIntensity = _bloomIntensity;
     vkCmdPushConstants(cmd, _pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(TonemapPush), &push);
 
     VkExtent2D extent = ctx->getDrawExtent();

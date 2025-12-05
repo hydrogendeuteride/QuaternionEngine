@@ -12,6 +12,7 @@
 #include "render/primitives.h"
 #include "vk_mem_alloc.h"
 #include "render/passes/tonemap.h"
+#include "render/passes/fxaa.h"
 #include "render/passes/background.h"
 #include <glm/gtx/euler_angles.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -147,6 +148,30 @@ namespace
             "5x5 spheres: metallic across columns, roughness across rows.\nExtra: chrome + glass.");
 
         ImGui::Separator();
+
+        // Post-processing: FXAA
+        if (auto *fx = eng->_renderPassManager ? eng->_renderPassManager->getPass<FxaaPass>() : nullptr)
+        {
+            bool fxaaEnabled = fx->enabled();
+            if (ImGui::Checkbox("FXAA", &fxaaEnabled))
+            {
+                fx->set_enabled(fxaaEnabled);
+            }
+            float edgeTh = fx->edge_threshold();
+            if (ImGui::SliderFloat("FXAA Edge Threshold", &edgeTh, 0.01f, 0.5f))
+            {
+                fx->set_edge_threshold(edgeTh);
+            }
+            float edgeThMin = fx->edge_threshold_min();
+            if (ImGui::SliderFloat("FXAA Edge Threshold Min", &edgeThMin, 0.0f, 0.1f))
+            {
+                fx->set_edge_threshold_min(edgeThMin);
+            }
+        }
+        else
+        {
+            ImGui::TextUnformatted("FXAA pass not available");
+        }
         ImGui::TextUnformatted("IBL Volumes (reflection probes)");
 
         if (!eng->_iblManager)
@@ -739,6 +764,23 @@ namespace
             {
                 mode = 1;
                 tm->setMode(mode);
+            }
+
+            // Bloom controls
+            bool bloomEnabled = tm->bloomEnabled();
+            if (ImGui::Checkbox("Bloom", &bloomEnabled))
+            {
+                tm->setBloomEnabled(bloomEnabled);
+            }
+            float bloomThreshold = tm->bloomThreshold();
+            if (ImGui::SliderFloat("Bloom Threshold", &bloomThreshold, 0.0f, 5.0f))
+            {
+                tm->setBloomThreshold(bloomThreshold);
+            }
+            float bloomIntensity = tm->bloomIntensity();
+            if (ImGui::SliderFloat("Bloom Intensity", &bloomIntensity, 0.0f, 2.0f))
+            {
+                tm->setBloomIntensity(bloomIntensity);
             }
         }
         else

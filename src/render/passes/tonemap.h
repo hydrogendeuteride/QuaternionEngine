@@ -25,6 +25,13 @@ public:
     void setMode(int m) { _mode = m; }
     int mode() const { return _mode; }
 
+    void setBloomEnabled(bool b) { _bloomEnabled = b; }
+    bool bloomEnabled() const { return _bloomEnabled; }
+    void setBloomThreshold(float t) { _bloomThreshold = t; }
+    float bloomThreshold() const { return _bloomThreshold; }
+    void setBloomIntensity(float i) { _bloomIntensity = i; }
+    float bloomIntensity() const { return _bloomIntensity; }
+
 private:
     void draw_tonemap(VkCommandBuffer cmd, EngineContext *ctx, const RGPassResources &res,
                       RGImageHandle hdrInput);
@@ -37,6 +44,10 @@ private:
 
     float _exposure = 1.0f;
     int _mode = 1; // default to ACES
+
+    bool _bloomEnabled = true;
+    float _bloomThreshold = 1.0f;
+    float _bloomIntensity = 0.7f;
 
     DeletionQueue _deletionQueue;
 };
