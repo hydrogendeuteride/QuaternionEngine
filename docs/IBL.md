@@ -13,7 +13,7 @@ Data Flow
   - `VulkanEngine::init_vulkan()` creates an `IBLManager`, calls `init(context)`, and publishes it via `EngineContext::ibl`.
   - The engine optionally loads default IBL assets (`IBLPaths` in `src/core/engine.cpp`), typically a BRDF LUT plus a specular environment `.ktx2`.
 - Loading (IBLManager):
-  - `IBLManager::load(const IBLPaths&)`:
+  - `IBLManager::load(const IBLPaths&)` (synchronous, mostly used in tools/tests):
     - Specular:
       - Tries `ktxutil::load_ktx2_cubemap` first. If successful, uploads via `ResourceManager::create_image_compressed_layers` with `VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT`.
       - If cubemap loading fails, falls back to 2D `.ktx2` via `ktxutil::load_ktx2_2d` and `create_image_compressed`. The image is treated as equirectangular with prefiltered mips.
@@ -28,6 +28,12 @@ Data Flow
       - Loaded as 2D `.ktx2` via `ktxutil::load_ktx2_2d` and uploaded with `create_image_compressed`.
     - Fallbacks:
       - If `diffuseCube` is missing but a specular env exists, `_diff` is aliased to `_spec`.
+  - `IBLManager::load_async(const IBLPaths&)` + `IBLManager::pump_async()` (runtime path used by the engine):
+    - `load_async` runs KTX2 file I/O and SH bake on a worker thread and stores a prepared CPU-side description (`PreparedIBLData`).
+    - `pump_async` is called on the main thread once per frame (after the previous frame is idle) to:
+      - Destroy old IBL images/SH via `destroy_images_and_sh()`.
+      - Create new GPU images with `create_image_compressed(_layers)` and upload the SH buffer.
+    - This avoids stalls in the main/game loop when switching IBL volumes or loading the default environment at startup.
   - `IBLManager::unload()` releases GPU images, the SH buffer, and the descriptor set layout.
 - Descriptor layout:
   - `IBLManager::ensureLayout()` builds a descriptor set layout (set=3) with:

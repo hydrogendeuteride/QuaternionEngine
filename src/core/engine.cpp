@@ -250,7 +250,7 @@ void VulkanEngine::init()
     // Publish to context for passes and pipeline layout assembly
     _context->ibl = _iblManager.get();
 
-    // Try to load default IBL assets if present
+    // Try to load default IBL assets if present (async)
     {
         IBLPaths ibl{};
         ibl.specularCube = _assetManager->assetPath("ibl/docklands.ktx2");
@@ -262,13 +262,21 @@ void VulkanEngine::init()
         // Treat this as the global/fallback IBL used outside any local volume.
         _globalIBLPaths = ibl;
         _activeIBLVolume = -1;
-        bool ibl_ok = _iblManager->load(ibl);
-        _hasGlobalIBL = ibl_ok;
-        if (!ibl_ok)
+        _hasGlobalIBL = false;
+        if (_iblManager)
         {
-            fmt::println("[Engine] Warning: failed to load default IBL (specular='{}', brdfLut='{}'). IBL lighting will be disabled until a valid IBL is loaded.",
-                         ibl.specularCube,
-                         ibl.brdfLut2D);
+            if (_iblManager->load_async(ibl))
+            {
+                _pendingIBLRequest.active = true;
+                _pendingIBLRequest.targetVolume = -1;
+                _pendingIBLRequest.paths = ibl;
+            }
+            else
+            {
+                fmt::println("[Engine] Warning: failed to enqueue default IBL load (specular='{}', brdfLut='{}'). IBL lighting will be disabled until a valid IBL is loaded.",
+                             ibl.specularCube,
+                             ibl.brdfLut2D);
+            }
         }
     }
 
@@ -433,6 +441,56 @@ bool VulkanEngine::addGLTFInstance(const std::string &instanceName,
         }
     }
 
+    return true;
+}
+
+bool VulkanEngine::addPrimitiveInstance(const std::string &instanceName,
+                                        AssetManager::MeshGeometryDesc::Type geomType,
+                                        const glm::mat4 &transform,
+                                        const AssetManager::MeshMaterialDesc &material,
+                                        std::optional<BoundsType> boundsTypeOverride)
+{
+    if (!_assetManager || !_sceneManager)
+    {
+        return false;
+    }
+
+    // Build a cache key for the primitive mesh so multiple instances
+    // share the same GPU buffers.
+    std::string meshName;
+    switch (geomType)
+    {
+    case AssetManager::MeshGeometryDesc::Type::Cube:
+        meshName = "Primitive.Cube";
+        break;
+    case AssetManager::MeshGeometryDesc::Type::Sphere:
+        meshName = "Primitive.Sphere";
+        break;
+    case AssetManager::MeshGeometryDesc::Type::Plane:
+        meshName = "Primitive.Plane";
+        break;
+    case AssetManager::MeshGeometryDesc::Type::Capsule:
+        meshName = "Primitive.Capsule";
+        break;
+    case AssetManager::MeshGeometryDesc::Type::Provided:
+    default:
+        // Provided geometry requires explicit vertex/index data; not supported here.
+        return false;
+    }
+
+    AssetManager::MeshCreateInfo ci{};
+    ci.name = meshName;
+    ci.geometry.type = geomType;
+    ci.material = material;
+    ci.boundsType = boundsTypeOverride;
+
+    auto mesh = _assetManager->createMesh(ci);
+    if (!mesh)
+    {
+        return false;
+    }
+
+    _sceneManager->addMeshInstance(instanceName, mesh, transform, boundsTypeOverride);
     return true;
 }
 
@@ -627,6 +685,7 @@ void VulkanEngine::draw()
                 break;
             }
         }
+
         if (newVolume != _activeIBLVolume)
         {
             const IBLPaths *paths = nullptr;
@@ -639,17 +698,25 @@ void VulkanEngine::draw()
                 paths = &_globalIBLPaths;
             }
 
-            if (paths)
+            // Avoid enqueueing duplicate jobs for the same target volume.
+            const bool alreadyPendingForTarget =
+                _pendingIBLRequest.active && _pendingIBLRequest.targetVolume == newVolume;
+
+            if (paths && !alreadyPendingForTarget)
             {
-                bool ibl_ok = _iblManager->load(*paths);
-                if (!ibl_ok)
+                if (_iblManager->load_async(*paths))
                 {
-                    fmt::println("[Engine] Warning: failed to load IBL for {} (specular='{}')",
+                    _pendingIBLRequest.active = true;
+                    _pendingIBLRequest.targetVolume = newVolume;
+                    _pendingIBLRequest.paths = *paths;
+                }
+                else
+                {
+                    fmt::println("[Engine] Warning: failed to enqueue IBL load for {} (specular='{}')",
                                  (newVolume >= 0) ? "volume" : "global environment",
                                  paths->specularCube);
                 }
             }
-            _activeIBLVolume = newVolume;
         }
     }
 
@@ -1117,6 +1184,33 @@ void VulkanEngine::run()
 
         // Safe to destroy any BLAS queued for deletion now that the previous frame is idle.
         if (_rayManager) { _rayManager->flushPendingDeletes(); }
+
+        // Commit any completed async IBL load now that the GPU is idle.
+        if (_iblManager && _pendingIBLRequest.active)
+        {
+            IBLManager::AsyncResult iblRes = _iblManager->pump_async();
+            if (iblRes.completed)
+            {
+                if (iblRes.success)
+                {
+                    if (_pendingIBLRequest.targetVolume >= 0)
+                    {
+                        _activeIBLVolume = _pendingIBLRequest.targetVolume;
+                    }
+                    else
+                    {
+                        _activeIBLVolume = -1;
+                        _hasGlobalIBL = true;
+                    }
+                }
+                else
+                {
+                    fmt::println("[Engine] Warning: async IBL load failed (specular='{}')",
+                                 _pendingIBLRequest.paths.specularCube);
+                }
+                _pendingIBLRequest.active = false;
+            }
+        }
 
         if (_pickResultPending && _pickReadbackBuffer.buffer && _sceneManager)
         {

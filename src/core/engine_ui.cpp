@@ -242,19 +242,27 @@ namespace
             {
                 if (eng->_iblManager && vol.enabled)
                 {
-                    eng->_iblManager->load(vol.paths);
-                    eng->_activeIBLVolume = static_cast<int>(i);
+                    if (eng->_iblManager->load_async(vol.paths))
+                    {
+                        eng->_pendingIBLRequest.active = true;
+                        eng->_pendingIBLRequest.targetVolume = static_cast<int>(i);
+                        eng->_pendingIBLRequest.paths = vol.paths;
+                    }
                 }
             }
             ImGui::SameLine();
             if (ImGui::Button("Set As Global IBL"))
             {
                 eng->_globalIBLPaths = vol.paths;
-                eng->_hasGlobalIBL = true;
-                eng->_activeIBLVolume = -1;
                 if (eng->_iblManager)
                 {
-                    eng->_iblManager->load(eng->_globalIBLPaths);
+                    if (eng->_iblManager->load_async(eng->_globalIBLPaths))
+                    {
+                        eng->_pendingIBLRequest.active = true;
+                        eng->_pendingIBLRequest.targetVolume = -1;
+                        eng->_pendingIBLRequest.paths = eng->_globalIBLPaths;
+                        eng->_hasGlobalIBL = false;
+                    }
                 }
             }
 

@@ -101,7 +101,7 @@ Image‑Based Lighting (IBL) Textures
   - Specular:
     - If `specularCube` is a cubemap `.ktx2`, `IBLManager` uses `ktxutil::load_ktx2_cubemap` and uploads via `ResourceManager::create_image_compressed_layers`, preserving the file’s format and mip chain.
     - If cubemap load fails, it falls back to 2D `.ktx2` via `ktxutil::load_ktx2_2d` + `ResourceManager::create_image_compressed`. The image is treated as equirectangular with prefiltered mips and sampled with explicit LOD in shaders.
-    - If the format is float HDR (`R16G16B16A16_SFLOAT` or `R32G32B32A32_SFLOAT`) and the aspect ratio is 2:1, `IBLManager` additionally computes 2nd‑order SH coefficients (9×`vec3`) on the CPU for diffuse irradiance and uploads them to a UBO (`_shBuffer`).
+    - If the format is float HDR (`R16G16B16A16_SFLOAT` or `R32G32B32A32_SFLOAT`) and the aspect ratio is 2:1, `IBLManager` additionally computes 2nd‑order SH coefficients (9×`vec3`) on a worker thread and uploads them to a UBO (`_shBuffer`) when `pump_async()` is called on the main thread.
   - Diffuse (optional):
     - If `diffuseCube` is provided and valid, it is uploaded as a cubemap using `create_image_compressed_layers`. Current shaders use the SH buffer for diffuse; this cubemap can be wired into a future path if you want to sample it directly.
   - BRDF LUT:

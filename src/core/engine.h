@@ -133,6 +133,13 @@ public:
     // User-defined local IBL volumes and currently active index (-1 = global).
     std::vector<IBLVolume> _iblVolumes;
     int _activeIBLVolume{-1};
+    // Pending async IBL request (global or volume). targetVolume = -1 means global.
+    struct PendingIBLRequest
+    {
+        bool active{false};
+        int targetVolume{-1};
+        IBLPaths paths{};
+    } _pendingIBLRequest;
 
     struct PickInfo
     {
@@ -205,6 +212,20 @@ public:
                          const std::string &modelRelativePath,
                          const glm::mat4 &transform = glm::mat4(1.f),
                          bool preloadTextures = false);
+
+    // Spawn a runtime primitive mesh instance (cube/sphere/plane/capsule).
+    // - instanceName is the unique key for this object in SceneManager.
+    // - geomType selects which analytic primitive to build.
+    // - material controls whether the primitive uses the default PBR material
+    //   or a textured material (see AssetManager::MeshMaterialDesc).
+    // - boundsTypeOverride can force a specific bounds type for picking.
+    // The underlying mesh is cached in AssetManager using a per-primitive name,
+    // so multiple instances share GPU buffers.
+    bool addPrimitiveInstance(const std::string &instanceName,
+                              AssetManager::MeshGeometryDesc::Type geomType,
+                              const glm::mat4 &transform = glm::mat4(1.f),
+                              const AssetManager::MeshMaterialDesc &material = {},
+                              std::optional<BoundsType> boundsTypeOverride = {});
 
     // Asynchronous glTF load that reports progress via AsyncAssetLoader.
     // Returns a JobID that can be queried via AsyncAssetLoader.

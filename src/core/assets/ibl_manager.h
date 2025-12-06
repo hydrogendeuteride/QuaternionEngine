@@ -7,6 +7,8 @@ class TextureCache;
 
 class EngineContext;
 
+struct PreparedIBLData;
+
 struct IBLPaths
 {
     std::string specularCube; // .ktx2 (GPU-ready BC6H or R16G16B16A16)
@@ -20,12 +22,34 @@ struct IBLPaths
 class IBLManager
 {
 public:
-    void init(EngineContext *ctx) { _ctx = ctx; }
+    IBLManager() = default;
+    ~IBLManager();
+
+    void init(EngineContext *ctx);
 
     void set_texture_cache(TextureCache *cache) { _cache = cache; }
 
     // Load all three textures. Returns true when specular+diffuse (and optional LUT) are resident.
     bool load(const IBLPaths &paths);
+
+    // Asynchronous IBL load:
+    // - Performs KTX2 file I/O and SH bake on a background thread.
+    // - GPU image creation and SH upload are deferred to pump_async() on the main thread.
+    // Returns false if the job could not be queued.
+    bool load_async(const IBLPaths &paths);
+
+    struct AsyncResult
+    {
+        // True when an async job finished since the last pump_async() call.
+        bool completed{false};
+        // True when the finished job successfully produced new GPU IBL resources.
+        bool success{false};
+    };
+
+    // Main-thread integration: if a completed async job is pending, destroy the
+    // previous IBL images/SH and upload the new ones. Must be called only when
+    // the GPU is idle for the previous frame.
+    AsyncResult pump_async();
 
     // Release GPU memory and patch to fallbacks handled by the caller.
     void unload();
@@ -57,6 +81,13 @@ private:
     VkDescriptorSetLayout _iblSetLayout = VK_NULL_HANDLE;
     AllocatedBuffer _shBuffer{}; // 9*vec4 coefficients (RGB in .xyz)
 
+    struct AsyncStateData;
+    AsyncStateData *_async{nullptr};
+
+    bool commit_prepared(const PreparedIBLData &data);
+
     // Destroy current GPU images/SH buffer but keep descriptor layout alive.
     void destroy_images_and_sh();
+
+    void shutdown_async();
 };
