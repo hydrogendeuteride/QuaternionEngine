@@ -573,6 +573,12 @@ std::pair<AllocatedImage, bool> AssetManager::loadImageFromAsset(std::string_vie
                                                           false);
             created = true;
         }
+        else
+        {
+            fmt::println("[AssetManager] Failed to load texture '{}' (resolved='{}')",
+                         imgPath,
+                         resolved);
+        }
         if (pixels) stbi_image_free(pixels);
     }
     return {out, created};

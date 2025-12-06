@@ -27,6 +27,7 @@
 #include <span>
 #include <array>
 
+#include <filesystem>
 #include <iostream>
 #include <cmath>
 #include <glm/gtx/transform.hpp>
@@ -55,6 +56,13 @@
 void vk_engine_draw_debug_ui(VulkanEngine *eng);
 
 VulkanEngine *loadedEngine = nullptr;
+
+static bool file_exists_nothrow(const std::string &path)
+{
+    if (path.empty()) return false;
+    std::error_code ec;
+    return std::filesystem::exists(path, ec) && !ec;
+}
 
 static void print_vma_stats(DeviceManager* dev, const char* tag)
 {
@@ -253,9 +261,15 @@ void VulkanEngine::init()
         ibl.background2D = ibl.specularCube;
         // Treat this as the global/fallback IBL used outside any local volume.
         _globalIBLPaths = ibl;
-        _hasGlobalIBL = true;
         _activeIBLVolume = -1;
-        _iblManager->load(ibl);
+        bool ibl_ok = _iblManager->load(ibl);
+        _hasGlobalIBL = ibl_ok;
+        if (!ibl_ok)
+        {
+            fmt::println("[Engine] Warning: failed to load default IBL (specular='{}', brdfLut='{}'). IBL lighting will be disabled until a valid IBL is loaded.",
+                         ibl.specularCube,
+                         ibl.brdfLut2D);
+        }
     }
 
     init_frame_resources();
@@ -342,8 +356,10 @@ void VulkanEngine::init_default_data()
                                        BoundsType::Sphere);
     }
 
-    addGLTFInstance("mirage", "mirage2000/scene.gltf", glm::mat4(1.0f));
-    preloadInstanceTextures("mirage");
+    if (addGLTFInstance("mirage", "mirage2000/scene.gltf", glm::mat4(1.0f)))
+    {
+        preloadInstanceTextures("mirage");
+    }
 
     _mainDeletionQueue.push_function([&]() {
         _resourceManager->destroy_image(_whiteImage);
@@ -365,10 +381,22 @@ bool VulkanEngine::addGLTFInstance(const std::string &instanceName,
         return false;
     }
 
-    const std::string fullPath = _assetManager->modelPath(modelRelativePath);
-    auto gltf = _assetManager->loadGLTF(fullPath);
+    const std::string resolvedPath = _assetManager->modelPath(modelRelativePath);
+    if (!file_exists_nothrow(resolvedPath))
+    {
+        fmt::println("[Engine] Failed to add glTF instance '{}' – model file not found (requested='{}', resolved='{}')",
+                     instanceName,
+                     modelRelativePath,
+                     resolvedPath);
+        return false;
+    }
+
+    auto gltf = _assetManager->loadGLTF(resolvedPath);
     if (!gltf.has_value() || !gltf.value())
     {
+        fmt::println("[Engine] Failed to add glTF instance '{}' – AssetManager::loadGLTF('{}') returned empty scene",
+                     instanceName,
+                     resolvedPath);
         return false;
     }
 
@@ -418,7 +446,17 @@ uint32_t VulkanEngine::loadGLTFAsync(const std::string &sceneName,
         return 0;
     }
 
-    return _asyncLoader->load_gltf_async(sceneName, modelRelativePath, transform, preloadTextures);
+    const std::string resolvedPath = _assetManager->modelPath(modelRelativePath);
+    if (!file_exists_nothrow(resolvedPath))
+    {
+        fmt::println("[Engine] Failed to enqueue async glTF load for scene '{}' – model file not found (requested='{}', resolved='{}')",
+                     sceneName,
+                     modelRelativePath,
+                     resolvedPath);
+        return 0;
+    }
+
+    return _asyncLoader->load_gltf_async(sceneName, resolvedPath, transform, preloadTextures);
 }
 
 void VulkanEngine::preloadInstanceTextures(const std::string &instanceName)
@@ -603,7 +641,13 @@ void VulkanEngine::draw()
 
             if (paths)
             {
-                _iblManager->load(*paths);
+                bool ibl_ok = _iblManager->load(*paths);
+                if (!ibl_ok)
+                {
+                    fmt::println("[Engine] Warning: failed to load IBL for {} (specular='{}')",
+                                 (newVolume >= 0) ? "volume" : "global environment",
+                                 paths->specularCube);
+                }
             }
             _activeIBLVolume = newVolume;
         }
