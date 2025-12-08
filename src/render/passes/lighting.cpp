@@ -192,7 +192,12 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
     const bool haveRTFeatures = ctxLocal->getDevice()->supportsAccelerationStructure();
     const VkAccelerationStructureKHR tlas = (ctxLocal->ray ? ctxLocal->ray->tlas() : VK_NULL_HANDLE);
     const VkDeviceAddress tlasAddr = (ctxLocal->ray ? ctxLocal->ray->tlasAddress() : 0);
-    const bool useRT = haveRTFeatures && (ctxLocal->shadowSettings.mode != 0u) && (tlas != VK_NULL_HANDLE) && (tlasAddr != 0);
+    const bool useRT =
+        haveRTFeatures &&
+        ctxLocal->shadowSettings.enabled &&
+        (ctxLocal->shadowSettings.mode != 0u) &&
+        (tlas != VK_NULL_HANDLE) &&
+        (tlasAddr != 0);
 
     const char* pipeName = useRT ? "deferred_lighting.rt" : "deferred_lighting.nort";
     if (!pipelineManager->getGraphics(pipeName, _pipeline, _pipelineLayout))

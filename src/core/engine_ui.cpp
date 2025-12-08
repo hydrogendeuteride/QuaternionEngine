@@ -515,6 +515,12 @@ namespace
         ImGui::Separator();
 
         auto &ss = eng->_context->shadowSettings;
+
+        // Global on/off toggle for all shadowing.
+        ImGui::Checkbox("Enable Shadows", &ss.enabled);
+        ImGui::Separator();
+
+        ImGui::BeginDisabled(!ss.enabled);
         int mode = static_cast<int>(ss.mode);
         ImGui::TextUnformatted("Shadow Mode");
         ImGui::RadioButton("Clipmap only", &mode, 0);
@@ -524,7 +530,7 @@ namespace
         ImGui::RadioButton("RT only", &mode, 2);
         if (!(rq && as) && mode != 0) mode = 0; // guard for unsupported HW
         ss.mode = static_cast<uint32_t>(mode);
-        ss.hybridRayQueryEnabled = (ss.mode != 0);
+        ss.hybridRayQueryEnabled = ss.enabled && (ss.mode != 0);
 
         ImGui::BeginDisabled(ss.mode != 1u);
         ImGui::TextUnformatted("Cascades using ray assist:");
@@ -540,6 +546,7 @@ namespace
             if (i != 3) ImGui::SameLine();
         }
         ImGui::SliderFloat("N·L threshold", &ss.hybridRayNoLThreshold, 0.0f, 1.0f, "%.2f");
+        ImGui::EndDisabled();
         ImGui::EndDisabled();
 
         ImGui::Separator();

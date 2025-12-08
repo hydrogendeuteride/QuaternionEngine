@@ -771,9 +771,12 @@ void VulkanEngine::draw()
     // Build or update TLAS for current frame now that the previous frame is idle.
     // TLAS is used for hybrid/full RT shadows and RT-assisted SSR reflections.
     // For reflections, only build TLAS when RT is actually enabled (reflectionMode != 0).
-    if (_rayManager &&
-        (_context->shadowSettings.mode != 0u ||
-         (_context->enableSSR && _context->reflectionMode != 0u)))
+    // For shadows, only build TLAS when shadows are enabled and an RT shadow mode is selected.
+    const bool rtShadowsActive =
+        _context->shadowSettings.enabled && (_context->shadowSettings.mode != 0u);
+    const bool rtReflectionsActive =
+        _context->enableSSR && (_context->reflectionMode != 0u);
+    if (_rayManager && (rtShadowsActive || rtReflectionsActive))
     {
         _rayManager->buildTLASFromDrawContext(_context->getMainDrawContext(), get_current_frame()._deletionQueue);
     }
@@ -817,7 +820,7 @@ void VulkanEngine::draw()
         // For debug overlays (IBL volumes), re-use HDR draw image as a color target.
         RGImageHandle hDebugColor = hDraw;
 
-        // Create transient depth targets for cascaded shadow maps (even if RT-only, to keep descriptors stable)
+        // Create transient depth targets for cascaded shadow maps (even if RT-only / disabled, to keep descriptors stable)
         const VkExtent2D shadowExtent{2048, 2048};
         std::array<RGImageHandle, kShadowCascadeCount> hShadowCascades{};
         for (int i = 0; i < kShadowCascadeCount; ++i)
@@ -846,7 +849,7 @@ void VulkanEngine::draw()
             {
                 background->register_graph(_renderGraph.get(), hDraw, hDepth);
             }
-            if (_context->shadowSettings.mode != 2u)
+            if (_context->shadowSettings.enabled && _context->shadowSettings.mode != 2u)
             {
                 if (auto *shadow = _renderPassManager->getPass<ShadowPass>())
                 {

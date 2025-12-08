@@ -189,6 +189,12 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
 
 float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
 {
+    // Early out when shadows are globally disabled.
+    if (sceneData.rtParams.y <= 0.0)
+    {
+        return 1.0;
+    }
+
     vec3 wp = worldPos + N * SHADOW_NORMAL_OFFSET * (0.5 + 0.5 * (1.0 - max(dot(N, L), 0.0)));
 
     // RT-only mode: cast a ray and skip clipmap sampling entirely
@@ -301,7 +307,7 @@ void main(){
 
         // Optional RT shadow for the first few point lights (hybrid mode)
         #ifdef GL_EXT_ray_query
-        if (sceneData.rtOptions.x == 1u && i < 4u)
+        if (sceneData.rtOptions.x == 1u && sceneData.rtParams.y > 0.0 && i < 4u)
         {
             vec3 toL = sceneData.punctualLights[i].position_radius.xyz - pos;
             float maxT = length(toL);

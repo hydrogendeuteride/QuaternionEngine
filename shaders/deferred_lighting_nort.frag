@@ -181,6 +181,12 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
 
 float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
 {
+    // Early out when shadows are globally disabled.
+    if (sceneData.rtParams.y <= 0.0)
+    {
+        return 1.0;
+    }
+
     vec3 wp = worldPos + N * SHADOW_NORMAL_OFFSET * (0.5 + 0.5 * (1.0 - max(dot(N, L), 0.0)));
 
     CascadeMix cm = computeCascadeMix(wp);

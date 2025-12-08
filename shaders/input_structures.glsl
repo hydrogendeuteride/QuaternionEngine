@@ -23,11 +23,12 @@ layout(set = 0, binding = 0) uniform  SceneData{
     mat4 lightViewProjCascades[4];
     // View-space split distances for selecting cascades (x,y,z,w)
     vec4 cascadeSplitsView;
-    // Ray-query settings (packed)
-    // rtOptions.x = enabled (1/0)
+    // Ray-query & reflection settings (packed)
+    // rtOptions.x = RT shadows enabled (1/0)
     // rtOptions.y = cascade bitmask (bit i => cascade i assisted)
     uvec4 rtOptions;
-    // rtParams.x = N·L threshold; others reserved
+    // rtParams.x = N·L threshold for hybrid shadows
+    // rtParams.y = shadows enabled flag (1.0 = on, 0.0 = off)
     vec4  rtParams;
 
     GPUPunctualLight punctualLights[MAX_PUNCTUAL_LIGHTS];

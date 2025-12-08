@@ -346,12 +346,15 @@ void SceneManager::update_scene()
     if (_context)
     {
         const auto &ss = _context->shadowSettings;
-        const uint32_t rtEnabled = (ss.mode != 0) ? 1u : 0u;
+        // RT shadows are considered active only when shadows are enabled and
+        // a hybrid/RT shadow mode is selected (mode != 0).
+        const uint32_t rtEnabled = (ss.enabled && ss.mode != 0u) ? 1u : 0u;
         const uint32_t reflMode = _context->reflectionMode;
         // rtOptions.x = RT shadows enabled, y = cascade mask, z = shadow mode, w = reflection mode (SSR/RT)
         sceneData.rtOptions = glm::uvec4(rtEnabled, ss.hybridRayCascadesMask, ss.mode, reflMode);
-        // rtParams.x = N·L threshold for hybrid shadows; remaining components reserved
-        sceneData.rtParams  = glm::vec4(ss.hybridRayNoLThreshold, 0.0f, 0.0f, 0.0f);
+        // rtParams.x = N·L threshold for hybrid shadows
+        // rtParams.y = shadows enabled flag (1.0 = on, 0.0 = off)
+        sceneData.rtParams  = glm::vec4(ss.hybridRayNoLThreshold, ss.enabled ? 1.0f : 0.0f, 0.0f, 0.0f);
     }
 
     // Fill punctual lights into GPUSceneData

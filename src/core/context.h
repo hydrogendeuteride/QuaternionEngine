@@ -37,6 +37,8 @@ struct ShadowSettings
 {
     // 0 = Clipmap only, 1 = Clipmap + RT assist, 2 = RT only
     uint32_t mode = 2;
+    // Global enable/disable for all shadowing (raster + RT).
+    bool enabled = true;
     bool hybridRayQueryEnabled = false;   // derived convenience: (mode != 0)
     uint32_t hybridRayCascadesMask = 0b1110; // bit i => cascade i uses ray query assist (default: 1..3)
     float hybridRayNoLThreshold = 0.25f;  // trigger when N·L below this (mode==1)

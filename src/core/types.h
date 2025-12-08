@@ -119,9 +119,15 @@ struct GPUSceneData {
 
     glm::mat4 lightViewProjCascades[4];
     glm::vec4 cascadeSplitsView;
-    // Hybrid ray-query options (match shaders/input_structures.glsl)
-    glm::uvec4 rtOptions; // x: enabled (1/0), y: cascade mask, z,w: reserved
-    glm::vec4  rtParams;  // x: N·L threshold, yzw: reserved
+    // Hybrid ray-query / reflection options (match shaders/input_structures.glsl)
+    // rtOptions.x = RT shadows enabled (1/0)
+    // rtOptions.y = cascade bitmask (bit i => cascade i assisted)
+    // rtOptions.z = shadow mode (0 = clipmap, 1 = hybrid, 2 = RT only)
+    // rtOptions.w = reflection mode (SSR/RT)
+    glm::uvec4 rtOptions;
+    // rtParams.x = N·L threshold for hybrid shadows
+    // rtParams.y = shadows enabled flag (1.0 = on, 0.0 = off)
+    glm::vec4  rtParams;
 
     GPUPunctualLight punctualLights[kMaxPunctualLights];
     glm::uvec4 lightCounts;
