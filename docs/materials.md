@@ -1,20 +1,27 @@
 Materials and Textures Overview (PBR)
 
-Current state (as of Nov 1, 2025)
 - PBR textures bound per material (set=1):
   - binding=0: GLTFMaterialData (UBO)
   - binding=1: `colorTex` (albedo/base color) — sRGB
   - binding=2: `metalRoughTex` (G=roughness, B=metallic) — UNORM
   - binding=3: `normalMap` (tangent-space normal, UNORM)
+  - binding=4: `occlusionTex` (ambient occlusion, R channel) — UNORM
+  - binding=5: `emissiveTex` (emissive RGB) — sRGB
 - G‑Buffer writes world‑space normals. Tangent‑space normal maps are decoded with TBN using a sign‑correct bitangent (B = sign * cross(N, T)).
 - Numeric fallbacks via `MaterialConstants` (CPU) / `GLTFMaterialData` (GPU):
   - `colorFactors` (RGBA). Defaults to 1 if zero.
   - `metal_rough_factors` (X=metallic, Y=roughness). Roughness is clamped to ≥ 0.04 in shaders.
   - `extra[0].x` = `normalScale` (scalar, default 1.0). Multiplies the XY of decoded normal.
+  - `extra[0].y` = `aoStrength` (scalar, 0–1). Controls AO influence.
+  - `extra[0].z` = `hasAO` (flag, 1 = use AO texture, 0 = skip).
+  - `extra[1].rgb` = `emissiveFactor` (vec3). Multiplied with emissive texture.
+  - `extra[2].x` = `alphaCutoff` (scalar). For MASK alpha mode.
 - Defaults when a texture is missing:
   - Albedo → checkerboard error texture
   - MR → white (no effect)
   - Normal → 1×1 flat normal (0.5, 0.5, 1.0)
+  - Occlusion → 1×1 white (AO = 1.0, no occlusion)
+  - Emissive → 1×1 black (no emission)
 
 Implications for primitive meshes
 - Primitives can use:
@@ -41,3 +48,14 @@ Usage Examples
 - Adjust normal strength per material: set `material.constants.extra[0].x` (CPU) or `normalTexture.scale` in glTF.
 - Primitive with PBR textures:
   - Set `MeshMaterialDesc::Kind::Textured` and fill `albedoPath`, `metalRoughPath`, and `normalPath`.
+
+G-Buffer Outputs
+- The geometry pass (`gbuffer.frag`) writes 4 render targets:
+  - `outPos` (location 0): World position (xyz) + valid flag (w=1).
+  - `outNorm` (location 1): World normal (xyz) + roughness (w).
+  - `outAlbedo` (location 2): Albedo (rgb) + metallic (a).
+  - `outExtra` (location 3): AO (x) + emissive (yzw).
+- Deferred lighting reads these and computes:
+  ```glsl
+  vec3 color = direct + indirect * ao + emissive;
+  ```

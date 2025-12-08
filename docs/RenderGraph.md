@@ -111,8 +111,8 @@ Buffer usage → stage/access examples:
 
 ### Built‑In Pass Wiring (Current)
 
-- Resource uploads (if any) → Background (compute) → Geometry (G‑Buffer) → Lighting (deferred) → Transparent → CopyToSwapchain → ImGui → PreparePresent.
-- See registrations: `src/core/engine.cpp:321`–`src/core/engine.cpp:352`.
+- Resource uploads (if any) → Background (compute) → Geometry (G‑Buffer) → Lighting (deferred) → SSR → Tonemap+Bloom → FXAA → Transparent → CopyToSwapchain → ImGui → PreparePresent.
+- See registrations in `src/core/engine.cpp`.
 
 ### Notes & Limits
 

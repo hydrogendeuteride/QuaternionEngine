@@ -68,10 +68,14 @@ addPass(std::move(myPass));
 ### Built-in Passes
 
 - Background (compute): Declares `ComputeWrite(drawImage)` and dispatches a selected effect instance.
-- Geometry (G-Buffer): Declares 3 color attachments and `DepthAttachment`, plus buffer reads for shared index/vertex buffers.
-- Lighting (deferred): Reads G‑Buffer as sampled images and writes to `drawImage`.
+- Geometry (G-Buffer): Declares 4 color attachments (position, normal+roughness, albedo+metallic, AO+emissive) and `DepthAttachment`, plus buffer reads for shared index/vertex buffers.
+- Lighting (deferred): Reads G‑Buffer as sampled images and writes to `drawImage`. Applies AO to indirect lighting and adds emissive contribution.
 - Shadows: Cascaded shadow maps render to per-frame transient depth images (four cascades). If Ray Query is enabled,
   the lighting pass additionally samples TLAS to evaluate shadow visibility according to the selected mode.
+- SSR (Screen Space Reflections): Reads HDR lighting result + G-Buffer and outputs reflections blended with the scene.
+  Two variants: `ssr.nort` (screen-space only) and `ssr.rt` (SSR + RT fallback using TLAS ray queries).
+- Tonemap + Bloom: Converts HDR to LDR with exposure control and optional bloom. Supports Reinhard and ACES tonemapping.
+- FXAA: Post-process anti-aliasing on the LDR tonemapped image. Simple 5-tap edge-detection blur.
 - Transparent (forward): Writes to `drawImage` with depth test against `depthImage` after lighting.
 - ImGui: Inserted just before present to draw on the swapchain image.
 
@@ -89,4 +93,84 @@ addPass(std::move(myPass));
 - Use `EngineContext::getDrawExtent()` for viewport/scissor.
 
 See also: `docs/RenderGraph.md` for the builder API and synchronization details.
+
+---
+
+## Post-Processing Pipeline
+
+After deferred lighting, the engine runs a post-processing chain: SSR → Tonemap (with Bloom) → FXAA → Present.
+
+### SSR (Screen Space Reflections)
+
+Located in `src/render/passes/ssr.cpp` and `shaders/ssr.frag` / `shaders/ssr_rt.frag`.
+
+**Algorithm:**
+- World-space ray marching along the reflection vector `R = reflect(-V, N)`.
+- Depth comparison against G-Buffer position to find intersection.
+- Fresnel (Schlick) and glossiness-based blending with the base HDR color.
+
+**Parameters (shader constants):**
+- `MAX_STEPS = 64` – maximum ray march iterations (reduced for rough surfaces).
+- `STEP_LENGTH = 0.5` – world units per step.
+- `MAX_DISTANCE = 50.0` – maximum ray travel distance.
+- `THICKNESS = 3.0` – depth tolerance for hit detection.
+
+**Variants:**
+- `ssr.nort` – Pure screen-space reflections.
+- `ssr.rt` – SSR + RT fallback using TLAS ray queries when SSR misses (requires `GL_EXT_ray_query`).
+  Reflection mode controlled via `sceneData.rtOptions.w`: 0 = SSR only, 1 = SSR + RT fallback, 2 = RT only.
+
+**Inputs (set=1):**
+- binding 0: `hdrColor` – HDR lighting result.
+- binding 1: `posTex` – G-Buffer world position (RGBA32F).
+- binding 2: `normalTex` – G-Buffer normal + roughness.
+- binding 3: `albedoTex` – G-Buffer albedo + metallic.
+
+---
+
+### Tonemap + Bloom
+
+Located in `src/render/passes/tonemap.cpp` and `shaders/tonemap.frag`.
+
+**Tonemapping modes:**
+- `mode = 0` – Reinhard: `x / (1 + x)`.
+- `mode = 1` – ACES (Narkowicz approximation, default).
+
+**Bloom:**
+- Simple gather-based bloom computed in HDR space before tonemapping.
+- 5×5 kernel (radius=2) samples neighbors; pixels exceeding `bloomThreshold` contribute weighted by their brightness.
+- Accumulated bloom is multiplied by `bloomIntensity` and added to the HDR color.
+
+**Runtime parameters:**
+- `exposure` (default 1.0) – exposure multiplier.
+- `bloomEnabled` (default true) – toggle bloom.
+- `bloomThreshold` (default 1.0) – brightness threshold for bloom contribution.
+- `bloomIntensity` (default 0.7) – bloom blend strength.
+
+**Output:** LDR image (`VK_FORMAT_R8G8B8A8_UNORM`) with gamma correction (γ = 2.2).
+
+---
+
+### FXAA (Fast Approximate Anti-Aliasing)
+
+Located in `src/render/passes/fxaa.cpp` and `shaders/fxaa.frag`.
+
+**Algorithm:**
+- Luma-based edge detection using a 5-tap cross pattern (N, S, E, W, center).
+- If luma range exceeds threshold, apply a simple box blur; otherwise pass through.
+
+**Runtime parameters:**
+- `enabled` (default true) – toggle FXAA.
+- `edge_threshold` (default 0.125) – relative contrast threshold.
+- `edge_threshold_min` (default 0.0312) – absolute minimum threshold.
+
+**Push constants:**
+```glsl
+layout(push_constant) uniform Push {
+    float inverse_width;
+    float inverse_height;
+    float edge_threshold;
+    float edge_threshold_min;
+} pc;
+```
 

@@ -35,6 +35,8 @@ void RayTracingManager::cleanup()
     VkDevice dv = _device->device();
     // Destroy any deferred BLAS first
     flushPendingDeletes();
+    _blasBuildQueue.clear();
+    _blasPendingMeshes.clear();
 
     if (_tlas.handle)
     {
@@ -100,19 +102,51 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
 {
     if (!mesh) return {};
 
-    // If uploads are deferred, ensure any pending mesh buffer uploads are flushed
-    // before building a BLAS that reads from those GPU buffers.
-    if (_resources && _resources->deferred_uploads() && _resources->has_pending_uploads())
-    {
-        fmt::println("[RT] getOrBuildBLAS: flushing pending resource uploads before BLAS build");
-        _resources->process_queued_uploads_immediate();
-    }
+    const MeshAsset* key = mesh.get();
 
-    if (auto it = _blasByMesh.find(mesh.get()); it != _blasByMesh.end())
+    // If a BLAS is already cached (even an empty sentinel), return it directly.
+    if (auto it = _blasByMesh.find(key); it != _blasByMesh.end())
     {
         fmt::println("[RT] getOrBuildBLAS reuse by mesh mesh='{}' handle={}", mesh->name,
                      static_cast<const void *>(it->second.handle));
         return it->second;
+    }
+
+    // If a build is already queued or in progress for this mesh, do not enqueue
+    // another job; simply report "not ready yet".
+    if (_blasPendingMeshes.find(key) != _blasPendingMeshes.end())
+    {
+        fmt::println("[RT] getOrBuildBLAS pending build mesh='{}'", mesh->name);
+        return {};
+    }
+
+    // If uploads are deferred, ensure any pending mesh buffer uploads are flushed
+    // before queuing a BLAS that will read from those GPU buffers.
+    if (_resources && _resources->deferred_uploads() && _resources->has_pending_uploads())
+    {
+        fmt::println("[RT] getOrBuildBLAS: flushing pending resource uploads before queuing BLAS build");
+        _resources->process_queued_uploads_immediate();
+    }
+
+    fmt::println("[RT] getOrBuildBLAS queue build mesh='{}'", mesh->name);
+    _blasPendingMeshes.insert(key);
+    _blasBuildQueue.push_back(PendingBlasBuild{key});
+
+    // BLAS will be built asynchronously by pump_blas_builds(); until then,
+    // callers should treat the empty handle as "not ready yet".
+    return {};
+}
+
+AccelStructureHandle RayTracingManager::build_blas_for_mesh(const MeshAsset *mesh)
+{
+    if (!mesh || !_resources || !_device) return {};
+
+    // If uploads are deferred, ensure any pending mesh buffer uploads are flushed
+    // before building a BLAS that reads from those GPU buffers.
+    if (_resources->deferred_uploads() && _resources->has_pending_uploads())
+    {
+        fmt::println("[RT] build_blas_for_mesh: flushing pending resource uploads before BLAS build");
+        _resources->process_queued_uploads_immediate();
     }
 
     // Build BLAS with one geometry per surface (skip empty primitives)
@@ -126,7 +160,7 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     const uint32_t vcount = mesh->meshBuffers.vertexCount;
     VkBuffer vb = mesh->meshBuffers.vertexBuffer.buffer;
 
-    fmt::println("[RT] getOrBuildBLAS build mesh='{}' surfaces={} vcount={}", mesh->name,
+    fmt::println("[RT] build_blas_for_mesh mesh='{}' surfaces={} vcount={}", mesh->name,
                  mesh->surfaces.size(), vcount);
 
     for (const auto &s: mesh->surfaces)
@@ -162,9 +196,11 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
         ranges.push_back(r);
     }
 
-    // If no valid geometries, skip BLAS build
+    // If no valid geometries, record an empty sentinel to avoid re-queuing.
     if (geoms.empty())
     {
+        fmt::println("[RT] build_blas_for_mesh: mesh='{}' has no primitives; skipping BLAS", mesh->name);
+        _blasByMesh.emplace(mesh, AccelStructureHandle{});
         return {};
     }
 
@@ -231,8 +267,48 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     dai.accelerationStructure = blas.handle;
     blas.deviceAddress = _vkGetAccelerationStructureDeviceAddressKHR(_device->device(), &dai);
 
-    _blasByMesh.emplace(mesh.get(), blas);
+    _blasByMesh.emplace(mesh, blas);
     return blas;
+}
+
+void RayTracingManager::pump_blas_builds(uint32_t max_builds_per_frame)
+{
+    if (max_builds_per_frame == 0 || _blasBuildQueue.empty())
+    {
+        return;
+    }
+
+    uint32_t built = 0;
+
+    while (built < max_builds_per_frame && !_blasBuildQueue.empty())
+    {
+        PendingBlasBuild job = _blasBuildQueue.front();
+        _blasBuildQueue.pop_front();
+
+        const MeshAsset* mesh = job.mesh;
+        if (mesh)
+        {
+            // Drop the pending flag for this mesh now; if the build ends up
+            // with an empty handle, getOrBuildBLAS will see the cache entry
+            // (including the empty sentinel) and avoid re-queuing.
+            _blasPendingMeshes.erase(mesh);
+
+            // Skip if a BLAS was already created meanwhile.
+            if (_blasByMesh.find(mesh) == _blasByMesh.end())
+            {
+                AccelStructureHandle blas = build_blas_for_mesh(mesh);
+                if (blas.handle)
+                {
+                    ++built;
+                }
+            }
+        }
+        else
+        {
+            // Mesh pointer is null; just drop the pending flag.
+            _blasPendingMeshes.erase(mesh);
+        }
+    }
 }
 
 void RayTracingManager::ensure_tlas_storage(VkDeviceSize requiredASSize, VkDeviceSize /*requiredScratch*/, DeletionQueue& dq)
@@ -296,7 +372,10 @@ VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const Dra
             }
             else
             {
-                // Try to build on the fly if the mesh is still alive (non-owning shared_ptr wrapper).
+                // Queue an async BLAS build if the mesh is still alive
+                // (non-owning shared_ptr wrapper). The BLAS will be built
+                // over subsequent frames by pump_blas_builds(); until then,
+                // this instance will be skipped.
                 std::shared_ptr<MeshAsset> nonOwning(const_cast<MeshAsset *>(r.sourceMesh), [](MeshAsset *) {});
                 blas = getOrBuildBLAS(nonOwning);
             }
@@ -423,6 +502,24 @@ void RayTracingManager::removeBLASForBuffer(VkBuffer vertexBuffer)
 {
     if (!vertexBuffer) return;
 
+    // Drop any queued builds referencing this vertex buffer.
+    if (!_blasBuildQueue.empty())
+    {
+        for (auto itQ = _blasBuildQueue.begin(); itQ != _blasBuildQueue.end(); )
+        {
+            const MeshAsset* mesh = itQ->mesh;
+            if (mesh && mesh->meshBuffers.vertexBuffer.buffer == vertexBuffer)
+            {
+                _blasPendingMeshes.erase(mesh);
+                itQ = _blasBuildQueue.erase(itQ);
+            }
+            else
+            {
+                ++itQ;
+            }
+        }
+    }
+
     // Find any mesh whose vertex buffer matches and evict its BLAS.
     for (auto it = _blasByMesh.begin(); it != _blasByMesh.end(); )
     {
@@ -443,6 +540,24 @@ void RayTracingManager::removeBLASForBuffer(VkBuffer vertexBuffer)
 void RayTracingManager::removeBLASForMesh(const MeshAsset *mesh)
 {
     if (!mesh) return;
+
+    // Drop any queued builds for this mesh.
+    if (!_blasBuildQueue.empty())
+    {
+        for (auto itQ = _blasBuildQueue.begin(); itQ != _blasBuildQueue.end(); )
+        {
+            if (itQ->mesh == mesh)
+            {
+                itQ = _blasBuildQueue.erase(itQ);
+            }
+            else
+            {
+                ++itQ;
+            }
+        }
+    }
+    _blasPendingMeshes.erase(mesh);
+
     auto it = _blasByMesh.find(mesh);
     if (it == _blasByMesh.end()) return;
 

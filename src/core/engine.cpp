@@ -1185,6 +1185,10 @@ void VulkanEngine::run()
         // Safe to destroy any BLAS queued for deletion now that the previous frame is idle.
         if (_rayManager) { _rayManager->flushPendingDeletes(); }
 
+        // Progress queued BLAS builds over multiple frames to avoid large
+        // stalls when many meshes require ray tracing structures at once.
+        if (_rayManager) { _rayManager->pump_blas_builds(1); }
+
         // Commit any completed async IBL load now that the GPU is idle.
         if (_iblManager && _pendingIBLRequest.active)
         {
