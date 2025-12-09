@@ -665,6 +665,12 @@ void VulkanEngine::draw()
         _asyncLoader->pump_main_thread(*_sceneManager);
     }
 
+    // Apply any completed async pipeline rebuilds before using pipelines this frame.
+    if (_pipelineManager)
+    {
+        _pipelineManager->pump_main_thread();
+    }
+
     _sceneManager->update_scene();
 
     // Update IBL based on camera position and user-defined reflection volumes.

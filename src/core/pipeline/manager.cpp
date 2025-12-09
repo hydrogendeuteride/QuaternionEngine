@@ -16,10 +16,14 @@ PipelineManager::~PipelineManager()
 void PipelineManager::init(EngineContext *ctx)
 {
     _context = ctx;
+    start_worker();
 }
 
 void PipelineManager::cleanup()
 {
+    // Stop async worker first so no background thread touches the device/context.
+    stop_worker();
+
     for (auto &kv: _graphicsPipelines)
     {
         destroyGraphics(kv.second);
@@ -82,6 +86,10 @@ void PipelineManager::hotReloadChanged()
 {
     if (!_context || !_context->getDevice()) return;
 
+    // Discover pipelines whose shaders changed and enqueue async rebuild jobs.
+    std::vector<ReloadJob> to_enqueue;
+    to_enqueue.reserve(_graphicsPipelines.size());
+
     for (auto &kv: _graphicsPipelines)
     {
         auto &rec = kv.second;
@@ -102,19 +110,79 @@ void PipelineManager::hotReloadChanged()
             if (needReload)
             {
                 GraphicsPipelineRecord fresh = rec;
+                // Do not touch existing pipeline here; async worker will build into a fresh record.
                 fresh.pipeline = VK_NULL_HANDLE;
                 fresh.layout = VK_NULL_HANDLE;
-                if (buildGraphics(fresh))
-                {
-                    destroyGraphics(rec);
-                    rec = std::move(fresh);
-                    fmt::println("Reloaded graphics pipeline '{}'", kv.first);
-                }
+
+                ReloadJob job{};
+                job.name = kv.first;
+                job.record = std::move(fresh);
+                to_enqueue.push_back(std::move(job));
             }
         }
         catch (const std::exception &)
         {
             // ignore hot-reload errors to avoid spamming
+        }
+    }
+
+    if (to_enqueue.empty()) return;
+
+    {
+        std::lock_guard<std::mutex> lock(_jobs_mutex);
+        for (auto &job : to_enqueue)
+        {
+            // Avoid duplicate enqueues while a previous rebuild for this pipeline is in-flight.
+            if (_inflight.find(job.name) != _inflight.end())
+            {
+                continue;
+            }
+            _inflight.insert(job.name);
+            _pending_jobs.push_back(std::move(job));
+        }
+    }
+    _jobs_cv.notify_all();
+}
+
+void PipelineManager::pump_main_thread()
+{
+    // Move completed jobs to a local queue so we don't hold the mutex while doing Vulkan work.
+    std::deque<ReloadJob> completed;
+    {
+        std::lock_guard<std::mutex> lock(_jobs_mutex);
+        if (_completed_jobs.empty()) return;
+        completed.swap(_completed_jobs);
+    }
+
+    if (!_context || !_context->getDevice()) return;
+
+    std::vector<std::string> finished_names;
+    finished_names.reserve(completed.size());
+
+    for (auto &job : completed)
+    {
+        auto it = _graphicsPipelines.find(job.name);
+        if (it == _graphicsPipelines.end())
+        {
+            // Pipeline was unregistered while the job was in flight; just destroy the newly built pipeline.
+            destroyGraphics(job.record);
+        }
+        else
+        {
+            // Replace existing pipeline with the freshly built one.
+            destroyGraphics(it->second);
+            it->second = std::move(job.record);
+            fmt::println("Reloaded graphics pipeline '{}' (async)", job.name);
+        }
+        finished_names.push_back(job.name);
+    }
+
+    // Clear in-flight markers after commit so new reloads can be enqueued.
+    {
+        std::lock_guard<std::mutex> lock(_jobs_mutex);
+        for (const auto &name : finished_names)
+        {
+            _inflight.erase(name);
         }
     }
 }
@@ -217,6 +285,95 @@ void PipelineManager::destroyGraphics(GraphicsPipelineRecord &rec)
     {
         vkDestroyPipelineLayout(_context->getDevice()->device(), rec.layout, nullptr);
         rec.layout = VK_NULL_HANDLE;
+    }
+}
+
+void PipelineManager::start_worker()
+{
+    bool expected = false;
+    if (!_running.compare_exchange_strong(expected, true))
+    {
+        // Already running.
+        return;
+    }
+
+    _worker = std::thread(&PipelineManager::worker_loop, this);
+}
+
+void PipelineManager::stop_worker()
+{
+    bool expected = true;
+    if (!_running.compare_exchange_strong(expected, false))
+    {
+        // Was not running.
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(_jobs_mutex);
+        _pending_jobs.clear();
+        _completed_jobs.clear();
+        _inflight.clear();
+    }
+    _jobs_cv.notify_all();
+
+    if (_worker.joinable())
+    {
+        _worker.join();
+    }
+}
+
+void PipelineManager::worker_loop()
+{
+    while (true)
+    {
+        ReloadJob job;
+        {
+            std::unique_lock<std::mutex> lock(_jobs_mutex);
+            _jobs_cv.wait(lock, [this]() {
+                return !_running.load(std::memory_order_acquire) || !_pending_jobs.empty();
+            });
+
+            if (!_running.load(std::memory_order_acquire) && _pending_jobs.empty())
+            {
+                return;
+            }
+
+            if (_pending_jobs.empty())
+            {
+                continue;
+            }
+
+            job = std::move(_pending_jobs.front());
+            _pending_jobs.pop_front();
+        }
+
+        if (!_context || !_context->getDevice())
+        {
+            // Context/device went away; drop job and exit.
+            std::lock_guard<std::mutex> lock(_jobs_mutex);
+            _inflight.erase(job.name);
+            return;
+        }
+
+        GraphicsPipelineRecord rec = job.record;
+        bool ok = buildGraphics(rec);
+
+        {
+            std::lock_guard<std::mutex> lock(_jobs_mutex);
+            if (ok)
+            {
+                ReloadJob completed;
+                completed.name = job.name;
+                completed.record = std::move(rec);
+                _completed_jobs.push_back(std::move(completed));
+            }
+            else
+            {
+                // Allow future hotReloadChanged calls to enqueue another attempt.
+                _inflight.erase(job.name);
+            }
+        }
     }
 }
 

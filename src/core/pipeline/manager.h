@@ -4,11 +4,17 @@
 #include <render/pipelines.h>
 #include <compute/vk_compute.h>
 
+#include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <filesystem>
+#include <thread>
 
 class EngineContext;
 
@@ -97,8 +103,11 @@ public:
     // Convenience to interop with MaterialInstance
     bool getMaterialPipeline(const std::string &name, MaterialPipeline &out) const;
 
-    // Rebuild pipelines whose shaders changed on disk
+    // Rebuild pipelines whose shaders changed on disk (enqueue async rebuild jobs)
     void hotReloadChanged();
+
+    // Apply any completed async rebuilds on the main thread.
+    void pump_main_thread();
 
     // Debug helpers (graphics only)
     struct GraphicsPipelineDebugInfo
@@ -125,7 +134,29 @@ private:
     EngineContext *_context = nullptr;
     std::unordered_map<std::string, GraphicsPipelineRecord> _graphicsPipelines;
 
+    // --- Async hot-reload state ---
+    struct ReloadJob
+    {
+        std::string name;
+        GraphicsPipelineRecord record;
+    };
+
+    std::atomic<bool> _running{false};
+    std::thread _worker;
+
+    std::mutex _jobs_mutex;
+    std::condition_variable _jobs_cv;
+    std::deque<ReloadJob> _pending_jobs;
+    std::deque<ReloadJob> _completed_jobs;
+    std::unordered_set<std::string> _inflight;
+
     bool buildGraphics(GraphicsPipelineRecord &rec) const;
 
     void destroyGraphics(GraphicsPipelineRecord &rec);
+
+    void start_worker();
+
+    void stop_worker();
+
+    void worker_loop();
 };
