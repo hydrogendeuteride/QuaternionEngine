@@ -107,13 +107,13 @@ static void dump_vma_json(DeviceManager* dev, const char* tag)
 size_t VulkanEngine::query_texture_budget_bytes() const
 {
     DeviceManager *dev = _deviceManager.get();
-    if (!dev) return 512ull * 1024ull * 1024ull; // fallback
+    if (!dev) return kTextureBudgetFallbackBytes; // fallback
     VmaAllocator alloc = dev->allocator();
-    if (!alloc) return 512ull * 1024ull * 1024ull;
+    if (!alloc) return kTextureBudgetFallbackBytes;
 
     const VkPhysicalDeviceMemoryProperties *memProps = nullptr;
     vmaGetMemoryProperties(alloc, &memProps);
-    if (!memProps) return 512ull * 1024ull * 1024ull;
+    if (!memProps) return kTextureBudgetFallbackBytes;
 
     VmaBudget budgets[VK_MAX_MEMORY_HEAPS] = {};
     vmaGetHeapBudgets(alloc, budgets);
@@ -128,14 +128,13 @@ size_t VulkanEngine::query_texture_budget_bytes() const
             totalUsage  += budgets[i].usage;
         }
     }
-    if (totalBudget == 0) return 512ull * 1024ull * 1024ull;
+    if (totalBudget == 0) return kTextureBudgetFallbackBytes;
 
-    // Reserve ~65% of VRAM for attachments, swapchain, meshes, AS, etc.
-    unsigned long long cap = static_cast<unsigned long long>(double(totalBudget) * 0.35);
+    unsigned long long cap = static_cast<unsigned long long>(double(totalBudget) * kTextureBudgetFraction);
 
     // If usage is already near the cap, still allow current textures to live; eviction will trim.
-    // Clamp to at least 128 MB, at most totalBudget.
-    unsigned long long minCap = 128ull * 1024ull * 1024ull;
+    // Clamp to at least a minimum budget, at most totalBudget.
+    unsigned long long minCap = static_cast<unsigned long long>(kTextureBudgetMinBytes);
     if (cap < minCap) cap = minCap;
     if (cap > totalBudget) cap = totalBudget;
     return static_cast<size_t>(cap);
@@ -827,7 +826,9 @@ void VulkanEngine::draw()
         RGImageHandle hDebugColor = hDraw;
 
         // Create transient depth targets for cascaded shadow maps (even if RT-only / disabled, to keep descriptors stable)
-        const VkExtent2D shadowExtent{2048, 2048};
+        const VkExtent2D shadowExtent{
+            static_cast<uint32_t>(kShadowMapResolution),
+            static_cast<uint32_t>(kShadowMapResolution)};
         std::array<RGImageHandle, kShadowCascadeCount> hShadowCascades{};
         for (int i = 0; i < kShadowCascadeCount; ++i)
         {

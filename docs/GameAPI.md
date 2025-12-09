@@ -10,6 +10,180 @@ For details on the underlying systems, see also:
 
 ---
 
+## `GameAPI::Engine` (High‑Level Game Wrapper)
+
+Header: `src/core/game_api.h`  
+Implementation: `src/core/game_api.cpp`
+
+`GameAPI::Engine` is a thin, game‑friendly wrapper around `VulkanEngine`. It exposes stable, snake_case methods grouped by responsibility:
+
+- Texture streaming and VRAM budget.
+- Shadows and reflections.
+- IBL volumes.
+- Instances and animation.
+- Post‑processing (tonemap, bloom, FXAA).
+- Camera control.
+- Picking and render‑graph pass toggles.
+
+Typical creation:
+
+```cpp
+#include "core/engine.h"
+#include "core/game_api.h"
+
+VulkanEngine engine;
+engine.init();
+
+GameAPI::Engine api(&engine); // non‑owning
+```
+
+You then call `api.*` from your game loop to spawn content and tweak settings.
+
+### Texture Streaming & VRAM Budget
+
+Relevant methods:
+
+- `size_t get_texture_budget() const;`
+- `void set_texture_loads_per_frame(int count);`
+- `void set_texture_upload_budget(size_t bytes);`
+- `void set_cpu_source_budget(size_t bytes);`
+- `void set_max_upload_dimension(uint32_t dim);`
+- `void set_keep_source_bytes(bool keep);`
+- `void evict_textures_to_budget();`
+
+At a lower level, `VulkanEngine::query_texture_budget_bytes()` computes a conservative per‑frame texture budget using VMA heap info and constants in `src/core/config.h`:
+
+- `kTextureBudgetFraction` – fraction of total device‑local VRAM reserved for streamed textures (default `0.35`).
+- `kTextureBudgetFallbackBytes` – fallback budget when memory properties are unavailable (default `512 MiB`).
+- `kTextureBudgetMinBytes` – minimum budget clamp (default `128 MiB`).
+
+To globally change how aggressive streaming can be, edit these constants in `config.h` and rebuild. Use the `GameAPI::Engine` setters for per‑scene tuning (e.g. reducing upload bandwidth on low‑end machines).
+
+### Shadows: Resolution, Quality, and RT Modes
+
+Shadows are controlled by a combination of:
+
+- Global settings in `EngineContext::shadowSettings`.
+- Config constants in `src/core/config.h`.
+- The `ShadowPass` render pass and lighting shader (`shadow.vert`, `deferred_lighting.frag`).
+
+High‑level game‑side controls:
+
+- `void set_shadows_enabled(bool enabled);`
+- `void set_shadow_mode(ShadowMode mode);`
+  - `ClipmapOnly` – cascaded shadow maps only.
+  - `ClipmapPlusRT` – cascades + optional ray‑query assist.
+  - `RTOnly` – ray‑traced shadows only (no raster maps).
+- `void set_hybrid_ray_cascade_mask(uint32_t mask);`
+- `void set_hybrid_ray_threshold(float threshold);`
+
+These map directly onto `EngineContext::shadowSettings` and are also visualized in the ImGui “Shadows / Ray Query” tab.
+
+#### Shadow Map Resolution (`kShadowMapResolution`)
+
+The shadow map resolution is driven by `kShadowMapResolution` in `src/core/config.h`:
+
+- Used for:
+  - The actual depth image size created for each cascaded shadow map in `VulkanEngine::draw()` (`shadowExtent`).
+  - Texel snapping for cascade stabilization in `SceneManager::update_scene()`:
+    - `texel = (2.0f * cover) / float(kShadowMapResolution);`
+- Default: `2048.0f`, which gives a good compromise between quality and VRAM usage on mid‑range GPUs.
+
+Increasing `kShadowMapResolution` has two important effects:
+
+- **VRAM cost grows quadratically.**
+  - Depth D32F, per cascade:
+    - 2048 → ~16 MB.
+    - 4096 → ~64 MB.
+  - With 4 cascades, 4096×4096 can consume ~256 MB just for shadow depth, on top of swapchain, HDR, G‑buffers, IBL, and other images.
+- **Allocation failures can effectively “kill” shadows.**
+  - All shadow maps are created as transient RenderGraph images each frame run.
+  - If VMA runs out of suitable device‑local memory, `vmaCreateImage` will fail, and the engine will assert via `VK_CHECK`. In practice (especially in a release build), this often manifests as:
+    - No shadow rendering, or
+    - The app aborting when the first frame tries to allocate these images.
+
+Practical guidance:
+
+- Prefer 2048 or 3072 on consumer hardware unless you have headroom and have profiled memory.
+- If you push to 4096 and shadows “disappear”, suspect VRAM pressure:
+  - Try reducing `kTextureBudgetFraction` so textures use less VRAM.
+  - Or bring `kShadowMapResolution` back down and re‑test.
+
+The following quality‑related shadow constants also live in `config.h`:
+
+- `kShadowCascadeCount`, `kShadowCSMFar`, `kShadowCascadeRadiusScale`, `kShadowCascadeRadiusMargin`.
+- `kShadowBorderSmoothNDC`, `kShadowPCFBaseRadius`, `kShadowPCFCascadeGain`.
+- `kShadowDepthBiasConstant`, `kShadowDepthBiasSlope`.
+
+These affect how cascades are distributed and how soft/filtered the resulting shadows are. Changing them is safe but should be tested against your content and FOV ranges.
+
+### Reflections and Post‑Processing
+
+Game‑side reflection controls:
+
+- `void set_ssr_enabled(bool enabled);`
+- `void set_reflection_mode(ReflectionMode mode);`  
+  (`SSROnly`, `SSRPlusRT`, `RTOnly`)
+
+Tone mapping and bloom:
+
+- `void set_exposure(float exposure);`
+- `void set_tonemap_operator(TonemapOperator op);` (`Reinhard`, `ACES`)
+- `void set_bloom_enabled(bool enabled);`
+- `void set_bloom_threshold(float threshold);`
+- `void set_bloom_intensity(float intensity);`
+
+These wrap `TonemapPass` parameters and are equivalent to flipping the corresponding ImGui controls at runtime.
+
+FXAA:
+
+- `void set_fxaa_enabled(bool enabled);`
+- `void set_fxaa_edge_threshold(float threshold);`
+- `void set_fxaa_edge_threshold_min(float threshold);`
+
+### Camera and Render Scale
+
+Camera:
+
+- `void set_camera_position(const glm::vec3 &position);`
+- `glm::vec3 get_camera_position() const;`
+- `void set_camera_rotation(float pitchDeg, float yawDeg);`
+- `void get_camera_rotation(float &pitchDeg, float &yawDeg) const;`
+- `void set_camera_fov(float fovDegrees);`
+- `float get_camera_fov() const;`
+- `void camera_look_at(const glm::vec3 &target);`
+
+These functions internally manipulate the quaternion‑based `Camera::orientation` and `position` in `SceneManager`. They respect the engine’s `-Z` forward convention.
+
+Render resolution scaling:
+
+- `void set_render_scale(float scale); // 0.3–1.0`
+- `float get_render_scale() const;`
+
+This scales the internal draw extent relative to the swapchain and main HDR image sizes, trading resolution for performance.
+
+### Picking & Pass Toggles
+
+Picking:
+
+- `Engine::PickResult get_last_pick() const;`
+- `void set_use_id_buffer_picking(bool use);`
+- `bool get_use_id_buffer_picking() const;`
+
+These mirror `VulkanEngine::get_last_pick()` and `_useIdBufferPicking`, letting you choose between:
+
+- CPU raycast picking (immediate, cheaper VRAM).
+- ID‑buffer based picking (async, 1‑frame latency, robust for dense scenes).
+
+Render‑graph pass toggles:
+
+- `void set_pass_enabled(const std::string &passName, bool enabled);`
+- `bool get_pass_enabled(const std::string &passName) const;`
+
+This writes into `VulkanEngine::_rgPassToggles` and is applied during RenderGraph compilation. It allows you to permanently disable or enable named passes (e.g. `"ShadowMap[0]"`, `"FXAA"`, `"SSR"`) from game code, not just via the debug UI.
+
+---
+
 ## VulkanEngine Helpers
 
 Header: `src/core/engine.h`
