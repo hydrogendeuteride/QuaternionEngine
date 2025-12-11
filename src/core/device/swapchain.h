@@ -1,6 +1,7 @@
 #pragma once
 
 #include <core/types.h>
+#include <core/config.h>
 
 class ResourceManager;
 class DeviceManager;
@@ -42,7 +43,7 @@ private:
     VkSwapchainKHR _swapchain = nullptr;
     VkFormat _swapchainImageFormat = {};
     VkExtent2D _swapchainExtent = {};
-    VkExtent2D _windowExtent{1920, 1080};
+    VkExtent2D _windowExtent{kRenderWidth, kRenderHeight};
 
     std::vector<VkImage> _swapchainImages;
     std::vector<VkImageView> _swapchainImageViews;

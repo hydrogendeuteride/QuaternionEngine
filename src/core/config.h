@@ -11,6 +11,7 @@ inline constexpr bool kUseValidationLayers = true;
 // - Default: disabled to avoid noise and I/O at shutdown.
 // - Enable at runtime by setting environment variable `VE_VMA_DEBUG=1`.
 #include <cstdlib>
+#include <cstdint>
 inline constexpr bool kEnableVmaDebugByDefault = false;
 inline bool vmaDebugEnabled()
 {
@@ -22,6 +23,12 @@ inline bool vmaDebugEnabled()
     }
     return kEnableVmaDebugByDefault;
 }
+
+// Fixed logical render resolution for letterboxed viewport.
+// Internal rendering and camera aspect will target this size
+// even when the window/swapchain size changes.
+inline constexpr uint32_t kRenderWidth  = 1920;
+inline constexpr uint32_t kRenderHeight = 1080;
 
 // Shadow mapping configuration
 inline constexpr int kShadowCascadeCount = 4;

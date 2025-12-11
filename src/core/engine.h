@@ -84,6 +84,7 @@ public:
     FrameResources &get_current_frame() { return _frames[_frameNumber % FRAME_OVERLAP]; };
 
 	VkExtent2D _drawExtent;
+    VkExtent2D _logicalRenderExtent{};
 	float renderScale = 1.f;
 
     std::unique_ptr<DescriptorManager> _descriptorManager;

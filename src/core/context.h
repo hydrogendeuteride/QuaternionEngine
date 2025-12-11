@@ -69,6 +69,7 @@ public:
 
     // Frequently used values
     VkExtent2D drawExtent{};
+    VkExtent2D logicalRenderExtent{};
 
     // Optional convenience content pointers (moved to AssetManager for meshes)
 
@@ -95,6 +96,7 @@ public:
     const GPUSceneData& getSceneData() const;
     const DrawContext& getMainDrawContext() const;
     VkExtent2D getDrawExtent() const { return drawExtent; }
+    VkExtent2D getLogicalRenderExtent() const { return logicalRenderExtent; }
     AssetManager* getAssets() const { return assets; }
     // Convenience alias (singular) requested
     AssetManager* getAsset() const { return assets; }

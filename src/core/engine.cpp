@@ -145,6 +145,10 @@ void VulkanEngine::init()
     // We initialize SDL and create a window with it.
     SDL_Init(SDL_INIT_VIDEO);
 
+    // Initialize fixed logical render resolution for the engine.
+    _logicalRenderExtent.width = kRenderWidth;
+    _logicalRenderExtent.height = kRenderHeight;
+
     constexpr auto window_flags = static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 
     _swapchainManager = std::make_unique<SwapchainManager>();
@@ -182,6 +186,7 @@ void VulkanEngine::init()
         };
         _context->descriptors->init(_deviceManager->device(), 10, sizes);
     }
+    _context->logicalRenderExtent = _logicalRenderExtent;
 
     _swapchainManager->init(_deviceManager.get(), _resourceManager.get());
     _swapchainManager->init_swapchain();
