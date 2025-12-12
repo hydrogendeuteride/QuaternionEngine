@@ -24,6 +24,8 @@ public:
     VkExtent2D swapchainExtent() const { return _swapchainExtent; }
     const std::vector<VkImage> &swapchainImages() const { return _swapchainImages; }
     const std::vector<VkImageView> &swapchainImageViews() const { return _swapchainImageViews; }
+    VkImageLayout swapchain_image_layout(uint32_t index) const;
+    void set_swapchain_image_layout(uint32_t index, VkImageLayout layout);
 
     AllocatedImage drawImage() const { return _drawImage; }
     AllocatedImage depthImage() const { return _depthImage; }
@@ -47,6 +49,7 @@ private:
 
     std::vector<VkImage> _swapchainImages;
     std::vector<VkImageView> _swapchainImageViews;
+    std::vector<VkImageLayout> _swapchainImageLayouts;
 
     AllocatedImage _drawImage = {};
     AllocatedImage _depthImage = {};

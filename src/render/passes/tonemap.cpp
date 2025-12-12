@@ -6,6 +6,7 @@
 #include <core/pipeline/manager.h>
 #include <core/assets/manager.h>
 #include <core/device/device.h>
+#include <core/device/swapchain.h>
 #include <core/device/resource.h>
 #include <core/pipeline/sampler.h>
 #include <render/graph/graph.h>
@@ -28,6 +29,11 @@ void TonemapPass::init(EngineContext *context)
 
     _inputSetLayout = _context->getDescriptorLayouts()->singleImageLayout();
 
+    const VkFormat ldrFormat =
+        (_context && _context->getSwapchain())
+            ? _context->getSwapchain()->swapchainImageFormat()
+            : VK_FORMAT_B8G8R8A8_UNORM;
+
     GraphicsPipelineCreateInfo info{};
     info.vertexShaderPath = _context->getAssets()->shaderPath("fullscreen.vert.spv");
     info.fragmentShaderPath = _context->getAssets()->shaderPath("tonemap.frag.spv");
@@ -39,14 +45,14 @@ void TonemapPass::init(EngineContext *context)
     pcr.size = sizeof(TonemapPush);
     info.pushConstants = { pcr };
 
-    info.configure = [this](PipelineBuilder &b) {
+    info.configure = [ldrFormat](PipelineBuilder &b) {
         b.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
         b.set_polygon_mode(VK_POLYGON_MODE_FILL);
         b.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
         b.set_multisampling_none();
         b.disable_depthtest();
         b.disable_blending();
-        b.set_color_attachment_format(VK_FORMAT_R8G8B8A8_UNORM);
+        b.set_color_attachment_format(ldrFormat);
     };
 
     _context->pipelines->createGraphicsPipeline("tonemap", info);
@@ -71,9 +77,14 @@ RGImageHandle TonemapPass::register_graph(RenderGraph *graph, RGImageHandle hdrI
 {
     if (!graph || !hdrInput.valid()) return {};
 
+    const VkFormat ldrFormat =
+        (_context && _context->getSwapchain())
+            ? _context->getSwapchain()->swapchainImageFormat()
+            : VK_FORMAT_B8G8R8A8_UNORM;
+
     RGImageDesc desc{};
     desc.name = "ldr.tonemap";
-    desc.format = VK_FORMAT_R8G8B8A8_UNORM;
+    desc.format = ldrFormat;
     desc.extent = _context->getDrawExtent();
     desc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
                  | VK_IMAGE_USAGE_SAMPLED_BIT

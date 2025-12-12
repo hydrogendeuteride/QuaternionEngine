@@ -2,12 +2,18 @@
 #include <core/context.h>
 #include <core/device/images.h>
 #include <core/util/initializers.h>
+#include <core/pipeline/manager.h>
+#include <core/descriptor/descriptors.h>
+#include <core/descriptor/manager.h>
+#include <core/frame/resources.h>
+#include <core/pipeline/sampler.h>
 
 #include <unordered_map>
 #include <unordered_set>
 #include <queue>
 #include <algorithm>
 #include <cstdio>
+#include <glm/glm.hpp>
 
 #include <core/device/swapchain.h>
 #include <core/util/initializers.h>
@@ -16,6 +22,8 @@
 
 #include "core/device/device.h"
 #include <chrono>
+
+#include "assets/manager.h"
 
 void RenderGraph::init(EngineContext *ctx)
 {
@@ -694,10 +702,16 @@ void RenderGraph::execute(VkCommandBuffer cmd)
             VkRenderingAttachmentInfo depthInfo{};
             bool hasDepth = false;
 
-            // Choose renderArea as the min of all attachment extents and the desired draw extent
-            VkExtent2D chosenExtent{_context->getDrawExtent()};
+            // Choose renderArea as the min of all attachment extents.
+            // Do not pre-clamp to drawExtent here: swapchain passes (ImGui, present)
+            // should be able to use the full window extent.
+            VkExtent2D chosenExtent{0, 0};
             auto clamp_min = [](VkExtent2D a, VkExtent2D b) {
                 return VkExtent2D{std::min(a.width, b.width), std::min(a.height, b.height)};
+            };
+            auto set_or_clamp = [&](VkExtent2D e) {
+                if (chosenExtent.width == 0 || chosenExtent.height == 0) chosenExtent = e;
+                else chosenExtent = clamp_min(chosenExtent, e);
             };
 
             // Resolve color attachments
@@ -714,7 +728,7 @@ void RenderGraph::execute(VkCommandBuffer cmd)
                                                                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
                 if (!a.store) info.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
                 colorInfos.push_back(info);
-                if (rec->extent.width && rec->extent.height) chosenExtent = clamp_min(chosenExtent, rec->extent);
+                if (rec->extent.width && rec->extent.height) set_or_clamp(rec->extent);
                 if (firstColorExtent.width == 0 && firstColorExtent.height == 0)
                 {
                     firstColorExtent = rec->extent;
@@ -748,8 +762,13 @@ void RenderGraph::execute(VkCommandBuffer cmd)
                     else depthInfo.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
                     if (!p.depthAttachment.store) depthInfo.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
                     hasDepth = true;
-                    if (rec->extent.width && rec->extent.height) chosenExtent = clamp_min(chosenExtent, rec->extent);
+                    if (rec->extent.width && rec->extent.height) set_or_clamp(rec->extent);
                 }
+            }
+
+            if (chosenExtent.width == 0 || chosenExtent.height == 0)
+            {
+                chosenExtent = _context->getDrawExtent();
             }
 
 			VkRenderingInfo ri{};
@@ -800,17 +819,86 @@ void RenderGraph::add_present_chain(RGImageHandle sourceDraw,
 	if (!sourceDraw.valid() || !targetSwapchain.valid()) return;
 
 	add_pass(
-		"CopyToSwapchain",
-		RGPassType::Transfer,
+		"PresentLetterbox",
+		RGPassType::Graphics,
 		[sourceDraw, targetSwapchain](RGPassBuilder &builder, EngineContext *) {
-			builder.read(sourceDraw, RGImageUsage::TransferSrc);
-			builder.write(targetSwapchain, RGImageUsage::TransferDst);
+			builder.read(sourceDraw, RGImageUsage::SampledFragment);
+            VkClearValue clear{};
+            clear.color = {{0.f, 0.f, 0.f, 1.f}};
+			builder.write_color(targetSwapchain, true, clear);
 		},
 		[sourceDraw, targetSwapchain](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *ctx) {
-			VkImage src = res.image(sourceDraw);
-			VkImage dst = res.image(targetSwapchain);
-			if (src == VK_NULL_HANDLE || dst == VK_NULL_HANDLE) return;
-			vkutil::copy_image_to_image(cmd, src, dst, ctx->getDrawExtent(), ctx->getSwapchain()->swapchainExtent());
+            if (!ctx || !ctx->currentFrame || !ctx->pipelines) return;
+
+            VkImageView srcView = res.image_view(sourceDraw);
+            VkImageView dstView = res.image_view(targetSwapchain);
+            if (srcView == VK_NULL_HANDLE || dstView == VK_NULL_HANDLE) return;
+
+            VkPipeline pipeline = VK_NULL_HANDLE;
+            VkPipelineLayout layout = VK_NULL_HANDLE;
+            if (!ctx->pipelines->getGraphics("present_letterbox", pipeline, layout))
+            {
+                GraphicsPipelineCreateInfo info{};
+                info.vertexShaderPath = ctx->getAssets()->shaderPath("fullscreen.vert.spv");
+                info.fragmentShaderPath = ctx->getAssets()->shaderPath("present_letterbox.frag.spv");
+                info.setLayouts = { ctx->getDescriptorLayouts()->singleImageLayout() };
+
+                VkPushConstantRange pcr{};
+                pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+                pcr.offset = 0;
+                pcr.size = sizeof(glm::vec4);
+                info.pushConstants = { pcr };
+
+                VkFormat swapFmt = ctx->getSwapchain()->swapchainImageFormat();
+                info.configure = [swapFmt](PipelineBuilder &b) {
+                    b.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+                    b.set_polygon_mode(VK_POLYGON_MODE_FILL);
+                    b.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+                    b.set_multisampling_none();
+                    b.disable_depthtest();
+                    b.disable_blending();
+                    b.set_color_attachment_format(swapFmt);
+                };
+
+                if (!ctx->pipelines->createGraphicsPipeline("present_letterbox", info))
+                {
+                    return;
+                }
+                if (!ctx->pipelines->getGraphics("present_letterbox", pipeline, layout))
+                {
+                    return;
+                }
+            }
+
+            VkDevice device = ctx->getDevice()->device();
+            VkDescriptorSetLayout setLayout = ctx->getDescriptorLayouts()->singleImageLayout();
+            VkDescriptorSet set = ctx->currentFrame->_frameDescriptors.allocate(device, setLayout);
+            DescriptorWriter writer;
+            writer.write_image(0, srcView, ctx->getSamplers()->defaultLinear(),
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            writer.update_set(device, set);
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &set, 0, nullptr);
+
+            VkExtent2D srcSize = ctx->getDrawExtent();
+            VkExtent2D dstSize = ctx->getSwapchain()->swapchainExtent();
+            VkRect2D dstRect = vkutil::compute_letterbox_rect(srcSize, dstSize);
+
+            float minX = dstSize.width > 0 ? float(dstRect.offset.x) / float(dstSize.width) : 0.f;
+            float minY = dstSize.height > 0 ? float(dstRect.offset.y) / float(dstSize.height) : 0.f;
+            float sizeX = dstSize.width > 0 ? float(dstRect.extent.width) / float(dstSize.width) : 1.f;
+            float sizeY = dstSize.height > 0 ? float(dstRect.extent.height) / float(dstSize.height) : 1.f;
+
+            glm::vec4 pc{minX, minY, sizeX, sizeY};
+            vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(glm::vec4), &pc);
+
+            VkViewport vp{0.f, 0.f, float(dstSize.width), float(dstSize.height), 0.f, 1.f};
+            VkRect2D sc{{0, 0}, dstSize};
+            vkCmdSetViewport(cmd, 0, 1, &vp);
+            vkCmdSetScissor(cmd, 0, 1, &sc);
+            vkCmdDraw(cmd, 3, 1, 0, 0);
 		});
 
 	if (appendExtra)
@@ -990,9 +1078,8 @@ RGImageHandle RenderGraph::import_swapchain_image(uint32_t index)
 	d.imageView = views[index];
 	d.format = _context->getSwapchain()->swapchainImageFormat();
 	d.extent = _context->getSwapchain()->swapchainExtent();
-    // On first use after swapchain creation, images are in UNDEFINED layout.
-    // Start from UNDEFINED so the graph inserts the necessary transition.
-    d.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // Track actual layout across frames. After present, images are in PRESENT_SRC_KHR.
+    d.currentLayout = _context->getSwapchain()->swapchain_image_layout(index);
     return import_image(d);
 }
 

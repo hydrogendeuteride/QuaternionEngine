@@ -759,19 +759,32 @@ void VulkanEngine::draw()
 
     uint32_t swapchainImageIndex;
 
-    VkResult e = vkAcquireNextImageKHR(_deviceManager->device(), _swapchainManager->swapchain(), 1000000000,
+    VkResult e = vkAcquireNextImageKHR(_deviceManager->device(),
+                                       _swapchainManager->swapchain(),
+                                       1000000000,
                                        get_current_frame()._swapchainSemaphore,
-                                       nullptr, &swapchainImageIndex);
+                                       nullptr,
+                                       &swapchainImageIndex);
     if (e == VK_ERROR_OUT_OF_DATE_KHR)
     {
         resize_requested = true;
         return;
     }
+    if (e == VK_SUBOPTIMAL_KHR)
+    {
+        // Acquire succeeded and signaled the semaphore. Keep rendering this frame
+        // so the semaphore gets waited on, but schedule a resize soon.
+        resize_requested = true;
+    }
+    else
+    {
+        VK_CHECK(e);
+    }
 
-    _drawExtent.height = std::min(_swapchainManager->swapchainExtent().height,
-                                  _swapchainManager->drawImage().imageExtent.height) * renderScale;
-    _drawExtent.width = std::min(_swapchainManager->swapchainExtent().width,
-                                 _swapchainManager->drawImage().imageExtent.width) * renderScale;
+    // Fixed logical render resolution (letterboxed): draw extent is derived
+    // from the engine's logical render size instead of the swapchain/window.
+    _drawExtent.width = static_cast<uint32_t>(static_cast<float>(_logicalRenderExtent.width) * renderScale);
+    _drawExtent.height = static_cast<uint32_t>(static_cast<float>(_logicalRenderExtent.height) * renderScale);
 
     VK_CHECK(vkResetFences(_deviceManager->device(), 1, &get_current_frame()._renderFence));
 
@@ -1041,7 +1054,11 @@ void VulkanEngine::draw()
     presentInfo.pImageIndices = &swapchainImageIndex;
 
     VkResult presentResult = vkQueuePresentKHR(_deviceManager->graphicsQueue(), &presentInfo);
-    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR)
+    if (_swapchainManager)
+    {
+        _swapchainManager->set_swapchain_image_layout(swapchainImageIndex, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    }
+    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR)
     {
         resize_requested = true;
     }
@@ -1065,13 +1082,23 @@ void VulkanEngine::run()
             if (e.type == SDL_QUIT) bQuit = true;
             if (e.type == SDL_WINDOWEVENT)
             {
-                if (e.window.event == SDL_WINDOWEVENT_MINIMIZED)
+                switch (e.window.event)
                 {
-                    freeze_rendering = true;
-                }
-                if (e.window.event == SDL_WINDOWEVENT_RESTORED)
-                {
-                    freeze_rendering = false;
+                    case SDL_WINDOWEVENT_MINIMIZED:
+                        freeze_rendering = true;
+                        break;
+                    case SDL_WINDOWEVENT_RESTORED:
+                        freeze_rendering = false;
+                        resize_requested = true;
+                        _last_resize_event_ms = SDL_GetTicks();
+                        break;
+                    case SDL_WINDOWEVENT_SIZE_CHANGED:
+                    case SDL_WINDOWEVENT_RESIZED:
+                        resize_requested = true;
+                        _last_resize_event_ms = SDL_GetTicks();
+                        break;
+                    default:
+                        break;
                 }
             }
             if (e.type == SDL_MOUSEMOTION)
@@ -1190,7 +1217,12 @@ void VulkanEngine::run()
         }
         if (resize_requested)
         {
-            _swapchainManager->resize_swapchain(_window);
+            const uint32_t now_ms = SDL_GetTicks();
+            if (now_ms - _last_resize_event_ms >= RESIZE_DEBOUNCE_MS)
+            {
+                _swapchainManager->resize_swapchain(_window);
+                resize_requested = false;
+            }
         }
 
         // Begin frame: wait for the GPU, resolve pending ID-buffer picks,

@@ -265,10 +265,22 @@ void SceneManager::update_scene()
     };
 
     // Keep projection FOV in sync with the camera so that CPU ray picking
-    // matches what is rendered on-screen.
+    // matches what is rendered inside the fixed logical render area (letterboxed).
     const float fov = glm::radians(mainCamera.fovDegrees);
-    const float aspect = (float) _context->getSwapchain()->windowExtent().width /
-                         (float) _context->getSwapchain()->windowExtent().height;
+
+    // Derive aspect ratio from the fixed logical render size instead of the window/swapchain.
+    VkExtent2D logicalExtent{ kRenderWidth, kRenderHeight };
+    if (_context)
+    {
+        VkExtent2D ctxExtent = _context->getLogicalRenderExtent();
+        if (ctxExtent.width > 0 && ctxExtent.height > 0)
+        {
+            logicalExtent = ctxExtent;
+        }
+    }
+
+    const float aspect = static_cast<float>(logicalExtent.width) /
+                         static_cast<float>(logicalExtent.height);
     const float nearPlane = 0.1f;
     glm::mat4 projection = makeReversedInfinitePerspective(fov, aspect, nearPlane);
     // Vulkan NDC has inverted Y.

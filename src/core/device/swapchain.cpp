@@ -23,9 +23,9 @@ void SwapchainManager::init_swapchain()
     // On creation we also push a cleanup lambda to _deletionQueue for final shutdown.
     // On resize we will flush that queue first to destroy previous resources.
 
-    // depth/draw/gbuffer sized to current window extent
+    // depth/draw/gbuffer sized to fixed logical render extent (letterboxed)
     auto create_frame_images = [this]() {
-        VkExtent3D drawImageExtent = { _windowExtent.width, _windowExtent.height, 1 };
+        VkExtent3D drawImageExtent = { kRenderWidth, kRenderHeight, 1 };
 
         // Draw HDR target
         _drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -118,7 +118,7 @@ void SwapchainManager::create_swapchain(uint32_t width, uint32_t height)
             //use vsync present mode
             .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
             .set_desired_extent(width, height)
-            .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+            .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
             .build()
             .value();
 
@@ -127,6 +127,7 @@ void SwapchainManager::create_swapchain(uint32_t width, uint32_t height)
     _swapchain = vkbSwapchain.swapchain;
     _swapchainImages = vkbSwapchain.get_images().value();
     _swapchainImageViews = vkbSwapchain.get_image_views().value();
+    _swapchainImageLayouts.assign(_swapchainImages.size(), VK_IMAGE_LAYOUT_UNDEFINED);
 }
 
 void SwapchainManager::destroy_swapchain() const
@@ -142,83 +143,36 @@ void SwapchainManager::destroy_swapchain() const
 
 void SwapchainManager::resize_swapchain(struct SDL_Window *window)
 {
+    int w, h;
+    // HiDPI-aware drawable size for correct pixel dimensions
+    SDL_Vulkan_GetDrawableSize(window, &w, &h);
+    if (w <= 0 || h <= 0)
+    {
+        // Window may be minimized or in a transient resize state; keep current swapchain.
+        resize_requested = true;
+        return;
+    }
+
     vkDeviceWaitIdle(_deviceManager->device());
 
     destroy_swapchain();
 
-    // Destroy per-frame images before recreating them
-    _deletionQueue.flush();
-
-    int w, h;
-    // HiDPI-aware drawable size for correct pixel dimensions
-    SDL_Vulkan_GetDrawableSize(window, &w, &h);
     _windowExtent.width = w;
     _windowExtent.height = h;
 
     create_swapchain(_windowExtent.width, _windowExtent.height);
 
-    // Recreate frame images at the new size
-    // (duplicate the same logic used at init time)
-    VkExtent3D drawImageExtent = { _windowExtent.width, _windowExtent.height, 1 };
-
-    _drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-    _drawImage.imageExtent = drawImageExtent;
-
-    VkImageUsageFlags drawImageUsages{};
-    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
-    drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    drawImageUsages |= VK_IMAGE_USAGE_SAMPLED_BIT;
-
-    VkImageCreateInfo rimg_info = vkinit::image_create_info(_drawImage.imageFormat, drawImageUsages, drawImageExtent);
-    VmaAllocationCreateInfo rimg_allocinfo = {};
-    rimg_allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    rimg_allocinfo.requiredFlags = static_cast<VkMemoryPropertyFlags>(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    vmaCreateImage(_deviceManager->allocator(), &rimg_info, &rimg_allocinfo, &_drawImage.image, &_drawImage.allocation,
-                   nullptr);
-
-    VkImageViewCreateInfo rview_info = vkinit::imageview_create_info(_drawImage.imageFormat, _drawImage.image,
-                                                                     VK_IMAGE_ASPECT_COLOR_BIT);
-    VK_CHECK(vkCreateImageView(_deviceManager->device(), &rview_info, nullptr, &_drawImage.imageView));
-
-    _depthImage.imageFormat = VK_FORMAT_D32_SFLOAT;
-    _depthImage.imageExtent = drawImageExtent;
-    VkImageUsageFlags depthImageUsages{};
-    depthImageUsages |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    VkImageCreateInfo dimg_info = vkinit::image_create_info(_depthImage.imageFormat, depthImageUsages, drawImageExtent);
-    vmaCreateImage(_deviceManager->allocator(), &dimg_info, &rimg_allocinfo, &_depthImage.image,
-                   &_depthImage.allocation, nullptr);
-
-    VkImageViewCreateInfo dview_info = vkinit::imageview_create_info(_depthImage.imageFormat, _depthImage.image,
-                                                                     VK_IMAGE_ASPECT_DEPTH_BIT);
-    VK_CHECK(vkCreateImageView(_deviceManager->device(), &dview_info, nullptr, &_depthImage.imageView));
-
-    _gBufferPosition = _resourceManager->create_image(drawImageExtent, VK_FORMAT_R16G16B16A16_SFLOAT,
-                                                      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-    _gBufferNormal = _resourceManager->create_image(drawImageExtent, VK_FORMAT_R16G16B16A16_SFLOAT,
-                                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-    _gBufferAlbedo = _resourceManager->create_image(drawImageExtent, VK_FORMAT_R8G8B8A8_UNORM,
-                                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-    _gBufferExtra = _resourceManager->create_image(drawImageExtent, VK_FORMAT_R16G16B16A16_SFLOAT,
-                                                   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-    _idBuffer = _resourceManager->create_image(drawImageExtent, VK_FORMAT_R32_UINT,
-                                               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                               VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                               VK_IMAGE_USAGE_SAMPLED_BIT);
-
-    _deletionQueue.push_function([=]() {
-        vkDestroyImageView(_deviceManager->device(), _drawImage.imageView, nullptr);
-        vmaDestroyImage(_deviceManager->allocator(), _drawImage.image, _drawImage.allocation);
-
-        vkDestroyImageView(_deviceManager->device(), _depthImage.imageView, nullptr);
-        vmaDestroyImage(_deviceManager->allocator(), _depthImage.image, _depthImage.allocation);
-
-        _resourceManager->destroy_image(_gBufferPosition);
-        _resourceManager->destroy_image(_gBufferNormal);
-        _resourceManager->destroy_image(_gBufferAlbedo);
-        _resourceManager->destroy_image(_gBufferExtra);
-        _resourceManager->destroy_image(_idBuffer);
-    });
-
     resize_requested = false;
+}
+
+VkImageLayout SwapchainManager::swapchain_image_layout(uint32_t index) const
+{
+    if (index >= _swapchainImageLayouts.size()) return VK_IMAGE_LAYOUT_UNDEFINED;
+    return _swapchainImageLayouts[index];
+}
+
+void SwapchainManager::set_swapchain_image_layout(uint32_t index, VkImageLayout layout)
+{
+    if (index >= _swapchainImageLayouts.size()) return;
+    _swapchainImageLayouts[index] = layout;
 }

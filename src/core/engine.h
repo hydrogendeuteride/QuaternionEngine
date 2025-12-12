@@ -251,4 +251,8 @@ private:
     void init_mesh_pipeline();
 
     void init_default_data();
+
+    // Debounce swapchain recreation during live window resizing.
+    uint32_t _last_resize_event_ms{0};
+    static constexpr uint32_t RESIZE_DEBOUNCE_MS = 150;
 };

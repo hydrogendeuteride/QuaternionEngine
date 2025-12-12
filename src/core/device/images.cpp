@@ -1,6 +1,9 @@
 #include <core/device/images.h>
 #include <core/util/initializers.h>
 
+#include <algorithm>
+#include <cmath>
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
@@ -137,6 +140,89 @@ void vkutil::copy_image_to_image(VkCommandBuffer cmd, VkImage source, VkImage de
 	vkCmdBlitImage2(cmd, &blitInfo);
 }
 //< copyimg
+
+VkRect2D vkutil::compute_letterbox_rect(VkExtent2D srcSize, VkExtent2D dstSize)
+{
+    VkRect2D rect{};
+    rect.offset = {0, 0};
+    rect.extent = dstSize;
+    if (srcSize.width == 0 || srcSize.height == 0 || dstSize.width == 0 || dstSize.height == 0)
+    {
+        return rect;
+    }
+
+    const double srcAspect = double(srcSize.width) / double(srcSize.height);
+    const double dstAspect = double(dstSize.width) / double(dstSize.height);
+
+    if (dstAspect > srcAspect)
+    {
+        // Fit by height, bars on left/right.
+        const double scale = double(dstSize.height) / double(srcSize.height);
+        uint32_t scaledWidth = static_cast<uint32_t>(std::lround(double(srcSize.width) * scale));
+        scaledWidth = std::min(scaledWidth, dstSize.width);
+        const uint32_t offsetX = (dstSize.width - scaledWidth) / 2u;
+        rect.offset = {static_cast<int32_t>(offsetX), 0};
+        rect.extent = {scaledWidth, dstSize.height};
+    }
+    else
+    {
+        // Fit by width, bars on top/bottom.
+        const double scale = double(dstSize.width) / double(srcSize.width);
+        uint32_t scaledHeight = static_cast<uint32_t>(std::lround(double(srcSize.height) * scale));
+        scaledHeight = std::min(scaledHeight, dstSize.height);
+        const uint32_t offsetY = (dstSize.height - scaledHeight) / 2u;
+        rect.offset = {0, static_cast<int32_t>(offsetY)};
+        rect.extent = {dstSize.width, scaledHeight};
+    }
+
+    return rect;
+}
+
+void vkutil::copy_image_to_image_letterboxed(VkCommandBuffer cmd,
+                                            VkImage source,
+                                            VkImage destination,
+                                            VkExtent2D srcSize,
+                                            VkExtent2D dstSize,
+                                            VkFilter filter)
+{
+    VkRect2D dstRect = compute_letterbox_rect(srcSize, dstSize);
+
+    VkImageBlit2 blitRegion{ .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2, .pNext = nullptr };
+
+    blitRegion.srcOffsets[1].x = static_cast<int32_t>(srcSize.width);
+    blitRegion.srcOffsets[1].y = static_cast<int32_t>(srcSize.height);
+    blitRegion.srcOffsets[1].z = 1;
+
+    blitRegion.dstOffsets[0].x = dstRect.offset.x;
+    blitRegion.dstOffsets[0].y = dstRect.offset.y;
+    blitRegion.dstOffsets[0].z = 0;
+
+    blitRegion.dstOffsets[1].x = dstRect.offset.x + static_cast<int32_t>(dstRect.extent.width);
+    blitRegion.dstOffsets[1].y = dstRect.offset.y + static_cast<int32_t>(dstRect.extent.height);
+    blitRegion.dstOffsets[1].z = 1;
+
+    blitRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    blitRegion.srcSubresource.baseArrayLayer = 0;
+    blitRegion.srcSubresource.layerCount = 1;
+    blitRegion.srcSubresource.mipLevel = 0;
+
+    blitRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    blitRegion.dstSubresource.baseArrayLayer = 0;
+    blitRegion.dstSubresource.layerCount = 1;
+    blitRegion.dstSubresource.mipLevel = 0;
+
+    VkBlitImageInfo2 blitInfo{ .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2, .pNext = nullptr };
+    blitInfo.dstImage = destination;
+    blitInfo.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    blitInfo.srcImage = source;
+    blitInfo.srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    blitInfo.filter = filter;
+    blitInfo.regionCount = 1;
+    blitInfo.pRegions = &blitRegion;
+
+    vkCmdBlitImage2(cmd, &blitInfo);
+}
+
 //> mipgen
 static inline int compute_full_mip_count(VkExtent2D imageSize)
 {
