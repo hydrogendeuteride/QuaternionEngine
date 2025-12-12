@@ -178,6 +178,41 @@ VkRect2D vkutil::compute_letterbox_rect(VkExtent2D srcSize, VkExtent2D dstSize)
     return rect;
 }
 
+bool vkutil::map_window_to_letterbox_src(const glm::vec2 &windowPosPixels,
+                                         VkExtent2D srcSize,
+                                         VkExtent2D dstSize,
+                                         glm::vec2 &outSrcPosPixels)
+{
+    outSrcPosPixels = glm::vec2{0.0f, 0.0f};
+    if (srcSize.width == 0 || srcSize.height == 0 || dstSize.width == 0 || dstSize.height == 0)
+    {
+        return false;
+    }
+
+    VkRect2D rect = compute_letterbox_rect(srcSize, dstSize);
+    if (rect.extent.width == 0 || rect.extent.height == 0)
+    {
+        return false;
+    }
+
+    const float localX = windowPosPixels.x - static_cast<float>(rect.offset.x);
+    const float localY = windowPosPixels.y - static_cast<float>(rect.offset.y);
+
+    if (localX < 0.0f || localY < 0.0f ||
+        localX >= static_cast<float>(rect.extent.width) ||
+        localY >= static_cast<float>(rect.extent.height))
+    {
+        return false;
+    }
+
+    const float u = localX / static_cast<float>(rect.extent.width);
+    const float v = localY / static_cast<float>(rect.extent.height);
+
+    outSrcPosPixels.x = u * static_cast<float>(srcSize.width);
+    outSrcPosPixels.y = v * static_cast<float>(srcSize.height);
+    return true;
+}
+
 void vkutil::copy_image_to_image_letterboxed(VkCommandBuffer cmd,
                                             VkImage source,
                                             VkImage destination,

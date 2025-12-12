@@ -20,6 +20,7 @@
 #include "core/pipeline/manager.h"
 #include "core/assets/texture_cache.h"
 #include "core/assets/ibl_manager.h"
+#include "device/images.h"
 #include "context.h"
 #include <core/types.h>
 #include <cstring>
@@ -1186,18 +1187,36 @@ namespace
 
         ImGuiIO &io = ImGui::GetIO();
         ImGuizmo::SetOrthographic(false);
+
+        VkExtent2D swapExtent = eng->_swapchainManager
+                                ? eng->_swapchainManager->swapchainExtent()
+                                : VkExtent2D{1, 1};
+        VkExtent2D drawExtent{
+            static_cast<uint32_t>(static_cast<float>(eng->_logicalRenderExtent.width) * eng->renderScale),
+            static_cast<uint32_t>(static_cast<float>(eng->_logicalRenderExtent.height) * eng->renderScale)
+        };
+        if (drawExtent.width == 0 || drawExtent.height == 0)
+        {
+            drawExtent = VkExtent2D{1, 1};
+        }
+
+        VkRect2D activeRect = vkutil::compute_letterbox_rect(drawExtent, swapExtent);
+        const float fbScaleX = (io.DisplayFramebufferScale.x > 0.0f) ? io.DisplayFramebufferScale.x : 1.0f;
+        const float fbScaleY = (io.DisplayFramebufferScale.y > 0.0f) ? io.DisplayFramebufferScale.y : 1.0f;
+        const float rectX = static_cast<float>(activeRect.offset.x) / fbScaleX;
+        const float rectY = static_cast<float>(activeRect.offset.y) / fbScaleY;
+        const float rectW = static_cast<float>(activeRect.extent.width) / fbScaleX;
+        const float rectH = static_cast<float>(activeRect.extent.height) / fbScaleY;
+
         ImGuizmo::SetDrawlist();
-        ImGuizmo::SetRect(0.0f, 0.0f, io.DisplaySize.x, io.DisplaySize.y);
+        ImGuizmo::SetRect(rectX, rectY, rectW, rectH);
 
         // Build a distance-based perspective projection for ImGuizmo instead of
         // using the engine's reversed-Z Vulkan projection.
         Camera &cam = sceneMgr->getMainCamera();
         float fovRad = glm::radians(cam.fovDegrees);
-        VkExtent2D extent = eng->_swapchainManager
-                            ? eng->_swapchainManager->swapchainExtent()
-                            : VkExtent2D{1, 1};
-        float aspect = extent.height > 0
-                       ? static_cast<float>(extent.width) / static_cast<float>(extent.height)
+        float aspect = drawExtent.height > 0
+                       ? static_cast<float>(drawExtent.width) / static_cast<float>(drawExtent.height)
                        : 1.0f;
 
         // Distance from camera to object; clamp to avoid degenerate planes.
@@ -1221,7 +1240,7 @@ namespace
         ImDrawList* dl = ImGui::GetForegroundDrawList();
         ImGuizmo::SetDrawlist(dl);
 
-        ImGuizmo::SetRect(0.0f, 0.0f, io.DisplaySize.x, io.DisplaySize.y);
+        ImGuizmo::SetRect(rectX, rectY, rectW, rectH);
         ImGuizmo::Manipulate(&view[0][0], &proj[0][0],
                              op, mode,
                              &targetTransform[0][0]);

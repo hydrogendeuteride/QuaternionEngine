@@ -47,6 +47,7 @@
 #include "render/passes/tonemap.h"
 #include "render/passes/shadow.h"
 #include "device/resource.h"
+#include "device/images.h"
 #include "context.h"
 #include "core/pipeline/manager.h"
 #include "core/assets/texture_cache.h"
@@ -893,56 +894,62 @@ void VulkanEngine::draw()
                     VkExtent2D swapExt = _swapchainManager->swapchainExtent();
                     VkExtent2D drawExt = _drawExtent;
 
-                    float sx = _pendingPick.windowPos.x / float(std::max(1u, swapExt.width));
-                    float sy = _pendingPick.windowPos.y / float(std::max(1u, swapExt.height));
+                    glm::vec2 logicalPos{};
+                    if (!vkutil::map_window_to_letterbox_src(_pendingPick.windowPos, drawExt, swapExt, logicalPos))
+                    {
+                        // Click landed outside the active letterboxed region.
+                        _pendingPick.active = false;
+                    }
+                    else
+                    {
+                        uint32_t idX = uint32_t(glm::clamp(logicalPos.x, 0.0f, float(drawExt.width  - 1)));
+                        uint32_t idY = uint32_t(glm::clamp(logicalPos.y, 0.0f, float(drawExt.height - 1)));
+                        _pendingPick.idCoords = {idX, idY};
 
-                    uint32_t idX = uint32_t(glm::clamp(sx * float(drawExt.width),  0.0f, float(drawExt.width  - 1)));
-                    uint32_t idY = uint32_t(glm::clamp(sy * float(drawExt.height), 0.0f, float(drawExt.height - 1)));
-                    _pendingPick.idCoords = {idX, idY};
+                        RGImportedBufferDesc bd{};
+                        bd.name = "pick.readback";
+                        bd.buffer = _pickReadbackBuffer.buffer;
+                        bd.size = sizeof(uint32_t);
+                        bd.currentStage = VK_PIPELINE_STAGE_2_NONE;
+                        bd.currentAccess = 0;
+                        RGBufferHandle hPickBuf = _renderGraph->import_buffer(bd);
 
-                    RGImportedBufferDesc bd{};
-                    bd.name = "pick.readback";
-                    bd.buffer = _pickReadbackBuffer.buffer;
-                    bd.size = sizeof(uint32_t);
-                    bd.currentStage = VK_PIPELINE_STAGE_2_NONE;
-                    bd.currentAccess = 0;
-                    RGBufferHandle hPickBuf = _renderGraph->import_buffer(bd);
+                        _renderGraph->add_pass(
+                            "PickReadback",
+                            RGPassType::Transfer,
+                            [hID, hPickBuf](RGPassBuilder &builder, EngineContext *)
+                            {
+                                builder.read(hID, RGImageUsage::TransferSrc);
+                                builder.write_buffer(hPickBuf, RGBufferUsage::TransferDst);
+                            },
+                            [this, hID, hPickBuf](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *)
+                            {
+                                VkImage idImage = res.image(hID);
+                                VkBuffer dst = res.buffer(hPickBuf);
+                                if (idImage == VK_NULL_HANDLE || dst == VK_NULL_HANDLE) return;
 
-                    _renderGraph->add_pass(
-                        "PickReadback",
-                        RGPassType::Transfer,
-                        [hID, hPickBuf](RGPassBuilder &builder, EngineContext *)
-                        {
-                            builder.read(hID, RGImageUsage::TransferSrc);
-                            builder.write_buffer(hPickBuf, RGBufferUsage::TransferDst);
-                        },
-                        [this, hID, hPickBuf](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *)
-                        {
-                            VkImage idImage = res.image(hID);
-                            VkBuffer dst = res.buffer(hPickBuf);
-                            if (idImage == VK_NULL_HANDLE || dst == VK_NULL_HANDLE) return;
+                                VkBufferImageCopy region{};
+                                region.bufferOffset = 0;
+                                region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                                region.imageSubresource.mipLevel = 0;
+                                region.imageSubresource.baseArrayLayer = 0;
+                                region.imageSubresource.layerCount = 1;
+                                region.imageOffset = { static_cast<int32_t>(_pendingPick.idCoords.x),
+                                                       static_cast<int32_t>(_pendingPick.idCoords.y),
+                                                       0 };
+                                region.imageExtent = {1, 1, 1};
 
-                            VkBufferImageCopy region{};
-                            region.bufferOffset = 0;
-                            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                            region.imageSubresource.mipLevel = 0;
-                            region.imageSubresource.baseArrayLayer = 0;
-                            region.imageSubresource.layerCount = 1;
-                            region.imageOffset = { static_cast<int32_t>(_pendingPick.idCoords.x),
-                                                   static_cast<int32_t>(_pendingPick.idCoords.y),
-                                                   0 };
-                            region.imageExtent = {1, 1, 1};
+                                vkCmdCopyImageToBuffer(cmd,
+                                                       idImage,
+                                                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                                       dst,
+                                                       1,
+                                                       &region);
+                            });
 
-                            vkCmdCopyImageToBuffer(cmd,
-                                                   idImage,
-                                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                                   dst,
-                                                   1,
-                                                   &region);
-                        });
-
-                    _pickResultPending = true;
-                    _pendingPick.active = false;
+                        _pickResultPending = true;
+                        _pendingPick.active = false;
+                    }
                 }
             }
             if (auto *lighting = _renderPassManager->getPass<LightingPass>())

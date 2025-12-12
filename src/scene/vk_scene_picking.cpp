@@ -1,6 +1,7 @@
 #include "vk_scene.h"
 
 #include "core/device/swapchain.h"
+#include "core/device/images.h"
 #include "core/context.h"
 #include "mesh_bvh.h"
 
@@ -433,18 +434,34 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
         return false;
     }
 
-    VkExtent2D extent = swapchain->windowExtent();
-    if (extent.width == 0 || extent.height == 0)
+    VkExtent2D dstExtent = swapchain->windowExtent();
+    if (dstExtent.width == 0 || dstExtent.height == 0)
     {
         return false;
     }
 
-    float width = static_cast<float>(extent.width);
-    float height = static_cast<float>(extent.height);
+    VkExtent2D logicalExtent{ kRenderWidth, kRenderHeight };
+    if (_context)
+    {
+        VkExtent2D ctxLogical = _context->getLogicalRenderExtent();
+        if (ctxLogical.width > 0 && ctxLogical.height > 0)
+        {
+            logicalExtent = ctxLogical;
+        }
+    }
 
-    // Convert from window coordinates (top-left origin) to NDC in [-1, 1].
-    float ndcX = (2.0f * mousePosPixels.x / width) - 1.0f;
-    float ndcY = 1.0f - (2.0f * mousePosPixels.y / height);
+    glm::vec2 logicalPos{};
+    if (!vkutil::map_window_to_letterbox_src(mousePosPixels, logicalExtent, dstExtent, logicalPos))
+    {
+        return false;
+    }
+
+    float width = static_cast<float>(logicalExtent.width);
+    float height = static_cast<float>(logicalExtent.height);
+
+    // Convert from logical view coordinates (top-left origin) to NDC in [-1, 1].
+    float ndcX = (2.0f * logicalPos.x / width) - 1.0f;
+    float ndcY = 1.0f - (2.0f * logicalPos.y / height);
 
     float fovRad = glm::radians(mainCamera.fovDegrees);
     float tanHalfFov = std::tan(fovRad * 0.5f);
@@ -566,16 +583,58 @@ void SceneManager::selectRect(const glm::vec2 &p0, const glm::vec2 &p1, std::vec
         return;
     }
 
-    VkExtent2D extent = _context->getSwapchain()->windowExtent();
-    if (extent.width == 0 || extent.height == 0)
+    SwapchainManager *swapchain = _context->getSwapchain();
+    VkExtent2D dstExtent = swapchain->windowExtent();
+    if (dstExtent.width == 0 || dstExtent.height == 0)
     {
         return;
     }
 
-    float width = static_cast<float>(extent.width);
-    float height = static_cast<float>(extent.height);
+    VkExtent2D logicalExtent{ kRenderWidth, kRenderHeight };
+    VkExtent2D ctxLogical = _context->getLogicalRenderExtent();
+    if (ctxLogical.width > 0 && ctxLogical.height > 0)
+    {
+        logicalExtent = ctxLogical;
+    }
 
-    // Convert from window coordinates (top-left origin) to NDC in [-1, 1].
+    VkRect2D activeRect = vkutil::compute_letterbox_rect(logicalExtent, dstExtent);
+    if (activeRect.extent.width == 0 || activeRect.extent.height == 0)
+    {
+        return;
+    }
+
+    glm::vec2 selMin = glm::min(p0, p1);
+    glm::vec2 selMax = glm::max(p0, p1);
+
+    glm::vec2 activeMin{static_cast<float>(activeRect.offset.x),
+                        static_cast<float>(activeRect.offset.y)};
+    glm::vec2 activeMax{activeMin.x + static_cast<float>(activeRect.extent.width),
+                        activeMin.y + static_cast<float>(activeRect.extent.height)};
+
+    glm::vec2 clipMin = glm::max(selMin, activeMin);
+    glm::vec2 clipMax = glm::min(selMax, activeMax);
+    if (clipMax.x <= clipMin.x || clipMax.y <= clipMin.y)
+    {
+        return;
+    }
+
+    auto toLogical = [&](const glm::vec2 &p) -> glm::vec2
+    {
+        float localX = p.x - activeMin.x;
+        float localY = p.y - activeMin.y;
+        float u = localX / static_cast<float>(activeRect.extent.width);
+        float v = localY / static_cast<float>(activeRect.extent.height);
+        return glm::vec2{u * static_cast<float>(logicalExtent.width),
+                         v * static_cast<float>(logicalExtent.height)};
+    };
+
+    glm::vec2 logical0 = toLogical(clipMin);
+    glm::vec2 logical1 = toLogical(clipMax);
+
+    float width = static_cast<float>(logicalExtent.width);
+    float height = static_cast<float>(logicalExtent.height);
+
+    // Convert from logical view coordinates (top-left origin) to NDC in [-1, 1].
     auto toNdc = [&](const glm::vec2 &p) -> glm::vec2
     {
         float ndcX = (2.0f * p.x / width) - 1.0f;
@@ -583,8 +642,8 @@ void SceneManager::selectRect(const glm::vec2 &p0, const glm::vec2 &p1, std::vec
         return glm::vec2{ndcX, ndcY};
     };
 
-    glm::vec2 ndc0 = toNdc(p0);
-    glm::vec2 ndc1 = toNdc(p1);
+    glm::vec2 ndc0 = toNdc(logical0);
+    glm::vec2 ndc1 = toNdc(logical1);
     glm::vec2 ndcMin = glm::min(ndc0, ndc1);
     glm::vec2 ndcMax = glm::max(ndc0, ndc1);
 
