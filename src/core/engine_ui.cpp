@@ -51,7 +51,57 @@ namespace
         ImGui::InputFloat4("data4", reinterpret_cast<float *>(&selected.data.data4));
 
         ImGui::Separator();
-        ImGui::SliderFloat("Render Scale", &eng->renderScale, 0.3f, 1.f);
+        ImGui::TextUnformatted("Render Resolution");
+
+        static int pendingLogicalW = 0;
+        static int pendingLogicalH = 0;
+        if (pendingLogicalW <= 0 || pendingLogicalH <= 0)
+        {
+            pendingLogicalW = static_cast<int>(eng->_logicalRenderExtent.width);
+            pendingLogicalH = static_cast<int>(eng->_logicalRenderExtent.height);
+        }
+
+        ImGui::InputInt("Logical Width", &pendingLogicalW);
+        ImGui::InputInt("Logical Height", &pendingLogicalH);
+
+        if (ImGui::Button("Apply Logical Resolution"))
+        {
+            uint32_t w = static_cast<uint32_t>(pendingLogicalW > 0 ? pendingLogicalW : 1);
+            uint32_t h = static_cast<uint32_t>(pendingLogicalH > 0 ? pendingLogicalH : 1);
+            eng->set_logical_render_extent(VkExtent2D{w, h});
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("720p"))
+        {
+            pendingLogicalW = 1280;
+            pendingLogicalH = 720;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("1080p"))
+        {
+            pendingLogicalW = 1920;
+            pendingLogicalH = 1080;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("1440p"))
+        {
+            pendingLogicalW = 2560;
+            pendingLogicalH = 1440;
+        }
+
+        static float pendingScale = 1.0f;
+        if (!ImGui::IsAnyItemActive())
+        {
+            pendingScale = eng->renderScale;
+        }
+        bool scaleChanged = ImGui::SliderFloat("Render Scale", &pendingScale, 0.25f, 2.0f);
+        bool applyScale = scaleChanged && ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::SameLine();
+        applyScale = ImGui::Button("Apply Scale") || applyScale;
+        if (applyScale)
+        {
+            eng->set_render_scale(pendingScale);
+        }
     }
 
     // IBL test grid spawner (spheres varying metallic/roughness)

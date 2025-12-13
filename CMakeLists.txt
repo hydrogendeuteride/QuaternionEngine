@@ -10,6 +10,10 @@ endif()
 
 find_package(Vulkan REQUIRED)
 
+# Third-party deps are vendored; keep builds offline-friendly by default.
+# BVH2's CMake enables tests by default, which would FetchContent googletest.
+set(BVH2_ENABLE_TESTS OFF CACHE BOOL "Disable BVH2 tests (offline builds)" FORCE)
+
 add_subdirectory(third_party)
 
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")

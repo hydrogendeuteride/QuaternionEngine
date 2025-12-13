@@ -18,6 +18,7 @@ public:
     void create_swapchain(uint32_t width, uint32_t height);
     void destroy_swapchain() const;
     void resize_swapchain(struct SDL_Window *window);
+    void resize_render_targets(VkExtent2D renderExtent);
 
     VkSwapchainKHR swapchain() const { return _swapchain; }
     VkFormat swapchainImageFormat() const { return _swapchainImageFormat; }
@@ -35,6 +36,8 @@ public:
     AllocatedImage gBufferExtra() const { return _gBufferExtra; }
     AllocatedImage idBuffer() const { return _idBuffer; }
     VkExtent2D windowExtent() const { return _windowExtent; }
+    VkExtent2D renderExtent() const { return _renderExtent; }
+    void set_render_extent(VkExtent2D extent) { _renderExtent = extent; }
 
     bool resize_requested{false};
 
@@ -46,6 +49,7 @@ private:
     VkFormat _swapchainImageFormat = {};
     VkExtent2D _swapchainExtent = {};
     VkExtent2D _windowExtent{kRenderWidth, kRenderHeight};
+    VkExtent2D _renderExtent{kRenderWidth, kRenderHeight};
 
     std::vector<VkImage> _swapchainImages;
     std::vector<VkImageView> _swapchainImageViews;

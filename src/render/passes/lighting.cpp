@@ -45,22 +45,6 @@ void LightingPass::init(EngineContext *context)
             nullptr, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
     }
 
-    // Allocate and write GBuffer descriptor set
-    _gBufferInputDescriptorSet = _context->getDescriptors()->allocate(
-        _context->getDevice()->device(), _gBufferInputDescriptorLayout);
-    {
-        DescriptorWriter writer;
-        writer.write_image(0, _context->getSwapchain()->gBufferPosition().imageView, _context->getSamplers()->defaultLinear(),
-                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.write_image(1, _context->getSwapchain()->gBufferNormal().imageView, _context->getSamplers()->defaultLinear(),
-                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.write_image(2, _context->getSwapchain()->gBufferAlbedo().imageView, _context->getSamplers()->defaultLinear(),
-                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.write_image(3, _context->getSwapchain()->gBufferExtra().imageView, _context->getSamplers()->defaultLinear(),
-                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.update_set(_context->getDevice()->device(), _gBufferInputDescriptorSet);
-    }
-
     // Shadow map descriptor layout (set = 2, updated per-frame). Use array of cascades
     {
         DescriptorLayoutBuilder builder;
@@ -164,9 +148,9 @@ void LightingPass::register_graph(RenderGraph *graph,
 
             builder.write_color(drawHandle);
         },
-        [this, drawHandle, shadowCascades](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *ctx)
+        [this, drawHandle, gbufferPosition, gbufferNormal, gbufferAlbedo, gbufferExtra, shadowCascades](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *ctx)
         {
-            draw_lighting(cmd, ctx, res, drawHandle, shadowCascades);
+            draw_lighting(cmd, ctx, res, drawHandle, gbufferPosition, gbufferNormal, gbufferAlbedo, gbufferExtra, shadowCascades);
         });
 }
 
@@ -174,6 +158,10 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
                                  EngineContext *context,
                                  const RGPassResources &resources,
                                  RGImageHandle drawHandle,
+                                 RGImageHandle gbufferPosition,
+                                 RGImageHandle gbufferNormal,
+                                 RGImageHandle gbufferAlbedo,
+                                 RGImageHandle gbufferExtra,
                                  std::span<RGImageHandle> shadowCascades)
 {
     EngineContext *ctxLocal = context ? context : _context;
@@ -187,6 +175,15 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
 
     VkImageView drawView = resources.image_view(drawHandle);
     if (drawView == VK_NULL_HANDLE) return;
+
+    VkImageView posView = resources.image_view(gbufferPosition);
+    VkImageView nrmView = resources.image_view(gbufferNormal);
+    VkImageView albView = resources.image_view(gbufferAlbedo);
+    VkImageView extView = resources.image_view(gbufferExtra);
+    if (posView == VK_NULL_HANDLE || nrmView == VK_NULL_HANDLE || albView == VK_NULL_HANDLE || extView == VK_NULL_HANDLE)
+    {
+        return;
+    }
 
     // Choose RT only if TLAS is valid; otherwise fall back to non-RT.
     const bool haveRTFeatures = ctxLocal->getDevice()->supportsAccelerationStructure();
@@ -235,11 +232,27 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
     }
     writer.update_set(deviceManager->device(), globalDescriptor);
 
+    // Allocate and write GBuffer descriptor set for this frame (set = 1).
+    VkDescriptorSet gbufferSet = ctxLocal->currentFrame->_frameDescriptors.allocate(
+        deviceManager->device(), _gBufferInputDescriptorLayout);
+    {
+        DescriptorWriter gbw;
+        gbw.write_image(0, posView, ctxLocal->getSamplers()->defaultLinear(),
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        gbw.write_image(1, nrmView, ctxLocal->getSamplers()->defaultLinear(),
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        gbw.write_image(2, albView, ctxLocal->getSamplers()->defaultLinear(),
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        gbw.write_image(3, extView, ctxLocal->getSamplers()->defaultLinear(),
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        gbw.update_set(deviceManager->device(), gbufferSet);
+    }
+
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &globalDescriptor, 0,
                             nullptr);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 1, 1,
-                            &_gBufferInputDescriptorSet, 0, nullptr);
+                            &gbufferSet, 0, nullptr);
 
     // Allocate and write shadow descriptor set for this frame (set = 2).
     // When RT is enabled, TLAS is bound in the global set at (set=0, binding=1)

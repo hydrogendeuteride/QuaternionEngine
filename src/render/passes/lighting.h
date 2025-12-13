@@ -27,7 +27,6 @@ private:
     EngineContext *_context = nullptr;
 
     VkDescriptorSetLayout _gBufferInputDescriptorLayout = VK_NULL_HANDLE;
-    VkDescriptorSet _gBufferInputDescriptorSet = VK_NULL_HANDLE;
     VkDescriptorSetLayout _shadowDescriptorLayout = VK_NULL_HANDLE; // set=2 (array)
     // Fallbacks if IBL is not loaded
     AllocatedImage _fallbackIbl2D{};       // 1x1 black
@@ -41,6 +40,10 @@ private:
                        EngineContext *context,
                        const class RGPassResources &resources,
                        RGImageHandle drawHandle,
+                       RGImageHandle gbufferPosition,
+                       RGImageHandle gbufferNormal,
+                       RGImageHandle gbufferAlbedo,
+                       RGImageHandle gbufferExtra,
                        std::span<RGImageHandle> shadowCascades);
 
     DeletionQueue _deletionQueue;

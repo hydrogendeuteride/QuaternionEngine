@@ -30,6 +30,7 @@
 #include <filesystem>
 #include <iostream>
 #include <cmath>
+#include <algorithm>
 #include <glm/gtx/transform.hpp>
 
 #include "config.h"
@@ -57,6 +58,28 @@
 void vk_engine_draw_debug_ui(VulkanEngine *eng);
 
 VulkanEngine *loadedEngine = nullptr;
+
+static VkExtent2D clamp_nonzero_extent(VkExtent2D extent)
+{
+    if (extent.width == 0) extent.width = 1;
+    if (extent.height == 0) extent.height = 1;
+    return extent;
+}
+
+static VkExtent2D scaled_extent(VkExtent2D logicalExtent, float scale)
+{
+    logicalExtent = clamp_nonzero_extent(logicalExtent);
+    if (!std::isfinite(scale)) scale = 1.0f;
+    scale = std::clamp(scale, 0.1f, 4.0f);
+
+    const float fw = static_cast<float>(logicalExtent.width) * scale;
+    const float fh = static_cast<float>(logicalExtent.height) * scale;
+
+    VkExtent2D out{};
+    out.width = static_cast<uint32_t>(std::max(1.0f, std::floor(fw)));
+    out.height = static_cast<uint32_t>(std::max(1.0f, std::floor(fh)));
+    return out;
+}
 
 static bool file_exists_nothrow(const std::string &path)
 {
@@ -146,9 +169,11 @@ void VulkanEngine::init()
     // We initialize SDL and create a window with it.
     SDL_Init(SDL_INIT_VIDEO);
 
-    // Initialize fixed logical render resolution for the engine.
+    // Initialize default logical render resolution for the engine.
     _logicalRenderExtent.width = kRenderWidth;
     _logicalRenderExtent.height = kRenderHeight;
+    _logicalRenderExtent = clamp_nonzero_extent(_logicalRenderExtent);
+    _drawExtent = scaled_extent(_logicalRenderExtent, renderScale);
 
     constexpr auto window_flags = static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 
@@ -190,6 +215,7 @@ void VulkanEngine::init()
     _context->logicalRenderExtent = _logicalRenderExtent;
 
     _swapchainManager->init(_deviceManager.get(), _resourceManager.get());
+    _swapchainManager->set_render_extent(_drawExtent);
     _swapchainManager->init_swapchain();
 
     // Fill remaining context pointers now that managers exist
@@ -304,6 +330,45 @@ void VulkanEngine::init()
 
     //everything went fine
     _isInitialized = true;
+}
+
+void VulkanEngine::set_logical_render_extent(VkExtent2D extent)
+{
+    extent = clamp_nonzero_extent(extent);
+    if (_logicalRenderExtent.width == extent.width && _logicalRenderExtent.height == extent.height)
+    {
+        return;
+    }
+
+    _logicalRenderExtent = extent;
+    if (_context)
+    {
+        _context->logicalRenderExtent = _logicalRenderExtent;
+    }
+
+    VkExtent2D newDraw = scaled_extent(_logicalRenderExtent, renderScale);
+    if (_swapchainManager)
+    {
+        _swapchainManager->resize_render_targets(newDraw);
+    }
+}
+
+void VulkanEngine::set_render_scale(float scale)
+{
+    if (!std::isfinite(scale)) scale = 1.0f;
+    scale = std::clamp(scale, 0.1f, 4.0f);
+    if (std::abs(renderScale - scale) < 1e-4f)
+    {
+        return;
+    }
+
+    renderScale = scale;
+
+    VkExtent2D newDraw = scaled_extent(_logicalRenderExtent, renderScale);
+    if (_swapchainManager)
+    {
+        _swapchainManager->resize_render_targets(newDraw);
+    }
 }
 
 void VulkanEngine::init_default_data()
@@ -758,6 +823,17 @@ void VulkanEngine::draw()
         }
     }
 
+    // Compute desired internal render-target extent from logical extent + render scale.
+    _drawExtent = scaled_extent(_logicalRenderExtent, renderScale);
+    if (_swapchainManager)
+    {
+        VkExtent2D current = _swapchainManager->renderExtent();
+        if (current.width != _drawExtent.width || current.height != _drawExtent.height)
+        {
+            _swapchainManager->resize_render_targets(_drawExtent);
+        }
+    }
+
     uint32_t swapchainImageIndex;
 
     VkResult e = vkAcquireNextImageKHR(_deviceManager->device(),
@@ -781,11 +857,6 @@ void VulkanEngine::draw()
     {
         VK_CHECK(e);
     }
-
-    // Fixed logical render resolution (letterboxed): draw extent is derived
-    // from the engine's logical render size instead of the swapchain/window.
-    _drawExtent.width = static_cast<uint32_t>(static_cast<float>(_logicalRenderExtent.width) * renderScale);
-    _drawExtent.height = static_cast<uint32_t>(static_cast<float>(_logicalRenderExtent.height) * renderScale);
 
     VK_CHECK(vkResetFences(_deviceManager->device(), 1, &get_current_frame()._renderFence));
 

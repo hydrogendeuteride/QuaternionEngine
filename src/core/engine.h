@@ -203,6 +203,12 @@ public:
 	//run main loop
 	void run();
 
+    // Rendering resolution controls:
+    // - logicalRenderExtent controls camera aspect and picking (letterboxed view).
+    // - renderScale controls the internal render target pixel count (logical * scale).
+    void set_logical_render_extent(VkExtent2D extent);
+    void set_render_scale(float scale);
+
     // Query a conservative streaming texture budget for the texture cache.
     size_t query_texture_budget_bytes() const;
 
