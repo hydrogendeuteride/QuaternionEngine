@@ -1222,11 +1222,14 @@ void VulkanEngine::run()
             }
             if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT)
             {
-                _dragState.buttonDown = true;
-                _dragState.dragging = false;
-                _dragState.start = glm::vec2{static_cast<float>(e.button.x),
-                                             static_cast<float>(e.button.y)};
-                _dragState.current = _dragState.start;
+                if (!ImGui::GetIO().WantCaptureMouse)
+                {
+                    _dragState.buttonDown = true;
+                    _dragState.dragging = false;
+                    _dragState.start = glm::vec2{static_cast<float>(e.button.x),
+                                                 static_cast<float>(e.button.y)};
+                    _dragState.current = _dragState.start;
+                }
             }
             if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT)
             {
