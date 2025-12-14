@@ -11,8 +11,11 @@
 #include <thread>
 
 #include <glm/mat4x4.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/vec3.hpp>
 
 #include "scene/vk_loader.h"
+#include "core/world.h"
 #include "core/assets/texture_cache.h"
 
 class VulkanEngine;
@@ -41,6 +44,13 @@ public:
                           const glm::mat4 &transform,
                           bool preload_textures = false);
 
+    JobID load_gltf_async(const std::string &scene_name,
+                          const std::string &model_relative_path,
+                          const WorldVec3 &translation_world,
+                          const glm::quat &rotation,
+                          const glm::vec3 &scale,
+                          bool preload_textures = false);
+
     bool get_job_status(JobID id, JobState &out_state, float &out_progress, std::string *out_error = nullptr);
 
     // Main-thread integration: commit completed jobs into the SceneManager.
@@ -66,6 +76,10 @@ private:
         std::string scene_name;
         std::string model_relative_path;
         glm::mat4 transform{1.0f};
+        bool has_world_trs{false};
+        WorldVec3 translation_world{0.0, 0.0, 0.0};
+        glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+        glm::vec3 scale{1.0f};
         bool preload_textures{false};
 
         std::shared_ptr<LoadedGLTF> scene;

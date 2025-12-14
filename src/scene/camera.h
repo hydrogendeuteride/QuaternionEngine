@@ -7,8 +7,8 @@
 
 class Camera {
 public:
-    glm::vec3 velocity;
-    glm::vec3 position;
+    glm::vec3 velocity{0.0f, 0.0f, 0.0f};
+    glm::dvec3 position_world{0.0, 0.0, 0.0};
     // Orientation stored as a quaternion (local -> world).
     glm::quat orientation { 1.0f, 0.0f, 0.0f, 0.0f };
 
@@ -20,8 +20,8 @@ public:
     // Field of view in degrees for projection
     float fovDegrees { 50.f };
 
-    glm::mat4 getViewMatrix();
-    glm::mat4 getRotationMatrix();
+    glm::mat4 getViewMatrix(const glm::vec3 &position_local) const;
+    glm::mat4 getRotationMatrix() const;
 
     void processSDLEvent(SDL_Event& e);
 

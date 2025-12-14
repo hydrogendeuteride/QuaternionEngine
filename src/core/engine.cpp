@@ -587,6 +587,36 @@ uint32_t VulkanEngine::loadGLTFAsync(const std::string &sceneName,
     return _asyncLoader->load_gltf_async(sceneName, resolvedPath, transform, preloadTextures);
 }
 
+uint32_t VulkanEngine::loadGLTFAsync(const std::string &sceneName,
+                                     const std::string &modelRelativePath,
+                                     const WorldVec3 &translationWorld,
+                                     const glm::quat &rotation,
+                                     const glm::vec3 &scale,
+                                     bool preloadTextures)
+{
+    if (!_asyncLoader || !_assetManager || !_sceneManager)
+    {
+        return 0;
+    }
+
+    const std::string resolvedPath = _assetManager->modelPath(modelRelativePath);
+    if (!file_exists_nothrow(resolvedPath))
+    {
+        fmt::println("[Engine] Failed to enqueue async glTF load for scene '{}' – model file not found (requested='{}', resolved='{}')",
+                     sceneName,
+                     modelRelativePath,
+                     resolvedPath);
+        return 0;
+    }
+
+    return _asyncLoader->load_gltf_async(sceneName,
+                                         resolvedPath,
+                                         translationWorld,
+                                         rotation,
+                                         scale,
+                                         preloadTextures);
+}
+
 void VulkanEngine::preloadInstanceTextures(const std::string &instanceName)
 {
     if (!_textureCache || !_sceneManager)
@@ -746,16 +776,16 @@ void VulkanEngine::draw()
     // Update IBL based on camera position and user-defined reflection volumes.
     if (_iblManager && _sceneManager)
     {
-        glm::vec3 camPos = _sceneManager->getMainCamera().position;
+        WorldVec3 camPosWorld = _sceneManager->getMainCamera().position_world;
         int newVolume = -1;
         for (size_t i = 0; i < _iblVolumes.size(); ++i)
         {
             const IBLVolume &v = _iblVolumes[i];
             if (!v.enabled) continue;
-            glm::vec3 local = camPos - v.center;
-            if (std::abs(local.x) <= v.halfExtents.x &&
-                std::abs(local.y) <= v.halfExtents.y &&
-                std::abs(local.z) <= v.halfExtents.z)
+            WorldVec3 local = camPosWorld - v.center_world;
+            if (std::abs(local.x) <= static_cast<double>(v.halfExtents.x) &&
+                std::abs(local.y) <= static_cast<double>(v.halfExtents.y) &&
+                std::abs(local.z) <= static_cast<double>(v.halfExtents.z))
             {
                 newVolume = static_cast<int>(i);
                 break;
@@ -800,7 +830,7 @@ void VulkanEngine::draw()
     if (_sceneManager && _mousePosPixels.x >= 0.0f && _mousePosPixels.y >= 0.0f)
     {
         RenderObject hoverObj{};
-        glm::vec3 hoverPos{};
+        WorldVec3 hoverPos{};
         if (_sceneManager->pick(_mousePosPixels, hoverObj, hoverPos))
         {
             _hoverPick.mesh = hoverObj.sourceMesh;
@@ -1225,7 +1255,7 @@ void VulkanEngine::run()
                         if (_sceneManager)
                         {
                             RenderObject hitObject{};
-                            glm::vec3 hitPos{};
+                            WorldVec3 hitPos{};
                             if (_sceneManager->pick(releasePos, hitObject, hitPos))
                             {
                                 _lastPick.mesh = hitObject.sourceMesh;
@@ -1269,8 +1299,8 @@ void VulkanEngine::run()
                             info.ownerType = obj.ownerType;
                             info.ownerName = obj.ownerName;
                             // Use bounds origin transformed to world as a representative point.
-                            glm::vec3 centerWorld = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.0f));
-                            info.worldPos = centerWorld;
+                            glm::vec3 centerLocal = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.0f));
+                            info.worldPos = local_to_world(centerLocal, _sceneManager->get_world_origin());
                             info.worldTransform = obj.transform;
                             info.firstIndex = obj.firstIndex;
                             info.indexCount = obj.indexCount;
@@ -1365,7 +1395,8 @@ void VulkanEngine::run()
                 if (_sceneManager->resolveObjectID(pickedID, picked))
                 {
                     // Fallback hit position: object origin in world space (can refine later)
-                    glm::vec3 fallbackPos = glm::vec3(picked.transform[3]);
+                    glm::vec3 fallbackLocal = glm::vec3(picked.transform[3]);
+                    WorldVec3 fallbackPos = local_to_world(fallbackLocal, _sceneManager->get_world_origin());
                     _lastPick.mesh = picked.sourceMesh;
                     _lastPick.scene = picked.sourceScene;
                     _lastPick.node = picked.sourceNode;

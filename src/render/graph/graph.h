@@ -36,7 +36,6 @@ public:
 	RGBufferHandle create_buffer(const RGBufferDesc& desc);
 
 	// Pass builder API
-struct Pass; // fwd
 	using RecordCallback = std::function<void(VkCommandBuffer cmd, const class RGPassResources& res, EngineContext* ctx)>;
 	using BuildCallback  = std::function<void(class RGPassBuilder& b, EngineContext* ctx)>;
 

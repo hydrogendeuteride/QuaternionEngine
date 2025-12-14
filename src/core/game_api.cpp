@@ -37,6 +37,25 @@ Transform Transform::from_matrix(const glm::mat4& m)
     return t;
 }
 
+glm::mat4 TransformD::to_matrix() const
+{
+    glm::mat4 T = glm::translate(glm::mat4(1.0f), glm::vec3(position));
+    glm::mat4 R = glm::mat4_cast(rotation);
+    glm::mat4 S = glm::scale(glm::mat4(1.0f), scale);
+    return T * R * S;
+}
+
+TransformD TransformD::from_matrix(const glm::mat4& m)
+{
+    TransformD t;
+    glm::vec3 skew;
+    glm::vec4 perspective;
+    glm::vec3 pos{};
+    glm::decompose(m, t.scale, t.rotation, pos, skew, perspective);
+    t.position = glm::dvec3(pos);
+    return t;
+}
+
 // ============================================================================
 // Engine Implementation
 // ============================================================================
@@ -254,7 +273,19 @@ void Engine::set_global_ibl_paths(const IBLPaths& paths)
 size_t Engine::add_ibl_volume(const IBLVolume& volume)
 {
     VulkanEngine::IBLVolume v;
-    v.center = volume.center;
+    v.center_world = WorldVec3(volume.center);
+    v.halfExtents = volume.halfExtents;
+    v.paths = to_internal_ibl_paths(volume.paths);
+    v.enabled = volume.enabled;
+
+    _engine->_iblVolumes.push_back(v);
+    return _engine->_iblVolumes.size() - 1;
+}
+
+size_t Engine::add_ibl_volume(const IBLVolumeD& volume)
+{
+    VulkanEngine::IBLVolume v;
+    v.center_world = WorldVec3(volume.center);
     v.halfExtents = volume.halfExtents;
     v.paths = to_internal_ibl_paths(volume.paths);
     v.enabled = volume.enabled;
@@ -285,7 +316,19 @@ bool Engine::get_ibl_volume(size_t index, IBLVolume& out) const
     if (index >= _engine->_iblVolumes.size()) return false;
 
     const auto& v = _engine->_iblVolumes[index];
-    out.center = v.center;
+    out.center = glm::vec3(v.center_world);
+    out.halfExtents = v.halfExtents;
+    out.paths = from_internal_ibl_paths(v.paths);
+    out.enabled = v.enabled;
+    return true;
+}
+
+bool Engine::get_ibl_volume(size_t index, IBLVolumeD& out) const
+{
+    if (index >= _engine->_iblVolumes.size()) return false;
+
+    const auto& v = _engine->_iblVolumes[index];
+    out.center = v.center_world;
     out.halfExtents = v.halfExtents;
     out.paths = from_internal_ibl_paths(v.paths);
     out.enabled = v.enabled;
@@ -297,7 +340,19 @@ bool Engine::set_ibl_volume(size_t index, const IBLVolume& volume)
     if (index >= _engine->_iblVolumes.size()) return false;
 
     auto& v = _engine->_iblVolumes[index];
-    v.center = volume.center;
+    v.center_world = WorldVec3(volume.center);
+    v.halfExtents = volume.halfExtents;
+    v.paths = to_internal_ibl_paths(volume.paths);
+    v.enabled = volume.enabled;
+    return true;
+}
+
+bool Engine::set_ibl_volume(size_t index, const IBLVolumeD& volume)
+{
+    if (index >= _engine->_iblVolumes.size()) return false;
+
+    auto& v = _engine->_iblVolumes[index];
+    v.center_world = WorldVec3(volume.center);
     v.halfExtents = volume.halfExtents;
     v.paths = to_internal_ibl_paths(volume.paths);
     v.enabled = volume.enabled;
@@ -332,12 +387,47 @@ bool Engine::add_gltf_instance(const std::string& name,
     return _engine->addGLTFInstance(name, modelPath, transform.to_matrix(), preloadTextures);
 }
 
+bool Engine::add_gltf_instance(const std::string& name,
+                               const std::string& modelPath,
+                               const TransformD& transform,
+                               bool preloadTextures)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    // Add the instance first (GPU resources), then apply the authoritative world transform in double.
+    if (!_engine->addGLTFInstance(name, modelPath, glm::mat4(1.0f), preloadTextures))
+    {
+        return false;
+    }
+
+    return _engine->_sceneManager->setGLTFInstanceTRSWorld(name,
+                                                          WorldVec3(transform.position),
+                                                          transform.rotation,
+                                                          transform.scale);
+}
+
 uint32_t Engine::add_gltf_instance_async(const std::string& name,
                                          const std::string& modelPath,
                                          const Transform& transform,
                                          bool preloadTextures)
 {
     return _engine->loadGLTFAsync(name, modelPath, transform.to_matrix(), preloadTextures);
+}
+
+uint32_t Engine::add_gltf_instance_async(const std::string& name,
+                                         const std::string& modelPath,
+                                         const TransformD& transform,
+                                         bool preloadTextures)
+{
+    return _engine->loadGLTFAsync(name,
+                                 modelPath,
+                                 WorldVec3(transform.position),
+                                 transform.rotation,
+                                 transform.scale,
+                                 preloadTextures);
 }
 
 bool Engine::remove_gltf_instance(const std::string& name)
@@ -358,10 +448,37 @@ bool Engine::get_gltf_instance_transform(const std::string& name, Transform& out
     return false;
 }
 
+bool Engine::get_gltf_instance_transform(const std::string& name, TransformD& out) const
+{
+    if (!_engine->_sceneManager) return false;
+
+    WorldVec3 t{};
+    glm::quat r{};
+    glm::vec3 s{};
+    if (_engine->_sceneManager->getGLTFInstanceTRSWorld(name, t, r, s))
+    {
+        out.position = glm::dvec3(t);
+        out.rotation = r;
+        out.scale = s;
+        return true;
+    }
+    return false;
+}
+
 bool Engine::set_gltf_instance_transform(const std::string& name, const Transform& transform)
 {
     return _engine->_sceneManager
            ? _engine->_sceneManager->setGLTFInstanceTransform(name, transform.to_matrix())
+           : false;
+}
+
+bool Engine::set_gltf_instance_transform(const std::string& name, const TransformD& transform)
+{
+    return _engine->_sceneManager
+           ? _engine->_sceneManager->setGLTFInstanceTRSWorld(name,
+                                                            WorldVec3(transform.position),
+                                                            transform.rotation,
+                                                            transform.scale)
            : false;
 }
 
@@ -382,6 +499,32 @@ bool Engine::add_primitive_instance(const std::string& name,
     return _engine->addPrimitiveInstance(name, geomType, transform.to_matrix());
 }
 
+bool Engine::add_primitive_instance(const std::string& name,
+                                    PrimitiveType type,
+                                    const TransformD& transform)
+{
+    AssetManager::MeshGeometryDesc::Type geomType;
+    switch (type)
+    {
+    case PrimitiveType::Cube:    geomType = AssetManager::MeshGeometryDesc::Type::Cube; break;
+    case PrimitiveType::Sphere:  geomType = AssetManager::MeshGeometryDesc::Type::Sphere; break;
+    case PrimitiveType::Plane:   geomType = AssetManager::MeshGeometryDesc::Type::Plane; break;
+    case PrimitiveType::Capsule: geomType = AssetManager::MeshGeometryDesc::Type::Capsule; break;
+    default: return false;
+    }
+
+    if (!_engine->addPrimitiveInstance(name, geomType, glm::mat4(1.0f)))
+    {
+        return false;
+    }
+    return _engine->_sceneManager
+           ? _engine->_sceneManager->setMeshInstanceTRSWorld(name,
+                                                            WorldVec3(transform.position),
+                                                            transform.rotation,
+                                                            transform.scale)
+           : false;
+}
+
 bool Engine::remove_mesh_instance(const std::string& name)
 {
     return _engine->_sceneManager ? _engine->_sceneManager->removeMeshInstance(name) : false;
@@ -400,10 +543,37 @@ bool Engine::get_mesh_instance_transform(const std::string& name, Transform& out
     return false;
 }
 
+bool Engine::get_mesh_instance_transform(const std::string& name, TransformD& out) const
+{
+    if (!_engine->_sceneManager) return false;
+
+    WorldVec3 t{};
+    glm::quat r{};
+    glm::vec3 s{};
+    if (_engine->_sceneManager->getMeshInstanceTRSWorld(name, t, r, s))
+    {
+        out.position = glm::dvec3(t);
+        out.rotation = r;
+        out.scale = s;
+        return true;
+    }
+    return false;
+}
+
 bool Engine::set_mesh_instance_transform(const std::string& name, const Transform& transform)
 {
     return _engine->_sceneManager
            ? _engine->_sceneManager->setMeshInstanceTransform(name, transform.to_matrix())
+           : false;
+}
+
+bool Engine::set_mesh_instance_transform(const std::string& name, const TransformD& transform)
+{
+    return _engine->_sceneManager
+           ? _engine->_sceneManager->setMeshInstanceTRSWorld(name,
+                                                            WorldVec3(transform.position),
+                                                            transform.rotation,
+                                                            transform.scale)
            : false;
 }
 
@@ -477,7 +647,22 @@ size_t Engine::add_point_light(const PointLight& light)
     if (!_engine->_sceneManager) return 0;
 
     SceneManager::PointLight pl;
-    pl.position = light.position;
+    pl.position_world = WorldVec3(light.position);
+    pl.radius = light.radius;
+    pl.color = light.color;
+    pl.intensity = light.intensity;
+
+    size_t idx = _engine->_sceneManager->getPointLightCount();
+    _engine->_sceneManager->addPointLight(pl);
+    return idx;
+}
+
+size_t Engine::add_point_light(const PointLightD& light)
+{
+    if (!_engine->_sceneManager) return 0;
+
+    SceneManager::PointLight pl;
+    pl.position_world = WorldVec3(light.position);
     pl.radius = light.radius;
     pl.color = light.color;
     pl.intensity = light.intensity;
@@ -499,7 +684,23 @@ bool Engine::get_point_light(size_t index, PointLight& out) const
     SceneManager::PointLight pl;
     if (_engine->_sceneManager->getPointLight(index, pl))
     {
-        out.position = pl.position;
+        out.position = glm::vec3(pl.position_world);
+        out.radius = pl.radius;
+        out.color = pl.color;
+        out.intensity = pl.intensity;
+        return true;
+    }
+    return false;
+}
+
+bool Engine::get_point_light(size_t index, PointLightD& out) const
+{
+    if (!_engine->_sceneManager) return false;
+
+    SceneManager::PointLight pl;
+    if (_engine->_sceneManager->getPointLight(index, pl))
+    {
+        out.position = pl.position_world;
         out.radius = pl.radius;
         out.color = pl.color;
         out.intensity = pl.intensity;
@@ -513,7 +714,20 @@ bool Engine::set_point_light(size_t index, const PointLight& light)
     if (!_engine->_sceneManager) return false;
 
     SceneManager::PointLight pl;
-    pl.position = light.position;
+    pl.position_world = WorldVec3(light.position);
+    pl.radius = light.radius;
+    pl.color = light.color;
+    pl.intensity = light.intensity;
+
+    return _engine->_sceneManager->setPointLight(index, pl);
+}
+
+bool Engine::set_point_light(size_t index, const PointLightD& light)
+{
+    if (!_engine->_sceneManager) return false;
+
+    SceneManager::PointLight pl;
+    pl.position_world = WorldVec3(light.position);
     pl.radius = light.radius;
     pl.color = light.color;
     pl.intensity = light.intensity;
@@ -748,7 +962,7 @@ void Engine::set_camera_position(const glm::vec3& position)
 {
     if (_engine->_sceneManager)
     {
-        _engine->_sceneManager->getMainCamera().position = position;
+        _engine->_sceneManager->getMainCamera().position_world = WorldVec3(position);
     }
 }
 
@@ -756,9 +970,26 @@ glm::vec3 Engine::get_camera_position() const
 {
     if (_engine->_sceneManager)
     {
-        return _engine->_sceneManager->getMainCamera().position;
+        return glm::vec3(_engine->_sceneManager->getMainCamera().position_world);
     }
     return glm::vec3(0.0f);
+}
+
+void Engine::set_camera_position(const glm::dvec3& position)
+{
+    if (_engine->_sceneManager)
+    {
+        _engine->_sceneManager->getMainCamera().position_world = position;
+    }
+}
+
+glm::dvec3 Engine::get_camera_position_d() const
+{
+    if (_engine->_sceneManager)
+    {
+        return _engine->_sceneManager->getMainCamera().position_world;
+    }
+    return glm::dvec3(0.0);
 }
 
 void Engine::set_camera_rotation(float pitch, float yaw)
@@ -821,10 +1052,37 @@ void Engine::camera_look_at(const glm::vec3& target)
     if (!_engine->_sceneManager) return;
 
     Camera& cam = _engine->_sceneManager->getMainCamera();
-    glm::vec3 dir = glm::normalize(target - cam.position);
+    glm::vec3 dir = glm::normalize(target - glm::vec3(cam.position_world));
 
     // For a -Z forward convention, build a quaternion that rotates -Z into dir.
     // Use glm's lookAt-style helper via matrices, then convert to a quaternion.
+    glm::vec3 up(0.0f, 1.0f, 0.0f);
+    if (glm::length2(glm::cross(dir, up)) < 1e-6f)
+    {
+        up = glm::vec3(0.0f, 0.0f, 1.0f);
+    }
+
+    glm::vec3 f = dir;
+    glm::vec3 r = glm::normalize(glm::cross(up, f));
+    glm::vec3 u = glm::cross(f, r);
+
+    glm::mat3 rot;
+    rot[0] = r;
+    rot[1] = u;
+    rot[2] = -f; // -Z forward
+
+    cam.orientation = glm::quat_cast(rot);
+}
+
+void Engine::camera_look_at(const glm::dvec3& target)
+{
+    if (!_engine->_sceneManager) return;
+
+    Camera& cam = _engine->_sceneManager->getMainCamera();
+    glm::dvec3 dirD = glm::normalize(target - cam.position_world);
+    glm::vec3 dir = glm::normalize(glm::vec3(dirD));
+
+    // For a -Z forward convention, build a quaternion that rotates -Z into dir.
     glm::vec3 up(0.0f, 1.0f, 0.0f);
     if (glm::length2(glm::cross(dir, up)) < 1e-6f)
     {
@@ -902,6 +1160,15 @@ Stats Engine::get_stats() const
 Engine::PickResult Engine::get_last_pick() const
 {
     PickResult r;
+    r.valid = _engine->_lastPick.valid;
+    r.ownerName = _engine->_lastPick.ownerName;
+    r.worldPosition = glm::vec3(_engine->_lastPick.worldPos);
+    return r;
+}
+
+Engine::PickResultD Engine::get_last_pick_d() const
+{
+    PickResultD r;
     r.valid = _engine->_lastPick.valid;
     r.ownerName = _engine->_lastPick.ownerName;
     r.worldPosition = _engine->_lastPick.worldPos;

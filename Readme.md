@@ -16,9 +16,9 @@ Current structure:
 - SSR
 - FXAA
 - Bloom
+- Floating origin with double precision coordinate system
 
 Work-In-Progress
-- [ ] Floating origin with double precision coordinate system
 - [ ] Planet Rendering
 
 ## Build prequsites

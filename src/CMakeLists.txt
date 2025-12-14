@@ -4,6 +4,7 @@ add_executable (vulkan_engine
   main.cpp
   # core root
   core/types.h
+  core/world.h
   core/config.h
   core/context.h
   core/context.cpp

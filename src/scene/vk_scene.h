@@ -1,5 +1,6 @@
 #pragma once
 #include <core/types.h>
+#include <core/world.h>
 #include <scene/camera.h>
 #include <unordered_map>
 #include <memory>
@@ -67,10 +68,13 @@ public:
 
     Camera &getMainCamera() { return mainCamera; }
 
+    WorldVec3 get_world_origin() const { return _origin_world; }
+    glm::vec3 get_camera_local_position() const { return _camera_position_local; }
+
     // Ray-pick against current DrawContext using per-surface Bounds.
     // mousePosPixels is in window coordinates (SDL), origin at top-left.
     // Returns true if any object was hit, filling outObject and outWorldPos.
-    bool pick(const glm::vec2 &mousePosPixels, RenderObject &outObject, glm::vec3 &outWorldPos);
+    bool pick(const glm::vec2 &mousePosPixels, RenderObject &outObject, WorldVec3 &outWorldPos);
 
     // Resolve an object ID (from ID buffer) back to the RenderObject for
     // the most recently built DrawContext. Returns false if not found or id==0.
@@ -91,7 +95,7 @@ public:
     struct MeshInstance
     {
         std::shared_ptr<MeshAsset> mesh;
-        glm::vec3 translation{0.0f, 0.0f, 0.0f};
+        WorldVec3 translation_world{0.0, 0.0, 0.0};
         glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
         glm::vec3 scale{1.0f, 1.0f, 1.0f};
         std::optional<BoundsType> boundsTypeOverride;
@@ -102,6 +106,10 @@ public:
                          std::optional<BoundsType> boundsType = {});
     bool getMeshInstanceTransform(const std::string &name, glm::mat4 &outTransform);
     bool setMeshInstanceTransform(const std::string &name, const glm::mat4 &transform);
+    bool getMeshInstanceTransformLocal(const std::string &name, glm::mat4 &outTransformLocal) const;
+    bool setMeshInstanceTransformLocal(const std::string &name, const glm::mat4 &transformLocal);
+    bool getMeshInstanceTRSWorld(const std::string &name, WorldVec3 &outTranslationWorld, glm::quat &outRotation, glm::vec3 &outScale) const;
+    bool setMeshInstanceTRSWorld(const std::string &name, const WorldVec3 &translationWorld, const glm::quat &rotation, const glm::vec3 &scale);
     bool removeMeshInstance(const std::string &name);
     void clearMeshInstances();
 
@@ -109,7 +117,7 @@ public:
     struct GLTFInstance
     {
         std::shared_ptr<LoadedGLTF> scene;
-        glm::vec3 translation{0.0f, 0.0f, 0.0f};
+        WorldVec3 translation_world{0.0, 0.0, 0.0};
         glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
         glm::vec3 scale{1.0f, 1.0f, 1.0f};
         LoadedGLTF::AnimationState animation;
@@ -123,6 +131,10 @@ public:
     bool removeGLTFInstance(const std::string &name);
     bool getGLTFInstanceTransform(const std::string &name, glm::mat4 &outTransform);
     bool setGLTFInstanceTransform(const std::string &name, const glm::mat4 &transform);
+    bool getGLTFInstanceTransformLocal(const std::string &name, glm::mat4 &outTransformLocal) const;
+    bool setGLTFInstanceTransformLocal(const std::string &name, const glm::mat4 &transformLocal);
+    bool getGLTFInstanceTRSWorld(const std::string &name, WorldVec3 &outTranslationWorld, glm::quat &outRotation, glm::vec3 &outScale) const;
+    bool setGLTFInstanceTRSWorld(const std::string &name, const WorldVec3 &translationWorld, const glm::quat &rotation, const glm::vec3 &scale);
     void clearGLTFInstances();
     // Per-instance glTF node pose overrides (local-space, layered on top of animation/base TRS).
     // 'offset' is post-multiplied onto the node's localTransform for this instance only.
@@ -147,7 +159,7 @@ public:
 
     struct PointLight
     {
-        glm::vec3 position;
+        WorldVec3 position_world;
         float radius;
         glm::vec3 color;
         float intensity;
@@ -187,6 +199,10 @@ private:
     GPUSceneData sceneData = {};
     DrawContext mainDrawContext;
     std::vector<PointLight> pointLights;
+    WorldVec3 _origin_world{0.0, 0.0, 0.0};
+    glm::vec3 _camera_position_local{0.0f, 0.0f, 0.0f};
+    double _floating_origin_recenter_threshold = 1000.0;
+    double _floating_origin_snap_size = 100.0;
 
     std::unordered_map<std::string, std::shared_ptr<LoadedGLTF> > loadedScenes;
     // Per-named static glTF scene animation state (independent of instances).

@@ -245,7 +245,7 @@ namespace
             VulkanEngine::IBLVolume vol{};
             if (eng->_sceneManager)
             {
-                vol.center = eng->_sceneManager->getMainCamera().position;
+                vol.center_world = eng->_sceneManager->getMainCamera().position_world;
             }
             vol.halfExtents = glm::vec3(10.0f, 10.0f, 10.0f);
             vol.paths = eng->_globalIBLPaths;
@@ -259,7 +259,13 @@ namespace
             ImGui::Separator();
             ImGui::Text("Volume %zu", i);
             ImGui::Checkbox("Enabled", &vol.enabled);
-            ImGui::InputFloat3("Center", &vol.center.x);
+            {
+                double c[3] = {vol.center_world.x, vol.center_world.y, vol.center_world.z};
+                if (ImGui::InputScalarN("Center (world)", ImGuiDataType_Double, c, 3, nullptr, nullptr, "%.3f"))
+                {
+                    vol.center_world = WorldVec3(c[0], c[1], c[2]);
+                }
+            }
             ImGui::InputFloat3("Half Extents", &vol.halfExtents.x);
 
             // Simple path editors; store absolute or engine-local paths.
@@ -337,6 +343,17 @@ namespace
         ImGui::Text("Swapchain:   %ux%u", scExt.width, scExt.height);
         ImGui::Text("Draw fmt:    %s", string_VkFormat(eng->_swapchainManager->drawImage().imageFormat));
         ImGui::Text("Swap fmt:    %s", string_VkFormat(eng->_swapchainManager->swapchainImageFormat()));
+
+        if (eng->_sceneManager)
+        {
+            ImGui::Separator();
+            WorldVec3 origin = eng->_sceneManager->get_world_origin();
+            WorldVec3 camWorld = eng->_sceneManager->getMainCamera().position_world;
+            glm::vec3 camLocal = eng->_sceneManager->get_camera_local_position();
+            ImGui::Text("Origin (world): (%.3f, %.3f, %.3f)", origin.x, origin.y, origin.z);
+            ImGui::Text("Camera (world): (%.3f, %.3f, %.3f)", camWorld.x, camWorld.y, camWorld.z);
+            ImGui::Text("Camera (local): (%.3f, %.3f, %.3f)", camLocal.x, camLocal.y, camLocal.z);
+        }
     }
 
     // Texture streaming + budget UI
@@ -956,18 +973,18 @@ namespace
                 SceneManager::PointLight pl{};
                 if (sceneMgr->getPointLight(static_cast<size_t>(selectedLight), pl))
                 {
-                    float pos[3] = {pl.position.x, pl.position.y, pl.position.z};
+                    double pos[3] = {pl.position_world.x, pl.position_world.y, pl.position_world.z};
                     float col[3] = {pl.color.r, pl.color.g, pl.color.b};
                     bool changed = false;
 
-                    changed |= ImGui::InputFloat3("Position", pos);
+                    changed |= ImGui::InputScalarN("Position (world)", ImGuiDataType_Double, pos, 3, nullptr, nullptr, "%.3f");
                     changed |= ImGui::SliderFloat("Radius", &pl.radius, 0.1f, 1000.0f);
                     changed |= ImGui::ColorEdit3("Color", col);
                     changed |= ImGui::SliderFloat("Intensity", &pl.intensity, 0.0f, 100.0f);
 
                     if (changed)
                     {
-                        pl.position = glm::vec3(pos[0], pos[1], pos[2]);
+                        pl.position_world = WorldVec3(pos[0], pos[1], pos[2]);
                         pl.color = glm::vec3(col[0], col[1], col[2]);
                         sceneMgr->setPointLight(static_cast<size_t>(selectedLight), pl);
                     }
@@ -983,12 +1000,12 @@ namespace
             // Controls for adding a new light
             ImGui::Separator();
             ImGui::TextUnformatted("Add point light");
-            static float newPos[3] = {0.0f, 1.0f, 0.0f};
+            static double newPos[3] = {0.0, 1.0, 0.0};
             static float newRadius = 10.0f;
             static float newColor[3] = {1.0f, 1.0f, 1.0f};
             static float newIntensity = 5.0f;
 
-            ImGui::InputFloat3("New position", newPos);
+            ImGui::InputScalarN("New position (world)", ImGuiDataType_Double, newPos, 3, nullptr, nullptr, "%.3f");
             ImGui::SliderFloat("New radius", &newRadius, 0.1f, 1000.0f);
             ImGui::ColorEdit3("New color", newColor);
             ImGui::SliderFloat("New intensity", &newIntensity, 0.0f, 100.0f);
@@ -996,7 +1013,7 @@ namespace
             if (ImGui::Button("Add point light"))
             {
                 SceneManager::PointLight pl{};
-                pl.position = glm::vec3(newPos[0], newPos[1], newPos[2]);
+                pl.position_world = WorldVec3(newPos[0], newPos[1], newPos[2]);
                 pl.radius = newRadius;
                 pl.color = glm::vec3(newColor[0], newColor[1], newColor[2]);
                 pl.intensity = newIntensity;
@@ -1214,7 +1231,7 @@ namespace
 
         if (pick->ownerType == RenderObject::OwnerType::MeshInstance)
         {
-            if (sceneMgr->getMeshInstanceTransform(pick->ownerName, targetTransform))
+            if (sceneMgr->getMeshInstanceTransformLocal(pick->ownerName, targetTransform))
             {
                 target = GizmoTarget::MeshInstance;
                 ImGui::Text("Editing mesh instance: %s", pick->ownerName.c_str());
@@ -1222,7 +1239,7 @@ namespace
         }
         else if (pick->ownerType == RenderObject::OwnerType::GLTFInstance)
         {
-            if (sceneMgr->getGLTFInstanceTransform(pick->ownerName, targetTransform))
+            if (sceneMgr->getGLTFInstanceTransformLocal(pick->ownerName, targetTransform))
             {
                 target = GizmoTarget::GLTFInstance;
                 ImGui::Text("Editing glTF instance: %s", pick->ownerName.c_str());
@@ -1270,8 +1287,8 @@ namespace
                        : 1.0f;
 
         // Distance from camera to object; clamp to avoid degenerate planes.
-        glm::vec3 camPos = cam.position;
-        glm::vec3 objPos = pick->worldPos;
+        glm::vec3 camPos = sceneMgr->get_camera_local_position();
+        glm::vec3 objPos = glm::vec3(targetTransform[3]);
         float dist = glm::length(objPos - camPos);
         if (!std::isfinite(dist) || dist <= 0.0f)
         {
@@ -1282,7 +1299,7 @@ namespace
         float nearPlane = glm::max(0.05f, dist * 0.05f);
         float farPlane = glm::max(nearPlane * 50.0f, dist * 2.0f);
 
-        glm::mat4 view = cam.getViewMatrix();
+        glm::mat4 view = cam.getViewMatrix(sceneMgr->get_camera_local_position());
         glm::mat4 proj = glm::perspective(fovRad, aspect, nearPlane, farPlane);
 
         glm::mat4 before = targetTransform;
@@ -1313,10 +1330,10 @@ namespace
             switch (target)
             {
                 case GizmoTarget::MeshInstance:
-                    sceneMgr->setMeshInstanceTransform(pick->ownerName, targetTransform);
+                    sceneMgr->setMeshInstanceTransformLocal(pick->ownerName, targetTransform);
                     break;
                 case GizmoTarget::GLTFInstance:
-                    sceneMgr->setGLTFInstanceTransform(pick->ownerName, targetTransform);
+                    sceneMgr->setGLTFInstanceTransformLocal(pick->ownerName, targetTransform);
                     break;
                 default:
                     break;
@@ -1324,7 +1341,7 @@ namespace
 
             // Keep pick debug info roughly in sync.
             pick->worldTransform = targetTransform;
-            pick->worldPos = glm::vec3(targetTransform[3]);
+            pick->worldPos = local_to_world(glm::vec3(targetTransform[3]), sceneMgr->get_world_origin());
         }
     }
 } // namespace

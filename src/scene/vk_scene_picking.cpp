@@ -421,7 +421,7 @@ namespace
     }
 } // namespace
 
-bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject, glm::vec3 &outWorldPos)
+bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject, WorldVec3 &outWorldPos)
 {
     if (_context == nullptr)
     {
@@ -473,7 +473,7 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
                         -1.0f);
     dirCamera = glm::normalize(dirCamera);
 
-    glm::vec3 rayOrigin = mainCamera.position;
+    glm::vec3 rayOrigin = world_to_local(mainCamera.position_world, _origin_world);
     glm::mat4 camRotation = mainCamera.getRotationMatrix();
     glm::vec3 rayDir = glm::normalize(glm::vec3(camRotation * glm::vec4(dirCamera, 0.0f)));
 
@@ -539,7 +539,7 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
 
     if (anyHit)
     {
-        outWorldPos = bestHitPos;
+        outWorldPos = local_to_world(bestHitPos, _origin_world);
     }
 
     return anyHit;

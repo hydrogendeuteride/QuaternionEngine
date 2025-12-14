@@ -4,6 +4,7 @@
 #pragma once
 
 #include <core/types.h>
+#include <core/world.h>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -123,7 +124,7 @@ public:
     // Simple world-space IBL reflection volumes (axis-aligned boxes).
     struct IBLVolume
     {
-        glm::vec3 center{0.0f, 0.0f, 0.0f};
+        WorldVec3 center_world{0.0, 0.0, 0.0};
         glm::vec3 halfExtents{10.0f, 10.0f, 10.0f};
         IBLPaths paths{};   // HDRI paths for this volume
         bool enabled{true};
@@ -149,7 +150,7 @@ public:
         Node *node = nullptr;
         RenderObject::OwnerType ownerType = RenderObject::OwnerType::None;
         std::string ownerName;
-        glm::vec3 worldPos{0.0f};
+        WorldVec3 worldPos{0.0, 0.0, 0.0};
         glm::mat4 worldTransform{1.0f};
         uint32_t indexCount = 0;
         uint32_t firstIndex = 0;
@@ -240,6 +241,13 @@ public:
     uint32_t loadGLTFAsync(const std::string &sceneName,
                            const std::string &modelRelativePath,
                            const glm::mat4 &transform = glm::mat4(1.f),
+                           bool preloadTextures = false);
+
+    uint32_t loadGLTFAsync(const std::string &sceneName,
+                           const std::string &modelRelativePath,
+                           const WorldVec3 &translationWorld,
+                           const glm::quat &rotation,
+                           const glm::vec3 &scale,
                            bool preloadTextures = false);
 
     // Preload textures for an already-loaded scene instance so they are

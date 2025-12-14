@@ -60,6 +60,15 @@ struct PointLight
     float intensity{1.0f};
 };
 
+// Double-precision world-space point light data (position only).
+struct PointLightD
+{
+    glm::dvec3 position{0.0};
+    float radius{10.0f};
+    glm::vec3 color{1.0f};
+    float intensity{1.0f};
+};
+
 // IBL (Image-Based Lighting) paths
 struct IBLPaths
 {
@@ -78,6 +87,15 @@ struct IBLVolume
     bool enabled{true};
 };
 
+// Double-precision world-space IBL volume (center only).
+struct IBLVolumeD
+{
+    glm::dvec3 center{0.0};
+    glm::vec3 halfExtents{10.0f};
+    IBLPaths paths;
+    bool enabled{true};
+};
+
 // Transform decomposition
 struct Transform
 {
@@ -87,6 +105,17 @@ struct Transform
 
     glm::mat4 to_matrix() const;
     static Transform from_matrix(const glm::mat4& m);
+};
+
+// Double-precision world-space transform (position only).
+struct TransformD
+{
+    glm::dvec3 position{0.0};
+    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec3 scale{1.0f};
+
+    glm::mat4 to_matrix() const;
+    static TransformD from_matrix(const glm::mat4& m);
 };
 
 // Engine statistics (read-only)
@@ -174,6 +203,7 @@ public:
 
     // Add a local IBL volume (returns volume index)
     size_t add_ibl_volume(const IBLVolume& volume);
+    size_t add_ibl_volume(const IBLVolumeD& volume);
 
     // Remove IBL volume by index
     bool remove_ibl_volume(size_t index);
@@ -181,6 +211,8 @@ public:
     // Get/set IBL volume properties
     bool get_ibl_volume(size_t index, IBLVolume& out) const;
     bool set_ibl_volume(size_t index, const IBLVolume& volume);
+    bool get_ibl_volume(size_t index, IBLVolumeD& out) const;
+    bool set_ibl_volume(size_t index, const IBLVolumeD& volume);
 
     // Get current active IBL volume index (-1 = global)
     int get_active_ibl_volume() const;
@@ -200,12 +232,20 @@ public:
                          const std::string& modelPath,
                          const Transform& transform = {},
                          bool preloadTextures = true);
+    bool add_gltf_instance(const std::string& name,
+                           const std::string& modelPath,
+                           const TransformD& transform,
+                           bool preloadTextures = true);
 
     // Add glTF model asynchronously (returns job ID, 0 on failure)
     uint32_t add_gltf_instance_async(const std::string& name,
                                   const std::string& modelPath,
                                   const Transform& transform = {},
                                   bool preloadTextures = true);
+    uint32_t add_gltf_instance_async(const std::string& name,
+                                     const std::string& modelPath,
+                                     const TransformD& transform,
+                                     bool preloadTextures = true);
 
     // Remove glTF instance
     bool remove_gltf_instance(const std::string& name);
@@ -213,11 +253,16 @@ public:
     // Get/set glTF instance transform
     bool get_gltf_instance_transform(const std::string& name, Transform& out) const;
     bool set_gltf_instance_transform(const std::string& name, const Transform& transform);
+    bool get_gltf_instance_transform(const std::string& name, TransformD& out) const;
+    bool set_gltf_instance_transform(const std::string& name, const TransformD& transform);
 
     // Add primitive mesh instance
     bool add_primitive_instance(const std::string& name,
                               PrimitiveType type,
                               const Transform& transform = {});
+    bool add_primitive_instance(const std::string& name,
+                                PrimitiveType type,
+                                const TransformD& transform);
 
     // Remove mesh instance (primitives or custom meshes)
     bool remove_mesh_instance(const std::string& name);
@@ -225,6 +270,8 @@ public:
     // Get/set mesh instance transform
     bool get_mesh_instance_transform(const std::string& name, Transform& out) const;
     bool set_mesh_instance_transform(const std::string& name, const Transform& transform);
+    bool get_mesh_instance_transform(const std::string& name, TransformD& out) const;
+    bool set_mesh_instance_transform(const std::string& name, const TransformD& transform);
 
     // Preload textures for an instance (useful before it becomes visible)
     void preload_instance_textures(const std::string& name);
@@ -256,6 +303,7 @@ public:
 
     // Add point light (returns index)
     size_t add_point_light(const PointLight& light);
+    size_t add_point_light(const PointLightD& light);
 
     // Remove point light by index
     bool remove_point_light(size_t index);
@@ -263,6 +311,8 @@ public:
     // Get/set point light properties
     bool get_point_light(size_t index, PointLight& out) const;
     bool set_point_light(size_t index, const PointLight& light);
+    bool get_point_light(size_t index, PointLightD& out) const;
+    bool set_point_light(size_t index, const PointLightD& light);
 
     // Get point light count
     size_t get_point_light_count() const;
@@ -322,6 +372,8 @@ public:
 
     void set_camera_position(const glm::vec3& position);
     glm::vec3 get_camera_position() const;
+    void set_camera_position(const glm::dvec3& position);
+    glm::dvec3 get_camera_position_d() const;
 
     void set_camera_rotation(float pitch, float yaw);
     void get_camera_rotation(float& pitch, float& yaw) const;
@@ -331,6 +383,7 @@ public:
 
     // Look at a target position
     void camera_look_at(const glm::vec3& target);
+    void camera_look_at(const glm::dvec3& target);
 
     // ------------------------------------------------------------------------
     // Rendering
@@ -363,8 +416,16 @@ public:
         glm::vec3 worldPosition{0.0f};
     };
 
+    struct PickResultD
+    {
+        bool valid{false};
+        std::string ownerName;
+        glm::dvec3 worldPosition{0.0};
+    };
+
     // Get last click selection result
     PickResult get_last_pick() const;
+    PickResultD get_last_pick_d() const;
 
     // Enable/disable ID buffer picking (vs CPU raycast)
     void set_use_id_buffer_picking(bool use);

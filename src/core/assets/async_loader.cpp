@@ -104,6 +104,32 @@ AsyncAssetLoader::JobID AsyncAssetLoader::load_gltf_async(const std::string &sce
     return id;
 }
 
+AsyncAssetLoader::JobID AsyncAssetLoader::load_gltf_async(const std::string &scene_name,
+                                                          const std::string &model_relative_path,
+                                                          const WorldVec3 &translation_world,
+                                                          const glm::quat &rotation,
+                                                          const glm::vec3 &scale,
+                                                          bool preload_textures)
+{
+    JobID id = load_gltf_async(scene_name, model_relative_path, glm::mat4(1.0f), preload_textures);
+    if (id == 0)
+    {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock(_jobs_mutex);
+    auto it = _jobs.find(id);
+    if (it != _jobs.end() && it->second)
+    {
+        Job &job = *it->second;
+        job.has_world_trs = true;
+        job.translation_world = translation_world;
+        job.rotation = rotation;
+        job.scale = scale;
+    }
+    return id;
+}
+
 bool AsyncAssetLoader::get_job_status(JobID id, JobState &out_state, float &out_progress, std::string *out_error)
 {
     std::lock_guard<std::mutex> lock(_jobs_mutex);
@@ -234,6 +260,13 @@ void AsyncAssetLoader::pump_main_thread(SceneManager &scene)
                     job->scene->debugName = job->model_relative_path;
                 }
                 scene.addGLTFInstance(job->scene_name, job->scene, job->transform);
+                if (job->has_world_trs)
+                {
+                    scene.setGLTFInstanceTRSWorld(job->scene_name,
+                                                  job->translation_world,
+                                                  job->rotation,
+                                                  job->scale);
+                }
 
                 // Optionally preload textures (same logic as addGLTFInstance)
                 if (job->preload_textures && _textures && _engine && _engine->_resourceManager)

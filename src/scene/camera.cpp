@@ -8,7 +8,8 @@
 void Camera::update()
 {
     glm::mat4 cameraRotation = getRotationMatrix();
-    position += glm::vec3(cameraRotation * glm::vec4(velocity * moveSpeed, 0.f));
+    glm::vec3 delta = glm::vec3(cameraRotation * glm::vec4(velocity * moveSpeed, 0.f));
+    position_world += glm::dvec3(delta);
 }
 
 void Camera::processSDLEvent(SDL_Event& e)
@@ -71,17 +72,17 @@ void Camera::processSDLEvent(SDL_Event& e)
     }
 }
 
-glm::mat4 Camera::getViewMatrix()
+glm::mat4 Camera::getViewMatrix(const glm::vec3 &position_local) const
 {
     // to create a correct model view, we need to move the world in opposite
     // direction to the camera
     //  so we will create the camera model matrix and invert
-    glm::mat4 cameraTranslation = glm::translate(glm::mat4(1.f), position);
+    glm::mat4 cameraTranslation = glm::translate(glm::mat4(1.f), position_local);
     glm::mat4 cameraRotation = getRotationMatrix();
     return glm::inverse(cameraTranslation * cameraRotation);
 }
 
-glm::mat4 Camera::getRotationMatrix()
+glm::mat4 Camera::getRotationMatrix() const
 {
     // Use the stored quaternion orientation directly.
     return glm::toMat4(orientation);

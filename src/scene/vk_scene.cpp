@@ -72,7 +72,7 @@ void SceneManager::init(EngineContext *context)
     _context = context;
 
     mainCamera.velocity = glm::vec3(0.f);
-    mainCamera.position = glm::vec3(30.f, -00.f, 85.f);
+    mainCamera.position_world = WorldVec3(30.0, 0.0, 85.0);
     mainCamera.orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 
     sceneData.ambientColor = glm::vec4(0.1f, 0.1f, 0.1f, 1.0f);
@@ -81,18 +81,20 @@ void SceneManager::init(EngineContext *context)
 
     // Seed a couple of default point lights for quick testing.
     PointLight warmKey{};
-    warmKey.position = glm::vec3(0.0f, 0.0f, 0.0f);
+    warmKey.position_world = WorldVec3(0.0, 0.0, 0.0);
     warmKey.radius = 25.0f;
     warmKey.color = glm::vec3(1.0f, 0.95f, 0.8f);
     warmKey.intensity = 15.0f;
     addPointLight(warmKey);
 
     PointLight coolFill{};
-    coolFill.position = glm::vec3(-10.0f, 4.0f, 10.0f);
+    coolFill.position_world = WorldVec3(-10.0, 4.0, 10.0);
     coolFill.radius = 20.0f;
     coolFill.color = glm::vec3(0.6f, 0.7f, 1.0f);
     coolFill.intensity = 10.0f;
     addPointLight(coolFill);
+
+    _camera_position_local = world_to_local(mainCamera.position_world, _origin_world);
 }
 
 void SceneManager::update_scene()
@@ -126,6 +128,24 @@ void SceneManager::update_scene()
 
     mainCamera.update();
 
+    // Floating origin: keep render-local coordinates near (0,0,0) by shifting the origin
+    // when the camera drifts too far in world space.
+    if (_floating_origin_recenter_threshold > 0.0)
+    {
+        const WorldVec3 d = mainCamera.position_world - _origin_world;
+        const double threshold2 = _floating_origin_recenter_threshold * _floating_origin_recenter_threshold;
+        if (glm::length2(d) > threshold2)
+        {
+            const WorldVec3 newOrigin =
+                (_floating_origin_snap_size > 0.0)
+                    ? snap_world(mainCamera.position_world, _floating_origin_snap_size)
+                    : mainCamera.position_world;
+            _origin_world = newOrigin;
+        }
+    }
+
+    _camera_position_local = world_to_local(mainCamera.position_world, _origin_world);
+
     // Simple per-frame dt (seconds) for animations
     static auto lastFrameTime = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
@@ -155,6 +175,11 @@ void SceneManager::update_scene()
         }
     };
 
+    // Root transform to shift "world space" float scenes into render-local space.
+    // Any object that is authored in world coordinates (float) should be offset by -origin.
+    const glm::mat4 world_to_local_root =
+        glm::translate(glm::mat4{1.f}, world_to_local(WorldVec3(0.0, 0.0, 0.0), _origin_world));
+
     // Draw all loaded GLTF scenes (static world), advancing their independent animation states.
     for (auto &[name, scene] : loadedScenes)
     {
@@ -173,7 +198,7 @@ void SceneManager::update_scene()
         const size_t opaqueStart = mainDrawContext.OpaqueSurfaces.size();
         const size_t transpStart = mainDrawContext.TransparentSurfaces.size();
         mainDrawContext.gltfNodeLocalOverrides = nullptr;
-        scene->Draw(glm::mat4{1.f}, mainDrawContext);
+        scene->Draw(world_to_local_root, mainDrawContext);
         mainDrawContext.gltfNodeLocalOverrides = nullptr;
         tagOwner(RenderObject::OwnerType::StaticGLTF, name, opaqueStart, transpStart);
     }
@@ -203,7 +228,8 @@ void SceneManager::update_scene()
         {
             mainDrawContext.gltfNodeLocalOverrides = nullptr;
         }
-        glm::mat4 instanceTransform = make_trs_matrix(inst.translation, inst.rotation, inst.scale);
+        glm::vec3 tLocal = world_to_local(inst.translation_world, _origin_world);
+        glm::mat4 instanceTransform = make_trs_matrix(tLocal, inst.rotation, inst.scale);
         inst.scene->Draw(instanceTransform, mainDrawContext);
         mainDrawContext.gltfNodeLocalOverrides = nullptr;
         tagOwner(RenderObject::OwnerType::GLTFInstance, kv.first, opaqueStart, transpStart);
@@ -216,7 +242,8 @@ void SceneManager::update_scene()
     {
         const MeshInstance &inst = kv.second;
         if (!inst.mesh || inst.mesh->surfaces.empty()) continue;
-        glm::mat4 instanceTransform = make_trs_matrix(inst.translation, inst.rotation, inst.scale);
+        glm::vec3 tLocal = world_to_local(inst.translation_world, _origin_world);
+        glm::mat4 instanceTransform = make_trs_matrix(tLocal, inst.rotation, inst.scale);
         uint32_t surfaceIndex = 0;
         for (const auto &surf: inst.mesh->surfaces)
         {
@@ -249,7 +276,7 @@ void SceneManager::update_scene()
         }
     }
 
-    glm::mat4 view = mainCamera.getViewMatrix();
+    glm::mat4 view = mainCamera.getViewMatrix(_camera_position_local);
     // Use reversed infinite-Z projection (right-handed, -Z forward) to avoid far-plane clipping
     // on very large scenes. Vulkan clip space is 0..1 (GLM_FORCE_DEPTH_ZERO_TO_ONE) and requires Y flip.
     auto makeReversedInfinitePerspective = [](float fovyRadians, float aspect, float zNear) {
@@ -374,7 +401,8 @@ void SceneManager::update_scene()
     for (uint32_t i = 0; i < lightCount; ++i)
     {
         const PointLight &pl = pointLights[i];
-        sceneData.punctualLights[i].position_radius = glm::vec4(pl.position, pl.radius);
+        glm::vec3 posLocal = world_to_local(pl.position_world, _origin_world);
+        sceneData.punctualLights[i].position_radius = glm::vec4(posLocal, pl.radius);
         sceneData.punctualLights[i].color_intensity = glm::vec4(pl.color, pl.intensity);
     }
     for (uint32_t i = lightCount; i < kMaxPunctualLights; ++i)
@@ -448,7 +476,9 @@ void SceneManager::addMeshInstance(const std::string &name, std::shared_ptr<Mesh
     if (!mesh) return;
     MeshInstance inst{};
     inst.mesh = std::move(mesh);
-    decompose_trs_matrix(transform, inst.translation, inst.rotation, inst.scale);
+    glm::vec3 t{};
+    decompose_trs_matrix(transform, t, inst.rotation, inst.scale);
+    inst.translation_world = WorldVec3(t);
     inst.boundsTypeOverride = boundsType;
     dynamicMeshInstances[name] = std::move(inst);
 }
@@ -461,7 +491,7 @@ bool SceneManager::getMeshInstanceTransform(const std::string &name, glm::mat4 &
         return false;
     }
     const MeshInstance &inst = it->second;
-    outTransform = make_trs_matrix(inst.translation, inst.rotation, inst.scale);
+    outTransform = make_trs_matrix(glm::vec3(inst.translation_world), inst.rotation, inst.scale);
     return true;
 }
 
@@ -473,7 +503,74 @@ bool SceneManager::setMeshInstanceTransform(const std::string &name, const glm::
         return false;
     }
     MeshInstance &inst = it->second;
-    decompose_trs_matrix(transform, inst.translation, inst.rotation, inst.scale);
+    glm::vec3 t{};
+    decompose_trs_matrix(transform, t, inst.rotation, inst.scale);
+    inst.translation_world = WorldVec3(t);
+    return true;
+}
+
+bool SceneManager::getMeshInstanceTransformLocal(const std::string &name, glm::mat4 &outTransformLocal) const
+{
+    auto it = dynamicMeshInstances.find(name);
+    if (it == dynamicMeshInstances.end())
+    {
+        return false;
+    }
+
+    const MeshInstance &inst = it->second;
+    glm::vec3 tLocal = world_to_local(inst.translation_world, _origin_world);
+    outTransformLocal = make_trs_matrix(tLocal, inst.rotation, inst.scale);
+    return true;
+}
+
+bool SceneManager::setMeshInstanceTransformLocal(const std::string &name, const glm::mat4 &transformLocal)
+{
+    auto it = dynamicMeshInstances.find(name);
+    if (it == dynamicMeshInstances.end())
+    {
+        return false;
+    }
+
+    MeshInstance &inst = it->second;
+    glm::vec3 tLocal{};
+    decompose_trs_matrix(transformLocal, tLocal, inst.rotation, inst.scale);
+    inst.translation_world = local_to_world(tLocal, _origin_world);
+    return true;
+}
+
+bool SceneManager::getMeshInstanceTRSWorld(const std::string &name,
+                                          WorldVec3 &outTranslationWorld,
+                                          glm::quat &outRotation,
+                                          glm::vec3 &outScale) const
+{
+    auto it = dynamicMeshInstances.find(name);
+    if (it == dynamicMeshInstances.end())
+    {
+        return false;
+    }
+
+    const MeshInstance &inst = it->second;
+    outTranslationWorld = inst.translation_world;
+    outRotation = inst.rotation;
+    outScale = inst.scale;
+    return true;
+}
+
+bool SceneManager::setMeshInstanceTRSWorld(const std::string &name,
+                                          const WorldVec3 &translationWorld,
+                                          const glm::quat &rotation,
+                                          const glm::vec3 &scale)
+{
+    auto it = dynamicMeshInstances.find(name);
+    if (it == dynamicMeshInstances.end())
+    {
+        return false;
+    }
+
+    MeshInstance &inst = it->second;
+    inst.translation_world = translationWorld;
+    inst.rotation = rotation;
+    inst.scale = scale;
     return true;
 }
 
@@ -496,7 +593,9 @@ void SceneManager::addGLTFInstance(const std::string &name, std::shared_ptr<Load
                  scene->debugName.empty() ? "<unnamed>" : scene->debugName.c_str());
     GLTFInstance inst{};
     inst.scene = std::move(scene);
-    decompose_trs_matrix(transform, inst.translation, inst.rotation, inst.scale);
+    glm::vec3 t{};
+    decompose_trs_matrix(transform, t, inst.rotation, inst.scale);
+    inst.translation_world = WorldVec3(t);
     if (inst.scene && !inst.scene->animations.empty())
     {
         inst.animation.activeAnimation = 0;
@@ -551,7 +650,7 @@ bool SceneManager::getGLTFInstanceTransform(const std::string &name, glm::mat4 &
         return false;
     }
     const GLTFInstance &inst = it->second;
-    outTransform = make_trs_matrix(inst.translation, inst.rotation, inst.scale);
+    outTransform = make_trs_matrix(glm::vec3(inst.translation_world), inst.rotation, inst.scale);
     return true;
 }
 
@@ -560,7 +659,74 @@ bool SceneManager::setGLTFInstanceTransform(const std::string &name, const glm::
     auto it = dynamicGLTFInstances.find(name);
     if (it == dynamicGLTFInstances.end()) return false;
     GLTFInstance &inst = it->second;
-    decompose_trs_matrix(transform, inst.translation, inst.rotation, inst.scale);
+    glm::vec3 t{};
+    decompose_trs_matrix(transform, t, inst.rotation, inst.scale);
+    inst.translation_world = WorldVec3(t);
+    return true;
+}
+
+bool SceneManager::getGLTFInstanceTransformLocal(const std::string &name, glm::mat4 &outTransformLocal) const
+{
+    auto it = dynamicGLTFInstances.find(name);
+    if (it == dynamicGLTFInstances.end())
+    {
+        return false;
+    }
+
+    const GLTFInstance &inst = it->second;
+    glm::vec3 tLocal = world_to_local(inst.translation_world, _origin_world);
+    outTransformLocal = make_trs_matrix(tLocal, inst.rotation, inst.scale);
+    return true;
+}
+
+bool SceneManager::setGLTFInstanceTransformLocal(const std::string &name, const glm::mat4 &transformLocal)
+{
+    auto it = dynamicGLTFInstances.find(name);
+    if (it == dynamicGLTFInstances.end())
+    {
+        return false;
+    }
+
+    GLTFInstance &inst = it->second;
+    glm::vec3 tLocal{};
+    decompose_trs_matrix(transformLocal, tLocal, inst.rotation, inst.scale);
+    inst.translation_world = local_to_world(tLocal, _origin_world);
+    return true;
+}
+
+bool SceneManager::getGLTFInstanceTRSWorld(const std::string &name,
+                                          WorldVec3 &outTranslationWorld,
+                                          glm::quat &outRotation,
+                                          glm::vec3 &outScale) const
+{
+    auto it = dynamicGLTFInstances.find(name);
+    if (it == dynamicGLTFInstances.end())
+    {
+        return false;
+    }
+
+    const GLTFInstance &inst = it->second;
+    outTranslationWorld = inst.translation_world;
+    outRotation = inst.rotation;
+    outScale = inst.scale;
+    return true;
+}
+
+bool SceneManager::setGLTFInstanceTRSWorld(const std::string &name,
+                                          const WorldVec3 &translationWorld,
+                                          const glm::quat &rotation,
+                                          const glm::vec3 &scale)
+{
+    auto it = dynamicGLTFInstances.find(name);
+    if (it == dynamicGLTFInstances.end())
+    {
+        return false;
+    }
+
+    GLTFInstance &inst = it->second;
+    inst.translation_world = translationWorld;
+    inst.rotation = rotation;
+    inst.scale = scale;
     return true;
 }
 

@@ -533,7 +533,7 @@ void TextureCache::worker_loop()
                             {
                                 ktx_size_t off = 0, len = 0;
                                 ktxTexture_GetImageOffset(ktxTexture(ktex), mip, 0, 0, &off);
-                                ktxTexture_GetImageSize(ktxTexture(ktex), mip, &len);
+                                len = ktxTexture_GetImageSize(ktxTexture(ktex), mip);
                                 uint32_t w = std::max(1u, baseW >> mip);
                                 uint32_t h = std::max(1u, baseH >> mip);
                                 out.ktx.levels.push_back({ static_cast<uint64_t>(off), static_cast<uint64_t>(len), w, h });

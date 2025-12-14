@@ -12,7 +12,16 @@
 #include <deque>
 
 #include <vulkan/vulkan.h>
+#if __has_include(<vulkan/vk_enum_string_helper.h>)
 #include <vulkan/vk_enum_string_helper.h>
+#elif __has_include(<vk_enum_string_helper.h>)
+#include <vk_enum_string_helper.h>
+#else
+// Fallback for environments without Vulkan-Hpp's enum string helpers.
+// This keeps the build working; enum names may not be available.
+inline const char *string_VkResult(VkResult) { return "VkResult"; }
+inline const char *string_VkFormat(VkFormat) { return "VkFormat"; }
+#endif
 
 #include <vk_mem_alloc.h>
 
