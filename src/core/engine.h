@@ -8,6 +8,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <cstdint>
 #include "vk_mem_alloc.h"
 #include <deque>
 #include <functional>
@@ -62,6 +63,13 @@ struct MeshNode : public Node
 class VulkanEngine
 {
 public:
+    enum class WindowMode : uint8_t
+    {
+        Windowed = 0,
+        FullscreenDesktop = 1,  // borderless fullscreen ("fullscreen windowed")
+        FullscreenExclusive = 2 // exclusive fullscreen (may change display mode)
+    };
+
 	bool _isInitialized{false};
 	int _frameNumber{0};
 
@@ -79,6 +87,9 @@ public:
     std::unique_ptr<IBLManager> _iblManager;
 
 	struct SDL_Window *_window{nullptr};
+
+    WindowMode _windowMode{WindowMode::Windowed};
+    int _windowDisplayIndex{0};
 
     FrameResources _frames[FRAME_OVERLAP];
 
@@ -204,6 +215,9 @@ public:
 	//run main loop
 	void run();
 
+    // Window controls (runtime)
+    void set_window_mode(WindowMode mode, int display_index);
+
     // Rendering resolution controls:
     // - logicalRenderExtent controls camera aspect and picking (letterboxed view).
     // - renderScale controls the internal render target pixel count (logical * scale).
@@ -258,6 +272,15 @@ public:
 	bool freeze_rendering{false};
 
 private:
+    struct WindowedRect
+    {
+        int x{0};
+        int y{0};
+        int w{0};
+        int h{0};
+        bool valid{false};
+    } _windowedRect;
+
     void init_frame_resources();
 
     void init_pipelines();

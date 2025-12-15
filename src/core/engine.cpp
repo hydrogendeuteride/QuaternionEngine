@@ -188,6 +188,23 @@ void VulkanEngine::init()
         window_flags
     );
 
+    _windowMode = WindowMode::Windowed;
+    _windowDisplayIndex = SDL_GetWindowDisplayIndex(_window);
+    if (_windowDisplayIndex < 0) _windowDisplayIndex = 0;
+    {
+        int wx = 0, wy = 0, ww = 0, wh = 0;
+        SDL_GetWindowPosition(_window, &wx, &wy);
+        SDL_GetWindowSize(_window, &ww, &wh);
+        if (ww > 0 && wh > 0)
+        {
+            _windowedRect.x = wx;
+            _windowedRect.y = wy;
+            _windowedRect.w = ww;
+            _windowedRect.h = wh;
+            _windowedRect.valid = true;
+        }
+    }
+
     _deviceManager = std::make_shared<DeviceManager>();
     _deviceManager->init_vulkan(_window);
 
@@ -330,6 +347,125 @@ void VulkanEngine::init()
 
     //everything went fine
     _isInitialized = true;
+}
+
+void VulkanEngine::set_window_mode(WindowMode mode, int display_index)
+{
+    if (!_window) return;
+
+    const int num_displays = SDL_GetNumVideoDisplays();
+    int current_display = SDL_GetWindowDisplayIndex(_window);
+    if (current_display < 0) current_display = 0;
+
+    if (num_displays <= 0)
+    {
+        display_index = 0;
+    }
+    else
+    {
+        if (display_index < 0) display_index = current_display;
+        display_index = std::clamp(display_index, 0, num_displays - 1);
+    }
+
+    const WindowMode prev_mode = _windowMode;
+    const bool entering_fullscreen = (prev_mode == WindowMode::Windowed) && (mode != WindowMode::Windowed);
+
+    if (entering_fullscreen)
+    {
+        int wx = 0, wy = 0, ww = 0, wh = 0;
+        SDL_GetWindowPosition(_window, &wx, &wy);
+        SDL_GetWindowSize(_window, &ww, &wh);
+        if (ww > 0 && wh > 0)
+        {
+            _windowedRect.x = wx;
+            _windowedRect.y = wy;
+            _windowedRect.w = ww;
+            _windowedRect.h = wh;
+            _windowedRect.valid = true;
+        }
+    }
+
+    // If we are currently in any fullscreen mode, leave fullscreen first so we can safely
+    // move the window to the target display before re-entering fullscreen.
+    if (prev_mode != WindowMode::Windowed)
+    {
+        if (SDL_SetWindowFullscreen(_window, 0) != 0)
+        {
+            fmt::println("[Window] SDL_SetWindowFullscreen(0) failed: {}", SDL_GetError());
+        }
+    }
+
+    // Move the window to the selected display (applies to both windowed and fullscreen).
+    SDL_SetWindowPosition(_window,
+                          SDL_WINDOWPOS_CENTERED_DISPLAY(display_index),
+                          SDL_WINDOWPOS_CENTERED_DISPLAY(display_index));
+
+    if (mode == WindowMode::Windowed)
+    {
+        SDL_SetWindowBordered(_window, SDL_TRUE);
+        SDL_SetWindowResizable(_window, SDL_TRUE);
+
+        int target_w = 0, target_h = 0;
+        if (_windowedRect.valid)
+        {
+            target_w = _windowedRect.w;
+            target_h = _windowedRect.h;
+        }
+        if (target_w <= 0 || target_h <= 0)
+        {
+            SDL_GetWindowSize(_window, &target_w, &target_h);
+        }
+        if (target_w > 0 && target_h > 0)
+        {
+            SDL_SetWindowSize(_window, target_w, target_h);
+        }
+    }
+    else
+    {
+        SDL_SetWindowBordered(_window, SDL_FALSE);
+
+        const Uint32 fullscreen_flag =
+            (mode == WindowMode::FullscreenDesktop) ? SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN;
+
+        if (mode == WindowMode::FullscreenExclusive)
+        {
+            SDL_DisplayMode desktop{};
+            if (SDL_GetDesktopDisplayMode(display_index, &desktop) == 0)
+            {
+                // Request desktop mode by default. Future UI can add explicit mode selection.
+                SDL_SetWindowDisplayMode(_window, &desktop);
+            }
+        }
+
+        if (SDL_SetWindowFullscreen(_window, fullscreen_flag) != 0)
+        {
+            fmt::println("[Window] SDL_SetWindowFullscreen({}) failed: {}",
+                         static_cast<unsigned>(fullscreen_flag),
+                         SDL_GetError());
+        }
+    }
+
+    _windowMode = mode;
+    _windowDisplayIndex = SDL_GetWindowDisplayIndex(_window);
+    if (_windowDisplayIndex < 0) _windowDisplayIndex = display_index;
+
+    // Make sure SDL has processed the fullscreen/move requests before we query drawable size for swapchain recreation.
+    SDL_PumpEvents();
+
+    // Recreate swapchain immediately so the very next draw uses correct extent.
+    if (_swapchainManager)
+    {
+        _swapchainManager->resize_swapchain(_window);
+        if (_swapchainManager->resize_requested)
+        {
+            resize_requested = true;
+            _last_resize_event_ms = 0;
+        }
+        else
+        {
+            resize_requested = false;
+        }
+    }
 }
 
 void VulkanEngine::set_logical_render_extent(VkExtent2D extent)

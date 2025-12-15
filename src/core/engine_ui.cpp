@@ -6,6 +6,8 @@
 
 #include "engine.h"
 
+#include "SDL2/SDL.h"
+
 #include "imgui.h"
 #include "ImGuizmo.h"
 
@@ -23,12 +25,93 @@
 #include "device/images.h"
 #include "context.h"
 #include <core/types.h>
+#include <algorithm>
 #include <cstring>
 
 #include "mesh_bvh.h"
 
 namespace
 {
+    static void ui_window(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_window) return;
+
+        int num_displays = SDL_GetNumVideoDisplays();
+        if (num_displays <= 0)
+        {
+            ImGui::Text("No displays reported by SDL (%s)", SDL_GetError());
+            return;
+        }
+
+        int current_display = SDL_GetWindowDisplayIndex(eng->_window);
+        if (current_display < 0) current_display = eng->_windowDisplayIndex;
+        current_display = std::clamp(current_display, 0, num_displays - 1);
+
+        const char *cur_display_name = SDL_GetDisplayName(current_display);
+        if (!cur_display_name) cur_display_name = "Unknown";
+
+        ImGui::Text("Current: %s on display %d (%s)",
+                    (eng->_windowMode == VulkanEngine::WindowMode::Windowed)
+                        ? "Windowed"
+                        : (eng->_windowMode == VulkanEngine::WindowMode::FullscreenDesktop)
+                              ? "Borderless Fullscreen"
+                              : "Exclusive Fullscreen",
+                    current_display,
+                    cur_display_name);
+
+        static int pending_display = -1;
+        static int pending_mode = -1; // 0 windowed, 1 borderless, 2 exclusive
+        if (pending_display < 0) pending_display = current_display;
+        if (pending_mode < 0) pending_mode = static_cast<int>(eng->_windowMode);
+
+        ImGui::Separator();
+
+        if (ImGui::BeginCombo("Monitor", cur_display_name))
+        {
+            for (int i = 0; i < num_displays; ++i)
+            {
+                const char *name = SDL_GetDisplayName(i);
+                if (!name) name = "Unknown";
+                const bool selected = (pending_display == i);
+                if (ImGui::Selectable(name, selected))
+                {
+                    pending_display = i;
+                }
+                if (selected)
+                {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        const char *mode_labels[] = {
+            "Windowed",
+            "Borderless (Fullscreen Desktop)",
+            "Exclusive Fullscreen"
+        };
+        ImGui::Combo("Mode", &pending_mode, mode_labels, 3);
+
+        ImGui::TextUnformatted("Apply triggers immediate swapchain recreation.");
+        if (ImGui::Button("Apply"))
+        {
+            auto mode = static_cast<VulkanEngine::WindowMode>(std::clamp(pending_mode, 0, 2));
+            eng->set_window_mode(mode, pending_display);
+
+            // Re-sync pending selections with what SDL actually applied.
+            pending_display = SDL_GetWindowDisplayIndex(eng->_window);
+            if (pending_display < 0) pending_display = eng->_windowDisplayIndex;
+            pending_display = std::clamp(pending_display, 0, num_displays - 1);
+            pending_mode = static_cast<int>(eng->_windowMode);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Use Current"))
+        {
+            pending_display = current_display;
+            pending_mode = static_cast<int>(eng->_windowMode);
+        }
+    }
+
     // Background / compute playground
     static void ui_background(VulkanEngine *eng)
     {
@@ -1362,6 +1445,11 @@ void vk_engine_draw_debug_ui(VulkanEngine *eng)
             if (ImGui::BeginTabItem("Overview"))
             {
                 ui_overview(eng);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Window"))
+            {
+                ui_window(eng);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Background"))
