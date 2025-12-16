@@ -1,7 +1,6 @@
 #include "camera.h"
 #include <glm/gtx/transform.hpp>
 #include <glm/gtx/quaternion.hpp>
-#include <SDL2/SDL.h>
 #include <algorithm>
 #include <cmath>
 
@@ -12,63 +11,90 @@ void Camera::update()
     position_world += glm::dvec3(delta);
 }
 
-void Camera::processSDLEvent(SDL_Event& e)
+void Camera::process_input(InputSystem &input, bool ui_capture_keyboard, bool ui_capture_mouse)
 {
-    if (e.type == SDL_KEYDOWN) {
-        // Camera uses -Z forward convention (right-handed)
-        if (e.key.keysym.sym == SDLK_w) { velocity.z = -1; }
-        if (e.key.keysym.sym == SDLK_s) { velocity.z = 1; }
-        if (e.key.keysym.sym == SDLK_a) { velocity.x = -1; }
-        if (e.key.keysym.sym == SDLK_d) { velocity.x = 1; }
+    const InputState &st = input.state();
+
+    // Movement is state-based so simultaneous keys work naturally.
+    if (ui_capture_keyboard)
+    {
+        velocity = glm::vec3(0.0f);
+    }
+    else
+    {
+        glm::vec3 v(0.0f);
+        if (st.key_down(Key::W)) { v.z -= 1.0f; }
+        if (st.key_down(Key::S)) { v.z += 1.0f; }
+        if (st.key_down(Key::A)) { v.x -= 1.0f; }
+        if (st.key_down(Key::D)) { v.x += 1.0f; }
+        velocity = v;
     }
 
-    if (e.type == SDL_KEYUP) {
-        if (e.key.keysym.sym == SDLK_w) { velocity.z = 0; }
-        if (e.key.keysym.sym == SDLK_s) { velocity.z = 0; }
-        if (e.key.keysym.sym == SDLK_a) { velocity.x = 0; }
-        if (e.key.keysym.sym == SDLK_d) { velocity.x = 0; }
-    }
-
-    if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_RIGHT) {
-        rmbDown = true;
-        SDL_SetRelativeMouseMode(SDL_TRUE);
-    }
-    if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_RIGHT) {
-        rmbDown = false;
-        SDL_SetRelativeMouseMode(SDL_FALSE);
-    }
-
-    if (e.type == SDL_MOUSEMOTION && rmbDown) {
-        // Convert mouse motion to incremental yaw/pitch angles.
-        float dx = static_cast<float>(e.motion.xrel) * lookSensitivity;
-        float dy = static_cast<float>(e.motion.yrel) * lookSensitivity;
-
-        // Mouse right (xrel > 0) turns view right with -Z-forward: yaw around +Y.
-        glm::quat yawRotation = glm::angleAxis(dx, glm::vec3 { 0.f, 1.f, 0.f });
-
-        // Mouse up (yrel < 0) looks up with -Z-forward: negative dy.
-        float pitchDelta = -dy;
-        // Pitch around the camera's local X (right) axis in world space.
-        glm::vec3 right = glm::rotate(orientation, glm::vec3 { 1.f, 0.f, 0.f });
-        glm::quat pitchRotation = glm::angleAxis(pitchDelta, glm::vec3(right));
-
-        // Apply yaw, then pitch, to the current orientation.
-        orientation = glm::normalize(pitchRotation * yawRotation * orientation);
-    }
-
-    if (e.type == SDL_MOUSEWHEEL) {
-        // Ctrl modifies FOV, otherwise adjust move speed
-        const bool ctrl = (SDL_GetModState() & KMOD_CTRL) != 0;
-        const int steps = e.wheel.y; // positive = wheel up
-        if (ctrl) {
-            // Wheel up -> zoom in (smaller FOV)
-            fovDegrees -= steps * 2.0f;
-            fovDegrees = std::clamp(fovDegrees, 30.0f, 110.0f);
-        } else {
-            // Exponential scale for pleasant feel
-            float factor = std::pow(1.15f, (float)steps);
-            moveSpeed = std::clamp(moveSpeed * factor, 0.001f, 5.0f);
+    // Event-based mouse handling so we don't apply motion that happened before RMB was pressed in the same frame.
+    for (const InputEvent &e : input.events())
+    {
+        if (ui_capture_mouse)
+        {
+            continue;
         }
+
+        if (e.type == InputEvent::Type::MouseButtonDown && e.mouse_button == MouseButton::Right)
+        {
+            rmbDown = true;
+            input.set_cursor_mode(CursorMode::Relative);
+        }
+        else if (e.type == InputEvent::Type::MouseButtonUp && e.mouse_button == MouseButton::Right)
+        {
+            rmbDown = false;
+            input.set_cursor_mode(CursorMode::Normal);
+        }
+        else if (e.type == InputEvent::Type::MouseMove && rmbDown)
+        {
+            // Convert mouse motion to incremental yaw/pitch angles.
+            float dx = e.mouse_delta.x * lookSensitivity;
+            float dy = e.mouse_delta.y * lookSensitivity;
+
+            // Mouse right (xrel > 0) turns view right with -Z-forward: yaw around +Y.
+            glm::quat yawRotation = glm::angleAxis(dx, glm::vec3 { 0.f, 1.f, 0.f });
+
+            // Mouse up (yrel < 0) looks up with -Z-forward: negative dy.
+            float pitchDelta = -dy;
+            // Pitch around the camera's local X (right) axis in world space.
+            glm::vec3 right = glm::rotate(orientation, glm::vec3 { 1.f, 0.f, 0.f });
+            glm::quat pitchRotation = glm::angleAxis(pitchDelta, glm::vec3(right));
+
+            // Apply yaw, then pitch, to the current orientation.
+            orientation = glm::normalize(pitchRotation * yawRotation * orientation);
+        }
+        else if (e.type == InputEvent::Type::MouseWheel)
+        {
+            const float steps = e.wheel_delta.y; // positive = wheel up
+            if (std::abs(steps) < 0.001f)
+            {
+                continue;
+            }
+
+            // Ctrl modifies FOV, otherwise adjust move speed
+            if (e.mods.ctrl)
+            {
+                // Wheel up -> zoom in (smaller FOV)
+                fovDegrees -= steps * 2.0f;
+                fovDegrees = std::clamp(fovDegrees, 30.0f, 110.0f);
+            }
+            else
+            {
+                // Exponential scale for pleasant feel
+                float factor = std::pow(1.15f, steps);
+                moveSpeed = std::clamp(moveSpeed * factor, 0.001f, 5.0f);
+            }
+        }
+    }
+
+    // Safety: if mouse state shows RMB is no longer down, release relative mode.
+    if (rmbDown && !st.mouse_down(MouseButton::Right))
+    {
+        rmbDown = false;
+        input.set_cursor_mode(CursorMode::Normal);
     }
 }
 

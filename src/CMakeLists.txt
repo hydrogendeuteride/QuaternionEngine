@@ -11,6 +11,8 @@ add_executable (vulkan_engine
   core/engine.h
   core/engine.cpp
   core/engine_ui.cpp
+  core/input/input_system.h
+  core/input/input_system.cpp
   core/ui/imgui_system.h
   core/ui/imgui_system.cpp
   core/picking/picking_system.h

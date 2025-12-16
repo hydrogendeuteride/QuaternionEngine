@@ -40,6 +40,8 @@
 #include "core/ui/imgui_system.h"
 #include "core/picking/picking_system.h"
 
+class InputSystem;
+
 // Number of frames-in-flight. Affects per-frame command buffers, fences,
 // semaphores, and transient descriptor pools in FrameResources.
 constexpr unsigned int FRAME_OVERLAP = 2;
@@ -81,9 +83,10 @@ public:
 	std::unique_ptr<SwapchainManager> _swapchainManager;
 	std::shared_ptr<ResourceManager> _resourceManager;
 	std::unique_ptr<RenderPassManager> _renderPassManager;
-    std::unique_ptr<ImGuiSystem> _ui;
+	std::unique_ptr<ImGuiSystem> _ui;
 	std::unique_ptr<SceneManager> _sceneManager;
     std::unique_ptr<PickingSystem> _picking;
+    std::unique_ptr<InputSystem> _input;
 	std::unique_ptr<PipelineManager> _pipelineManager;
 	std::unique_ptr<AssetManager> _assetManager;
 	std::unique_ptr<AsyncAssetLoader> _asyncLoader;
@@ -169,6 +172,9 @@ public:
 
     PickingSystem *picking() { return _picking.get(); }
     const PickingSystem *picking() const { return _picking.get(); }
+
+    InputSystem *input() { return _input.get(); }
+    const InputSystem *input() const { return _input.get(); }
 
     // Debug: persistent pass enable overrides (by pass name)
     std::unordered_map<std::string, bool> _rgPassToggles;

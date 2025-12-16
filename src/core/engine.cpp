@@ -15,6 +15,8 @@
 //> includes
 #include "engine.h"
 
+#include "core/input/input_system.h"
+
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_vulkan.h"
 
@@ -237,6 +239,8 @@ void VulkanEngine::init()
 
     // Build dependency-injection context
     _context = std::make_shared<EngineContext>();
+    _input = std::make_unique<InputSystem>();
+    _context->input = _input.get();
     _context->device = _deviceManager;
     _context->resources = _resourceManager;
     _context->descriptors = std::make_shared<DescriptorAllocatorGrowable>(); {
@@ -922,6 +926,16 @@ void VulkanEngine::cleanup()
         dump_vma_json(_deviceManager.get(), "before_DeviceManager");
         _deviceManager->cleanup();
 
+        if (_input)
+        {
+            _input->set_cursor_mode(CursorMode::Normal);
+            _input.reset();
+        }
+        if (_context)
+        {
+            _context->input = nullptr;
+        }
+
         SDL_DestroyWindow(_window);
     }
 }
@@ -1264,75 +1278,78 @@ void VulkanEngine::draw()
     _frameNumber++;
 }
 
+namespace
+{
+    struct NativeEventDispatchCtx
+    {
+        VulkanEngine *engine = nullptr;
+        bool ui_capture_mouse = false;
+    };
+
+    void dispatch_native_event(void *user, InputSystem::NativeEventView view)
+    {
+        auto *ctx = static_cast<NativeEventDispatchCtx *>(user);
+        if (!ctx || !ctx->engine || view.backend != InputSystem::NativeBackend::SDL2 || view.data == nullptr)
+        {
+            return;
+        }
+
+        const SDL_Event &e = *static_cast<const SDL_Event *>(view.data);
+
+        if (ctx->engine->ui())
+        {
+            ctx->engine->ui()->process_event(e);
+        }
+        if (ctx->engine->picking())
+        {
+            ctx->engine->picking()->process_event(e, ctx->ui_capture_mouse);
+        }
+    }
+} // namespace
+
 void VulkanEngine::run()
 {
-    SDL_Event e;
     bool bQuit = false;
 
     //main loop
     while (!bQuit)
     {
         auto start = std::chrono::system_clock::now();
-        //Handle events on queue
-        while (SDL_PollEvent(&e) != 0)
+
+        if (_input)
         {
-            //close the window when user alt-f4s or clicks the X button
-            if (e.type == SDL_QUIT)
+            _input->begin_frame();
+            _input->pump_events();
+
+            if (_input->quit_requested())
             {
                 bQuit = true;
             }
 
-            if (e.type == SDL_WINDOWEVENT)
-            {
-                switch (e.window.event)
-                {
-                    case SDL_WINDOWEVENT_MINIMIZED:
-                        freeze_rendering = true;
-                        break;
-                    case SDL_WINDOWEVENT_RESTORED:
-                        freeze_rendering = false;
-                        resize_requested = true;
-                        _last_resize_event_ms = SDL_GetTicks();
-                        break;
-                    case SDL_WINDOWEVENT_SIZE_CHANGED:
-                    case SDL_WINDOWEVENT_RESIZED:
-                        resize_requested = true;
-                        _last_resize_event_ms = SDL_GetTicks();
-                        break;
-                    case SDL_WINDOWEVENT_MOVED:
-                        // Moving between monitors can change DPI scale; ensure swapchain is refreshed.
-                        resize_requested = true;
-                        _last_resize_event_ms = SDL_GetTicks();
-                        break;
-                    default:
-                        break;
-                }
-            }
+            freeze_rendering = _input->window_minimized();
 
-            const bool ui_capture_mouse = _ui && _ui->want_capture_mouse();
-            const bool ui_capture_keyboard = _ui && _ui->want_capture_keyboard();
+            if (_input->resize_requested())
+            {
+                resize_requested = true;
+                _last_resize_event_ms = _input->last_resize_event_ms();
+                _input->clear_resize_request();
+            }
+        }
 
-            if (_ui)
-            {
-                _ui->process_event(e);
-            }
-            if (_picking)
-            {
-                _picking->process_event(e, ui_capture_mouse);
-            }
-            if (_sceneManager)
-            {
-                const bool key_event = (e.type == SDL_KEYDOWN) || (e.type == SDL_KEYUP);
-                const bool mouse_event = (e.type == SDL_MOUSEBUTTONDOWN) ||
-                                         (e.type == SDL_MOUSEBUTTONUP) ||
-                                         (e.type == SDL_MOUSEMOTION) ||
-                                         (e.type == SDL_MOUSEWHEEL);
+        const bool ui_capture_mouse = _ui && _ui->want_capture_mouse();
+        const bool ui_capture_keyboard = _ui && _ui->want_capture_keyboard();
 
-                if (!(ui_capture_keyboard && key_event) && !(ui_capture_mouse && mouse_event))
-                {
-                    _sceneManager->getMainCamera().processSDLEvent(e);
-                }
-            }
+        if (_input)
+        {
+            NativeEventDispatchCtx ctx{};
+            ctx.engine = this;
+            ctx.ui_capture_mouse = ui_capture_mouse;
+            _input->for_each_native_event(dispatch_native_event, &ctx);
+        }
+
+        if (_sceneManager && _input)
+        {
+            _sceneManager->getMainCamera().process_input(*_input, ui_capture_keyboard, ui_capture_mouse);
         }
 
         if (freeze_rendering)

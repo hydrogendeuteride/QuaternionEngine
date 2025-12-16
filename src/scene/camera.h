@@ -1,7 +1,8 @@
 #pragma once
 
 #include <core/types.h>
-#include <SDL_events.h>
+
+#include <core/input/input_system.h>
 
 #include "glm/vec3.hpp"
 
@@ -23,7 +24,7 @@ public:
     glm::mat4 getViewMatrix(const glm::vec3 &position_local) const;
     glm::mat4 getRotationMatrix() const;
 
-    void processSDLEvent(SDL_Event& e);
+    void process_input(InputSystem &input, bool ui_capture_keyboard, bool ui_capture_mouse);
 
     void update();
 };

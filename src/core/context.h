@@ -32,6 +32,7 @@ class RenderGraph;
 class RayTracingManager;
 class TextureCache;
 class IBLManager;
+class InputSystem;
 
 struct ShadowSettings
 {
@@ -66,6 +67,7 @@ public:
     PipelineManager* pipelines = nullptr;        // graphics pipeline manager
     RenderGraph* renderGraph = nullptr;          // render graph (built per-frame)
     SDL_Window* window = nullptr;                // SDL window handle
+    InputSystem* input = nullptr;                // input system (engine-owned)
 
     // Frequently used values
     VkExtent2D drawExtent{};
