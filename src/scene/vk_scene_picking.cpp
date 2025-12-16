@@ -434,7 +434,7 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
         return false;
     }
 
-    VkExtent2D dstExtent = swapchain->windowExtent();
+    VkExtent2D dstExtent = swapchain->swapchainExtent();
     if (dstExtent.width == 0 || dstExtent.height == 0)
     {
         return false;
@@ -584,7 +584,7 @@ void SceneManager::selectRect(const glm::vec2 &p0, const glm::vec2 &p1, std::vec
     }
 
     SwapchainManager *swapchain = _context->getSwapchain();
-    VkExtent2D dstExtent = swapchain->windowExtent();
+    VkExtent2D dstExtent = swapchain->swapchainExtent();
     if (dstExtent.width == 0 || dstExtent.height == 0)
     {
         return;

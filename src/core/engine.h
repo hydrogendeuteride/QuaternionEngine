@@ -37,6 +37,8 @@
 #include "core/raytracing/raytracing.h"
 #include "core/assets/texture_cache.h"
 #include "core/assets/ibl_manager.h"
+#include "core/ui/imgui_system.h"
+#include "core/picking/picking_system.h"
 
 // Number of frames-in-flight. Affects per-frame command buffers, fences,
 // semaphores, and transient descriptor pools in FrameResources.
@@ -70,17 +72,21 @@ public:
         FullscreenExclusive = 2 // exclusive fullscreen (may change display mode)
     };
 
+    ~VulkanEngine();
+
 	bool _isInitialized{false};
 	int _frameNumber{0};
 
-    std::shared_ptr<DeviceManager> _deviceManager;
-    std::unique_ptr<SwapchainManager> _swapchainManager;
-    std::shared_ptr<ResourceManager> _resourceManager;
-    std::unique_ptr<RenderPassManager> _renderPassManager;
-    std::unique_ptr<SceneManager> _sceneManager;
-    std::unique_ptr<PipelineManager> _pipelineManager;
-    std::unique_ptr<AssetManager> _assetManager;
-    std::unique_ptr<AsyncAssetLoader> _asyncLoader;
+	std::shared_ptr<DeviceManager> _deviceManager;
+	std::unique_ptr<SwapchainManager> _swapchainManager;
+	std::shared_ptr<ResourceManager> _resourceManager;
+	std::unique_ptr<RenderPassManager> _renderPassManager;
+    std::unique_ptr<ImGuiSystem> _ui;
+	std::unique_ptr<SceneManager> _sceneManager;
+    std::unique_ptr<PickingSystem> _picking;
+	std::unique_ptr<PipelineManager> _pipelineManager;
+	std::unique_ptr<AssetManager> _assetManager;
+	std::unique_ptr<AsyncAssetLoader> _asyncLoader;
     std::unique_ptr<RenderGraph> _renderGraph;
     std::unique_ptr<RayTracingManager> _rayManager;
     std::unique_ptr<TextureCache> _textureCache;
@@ -90,6 +96,10 @@ public:
 
     WindowMode _windowMode{WindowMode::Windowed};
     int _windowDisplayIndex{0};
+
+    // HiDPI: allow high-DPI drawables (Retina / Windows scaling).
+    // Window coordinates from SDL events may be in "points" while the drawable/swapchain is in pixels.
+    bool _hiDpiEnabled{true};
 
     FrameResources _frames[FRAME_OVERLAP];
 
@@ -154,51 +164,11 @@ public:
         IBLPaths paths{};
     } _pendingIBLRequest;
 
-    struct PickInfo
-    {
-        MeshAsset *mesh = nullptr;
-        LoadedGLTF *scene = nullptr;
-        Node *node = nullptr;
-        RenderObject::OwnerType ownerType = RenderObject::OwnerType::None;
-        std::string ownerName;
-        WorldVec3 worldPos{0.0, 0.0, 0.0};
-        glm::mat4 worldTransform{1.0f};
-        uint32_t indexCount = 0;
-        uint32_t firstIndex = 0;
-        uint32_t surfaceIndex = 0;
-        bool valid = false;
-    } _lastPick;
-    uint32_t _lastPickObjectID = 0;
+    ImGuiSystem *ui() { return _ui.get(); }
+    const ImGuiSystem *ui() const { return _ui.get(); }
 
-    struct PickRequest
-    {
-        bool active = false;
-        glm::vec2 windowPos{0.0f};
-        glm::uvec2 idCoords{0, 0};
-    } _pendingPick;
-    bool _pickResultPending = false;
-    AllocatedBuffer _pickReadbackBuffer{};
-
-    // Hover and drag-selection state (raycast-based)
-    PickInfo _hoverPick{};
-    glm::vec2 _mousePosPixels{-1.0f, -1.0f};
-    struct DragState
-    {
-        bool dragging = false;
-        bool buttonDown = false;
-        glm::vec2 start{0.0f};
-        glm::vec2 current{0.0f};
-    } _dragState;
-    // Optional list of last drag-selected objects (for future editing UI)
-    std::vector<PickInfo> _dragSelection;
-
-    // Toggle to enable/disable ID-buffer picking in addition to raycast
-    bool _useIdBufferPicking = false;
-    // Debug: draw mesh BVH boxes for last pick
-    bool _debugDrawBVH = false;
-
-    // Last click selection (CPU ray or ID-buffer). Useful for game/editor code.
-    const PickInfo &get_last_pick() const { return _lastPick; }
+    PickingSystem *picking() { return _picking.get(); }
+    const PickingSystem *picking() const { return _picking.get(); }
 
     // Debug: persistent pass enable overrides (by pass name)
     std::unordered_map<std::string, bool> _rgPassToggles;

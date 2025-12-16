@@ -27,6 +27,26 @@ void SwapchainManager::init_swapchain()
     resize_render_targets(_renderExtent);
 }
 
+void SwapchainManager::set_window_extent_from_window(struct SDL_Window *window)
+{
+    if (!window)
+    {
+        return;
+    }
+
+    int w = 0, h = 0;
+    SDL_Vulkan_GetDrawableSize(window, &w, &h);
+    if (w <= 0 || h <= 0)
+    {
+        SDL_GetWindowSize(window, &w, &h);
+    }
+    if (w > 0 && h > 0)
+    {
+        _windowExtent.width = static_cast<uint32_t>(w);
+        _windowExtent.height = static_cast<uint32_t>(h);
+    }
+}
+
 void SwapchainManager::cleanup()
 {
     _deletionQueue.flush();

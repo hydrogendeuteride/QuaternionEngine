@@ -14,6 +14,7 @@ public:
 
     void cleanup();
 
+    void set_window_extent_from_window(struct SDL_Window *window);
     void init_swapchain();
     void create_swapchain(uint32_t width, uint32_t height);
     void destroy_swapchain() const;

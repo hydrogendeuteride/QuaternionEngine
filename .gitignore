@@ -2,4 +2,7 @@
 /bin
 /assets
 /.idea
+/cmake-build-debug
+/cmake-build-debug_win
+/cmake-build-release_win
 *.spv

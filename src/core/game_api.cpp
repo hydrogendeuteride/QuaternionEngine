@@ -7,6 +7,7 @@
 #include "render/passes/tonemap.h"
 #include "render/passes/fxaa.h"
 #include "render/renderpass.h"
+#include "core/picking/picking_system.h"
 #include "scene/vk_scene.h"
 #include "scene/camera.h"
 
@@ -1160,29 +1161,44 @@ Stats Engine::get_stats() const
 Engine::PickResult Engine::get_last_pick() const
 {
     PickResult r;
-    r.valid = _engine->_lastPick.valid;
-    r.ownerName = _engine->_lastPick.ownerName;
-    r.worldPosition = glm::vec3(_engine->_lastPick.worldPos);
+    const PickingSystem *picking = _engine ? _engine->picking() : nullptr;
+    if (picking)
+    {
+        const auto &pick = picking->last_pick();
+        r.valid = pick.valid;
+        r.ownerName = pick.ownerName;
+        r.worldPosition = glm::vec3(pick.worldPos);
+    }
     return r;
 }
 
 Engine::PickResultD Engine::get_last_pick_d() const
 {
     PickResultD r;
-    r.valid = _engine->_lastPick.valid;
-    r.ownerName = _engine->_lastPick.ownerName;
-    r.worldPosition = _engine->_lastPick.worldPos;
+    const PickingSystem *picking = _engine ? _engine->picking() : nullptr;
+    if (picking)
+    {
+        const auto &pick = picking->last_pick();
+        r.valid = pick.valid;
+        r.ownerName = pick.ownerName;
+        r.worldPosition = pick.worldPos;
+    }
     return r;
 }
 
 void Engine::set_use_id_buffer_picking(bool use)
 {
-    _engine->_useIdBufferPicking = use;
+    if (!_engine) return;
+    PickingSystem *picking = _engine->picking();
+    if (!picking) return;
+    picking->set_use_id_buffer_picking(use);
 }
 
 bool Engine::get_use_id_buffer_picking() const
 {
-    return _engine->_useIdBufferPicking;
+    const PickingSystem *picking = _engine ? _engine->picking() : nullptr;
+    if (!picking) return false;
+    return picking->use_id_buffer_picking();
 }
 
 } // namespace GameAPI

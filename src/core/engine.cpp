@@ -16,6 +16,7 @@
 #include "engine.h"
 
 #include "SDL2/SDL.h"
+#include "SDL2/SDL_vulkan.h"
 
 #include <core/util/initializers.h>
 #include <core/types.h>
@@ -37,9 +38,8 @@
 #include "render/primitives.h"
 
 #include "vk_mem_alloc.h"
-#include "imgui.h"
-#include "imgui_impl_sdl2.h"
-#include "imgui_impl_vulkan.h"
+#include "core/ui/imgui_system.h"
+#include "core/picking/picking_system.h"
 #include "render/passes/geometry.h"
 #include "render/passes/imgui_pass.h"
 #include "render/passes/lighting.h"
@@ -58,6 +58,8 @@
 void vk_engine_draw_debug_ui(VulkanEngine *eng);
 
 VulkanEngine *loadedEngine = nullptr;
+
+VulkanEngine::~VulkanEngine() = default;
 
 static VkExtent2D clamp_nonzero_extent(VkExtent2D extent)
 {
@@ -166,6 +168,13 @@ size_t VulkanEngine::query_texture_budget_bytes() const
 
 void VulkanEngine::init()
 {
+    // DPI awareness and HiDPI behavior must be configured before initializing the video subsystem.
+#if defined(_WIN32)
+#ifdef SDL_HINT_WINDOWS_DPI_AWARENESS
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+#endif
+#endif
+
     // We initialize SDL and create a window with it.
     SDL_Init(SDL_INIT_VIDEO);
 
@@ -175,7 +184,11 @@ void VulkanEngine::init()
     _logicalRenderExtent = clamp_nonzero_extent(_logicalRenderExtent);
     _drawExtent = scaled_extent(_logicalRenderExtent, renderScale);
 
-    constexpr auto window_flags = static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+    SDL_WindowFlags window_flags = static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+    if (_hiDpiEnabled)
+    {
+        window_flags = static_cast<SDL_WindowFlags>(window_flags | SDL_WINDOW_ALLOW_HIGHDPI);
+    }
 
     _swapchainManager = std::make_unique<SwapchainManager>();
 
@@ -187,6 +200,11 @@ void VulkanEngine::init()
         _swapchainManager->windowExtent().height,
         window_flags
     );
+
+    if (_swapchainManager)
+    {
+        _swapchainManager->set_window_extent_from_window(_window);
+    }
 
     _windowMode = WindowMode::Windowed;
     _windowDisplayIndex = SDL_GetWindowDisplayIndex(_window);
@@ -283,6 +301,9 @@ void VulkanEngine::init()
     _context->window = _window;
     _context->stats = &stats;
 
+    _picking = std::make_unique<PickingSystem>();
+    _picking->init(_context.get());
+
     // Render graph skeleton
     _renderGraph = std::make_unique<RenderGraph>();
     _renderGraph->init(_context.get());
@@ -340,6 +361,10 @@ void VulkanEngine::init()
 
     auto imguiPass = std::make_unique<ImGuiPass>();
     _renderPassManager->setImGuiPass(std::move(imguiPass));
+
+    _ui = std::make_unique<ImGuiSystem>();
+    _ui->init(_context.get());
+    _ui->add_draw_callback([this]() { vk_engine_draw_debug_ui(this); });
 
     _resourceManager->set_deferred_uploads(true);
 
@@ -456,6 +481,10 @@ void VulkanEngine::set_window_mode(WindowMode mode, int display_index)
     if (_swapchainManager)
     {
         _swapchainManager->resize_swapchain(_window);
+        if (_ui)
+        {
+            _ui->on_swapchain_recreated();
+        }
         if (_swapchainManager->resize_requested)
         {
             resize_requested = true;
@@ -804,6 +833,17 @@ void VulkanEngine::cleanup()
         //make sure the gpu has stopped doing its things
         vkDeviceWaitIdle(_deviceManager->device());
 
+        if (_ui)
+        {
+            _ui->cleanup();
+            _ui.reset();
+        }
+        if (_picking)
+        {
+            _picking->cleanup();
+            _picking.reset();
+        }
+
         // Flush all frame deletion queues first while VMA allocator is still alive
         for (int i = 0; i < FRAME_OVERLAP; i++)
         {
@@ -860,13 +900,6 @@ void VulkanEngine::cleanup()
         if (_rayManager) { _rayManager->cleanup(); }
         print_vma_stats(_deviceManager.get(), "after RTManager");
         dump_vma_json(_deviceManager.get(), "after_RTManager");
-
-        // Destroy pick readback buffer before resource manager cleanup
-        if (_pickReadbackBuffer.buffer)
-        {
-            _resourceManager->destroy_buffer(_pickReadbackBuffer);
-            _pickReadbackBuffer = {};
-        }
 
         _resourceManager->cleanup();
         print_vma_stats(_deviceManager.get(), "after ResourceManager");
@@ -962,31 +995,9 @@ void VulkanEngine::draw()
         }
     }
 
-    // Per-frame hover raycast based on last mouse position.
-    if (_sceneManager && _mousePosPixels.x >= 0.0f && _mousePosPixels.y >= 0.0f)
+    if (_picking)
     {
-        RenderObject hoverObj{};
-        WorldVec3 hoverPos{};
-        if (_sceneManager->pick(_mousePosPixels, hoverObj, hoverPos))
-        {
-            _hoverPick.mesh = hoverObj.sourceMesh;
-            _hoverPick.scene = hoverObj.sourceScene;
-            _hoverPick.node = hoverObj.sourceNode;
-            _hoverPick.ownerType = hoverObj.ownerType;
-            _hoverPick.ownerName = hoverObj.ownerName;
-            _hoverPick.worldPos = hoverPos;
-            _hoverPick.worldTransform = hoverObj.transform;
-            _hoverPick.firstIndex = hoverObj.firstIndex;
-            _hoverPick.indexCount = hoverObj.indexCount;
-            _hoverPick.surfaceIndex = hoverObj.surfaceIndex;
-            _hoverPick.valid = true;
-        }
-        else
-        {
-            _hoverPick.valid = false;
-            _hoverPick.ownerName.clear();
-            _hoverPick.ownerType = RenderObject::OwnerType::None;
-        }
+        _picking->update_hover();
     }
 
     // Compute desired internal render-target extent from logical extent + render scale.
@@ -1124,69 +1135,12 @@ void VulkanEngine::draw()
                 RGImageHandle hID = _renderGraph->import_id_buffer();
                 geometry->register_graph(_renderGraph.get(), hGBufferPosition, hGBufferNormal, hGBufferAlbedo, hGBufferExtra, hID, hDepth);
 
-                // If ID-buffer picking is enabled and a pick was requested this frame,
-                // add a small transfer pass to read back 1 pixel from the ID buffer.
-                if (_useIdBufferPicking && _pendingPick.active && hID.valid() && _pickReadbackBuffer.buffer)
+                if (_picking && _swapchainManager)
                 {
-                    VkExtent2D swapExt = _swapchainManager->swapchainExtent();
-                    VkExtent2D drawExt = _drawExtent;
-
-                    glm::vec2 logicalPos{};
-                    if (!vkutil::map_window_to_letterbox_src(_pendingPick.windowPos, drawExt, swapExt, logicalPos))
-                    {
-                        // Click landed outside the active letterboxed region.
-                        _pendingPick.active = false;
-                    }
-                    else
-                    {
-                        uint32_t idX = uint32_t(glm::clamp(logicalPos.x, 0.0f, float(drawExt.width  - 1)));
-                        uint32_t idY = uint32_t(glm::clamp(logicalPos.y, 0.0f, float(drawExt.height - 1)));
-                        _pendingPick.idCoords = {idX, idY};
-
-                        RGImportedBufferDesc bd{};
-                        bd.name = "pick.readback";
-                        bd.buffer = _pickReadbackBuffer.buffer;
-                        bd.size = sizeof(uint32_t);
-                        bd.currentStage = VK_PIPELINE_STAGE_2_NONE;
-                        bd.currentAccess = 0;
-                        RGBufferHandle hPickBuf = _renderGraph->import_buffer(bd);
-
-                        _renderGraph->add_pass(
-                            "PickReadback",
-                            RGPassType::Transfer,
-                            [hID, hPickBuf](RGPassBuilder &builder, EngineContext *)
-                            {
-                                builder.read(hID, RGImageUsage::TransferSrc);
-                                builder.write_buffer(hPickBuf, RGBufferUsage::TransferDst);
-                            },
-                            [this, hID, hPickBuf](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *)
-                            {
-                                VkImage idImage = res.image(hID);
-                                VkBuffer dst = res.buffer(hPickBuf);
-                                if (idImage == VK_NULL_HANDLE || dst == VK_NULL_HANDLE) return;
-
-                                VkBufferImageCopy region{};
-                                region.bufferOffset = 0;
-                                region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                                region.imageSubresource.mipLevel = 0;
-                                region.imageSubresource.baseArrayLayer = 0;
-                                region.imageSubresource.layerCount = 1;
-                                region.imageOffset = { static_cast<int32_t>(_pendingPick.idCoords.x),
-                                                       static_cast<int32_t>(_pendingPick.idCoords.y),
-                                                       0 };
-                                region.imageExtent = {1, 1, 1};
-
-                                vkCmdCopyImageToBuffer(cmd,
-                                                       idImage,
-                                                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                                       dst,
-                                                       1,
-                                                       &region);
-                            });
-
-                        _pickResultPending = true;
-                        _pendingPick.active = false;
-                    }
+                    _picking->register_id_buffer_readback(*_renderGraph,
+                                                          hID,
+                                                          _drawExtent,
+                                                          _swapchainManager->swapchainExtent());
                 }
             }
             if (auto *lighting = _renderPassManager->getPass<LightingPass>())
@@ -1323,7 +1277,11 @@ void VulkanEngine::run()
         while (SDL_PollEvent(&e) != 0)
         {
             //close the window when user alt-f4s or clicks the X button
-            if (e.type == SDL_QUIT) bQuit = true;
+            if (e.type == SDL_QUIT)
+            {
+                bQuit = true;
+            }
+
             if (e.type == SDL_WINDOWEVENT)
             {
                 switch (e.window.event)
@@ -1341,119 +1299,40 @@ void VulkanEngine::run()
                         resize_requested = true;
                         _last_resize_event_ms = SDL_GetTicks();
                         break;
+                    case SDL_WINDOWEVENT_MOVED:
+                        // Moving between monitors can change DPI scale; ensure swapchain is refreshed.
+                        resize_requested = true;
+                        _last_resize_event_ms = SDL_GetTicks();
+                        break;
                     default:
                         break;
                 }
             }
-            if (e.type == SDL_MOUSEMOTION)
+
+            const bool ui_capture_mouse = _ui && _ui->want_capture_mouse();
+            const bool ui_capture_keyboard = _ui && _ui->want_capture_keyboard();
+
+            if (_ui)
             {
-                _mousePosPixels = glm::vec2{static_cast<float>(e.motion.x),
-                                            static_cast<float>(e.motion.y)};
-                if (_dragState.buttonDown)
+                _ui->process_event(e);
+            }
+            if (_picking)
+            {
+                _picking->process_event(e, ui_capture_mouse);
+            }
+            if (_sceneManager)
+            {
+                const bool key_event = (e.type == SDL_KEYDOWN) || (e.type == SDL_KEYUP);
+                const bool mouse_event = (e.type == SDL_MOUSEBUTTONDOWN) ||
+                                         (e.type == SDL_MOUSEBUTTONUP) ||
+                                         (e.type == SDL_MOUSEMOTION) ||
+                                         (e.type == SDL_MOUSEWHEEL);
+
+                if (!(ui_capture_keyboard && key_event) && !(ui_capture_mouse && mouse_event))
                 {
-                    _dragState.current = _mousePosPixels;
-                    // Consider any motion as dragging for now; can add threshold if desired.
-                    _dragState.dragging = true;
+                    _sceneManager->getMainCamera().processSDLEvent(e);
                 }
             }
-            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT)
-            {
-                if (!ImGui::GetIO().WantCaptureMouse)
-                {
-                    _dragState.buttonDown = true;
-                    _dragState.dragging = false;
-                    _dragState.start = glm::vec2{static_cast<float>(e.button.x),
-                                                 static_cast<float>(e.button.y)};
-                    _dragState.current = _dragState.start;
-                }
-            }
-            if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT)
-            {
-                glm::vec2 releasePos{static_cast<float>(e.button.x),
-                                     static_cast<float>(e.button.y)};
-                _dragState.buttonDown = false;
-
-                constexpr float clickThreshold = 3.0f;
-                glm::vec2 delta = releasePos - _dragState.start;
-                bool treatAsClick = !_dragState.dragging &&
-                                    std::abs(delta.x) < clickThreshold &&
-                                    std::abs(delta.y) < clickThreshold;
-
-                if (treatAsClick)
-                {
-                    if (_useIdBufferPicking)
-                    {
-                        // Asynchronous ID-buffer clicking: queue a pick request for this position.
-                        // The result will be resolved at the start of a future frame from the ID buffer.
-                        _pendingPick.active = true;
-                        _pendingPick.windowPos = releasePos;
-                    }
-                    else
-                    {
-                        // Raycast click selection (CPU side) when ID-buffer picking is disabled.
-                        if (_sceneManager)
-                        {
-                            RenderObject hitObject{};
-                            WorldVec3 hitPos{};
-                            if (_sceneManager->pick(releasePos, hitObject, hitPos))
-                            {
-                                _lastPick.mesh = hitObject.sourceMesh;
-                                _lastPick.scene = hitObject.sourceScene;
-                                _lastPick.node = hitObject.sourceNode;
-                                _lastPick.ownerType = hitObject.ownerType;
-                                _lastPick.ownerName = hitObject.ownerName;
-                                _lastPick.worldPos = hitPos;
-                                _lastPick.worldTransform = hitObject.transform;
-                                _lastPick.firstIndex = hitObject.firstIndex;
-                                _lastPick.indexCount = hitObject.indexCount;
-                                _lastPick.surfaceIndex = hitObject.surfaceIndex;
-                                _lastPick.valid = true;
-                                _lastPickObjectID = hitObject.objectID;
-                            }
-                            else
-                            {
-                                _lastPick.valid = false;
-                                _lastPick.ownerName.clear();
-                                _lastPick.ownerType = RenderObject::OwnerType::None;
-                                _lastPickObjectID = 0;
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    // Drag selection completed; compute selection based on screen-space rectangle.
-                    _dragSelection.clear();
-                    if (_sceneManager)
-                    {
-                        std::vector<RenderObject> selected;
-                        _sceneManager->selectRect(_dragState.start, releasePos, selected);
-                        _dragSelection.reserve(selected.size());
-                        for (const RenderObject &obj : selected)
-                        {
-                            PickInfo info{};
-                            info.mesh = obj.sourceMesh;
-                            info.scene = obj.sourceScene;
-                            info.node = obj.sourceNode;
-                            info.ownerType = obj.ownerType;
-                            info.ownerName = obj.ownerName;
-                            // Use bounds origin transformed to world as a representative point.
-                            glm::vec3 centerLocal = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.0f));
-                            info.worldPos = local_to_world(centerLocal, _sceneManager->get_world_origin());
-                            info.worldTransform = obj.transform;
-                            info.firstIndex = obj.firstIndex;
-                            info.indexCount = obj.indexCount;
-                            info.surfaceIndex = obj.surfaceIndex;
-                            info.valid = true;
-                            _dragSelection.push_back(info);
-                        }
-                    }
-                }
-
-                _dragState.dragging = false;
-            }
-            _sceneManager->getMainCamera().processSDLEvent(e);
-            ImGui_ImplSDL2_ProcessEvent(&e);
         }
 
         if (freeze_rendering)
@@ -1468,6 +1347,10 @@ void VulkanEngine::run()
             if (now_ms - _last_resize_event_ms >= RESIZE_DEBOUNCE_MS)
             {
                 _swapchainManager->resize_swapchain(_window);
+                if (_ui)
+                {
+                    _ui->on_swapchain_recreated();
+                }
                 resize_requested = false;
             }
         }
@@ -1510,53 +1393,9 @@ void VulkanEngine::run()
             }
         }
 
-        if (_pickResultPending && _pickReadbackBuffer.buffer && _sceneManager)
+        if (_picking)
         {
-            vmaInvalidateAllocation(_deviceManager->allocator(), _pickReadbackBuffer.allocation, 0, sizeof(uint32_t));
-            uint32_t pickedID = 0;
-            if (_pickReadbackBuffer.info.pMappedData)
-            {
-                pickedID = *reinterpret_cast<const uint32_t *>(_pickReadbackBuffer.info.pMappedData);
-            }
-
-            if (pickedID == 0)
-            {
-                // No object under cursor in ID buffer: clear last pick.
-                _lastPick.valid = false;
-                _lastPick.ownerName.clear();
-                _lastPick.ownerType = RenderObject::OwnerType::None;
-                _lastPickObjectID = 0;
-            }
-            else
-            {
-                _lastPickObjectID = pickedID;
-                RenderObject picked{};
-                if (_sceneManager->resolveObjectID(pickedID, picked))
-                {
-                    // Fallback hit position: object origin in world space (can refine later)
-                    glm::vec3 fallbackLocal = glm::vec3(picked.transform[3]);
-                    WorldVec3 fallbackPos = local_to_world(fallbackLocal, _sceneManager->get_world_origin());
-                    _lastPick.mesh = picked.sourceMesh;
-                    _lastPick.scene = picked.sourceScene;
-                    _lastPick.node = picked.sourceNode;
-                    _lastPick.ownerType = picked.ownerType;
-                    _lastPick.ownerName = picked.ownerName;
-                    _lastPick.worldPos = fallbackPos;
-                    _lastPick.worldTransform = picked.transform;
-                    _lastPick.firstIndex = picked.firstIndex;
-                    _lastPick.indexCount = picked.indexCount;
-                    _lastPick.surfaceIndex = picked.surfaceIndex;
-                    _lastPick.valid = true;
-                }
-                else
-                {
-                    _lastPick.valid = false;
-                    _lastPick.ownerName.clear();
-                    _lastPick.ownerType = RenderObject::OwnerType::None;
-                    _lastPickObjectID = 0;
-                }
-            }
-            _pickResultPending = false;
+            _picking->begin_frame();
         }
 
         get_current_frame()._deletionQueue.flush();
@@ -1566,17 +1405,11 @@ void VulkanEngine::run()
         }
         get_current_frame()._frameDescriptors.clear_pools(_deviceManager->device());
 
-
-        // imgui new frame
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplSDL2_NewFrame();
-
-        ImGui::NewFrame();
-
-        // Build the engine debug UI (tabs, inspectors, etc.).
-        vk_engine_draw_debug_ui(this);
-
-        ImGui::Render();
+        if (_ui)
+        {
+            _ui->begin_frame();
+            _ui->end_frame();
+        }
         draw();
 
         auto end = std::chrono::system_clock::now();
@@ -1602,12 +1435,6 @@ void VulkanEngine::init_frame_resources()
     {
         _frames[i].init(_deviceManager.get(), frame_sizes);
     }
-
-    // Allocate a small readback buffer for ID-buffer picking (single uint32 pixel).
-    _pickReadbackBuffer = _resourceManager->create_buffer(
-        sizeof(uint32_t),
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VMA_MEMORY_USAGE_CPU_TO_GPU);
 }
 
 void VulkanEngine::init_pipelines()

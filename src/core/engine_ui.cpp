@@ -5,8 +5,10 @@
 // The main frame loop in vk_engine.cpp simply calls vk_engine_draw_debug_ui().
 
 #include "engine.h"
+#include "core/picking/picking_system.h"
 
 #include "SDL2/SDL.h"
+#include "SDL2/SDL_vulkan.h"
 
 #include "imgui.h"
 #include "ImGuizmo.h"
@@ -110,6 +112,75 @@ namespace
             pending_display = current_display;
             pending_mode = static_cast<int>(eng->_windowMode);
         }
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("HiDPI / Sizes");
+        ImGui::Text("HiDPI enabled: %s", eng->_hiDpiEnabled ? "yes" : "no");
+
+        int winW = 0, winH = 0;
+        SDL_GetWindowSize(eng->_window, &winW, &winH);
+        int drawW = 0, drawH = 0;
+        SDL_Vulkan_GetDrawableSize(eng->_window, &drawW, &drawH);
+        ImGui::Text("Window size: %d x %d", winW, winH);
+        ImGui::Text("Drawable size: %d x %d", drawW, drawH);
+        if (winW > 0 && winH > 0 && drawW > 0 && drawH > 0)
+        {
+            ImGui::Text("Drawable scale: %.3f x %.3f",
+                        static_cast<float>(drawW) / static_cast<float>(winW),
+                        static_cast<float>(drawH) / static_cast<float>(winH));
+        }
+        if (eng->_swapchainManager)
+        {
+            VkExtent2D sw = eng->_swapchainManager->swapchainExtent();
+            ImGui::Text("Swapchain extent: %u x %u", sw.width, sw.height);
+        }
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("GPU");
+        if (!eng->_deviceManager || !eng->_deviceManager->physicalDevice())
+        {
+            ImGui::TextUnformatted("No Vulkan device initialized.");
+            return;
+        }
+
+        VkPhysicalDevice gpu = eng->_deviceManager->physicalDevice();
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(gpu, &props);
+        VkPhysicalDeviceMemoryProperties mem{};
+        vkGetPhysicalDeviceMemoryProperties(gpu, &mem);
+
+        auto type_str = [](VkPhysicalDeviceType t) -> const char*
+        {
+            switch (t)
+            {
+                case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: return "Discrete";
+                case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return "Integrated";
+                case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: return "Virtual";
+                case VK_PHYSICAL_DEVICE_TYPE_CPU: return "CPU";
+                default: return "Other";
+            }
+        };
+
+        uint64_t device_local_bytes = 0;
+        for (uint32_t i = 0; i < mem.memoryHeapCount; ++i)
+        {
+            if (mem.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+            {
+                device_local_bytes += mem.memoryHeaps[i].size;
+            }
+        }
+        const double vram_gib = static_cast<double>(device_local_bytes) / (1024.0 * 1024.0 * 1024.0);
+
+        const uint32_t api = props.apiVersion;
+        ImGui::Text("Name: %s", props.deviceName);
+        ImGui::Text("Type: %s", type_str(props.deviceType));
+        ImGui::Text("Vendor: 0x%04x  Device: 0x%04x", props.vendorID, props.deviceID);
+        ImGui::Text("Vulkan API: %u.%u.%u", VK_VERSION_MAJOR(api), VK_VERSION_MINOR(api), VK_VERSION_PATCH(api));
+        ImGui::Text("Driver: %u (0x%08x)", props.driverVersion, props.driverVersion);
+        ImGui::Text("Device-local memory: %.2f GiB", vram_gib);
+        ImGui::Text("RayQuery: %s  AccelStruct: %s",
+                    eng->_deviceManager->supportsRayQuery() ? "yes" : "no",
+                    eng->_deviceManager->supportsAccelerationStructure() ? "yes" : "no");
     }
 
     // Background / compute playground
@@ -962,10 +1033,27 @@ namespace
         const DrawContext &dc = eng->_context->getMainDrawContext();
         ImGui::Text("Opaque draws: %zu", dc.OpaqueSurfaces.size());
         ImGui::Text("Transp draws: %zu", dc.TransparentSurfaces.size());
-        ImGui::Checkbox("Use ID-buffer picking", &eng->_useIdBufferPicking);
-        ImGui::Text("Picking mode: %s",
-                    eng->_useIdBufferPicking ? "ID buffer (async, 1-frame latency)" : "CPU raycast");
-        ImGui::Checkbox("Debug draw mesh BVH (last pick)", &eng->_debugDrawBVH);
+        PickingSystem *picking = eng->picking();
+        if (picking)
+        {
+            bool use_id = picking->use_id_buffer_picking();
+            if (ImGui::Checkbox("Use ID-buffer picking", &use_id))
+            {
+                picking->set_use_id_buffer_picking(use_id);
+            }
+            ImGui::Text("Picking mode: %s",
+                        use_id ? "ID buffer (async, 1-frame latency)" : "CPU raycast");
+
+            bool debug_bvh = picking->debug_draw_bvh();
+            if (ImGui::Checkbox("Debug draw mesh BVH (last pick)", &debug_bvh))
+            {
+                picking->set_debug_draw_bvh(debug_bvh);
+            }
+        }
+        else
+        {
+            ImGui::TextUnformatted("Picking system not available");
+        }
         ImGui::Separator();
 
         // Spawn glTF instances (runtime)
@@ -1119,8 +1207,13 @@ namespace
         if (ImGui::Button("Delete selected"))
         {
             deleteStatus.clear();
-            const auto *pick = eng->_lastPick.valid ? &eng->_lastPick
-                                                    : (eng->_hoverPick.valid ? &eng->_hoverPick : nullptr);
+            const PickingSystem::PickInfo *pick = nullptr;
+            if (picking)
+            {
+                const auto &last = picking->last_pick();
+                const auto &hover = picking->hover_pick();
+                pick = last.valid ? &last : (hover.valid ? &hover : nullptr);
+            }
             if (!pick || pick->ownerName.empty())
             {
                 deleteStatus = "No selection to delete.";
@@ -1128,6 +1221,10 @@ namespace
             else if (pick->ownerType == RenderObject::OwnerType::MeshInstance)
             {
                 bool ok = eng->_sceneManager->removeMeshInstance(pick->ownerName);
+                if (ok && picking)
+                {
+                    picking->clear_owner_picks(RenderObject::OwnerType::MeshInstance, pick->ownerName);
+                }
                 deleteStatus = ok ? "Removed mesh instance: " + pick->ownerName
                                   : "Mesh instance not found: " + pick->ownerName;
             }
@@ -1137,35 +1234,9 @@ namespace
                 if (ok)
                 {
                     deleteStatus = "Removed glTF instance: " + pick->ownerName;
-
-                    // Debug: log and clear any picks that still reference the deleted instance.
-                    fmt::println("[Debug] GLTF delete requested for '{}'; clearing picks if they match.",
-                                 pick->ownerName);
-
-                    if (eng->_lastPick.valid &&
-                        eng->_lastPick.ownerType == RenderObject::OwnerType::GLTFInstance &&
-                        eng->_lastPick.ownerName == pick->ownerName)
+                    if (picking)
                     {
-                        fmt::println("[Debug] Clearing _lastPick for deleted GLTF instance '{}'", pick->ownerName);
-                        eng->_lastPick.valid = false;
-                        eng->_lastPick.ownerName.clear();
-                        eng->_lastPick.ownerType = RenderObject::OwnerType::None;
-                        eng->_lastPick.mesh = nullptr;
-                        eng->_lastPick.scene = nullptr;
-                        eng->_lastPick.node = nullptr;
-                    }
-
-                    if (eng->_hoverPick.valid &&
-                        eng->_hoverPick.ownerType == RenderObject::OwnerType::GLTFInstance &&
-                        eng->_hoverPick.ownerName == pick->ownerName)
-                    {
-                        fmt::println("[Debug] Clearing _hoverPick for deleted GLTF instance '{}'", pick->ownerName);
-                        eng->_hoverPick.valid = false;
-                        eng->_hoverPick.ownerName.clear();
-                        eng->_hoverPick.ownerType = RenderObject::OwnerType::None;
-                        eng->_hoverPick.mesh = nullptr;
-                        eng->_hoverPick.scene = nullptr;
-                        eng->_hoverPick.node = nullptr;
+                        picking->clear_owner_picks(RenderObject::OwnerType::GLTFInstance, pick->ownerName);
                     }
                 }
                 else
@@ -1184,36 +1255,37 @@ namespace
         }
         ImGui::Separator();
 
-        if (eng->_lastPick.valid)
+        if (picking && picking->last_pick().valid)
         {
-            const char *meshName = eng->_lastPick.mesh ? eng->_lastPick.mesh->name.c_str() : "<unknown>";
+            const auto &last = picking->last_pick();
+            const char *meshName = last.mesh ? last.mesh->name.c_str() : "<unknown>";
             const char *sceneName = "<none>";
-            if (eng->_lastPick.scene && !eng->_lastPick.scene->debugName.empty())
+            if (last.scene && !last.scene->debugName.empty())
             {
-                sceneName = eng->_lastPick.scene->debugName.c_str();
+                sceneName = last.scene->debugName.c_str();
             }
             ImGui::Text("Last pick scene: %s", sceneName);
             ImGui::Text("Last pick source: %s",
-                        eng->_useIdBufferPicking ? "ID buffer" : "CPU raycast");
-            ImGui::Text("Last pick object ID: %u", eng->_lastPickObjectID);
-            ImGui::Text("Last pick mesh: %s (surface %u)", meshName, eng->_lastPick.surfaceIndex);
+                        picking->use_id_buffer_picking() ? "ID buffer" : "CPU raycast");
+            ImGui::Text("Last pick object ID: %u", picking->last_pick_object_id());
+            ImGui::Text("Last pick mesh: %s (surface %u)", meshName, last.surfaceIndex);
             ImGui::Text("World pos: (%.3f, %.3f, %.3f)",
-                        eng->_lastPick.worldPos.x,
-                        eng->_lastPick.worldPos.y,
-                        eng->_lastPick.worldPos.z);
+                        last.worldPos.x,
+                        last.worldPos.y,
+                        last.worldPos.z);
             const char *ownerTypeStr = "none";
-            switch (eng->_lastPick.ownerType)
+            switch (last.ownerType)
             {
                 case RenderObject::OwnerType::MeshInstance: ownerTypeStr = "mesh instance"; break;
                 case RenderObject::OwnerType::GLTFInstance: ownerTypeStr = "glTF instance"; break;
                 case RenderObject::OwnerType::StaticGLTF: ownerTypeStr = "glTF scene"; break;
                 default: break;
             }
-            const char *ownerName = eng->_lastPick.ownerName.empty() ? "<unnamed>" : eng->_lastPick.ownerName.c_str();
+            const char *ownerName = last.ownerName.empty() ? "<unnamed>" : last.ownerName.c_str();
             ImGui::Text("Owner: %s (%s)", ownerName, ownerTypeStr);
             ImGui::Text("Indices: first=%u count=%u",
-                        eng->_lastPick.firstIndex,
-                        eng->_lastPick.indexCount);
+                        last.firstIndex,
+                        last.indexCount);
 
             if (eng->_sceneManager)
             {
@@ -1235,28 +1307,29 @@ namespace
             ImGui::TextUnformatted("Last pick: <none>");
         }
         ImGui::Separator();
-        if (eng->_hoverPick.valid)
+        if (picking && picking->hover_pick().valid)
         {
-            const char *meshName = eng->_hoverPick.mesh ? eng->_hoverPick.mesh->name.c_str() : "<unknown>";
-            ImGui::Text("Hover mesh: %s (surface %u)", meshName, eng->_hoverPick.surfaceIndex);
+            const auto &hover = picking->hover_pick();
+            const char *meshName = hover.mesh ? hover.mesh->name.c_str() : "<unknown>";
+            ImGui::Text("Hover mesh: %s (surface %u)", meshName, hover.surfaceIndex);
             const char *ownerTypeStr = "none";
-            switch (eng->_hoverPick.ownerType)
+            switch (hover.ownerType)
             {
                 case RenderObject::OwnerType::MeshInstance: ownerTypeStr = "mesh instance"; break;
                 case RenderObject::OwnerType::GLTFInstance: ownerTypeStr = "glTF instance"; break;
                 case RenderObject::OwnerType::StaticGLTF: ownerTypeStr = "glTF scene"; break;
                 default: break;
             }
-            const char *ownerName = eng->_hoverPick.ownerName.empty() ? "<unnamed>" : eng->_hoverPick.ownerName.c_str();
+            const char *ownerName = hover.ownerName.empty() ? "<unnamed>" : hover.ownerName.c_str();
             ImGui::Text("Hover owner: %s (%s)", ownerName, ownerTypeStr);
         }
         else
         {
             ImGui::TextUnformatted("Hover: <none>");
         }
-        if (!eng->_dragSelection.empty())
+        if (picking && !picking->drag_selection().empty())
         {
-            ImGui::Text("Drag selection: %zu objects", eng->_dragSelection.size());
+            ImGui::Text("Drag selection: %zu objects", picking->drag_selection().size());
         }
 
         ImGui::Separator();
@@ -1271,14 +1344,17 @@ namespace
         SceneManager *sceneMgr = eng->_sceneManager.get();
 
         // Choose a pick to edit: prefer last pick, then hover.
-        VulkanEngine::PickInfo *pick = nullptr;
-        if (eng->_lastPick.valid)
+        PickingSystem::PickInfo *pick = nullptr;
+        if (picking)
         {
-            pick = &eng->_lastPick;
-        }
-        else if (eng->_hoverPick.valid)
-        {
-            pick = &eng->_hoverPick;
+            if (picking->last_pick().valid)
+            {
+                pick = picking->mutable_last_pick();
+            }
+            else if (picking->hover_pick().valid)
+            {
+                pick = picking->mutable_hover_pick();
+            }
         }
 
         if (!pick || pick->ownerName.empty())

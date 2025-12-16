@@ -25,5 +25,4 @@ private:
                     const class RGPassResources &resources,
                     RGImageHandle targetHandle) const;
 
-    DeletionQueue _deletionQueue;
 };
