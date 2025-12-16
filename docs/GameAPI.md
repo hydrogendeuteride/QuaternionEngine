@@ -7,6 +7,9 @@ For details on the underlying systems, see also:
 - `docs/Scene.md` – cameras, draw context, instances, picking.
 - `docs/EngineContext.md` – access to managers and per‑frame state.
 - `docs/RenderGraph.md` – render‑graph API for custom passes.
+- `docs/InputSystem.md` – keyboard, mouse, and cursor mode handling.
+- `docs/Picking.md` – object selection, hover detection, and drag-box multi-select.
+- `docs/ImGuiSystem.md` – immediate-mode UI integration and debug widgets.
 
 ---
 
@@ -24,6 +27,7 @@ Implementation: `src/core/game_api.cpp`
 - Post‑processing (tonemap, bloom, FXAA).
 - Camera control.
 - Picking and render‑graph pass toggles.
+- Input handling (keyboard, mouse, cursor modes).
 
 Typical creation:
 
@@ -184,6 +188,152 @@ This writes into `VulkanEngine::_rgPassToggles` and is applied during RenderGrap
 
 ---
 
+## Input System
+
+Header: `src/core/input/input_system.h`
+Docs: `docs/InputSystem.md`
+
+The engine provides a unified input abstraction layer that wraps SDL2 events. Access it via `VulkanEngine::input()` or store a reference during initialization.
+
+### Polled State (Recommended for Games)
+
+Query current keyboard/mouse state each frame:
+
+```cpp
+void Game::update(VulkanEngine& engine)
+{
+    const InputState& input = engine.input().state();
+
+    // Movement (held keys)
+    glm::vec3 move{0.0f};
+    if (input.key_down(Key::W)) move.z -= 1.0f;
+    if (input.key_down(Key::S)) move.z += 1.0f;
+    if (input.key_down(Key::A)) move.x -= 1.0f;
+    if (input.key_down(Key::D)) move.x += 1.0f;
+
+    // Sprint modifier
+    float speed = input.modifiers().shift ? 10.0f : 5.0f;
+    player.move(move * speed * dt);
+
+    // Fire on left click (just pressed this frame)
+    if (input.mouse_pressed(MouseButton::Left))
+    {
+        player.fire();
+    }
+
+    // Toggle menu on Escape (just pressed)
+    if (input.key_pressed(Key::Escape))
+    {
+        ui.toggle_menu();
+    }
+
+    // Mouse look (right button held)
+    if (input.mouse_down(MouseButton::Right))
+    {
+        engine.input().set_cursor_mode(CursorMode::Relative);
+        glm::vec2 delta = input.mouse_delta();
+        camera.rotate(delta.x * 0.1f, delta.y * 0.1f);
+    }
+    else
+    {
+        engine.input().set_cursor_mode(CursorMode::Normal);
+    }
+
+    // Scroll wheel for zoom
+    float scroll = input.wheel_delta().y;
+    if (scroll != 0.0f)
+    {
+        camera.zoom(scroll * 0.5f);
+    }
+}
+```
+
+### Key State Types
+
+- `key_down(Key)` / `mouse_down(MouseButton)` — true while held (continuous actions)
+- `key_pressed(Key)` / `mouse_pressed(MouseButton)` — true only on the frame it was pressed (one-shot)
+- `key_released(Key)` / `mouse_released(MouseButton)` — true only on the frame it was released
+
+### Available Keys
+
+Letters: `Key::A` through `Key::Z`
+Numbers: `Key::Num0` through `Key::Num9`
+Special: `Key::Enter`, `Key::Escape`, `Key::Space`, `Key::Tab`, `Key::Backspace`
+Modifiers: `Key::LeftShift`, `Key::LeftCtrl`, `Key::LeftAlt`, `Key::LeftSuper` (and Right variants)
+
+### Mouse Buttons
+
+`MouseButton::Left`, `MouseButton::Middle`, `MouseButton::Right`, `MouseButton::X1`, `MouseButton::X2`
+
+### Cursor Modes
+
+```cpp
+enum class CursorMode : uint8_t
+{
+    Normal = 0,   // Default visible cursor
+    Hidden = 1,   // Hidden but not captured
+    Relative = 2, // FPS-style: hidden + captured, only delta matters
+};
+
+// Set via:
+engine.input().set_cursor_mode(CursorMode::Relative);
+```
+
+### Mouse Position and Motion
+
+```cpp
+glm::vec2 pos   = input.mouse_position(); // Screen coordinates (pixels)
+glm::vec2 delta = input.mouse_delta();    // Frame motion delta
+glm::vec2 wheel = input.wheel_delta();    // Scroll wheel delta
+```
+
+### Modifier Keys
+
+```cpp
+InputModifiers mods = input.modifiers();
+if (mods.ctrl && input.key_pressed(Key::S))
+{
+    save_game();
+}
+```
+
+### Event-Driven Access (For UI)
+
+For text input or other event-driven needs:
+
+```cpp
+for (const InputEvent& ev : engine.input().events())
+{
+    if (ev.type == InputEvent::Type::KeyDown)
+    {
+        if (ev.key == Key::Backspace)
+        {
+            text_field.delete_char();
+        }
+    }
+    else if (ev.type == InputEvent::Type::MouseWheel)
+    {
+        scroll_view.scroll(ev.wheel_delta.y);
+    }
+}
+```
+
+### Window State
+
+```cpp
+if (engine.input().quit_requested())
+{
+    // Handle window close
+}
+
+if (engine.input().window_minimized())
+{
+    // Skip heavy rendering
+}
+```
+
+---
+
 ## VulkanEngine Helpers
 
 Header: `src/core/engine.h`
@@ -300,66 +450,183 @@ Typical usage:
 
 ---
 
-## Picking & Selection (Interaction)
+## Picking System
 
-Picking lives in `SceneManager` and is wired into `VulkanEngine`’s frame loop.
+Header: `src/core/picking/picking_system.h`
+Docs: `docs/Picking.md`
 
-Header: `src/scene/vk_scene.h`  
-Implementation: `src/scene/vk_scene_picking.cpp`
+The engine provides a unified picking system that handles click selection, hover detection, and drag-box multi-select. Access it via `VulkanEngine::picking()`.
 
-### Single‑Object Ray Picking
+### Accessing Pick Results
 
-- `bool pick(const glm::vec2 &mousePosPixels, RenderObject &outObject, glm::vec3 &outWorldPos);`
-  - Input:
-    - `mousePosPixels` – window coordinates (SDL style), origin at top‑left.
-  - Output on success:
-    - `outObject` – closest `RenderObject` hit by the camera ray.
-    - `outWorldPos` – precise world‑space hit position (uses mesh BVH when available).
-  - Returns:
-    - `true` if any object was hit, otherwise `false`.
+```cpp
+void Game::handle_interaction(VulkanEngine& engine)
+{
+    PickingSystem& picking = engine.picking();
 
-### ID‑Buffer Picking
+    // Last click selection
+    const PickingSystem::PickInfo& pick = picking.last_pick();
+    if (pick.valid)
+    {
+        fmt::println("Selected: {}", pick.ownerName);
+        interact_with(pick.ownerName, pick.worldPos);
+    }
 
-- `bool resolveObjectID(uint32_t id, RenderObject &outObject) const;`
-  - Takes an ID read back from the ID buffer and resolves it to the corresponding `RenderObject` in the latest `DrawContext`.
-  - Used by the engine when `_useIdBufferPicking` is enabled to implement asynchronous picking.
+    // Current hover (for tooltips)
+    const PickingSystem::PickInfo& hover = picking.hover_pick();
+    if (hover.valid)
+    {
+        show_tooltip(hover.ownerName);
+    }
 
-### Rectangle Selection (Drag Box)
+    // Drag-box multi-select
+    for (const auto& sel : picking.drag_selection())
+    {
+        if (sel.valid)
+        {
+            add_to_selection(sel.ownerName);
+        }
+    }
+}
+```
 
-- `void selectRect(const glm::vec2 &p0, const glm::vec2 &p1, std::vector<RenderObject> &outObjects) const;`
-  - Inputs:
-    - `p0`, `p1` – opposite corners of a window‑space rectangle (top‑left origin).
-  - Output:
-    - `outObjects` – appended with all `RenderObject`s whose projected bounds intersect the rectangle.
-  - Internals:
-    - Uses `sceneData.viewproj` and an NDC‑space bounds test to determine overlap.
+### PickInfo Structure
 
-### Typical Game Usage
+```cpp
+struct PickInfo
+{
+    MeshAsset *mesh;                     // Source mesh
+    LoadedGLTF *scene;                   // Source glTF
+    Node *node;                          // glTF node
+    RenderObject::OwnerType ownerType;   // StaticGLTF, GLTFInstance, MeshInstance
+    std::string ownerName;               // Logical name (e.g., "player")
+    WorldVec3 worldPos;                  // Hit position (double-precision)
+    glm::mat4 worldTransform;            // Object transform
+    uint32_t indexCount, firstIndex;     // Picked surface indices
+    uint32_t surfaceIndex;               // Surface index in mesh
+    bool valid;                          // True if hit something
+};
+```
 
-- Hover tooltips:
-  - Track mouse position in window coordinates.
-  - Use `SceneManager::pick` directly, or read `VulkanEngine::get_last_pick()` and/or `_hoverPick` as documented in `Scene.md`.
-- Object selection / interaction:
-  - On mouse click release, inspect `engine->get_last_pick()`:
-    - If `valid`, dispatch interaction based on `ownerType` / `ownerName` (e.g. select unit, open door).
-- Multi‑select:
-  - When implementing drag selection, call `SceneManager::selectRect` with the drag rectangle to get all hits, or reuse the engine’s `_dragSelection` mechanism.
+### Picking Modes
+
+```cpp
+// CPU ray picking (default) - immediate, BVH-accelerated
+picking.set_use_id_buffer_picking(false);
+
+// ID-buffer picking - pixel-perfect, 1-frame latency
+picking.set_use_id_buffer_picking(true);
+```
+
+### Owner Types
+
+```cpp
+enum class OwnerType
+{
+    None,
+    StaticGLTF,    // Loaded via loadScene()
+    GLTFInstance,  // Runtime glTF instance
+    MeshInstance,  // Runtime mesh instance
+};
+```
 
 ---
 
-## ImGui / ImGuizmo Editor Utilities
+## ImGui System
 
-File: `src/core/engine_ui.cpp`
+Header: `src/core/ui/imgui_system.h`
+Docs: `docs/ImGuiSystem.md`
 
-These are primarily debug/editor features but can be kept in a game build to provide in‑game tools.
+The engine integrates Dear ImGui for debug UI and editor tools. Access it via `VulkanEngine::imgui()`.
 
-- Main entry:
-  - `void vk_engine_draw_debug_ui(VulkanEngine *eng);`
-    - Called once per frame by the engine to build the “Debug” window tabs.
-- Useful tools for games:
-  - Scene tab:
-    - Spawn glTF instances at runtime using `VulkanEngine::addGLTFInstance(...)`.
-    - Spawn primitive mesh instances (cube/sphere) using `SceneManager::addMeshInstance(...)`.
-    - Point‑light editor UI built on `SceneManager` light APIs.
-  - Object gizmo (ImGuizmo):
-    - Uses last pick / hover pick as the current target and manipulates transforms via `setMeshInstanceTransform` / `setGLTFInstanceTransform`.
+### Adding Custom UI
+
+```cpp
+void Game::init(VulkanEngine& engine)
+{
+    // Register your UI callback
+    engine.imgui().add_draw_callback([this]() {
+        draw_game_ui();
+    });
+}
+
+void Game::draw_game_ui()
+{
+    if (ImGui::Begin("Game HUD"))
+    {
+        ImGui::Text("Score: %d", _score);
+        ImGui::Text("Health: %.0f%%", _health * 100.0f);
+
+        if (ImGui::Button("Pause"))
+        {
+            toggle_pause();
+        }
+    }
+    ImGui::End();
+}
+```
+
+### Input Capture
+
+Always check ImGui input capture before processing game input:
+
+```cpp
+void Game::update(VulkanEngine& engine)
+{
+    // Skip game mouse input when ImGui wants it
+    if (!engine.imgui().want_capture_mouse())
+    {
+        handle_mouse_input();
+    }
+
+    // Skip game keyboard input when ImGui wants it
+    if (!engine.imgui().want_capture_keyboard())
+    {
+        handle_keyboard_input();
+    }
+}
+```
+
+### Built-in Debug UI
+
+The engine provides comprehensive debug widgets in `src/core/engine_ui.cpp`:
+
+- **Window Tab**: Monitor selection, fullscreen modes, HiDPI info
+- **Stats Tab**: Frame time, FPS, draw calls, triangle count
+- **Scene Tab**: Instance spawning, point light editor, ImGuizmo gizmos
+- **Render Graph Tab**: Pass toggles, resource tracking
+- **Texture Streaming Tab**: VRAM budget, cache stats
+- **Shadows Tab**: Shadow mode, cascade visualization
+- **Post Processing Tab**: Tonemapping, bloom, FXAA, SSR settings
+
+### ImGuizmo Integration
+
+For 3D transform gizmos on selected objects:
+
+```cpp
+#include "ImGuizmo.h"
+
+void draw_gizmo(const PickingSystem::PickInfo& pick,
+                const glm::mat4& view, const glm::mat4& proj)
+{
+    if (!pick.valid) return;
+
+    glm::mat4 transform = pick.worldTransform;
+
+    ImGuizmo::SetOrthographic(false);
+    ImGuizmo::SetDrawlist();
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+
+    if (ImGuizmo::Manipulate(glm::value_ptr(view),
+                             glm::value_ptr(proj),
+                             ImGuizmo::TRANSLATE,
+                             ImGuizmo::WORLD,
+                             glm::value_ptr(transform)))
+    {
+        // Apply transform to the picked object
+        scene->setGLTFInstanceTransform(pick.ownerName, transform);
+    }
+}
+```

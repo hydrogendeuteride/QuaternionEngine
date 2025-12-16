@@ -147,10 +147,13 @@ void SceneManager::update_scene()
     _camera_position_local = world_to_local(mainCamera.position_world, _origin_world);
 
     // Simple per-frame dt (seconds) for animations
-    static auto lastFrameTime = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
-    float dt = std::chrono::duration<float>(now - lastFrameTime).count();
-    lastFrameTime = now;
+    if (_lastFrameTime.time_since_epoch().count() == 0)
+    {
+        _lastFrameTime = now;
+    }
+    float dt = std::chrono::duration<float>(now - _lastFrameTime).count();
+    _lastFrameTime = now;
     if (dt < 0.f)
     {
         dt = 0.f;
@@ -159,6 +162,7 @@ void SceneManager::update_scene()
     {
         dt = 0.1f;
     }
+    _deltaTime = dt;
 
     auto tagOwner = [&](RenderObject::OwnerType type, const std::string &name,
                         size_t opaqueBegin, size_t transpBegin)
@@ -887,4 +891,30 @@ bool SceneManager::setGLTFInstanceAnimationLoop(const std::string &instanceName,
 
     it->second.animation.animationLoop = loop;
     return true;
+}
+
+void SceneManager::setSunlightDirection(const glm::vec3& dir)
+{
+    glm::vec3 normalized = glm::normalize(dir);
+    sceneData.sunlightDirection = glm::vec4(normalized, sceneData.sunlightDirection.w);
+}
+
+glm::vec3 SceneManager::getSunlightDirection() const
+{
+    return glm::vec3(sceneData.sunlightDirection);
+}
+
+void SceneManager::setSunlightColor(const glm::vec3& color, float intensity)
+{
+    sceneData.sunlightColor = glm::vec4(color, intensity);
+}
+
+glm::vec3 SceneManager::getSunlightColor() const
+{
+    return glm::vec3(sceneData.sunlightColor);
+}
+
+float SceneManager::getSunlightIntensity() const
+{
+    return sceneData.sunlightColor.w;
 }

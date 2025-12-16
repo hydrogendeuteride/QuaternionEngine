@@ -640,7 +640,54 @@ void Engine::clear_all_instance_node_offsets(const std::string& instanceName)
 }
 
 // ----------------------------------------------------------------------------
-// Lighting
+// Lighting - Directional (Sunlight)
+// ----------------------------------------------------------------------------
+
+void Engine::set_sunlight_direction(const glm::vec3& dir)
+{
+    if (_engine->_sceneManager)
+    {
+        _engine->_sceneManager->setSunlightDirection(dir);
+    }
+}
+
+glm::vec3 Engine::get_sunlight_direction() const
+{
+    if (_engine->_sceneManager)
+    {
+        return _engine->_sceneManager->getSunlightDirection();
+    }
+    return glm::vec3(0.0f, -1.0f, 0.0f);
+}
+
+void Engine::set_sunlight_color(const glm::vec3& color, float intensity)
+{
+    if (_engine->_sceneManager)
+    {
+        _engine->_sceneManager->setSunlightColor(color, intensity);
+    }
+}
+
+glm::vec3 Engine::get_sunlight_color() const
+{
+    if (_engine->_sceneManager)
+    {
+        return _engine->_sceneManager->getSunlightColor();
+    }
+    return glm::vec3(1.0f);
+}
+
+float Engine::get_sunlight_intensity() const
+{
+    if (_engine->_sceneManager)
+    {
+        return _engine->_sceneManager->getSunlightIntensity();
+    }
+    return 1.0f;
+}
+
+// ----------------------------------------------------------------------------
+// Lighting - Point Lights
 // ----------------------------------------------------------------------------
 
 size_t Engine::add_point_light(const PointLight& light)
@@ -1137,6 +1184,19 @@ void Engine::hot_reload_shaders()
     {
         _engine->_pipelineManager->hotReloadChanged();
     }
+}
+
+// ----------------------------------------------------------------------------
+// Time
+// ----------------------------------------------------------------------------
+
+float Engine::get_delta_time() const
+{
+    if (_engine->_sceneManager)
+    {
+        return _engine->_sceneManager->getDeltaTime();
+    }
+    return 0.0f;
 }
 
 // ----------------------------------------------------------------------------

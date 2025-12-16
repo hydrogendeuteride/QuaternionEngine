@@ -298,7 +298,20 @@ public:
     void clear_all_instance_node_offsets(const std::string& instanceName);
 
     // ------------------------------------------------------------------------
-    // Lighting
+    // Lighting - Directional (Sunlight)
+    // ------------------------------------------------------------------------
+
+    // Set sunlight direction (normalized automatically)
+    void set_sunlight_direction(const glm::vec3& dir);
+    glm::vec3 get_sunlight_direction() const;
+
+    // Set sunlight color and intensity
+    void set_sunlight_color(const glm::vec3& color, float intensity);
+    glm::vec3 get_sunlight_color() const;
+    float get_sunlight_intensity() const;
+
+    // ------------------------------------------------------------------------
+    // Lighting - Point Lights
     // ------------------------------------------------------------------------
 
     // Add point light (returns index)
@@ -398,6 +411,13 @@ public:
 
     // Hot reload all changed shaders
     void hot_reload_shaders();
+
+    // ------------------------------------------------------------------------
+    // Time
+    // ------------------------------------------------------------------------
+
+    // Get delta time in seconds for the current frame (clamped to 0.0-0.1)
+    float get_delta_time() const;
 
     // ------------------------------------------------------------------------
     // Statistics (read-only)

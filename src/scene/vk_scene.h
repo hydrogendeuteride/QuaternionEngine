@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <memory>
 #include <optional>
+#include <chrono>
 #include <glm/vec2.hpp>
 #include <string>
 
@@ -85,6 +86,16 @@ public:
     void selectRect(const glm::vec2 &p0, const glm::vec2 &p1, std::vector<RenderObject> &outObjects) const;
 
     const GPUSceneData &getSceneData() const { return sceneData; }
+
+    // Sunlight (directional light) access
+    void setSunlightDirection(const glm::vec3& dir);
+    glm::vec3 getSunlightDirection() const;
+    void setSunlightColor(const glm::vec3& color, float intensity);
+    glm::vec3 getSunlightColor() const;
+    float getSunlightIntensity() const;
+
+    // Delta time (seconds) for the current frame
+    float getDeltaTime() const { return _deltaTime; }
     DrawContext &getMainDrawContext() { return mainDrawContext; }
 
     void loadScene(const std::string &name, std::shared_ptr<LoadedGLTF> scene);
@@ -203,6 +214,8 @@ private:
     glm::vec3 _camera_position_local{0.0f, 0.0f, 0.0f};
     double _floating_origin_recenter_threshold = 1000.0;
     double _floating_origin_snap_size = 100.0;
+    float _deltaTime = 0.0f;
+    std::chrono::steady_clock::time_point _lastFrameTime{};
 
     std::unordered_map<std::string, std::shared_ptr<LoadedGLTF> > loadedScenes;
     // Per-named static glTF scene animation state (independent of instances).
