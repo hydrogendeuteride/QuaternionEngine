@@ -16,6 +16,15 @@ set(BVH2_ENABLE_TESTS OFF CACHE BOOL "Disable BVH2 tests (offline builds)" FORCE
 
 add_subdirectory(third_party)
 
+if (MSVC AND CMAKE_C_COMPILER_ID MATCHES "Clang")
+    if (TARGET SDL2)
+        target_link_options(SDL2 PRIVATE /DEFAULTLIB:ucrt.lib /DEFAULTLIB:vcruntime.lib)
+    endif()
+    if (TARGET SDL2-static)
+        target_link_options(SDL2-static PRIVATE /DEFAULTLIB:ucrt.lib /DEFAULTLIB:vcruntime.lib)
+    endif()
+endif()
+
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 set (CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 
