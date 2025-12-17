@@ -4,3 +4,7 @@
 [submodule "third_party/taskflow"]
 	path = third_party/taskflow
 	url = https://github.com/taskflow/taskflow.git
+[submodule "third_party/SDL"]
+	path = third_party/SDL
+	url = https://github.com/libsdl-org/SDL.git
+	branch = release-2.32.x
