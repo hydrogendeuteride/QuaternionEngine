@@ -83,6 +83,8 @@ add_executable (vulkan_engine
   render/passes/fxaa.cpp
   render/passes/ssr.h
   render/passes/ssr.cpp
+  render/passes/particles.h
+  render/passes/particles.cpp
   render/passes/transparent.h
   render/passes/transparent.cpp
   render/passes/imgui_pass.h

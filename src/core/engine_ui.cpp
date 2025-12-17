@@ -18,6 +18,7 @@
 #include "render/passes/tonemap.h"
 #include "render/passes/fxaa.h"
 #include "render/passes/background.h"
+#include "render/passes/particles.h"
 #include <glm/gtx/euler_angles.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "render/graph/graph.h"
@@ -28,6 +29,7 @@
 #include "context.h"
 #include <core/types.h>
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 #include "mesh_bvh.h"
@@ -256,6 +258,138 @@ namespace
         {
             eng->set_render_scale(pendingScale);
         }
+    }
+
+    static void ui_particles(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_renderPassManager) return;
+        auto *pass = eng->_renderPassManager->getPass<ParticlePass>();
+        if (!pass)
+        {
+            ImGui::TextUnformatted("Particle pass not available");
+            return;
+        }
+
+        const uint32_t freeCount = pass->free_particles();
+        const uint32_t allocCount = pass->allocated_particles();
+        ImGui::Text("Pool: %u allocated / %u free (max %u)", allocCount, freeCount, ParticlePass::k_max_particles);
+
+        ImGui::Separator();
+
+        static int newCount = 32768;
+        newCount = std::max(newCount, 1);
+        ImGui::InputInt("New System Particles", &newCount);
+        ImGui::SameLine();
+        if (ImGui::Button("Create"))
+        {
+            const uint32_t want = static_cast<uint32_t>(std::max(1, newCount));
+            pass->create_system(want);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Create 32k"))
+        {
+            pass->create_system(32768);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Create 128k"))
+        {
+            pass->create_system(ParticlePass::k_max_particles);
+        }
+
+        ImGui::Separator();
+
+        auto &systems = pass->systems();
+        if (systems.empty())
+        {
+            ImGui::TextUnformatted("No particle systems. Create one above.");
+            return;
+        }
+
+        static int selected = 0;
+        selected = std::clamp(selected, 0, (int)systems.size() - 1);
+
+        if (ImGui::BeginListBox("Systems"))
+        {
+            for (int i = 0; i < (int)systems.size(); ++i)
+            {
+                const auto &s = systems[i];
+                char label[128];
+                std::snprintf(label, sizeof(label), "#%u base=%u count=%u %s",
+                              s.id, s.base, s.count, s.enabled ? "on" : "off");
+                const bool isSelected = (selected == i);
+                if (ImGui::Selectable(label, isSelected))
+                {
+                    selected = i;
+                }
+                if (isSelected) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndListBox();
+        }
+
+        selected = std::clamp(selected, 0, (int)systems.size() - 1);
+        auto &s = systems[(size_t)selected];
+
+        ImGui::Separator();
+
+        ImGui::Text("Selected: id=%u base=%u count=%u", s.id, s.base, s.count);
+        ImGui::Checkbox("Enabled", &s.enabled);
+        ImGui::SameLine();
+        if (ImGui::Button("Reset (Respawn)"))
+        {
+            s.reset = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Destroy"))
+        {
+            const uint32_t id = s.id;
+            pass->destroy_system(id);
+            selected = 0;
+            return;
+        }
+
+        const char *blendItems[] = {"Additive", "Alpha (unsorted)"};
+        int blend = (s.blend == ParticlePass::BlendMode::Alpha) ? 1 : 0;
+        if (ImGui::Combo("Blend", &blend, blendItems, 2))
+        {
+            s.blend = (blend == 1) ? ParticlePass::BlendMode::Alpha : ParticlePass::BlendMode::Additive;
+        }
+
+        ImGui::Separator();
+
+        static int pendingResizeCount = 0;
+        if (!ImGui::IsAnyItemActive())
+        {
+            pendingResizeCount = (int)s.count;
+        }
+        ImGui::InputInt("Resize Count", &pendingResizeCount);
+        ImGui::SameLine();
+        if (ImGui::Button("Apply Resize"))
+        {
+            const uint32_t want = static_cast<uint32_t>(std::max(0, pendingResizeCount));
+            pass->resize_system(s.id, want);
+        }
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Emitter");
+        ImGui::InputFloat3("Position (local)", reinterpret_cast<float *>(&s.params.emitter_pos_local));
+        ImGui::SliderFloat("Spawn Radius", &s.params.spawn_radius, 0.0f, 10.0f, "%.3f");
+        ImGui::InputFloat3("Direction (local)", reinterpret_cast<float *>(&s.params.emitter_dir_local));
+        ImGui::SliderFloat("Cone Angle (deg)", &s.params.cone_angle_degrees, 0.0f, 89.0f, "%.1f");
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Motion");
+        ImGui::InputFloat("Min Speed", &s.params.min_speed);
+        ImGui::InputFloat("Max Speed", &s.params.max_speed);
+        ImGui::InputFloat("Min Life (s)", &s.params.min_life);
+        ImGui::InputFloat("Max Life (s)", &s.params.max_life);
+        ImGui::InputFloat("Min Size", &s.params.min_size);
+        ImGui::InputFloat("Max Size", &s.params.max_size);
+        ImGui::SliderFloat("Drag", &s.params.drag, 0.0f, 10.0f, "%.3f");
+        ImGui::SliderFloat("Gravity (m/s^2)", &s.params.gravity, 0.0f, 30.0f, "%.2f");
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Color");
+        ImGui::ColorEdit4("Tint", reinterpret_cast<float *>(&s.params.color), ImGuiColorEditFlags_Float);
     }
 
     // IBL test grid spawner (spheres varying metallic/roughness)
@@ -1531,6 +1665,11 @@ void vk_engine_draw_debug_ui(VulkanEngine *eng)
             if (ImGui::BeginTabItem("Background"))
             {
                 ui_background(eng);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Particles"))
+            {
+                ui_particles(eng);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Shadows"))

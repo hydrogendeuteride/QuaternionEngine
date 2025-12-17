@@ -5,6 +5,7 @@
 #include "passes/imgui_pass.h"
 #include "passes/lighting.h"
 #include "passes/ssr.h"
+#include "passes/particles.h"
 #include "passes/fxaa.h"
 #include "passes/transparent.h"
 #include "passes/tonemap.h"
@@ -35,6 +36,11 @@ void RenderPassManager::init(EngineContext *context)
     auto ssrPass = std::make_unique<SSRPass>();
     ssrPass->init(context);
     addPass(std::move(ssrPass));
+
+    // GPU particle system (compute update + render)
+    auto particlePass = std::make_unique<ParticlePass>();
+    particlePass->init(context);
+    addPass(std::move(particlePass));
 
     // Post-process AA (FXAA-like) after tonemapping.
     auto fxaaPass = std::make_unique<FxaaPass>();

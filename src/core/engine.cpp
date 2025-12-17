@@ -45,6 +45,7 @@
 #include "render/passes/geometry.h"
 #include "render/passes/imgui_pass.h"
 #include "render/passes/lighting.h"
+#include "render/passes/particles.h"
 #include "render/passes/transparent.h"
 #include "render/passes/fxaa.h"
 #include "render/passes/tonemap.h"
@@ -1187,10 +1188,16 @@ void VulkanEngine::draw()
                                     hSSR);
             }
 
+            // Downstream passes draw on top of either the SSR output or the raw HDR draw.
+            RGImageHandle hdrTarget = (ssrEnabled && hSSR.valid()) ? hSSR : hDraw;
+
+            if (auto *particles = _renderPassManager->getPass<ParticlePass>())
+            {
+                particles->register_graph(_renderGraph.get(), hdrTarget, hDepth);
+            }
+
             if (auto *transparent = _renderPassManager->getPass<TransparentPass>())
             {
-                // Transparent objects draw on top of either the SSR output or the raw HDR draw.
-                RGImageHandle hdrTarget = (ssrEnabled && hSSR.valid()) ? hSSR : hDraw;
                 transparent->register_graph(_renderGraph.get(), hdrTarget, hDepth);
             }
             imguiPass = _renderPassManager->getImGuiPass();
@@ -1198,8 +1205,7 @@ void VulkanEngine::draw()
             // Optional Tonemap pass: sample HDR draw -> LDR intermediate
             if (auto *tonemap = _renderPassManager->getPass<TonemapPass>())
             {
-                RGImageHandle hdrInput = (ssrEnabled && hSSR.valid()) ? hSSR : hDraw;
-                finalColor = tonemap->register_graph(_renderGraph.get(), hdrInput);
+                finalColor = tonemap->register_graph(_renderGraph.get(), hdrTarget);
 
                 // Optional FXAA pass: runs on LDR tonemapped output.
                 if (auto *fxaa = _renderPassManager->getPass<FxaaPass>())
@@ -1210,7 +1216,7 @@ void VulkanEngine::draw()
             else
             {
                 // If tonemapping is disabled, present whichever HDR buffer we ended up with.
-                finalColor = (ssrEnabled && hSSR.valid()) ? hSSR : hDraw;
+                finalColor = hdrTarget;
             }
         }
 

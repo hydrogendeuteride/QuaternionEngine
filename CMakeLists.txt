@@ -44,6 +44,7 @@ foreach(GLSL ${GLSL_SOURCE_FILES})
   list(APPEND SPIRV_BINARY_FILES ${SPIRV})
 endforeach(GLSL)
 
-add_custom_target(
-    DEPENDS ${SPIRV_BINARY_FILES}
-    )
+add_custom_target(shaders_spirv DEPENDS ${SPIRV_BINARY_FILES})
+
+# Ensure shaders are built alongside the executable.
+add_dependencies(vulkan_engine shaders_spirv)

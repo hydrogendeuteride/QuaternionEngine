@@ -374,11 +374,13 @@ bool RenderGraph::compile()
 				info.access = VK_ACCESS_2_UNIFORM_READ_BIT;
 				break;
 			case RGBufferUsage::StorageRead:
-				info.stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+				// Storage buffers can be read from compute and any graphics stage (including vertex).
+				info.stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
 				info.access = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
 				break;
 			case RGBufferUsage::StorageReadWrite:
-				info.stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+				// Storage buffers can be read/write from compute and read in graphics stages.
+				info.stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
 				info.access = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
 				break;
 			case RGBufferUsage::IndirectArgs:

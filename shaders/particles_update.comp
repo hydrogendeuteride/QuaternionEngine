@@ -1,0 +1,158 @@
+#version 450
+
+// v1 particle update: one SSBO, per-system dispatch.
+// Particles store "remaining life" in pos_age.w and total lifetime in vel_life.w.
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct Particle
+{
+    vec4 pos_age;   // xyz = local position, w = remaining life (seconds)
+    vec4 vel_life;  // xyz = local velocity, w = lifetime (seconds)
+    vec4 color;     // rgba
+    vec4 misc;      // x=size, y=seed, z=unused, w=flags
+};
+
+layout(std430, set = 0, binding = 0) buffer ParticlePool
+{
+    Particle particles[];
+} pool;
+
+layout(push_constant) uniform Push
+{
+    uvec4 header;            // x=base, y=count, z=reset
+    vec4  sim;               // x=dt, y=time, z=drag, w=gravity (m/s^2, pulls down -Y)
+    vec4  origin_delta;      // xyz origin delta (local)
+    vec4  emitter_pos_radius;// xyz emitter pos (local), w=spawn radius
+    vec4  emitter_dir_cone;  // xyz emitter dir (local), w=cone angle radians (<=0 => sphere)
+    vec4  ranges;            // x=minSpeed, y=maxSpeed, z=minLife, w=maxLife
+    vec4  size_range;        // x=minSize, y=maxSize
+    vec4  color;             // rgba
+} pc;
+
+uint hash_u32(uint x)
+{
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+
+float rand01(inout uint state)
+{
+    state = hash_u32(state);
+    // 0..1 (exclusive 1)
+    return float(state) * (1.0 / 4294967296.0);
+}
+
+vec3 random_unit_vector(inout uint state)
+{
+    float z = rand01(state) * 2.0 - 1.0;
+    float a = rand01(state) * 6.28318530718;
+    float r = sqrt(max(0.0, 1.0 - z * z));
+    return vec3(r * cos(a), z, r * sin(a));
+}
+
+vec3 random_in_sphere(inout uint state)
+{
+    vec3 dir = random_unit_vector(state);
+    float u = rand01(state);
+    float radius = pow(u, 1.0 / 3.0);
+    return dir * radius;
+}
+
+vec3 random_in_cone(inout uint state, vec3 axis, float cone_angle)
+{
+    axis = normalize(axis);
+
+    float cos_max = clamp(cos(cone_angle), -1.0, 1.0);
+    float cos_t = mix(cos_max, 1.0, rand01(state));
+    float sin_t = sqrt(max(0.0, 1.0 - cos_t * cos_t));
+
+    float phi = rand01(state) * 6.28318530718;
+    vec3 local_dir = vec3(cos(phi) * sin_t, sin(phi) * sin_t, cos_t);
+
+    vec3 up = (abs(axis.y) < 0.999) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 u = normalize(cross(up, axis));
+    vec3 v = cross(axis, u);
+
+    return u * local_dir.x + v * local_dir.y + axis * local_dir.z;
+}
+
+void respawn(uint idx)
+{
+    uint seed = idx ^ (hash_u32(floatBitsToUint(pc.sim.y)) * 1664525u) ^ 1013904223u;
+
+    float life = mix(pc.ranges.z, pc.ranges.w, rand01(seed));
+    life = max(life, 0.01);
+
+    float speed = mix(pc.ranges.x, pc.ranges.y, rand01(seed));
+    speed = max(speed, 0.0);
+
+    float size = mix(pc.size_range.x, pc.size_range.y, rand01(seed));
+    size = max(size, 0.001);
+
+    vec3 spawn_pos = pc.emitter_pos_radius.xyz;
+    float radius = max(pc.emitter_pos_radius.w, 0.0);
+    if (radius > 0.0)
+    {
+        spawn_pos += random_in_sphere(seed) * radius;
+    }
+
+    vec3 dir;
+    float cone = pc.emitter_dir_cone.w;
+    if (cone > 0.0)
+    {
+        dir = random_in_cone(seed, pc.emitter_dir_cone.xyz, cone);
+    }
+    else
+    {
+        dir = random_unit_vector(seed);
+    }
+
+    Particle p;
+    p.pos_age = vec4(spawn_pos, life);
+    p.vel_life = vec4(dir * speed, life);
+    p.color = pc.color;
+    p.misc = vec4(size, rand01(seed), 0.0, 0.0);
+    pool.particles[idx] = p;
+}
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.header.y) return;
+
+    uint idx = pc.header.x + i;
+
+    Particle p = pool.particles[idx];
+
+    // Keep particles stable under floating-origin recenters.
+    p.pos_age.xyz -= pc.origin_delta.xyz;
+
+    bool reset = (pc.header.z != 0u);
+    bool dead = (p.pos_age.w <= 0.0) || (p.vel_life.w <= 0.0);
+
+    if (reset || dead)
+    {
+        respawn(idx);
+        return;
+    }
+
+    float dt = pc.sim.x;
+    float drag = max(pc.sim.z, 0.0);
+    float gravity = pc.sim.w;
+
+    vec3 vel = p.vel_life.xyz;
+    vel += vec3(0.0, -gravity, 0.0) * dt;
+    vel *= exp(-drag * dt);
+
+    p.pos_age.xyz += vel * dt;
+    p.vel_life.xyz = vel;
+    p.pos_age.w -= dt;
+
+    pool.particles[idx] = p;
+}
+
