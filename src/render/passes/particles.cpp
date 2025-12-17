@@ -373,6 +373,16 @@ void ParticlePass::register_graph(RenderGraph *graph, RGImageHandle hdrTarget, R
         _has_prev_origin = true;
     }
 
+    const float origin_delta_len2 = glm::dot(_origin_delta_local, _origin_delta_local);
+    const bool origin_delta_valid = std::isfinite(origin_delta_len2) && origin_delta_len2 > 0.0f;
+    if (origin_delta_valid)
+    {
+        for (auto &sys : _systems)
+        {
+            sys.params.emitter_pos_local -= _origin_delta_local;
+        }
+    }
+
     bool any_active = false;
     for (const auto &s : _systems)
     {
