@@ -118,6 +118,143 @@ add_executable (vulkan_engine
 
 set_property(TARGET vulkan_engine PROPERTY CXX_STANDARD 20)
 target_compile_definitions(vulkan_engine PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
+
+# ==============================================================================
+# Compiler/OS-specific optimization flags
+# ==============================================================================
+
+# Detect clang-cl (Clang with MSVC frontend)
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+    set(USING_CLANG_CL TRUE)
+else()
+    set(USING_CLANG_CL FALSE)
+endif()
+
+# --- Release build optimizations ---
+if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+
+    if (MSVC AND NOT USING_CLANG_CL)
+        # MSVC (cl.exe)
+        target_compile_options(vulkan_engine PRIVATE
+            /O2             # Maximum speed optimization
+            /Ob2            # Inline expansion (any suitable)
+            /Oi             # Enable intrinsic functions
+            /Ot             # Favor fast code
+            /Oy             # Omit frame pointers
+            /GL             # Whole program optimization
+            /fp:fast        # Fast floating-point
+            /GS-            # Disable buffer security checks (perf)
+        )
+        target_link_options(vulkan_engine PRIVATE
+            /LTCG           # Link-time code generation
+            /OPT:REF        # Remove unreferenced functions
+            /OPT:ICF        # Identical COMDAT folding
+        )
+        # Optional: AVX2 for modern CPUs (uncomment if needed)
+        # target_compile_options(vulkan_engine PRIVATE /arch:AVX2)
+
+    elseif (USING_CLANG_CL)
+        # Clang-cl (Clang with MSVC-compatible flags)
+        target_compile_options(vulkan_engine PRIVATE
+            /O2
+            /Ob2
+            /Oi
+            /Ot
+            /fp:fast
+            -flto=thin      # ThinLTO for faster link times
+            -fno-strict-aliasing
+        )
+        target_link_options(vulkan_engine PRIVATE
+            -flto=thin
+            /OPT:REF
+            /OPT:ICF
+        )
+        # Optional: AVX2
+        # target_compile_options(vulkan_engine PRIVATE /arch:AVX2)
+
+    elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # GCC (g++)
+        target_compile_options(vulkan_engine PRIVATE
+            -O3                     # High optimization level
+            -march=native           # Optimize for host CPU
+            -mtune=native           # Tune for host CPU
+            -flto                   # Link-time optimization
+            -ffast-math             # Fast floating-point
+            -funroll-loops          # Loop unrolling
+            -fomit-frame-pointer    # Omit frame pointers
+            -fno-strict-aliasing
+        )
+        target_link_options(vulkan_engine PRIVATE
+            -flto
+            -s                      # Strip symbols
+        )
+
+    elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        # Clang (non-Windows / Linux/macOS)
+        target_compile_options(vulkan_engine PRIVATE
+            -O3
+            -march=native
+            -mtune=native
+            -flto=thin
+            -ffast-math
+            -funroll-loops
+            -fomit-frame-pointer
+            -fno-strict-aliasing
+        )
+        target_link_options(vulkan_engine PRIVATE
+            -flto=thin
+        )
+    endif()
+
+endif()
+
+# --- Debug build options ---
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+
+    if (MSVC)
+        # MSVC / Clang-cl debug
+        target_compile_options(vulkan_engine PRIVATE
+            /Od             # Disable optimization
+            /Zi             # Debug information
+            /RTC1           # Runtime checks
+            /GS             # Buffer security checks
+        )
+    elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        # GCC / Clang debug
+        target_compile_options(vulkan_engine PRIVATE
+            -O0                     # No optimization
+            -g3                     # Maximum debug info
+            -fno-omit-frame-pointer # Keep frame pointers for debugging
+            -fsanitize=address,undefined   # Optional: sanitizers
+        )
+        target_link_options(vulkan_engine PRIVATE
+            -fsanitize=address,undefined
+        )
+    endif()
+
+endif()
+
+# --- Platform-specific flags ---
+if (WIN32)
+    target_compile_definitions(vulkan_engine PRIVATE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        _CRT_SECURE_NO_WARNINGS
+    )
+endif()
+
+if (UNIX AND NOT APPLE)
+    # Linux-specific
+    target_link_libraries(vulkan_engine PRIVATE pthread dl)
+endif()
+
+if (APPLE)
+    # macOS-specific (if needed)
+    target_compile_options(vulkan_engine PRIVATE
+        -Wno-deprecated-declarations
+    )
+endif()
+
 target_include_directories(vulkan_engine PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/core"
