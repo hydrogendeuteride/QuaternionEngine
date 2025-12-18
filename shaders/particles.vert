@@ -20,8 +20,15 @@ layout(std430, set = 1, binding = 0) readonly buffer ParticlePool
     Particle particles[];
 } pool;
 
+layout(std430, set = 1, binding = 1) readonly buffer DrawIndices
+{
+    uint indices[];
+} drawIndices;
+
 layout(location = 0) out vec4 v_color;
 layout(location = 1) out vec2 v_uv;
+layout(location = 2) out float v_view_depth;
+layout(location = 3) out float v_seed;
 
 vec2 quad_corner(uint vidx)
 {
@@ -39,7 +46,7 @@ vec2 quad_corner(uint vidx)
 
 void main()
 {
-    uint particle_index = gl_InstanceIndex;
+    uint particle_index = drawIndices.indices[uint(gl_InstanceIndex)];
     Particle p = pool.particles[particle_index];
 
     float life = max(p.vel_life.w, 1e-6);
@@ -61,6 +68,7 @@ void main()
     vec3 pos = p.pos_age.xyz + (cam_right * corner.x + cam_up * corner.y) * size;
 
     v_color = vec4(p.color.rgb * fade, p.color.a * fade);
+    v_view_depth = -(sceneData.view * vec4(pos, 1.0)).z;
+    v_seed = p.misc.y;
     gl_Position = sceneData.viewproj * vec4(pos, 1.0);
 }
-

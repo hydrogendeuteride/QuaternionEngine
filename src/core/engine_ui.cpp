@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 
 #include "mesh_bvh.h"
 
@@ -329,6 +330,31 @@ namespace
         selected = std::clamp(selected, 0, (int)systems.size() - 1);
         auto &s = systems[(size_t)selected];
 
+        static std::vector<std::string> vfxKtx2;
+        auto refresh_vfx_list = [&]() {
+            vfxKtx2.clear();
+            vfxKtx2.push_back(std::string{}); // None
+            if (!eng || !eng->_assetManager) return;
+            const auto &paths = eng->_assetManager->paths();
+            if (paths.assets.empty()) return;
+            std::error_code ec;
+            std::filesystem::path vfxDir = paths.assets / "vfx";
+            if (!std::filesystem::exists(vfxDir, ec) || ec) return;
+            for (const auto &entry : std::filesystem::directory_iterator(vfxDir, ec))
+            {
+                if (ec) break;
+                if (!entry.is_regular_file(ec) || ec) continue;
+                const auto p = entry.path();
+                if (p.extension() != ".ktx2" && p.extension() != ".KTX2") continue;
+                vfxKtx2.push_back(std::string("vfx/") + p.filename().string());
+            }
+            std::sort(vfxKtx2.begin() + 1, vfxKtx2.end());
+        };
+        if (vfxKtx2.empty())
+        {
+            refresh_vfx_list();
+        }
+
         ImGui::Separator();
 
         ImGui::Text("Selected: id=%u base=%u count=%u", s.id, s.base, s.count);
@@ -347,7 +373,7 @@ namespace
             return;
         }
 
-        const char *blendItems[] = {"Additive", "Alpha (unsorted)"};
+        const char *blendItems[] = {"Additive", "Alpha (block-sorted)"};
         int blend = (s.blend == ParticlePass::BlendMode::Alpha) ? 1 : 0;
         if (ImGui::Combo("Blend", &blend, blendItems, 2))
         {
@@ -386,6 +412,72 @@ namespace
         ImGui::InputFloat("Max Size", &s.params.max_size);
         ImGui::SliderFloat("Drag", &s.params.drag, 0.0f, 10.0f, "%.3f");
         ImGui::SliderFloat("Gravity (m/s^2)", &s.params.gravity, 0.0f, 30.0f, "%.2f");
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Rendering");
+        ImGui::SliderFloat("Soft Depth (m)", &s.params.soft_depth_distance, 0.0f, 2.0f, "%.3f");
+
+        if (ImGui::Button("Refresh VFX List"))
+        {
+            refresh_vfx_list();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Use Flame Defaults"))
+        {
+            s.flipbook_texture = "vfx/flame.ktx2";
+            s.noise_texture = "vfx/simplex.ktx2";
+            s.params.flipbook_cols = 16;
+            s.params.flipbook_rows = 4;
+            s.params.flipbook_fps = 30.0f;
+            s.params.flipbook_intensity = 1.0f;
+            s.params.noise_scale = 6.0f;
+            s.params.noise_strength = 0.05f;
+            s.params.noise_scroll = glm::vec2(0.0f, 0.0f);
+            pass->preload_vfx_texture(s.flipbook_texture);
+            pass->preload_vfx_texture(s.noise_texture);
+        }
+
+        auto combo_vfx = [&](const char *label, std::string &path) {
+            const char *preview = path.empty() ? "None" : path.c_str();
+            if (ImGui::BeginCombo(label, preview))
+            {
+                for (const auto &opt : vfxKtx2)
+                {
+                    const bool isNone = opt.empty();
+                    const bool isSelected = (path == opt) || (path.empty() && isNone);
+                    const char *name = isNone ? "None" : opt.c_str();
+                    if (ImGui::Selectable(name, isSelected))
+                    {
+                        path = opt;
+                        if (!path.empty())
+                        {
+                            pass->preload_vfx_texture(path);
+                        }
+                    }
+                    if (isSelected) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+        };
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Flipbook");
+        combo_vfx("Flipbook Texture", s.flipbook_texture);
+        int cols = (int)s.params.flipbook_cols;
+        int rows = (int)s.params.flipbook_rows;
+        cols = std::max(cols, 1);
+        rows = std::max(rows, 1);
+        if (ImGui::InputInt("Flipbook Cols", &cols)) s.params.flipbook_cols = (uint32_t)std::max(cols, 1);
+        if (ImGui::InputInt("Flipbook Rows", &rows)) s.params.flipbook_rows = (uint32_t)std::max(rows, 1);
+        ImGui::SliderFloat("Flipbook FPS", &s.params.flipbook_fps, 0.0f, 120.0f, "%.1f");
+        ImGui::SliderFloat("Flipbook Intensity", &s.params.flipbook_intensity, 0.0f, 8.0f, "%.3f");
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Noise");
+        combo_vfx("Noise Texture", s.noise_texture);
+        ImGui::SliderFloat("Noise Scale", &s.params.noise_scale, 0.0f, 32.0f, "%.3f");
+        ImGui::SliderFloat("Noise Strength", &s.params.noise_strength, 0.0f, 1.0f, "%.3f");
+        ImGui::InputFloat2("Noise Scroll", reinterpret_cast<float *>(&s.params.noise_scroll));
 
         ImGui::Separator();
         ImGui::TextUnformatted("Color");

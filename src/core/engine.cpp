@@ -1127,6 +1127,16 @@ void VulkanEngine::draw()
             _textureCache->pumpLoads(*_resourceManager, get_current_frame());
         }
 
+        // Allow passes to enqueue texture/image uploads before the upload pass snapshot.
+        // Particles use this to preload flipbooks/noise referenced by systems.
+        if (_renderPassManager)
+        {
+            if (auto *particles = _renderPassManager->getPass<ParticlePass>())
+            {
+                particles->preload_needed_textures();
+            }
+        }
+
         _resourceManager->register_upload_pass(*_renderGraph, get_current_frame());
 
         ImGuiPass *imguiPass = nullptr;
@@ -1193,7 +1203,7 @@ void VulkanEngine::draw()
 
             if (auto *particles = _renderPassManager->getPass<ParticlePass>())
             {
-                particles->register_graph(_renderGraph.get(), hdrTarget, hDepth);
+                particles->register_graph(_renderGraph.get(), hdrTarget, hDepth, hGBufferPosition);
             }
 
             if (auto *transparent = _renderPassManager->getPass<TransparentPass>())

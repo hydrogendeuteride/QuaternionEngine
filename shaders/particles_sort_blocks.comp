@@ -1,0 +1,101 @@
+#version 450
+
+// Each system dispatch sorts up to 512 blocks of 256 particles by max view-space depth.
+
+layout(local_size_x = 512, local_size_y = 1, local_size_z = 1) in;
+
+struct Particle
+{
+    vec4 pos_age;
+    vec4 vel_life;
+    vec4 color;
+    vec4 misc;
+};
+
+layout(std430, set = 0, binding = 0) readonly buffer ParticlePool
+{
+    Particle particles[];
+} pool;
+
+layout(std430, set = 0, binding = 1) writeonly buffer SortedBlocks
+{
+    uint blocks[];
+} outBlocks;
+
+layout(push_constant) uniform Push
+{
+    uvec4 header; // x=base, y=count
+    mat4 view;
+} pc;
+
+const uint BLOCK_SIZE = 256u;
+const uint MAX_BLOCKS = 512u;
+
+shared float s_key[512];
+shared uint  s_block[512];
+
+void main()
+{
+    uint tid = gl_LocalInvocationID.x;
+
+    uint count = pc.header.y;
+    uint blockCount = (count + BLOCK_SIZE - 1u) / BLOCK_SIZE;
+    blockCount = min(blockCount, MAX_BLOCKS);
+
+    float key = 1e20;
+    if (tid < blockCount)
+    {
+        uint blockStart = pc.header.x + tid * BLOCK_SIZE;
+        uint localCount = min(BLOCK_SIZE, count - tid * BLOCK_SIZE);
+
+        float maxDepth = -1e20;
+        for (uint i = 0u; i < localCount; ++i)
+        {
+            uint idx = blockStart + i;
+            vec4 viewPos = pc.view * vec4(pool.particles[idx].pos_age.xyz, 1.0);
+            float depth = -viewPos.z;
+            maxDepth = max(maxDepth, depth);
+        }
+
+        // Sort ascending by -depth => farthest first.
+        key = -maxDepth;
+    }
+
+    s_key[tid] = key;
+    s_block[tid] = tid;
+    barrier();
+
+    // Bitonic sort ascending for 512 elements.
+    for (uint k = 2u; k <= MAX_BLOCKS; k <<= 1u)
+    {
+        for (uint j = (k >> 1u); j > 0u; j >>= 1u)
+        {
+            uint ixj = tid ^ j;
+            if (ixj > tid)
+            {
+                bool ascending = ((tid & k) == 0u);
+
+                float a = s_key[tid];
+                float b = s_key[ixj];
+                uint ai = s_block[tid];
+                uint bi = s_block[ixj];
+
+                bool swap = (ascending && (a > b)) || (!ascending && (a < b));
+                if (swap)
+                {
+                    s_key[tid] = b;
+                    s_key[ixj] = a;
+                    s_block[tid] = bi;
+                    s_block[ixj] = ai;
+                }
+            }
+            barrier();
+        }
+    }
+
+    if (tid < blockCount)
+    {
+        outBlocks.blocks[tid] = s_block[tid];
+    }
+}
+
