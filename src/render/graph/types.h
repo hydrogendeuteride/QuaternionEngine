@@ -64,6 +64,11 @@ struct RGImportedImageDesc
 	VkFormat format = VK_FORMAT_UNDEFINED;
 	VkExtent2D extent{0, 0};
 	VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED; // layout at graph begin
+	// Optional: last known access state at graph begin. If left as NONE/0 and
+	// currentLayout is not UNDEFINED, the graph conservatively assumes an
+	// unknown prior write (ALL_COMMANDS + MEMORY_READ|WRITE) for the first barrier.
+	VkPipelineStageFlags2 currentStage = VK_PIPELINE_STAGE_2_NONE;
+	VkAccessFlags2 currentAccess = 0;
 };
 
 struct RGImportedBufferDesc

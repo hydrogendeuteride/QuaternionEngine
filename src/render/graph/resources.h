@@ -19,6 +19,8 @@ struct RGImageRecord
     VkFormat format = VK_FORMAT_UNDEFINED;
     VkExtent2D extent{0, 0};
     VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	VkPipelineStageFlags2 initialStage = VK_PIPELINE_STAGE_2_NONE;
+	VkAccessFlags2 initialAccess = 0;
     VkImageUsageFlags creationUsage = 0; // if transient; 0 for imported
 
     // If transient, keep allocation owner for cleanup
@@ -75,6 +77,8 @@ public:
 
 	VkImageLayout initial_layout(RGImageHandle h) const;
 	VkFormat image_format(RGImageHandle h) const;
+	VkPipelineStageFlags2 initial_stage(RGImageHandle h) const;
+	VkAccessFlags2 initial_access(RGImageHandle h) const;
 
 	VkPipelineStageFlags2 initial_stage(RGBufferHandle h) const;
 	VkAccessFlags2 initial_access(RGBufferHandle h) const;

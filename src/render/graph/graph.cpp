@@ -230,20 +230,35 @@ bool RenderGraph::compile()
 		}
 	}
 
-    struct ImageState
-    {
-        bool initialized = false;
-        VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
-        VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE;
-        VkAccessFlags2 access = 0;
-    };
+	    struct ImageState
+	    {
+	        VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+	        // Accumulate read stages/accesses since last barrier or write.
+	        VkPipelineStageFlags2 readStage = VK_PIPELINE_STAGE_2_NONE;
+	        VkAccessFlags2 readAccess = 0;
+	        // Track last write since last barrier.
+	        VkPipelineStageFlags2 writeStage = VK_PIPELINE_STAGE_2_NONE;
+	        VkAccessFlags2 writeAccess = 0;
+	    };
+	
+		struct BufferState
+		{
+			VkPipelineStageFlags2 readStage = VK_PIPELINE_STAGE_2_NONE;
+			VkAccessFlags2 readAccess = 0;
+			VkPipelineStageFlags2 writeStage = VK_PIPELINE_STAGE_2_NONE;
+			VkAccessFlags2 writeAccess = 0;
+		};
 
-	struct BufferState
-	{
-		bool initialized = false;
-		VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE;
-		VkAccessFlags2 access = 0;
-	};
+	    auto access_has_write = [](VkAccessFlags2 access) -> bool {
+	        constexpr VkAccessFlags2 WRITE_MASK =
+	                VK_ACCESS_2_TRANSFER_WRITE_BIT |
+	                VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT |
+	                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+	                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+	                VK_ACCESS_2_HOST_WRITE_BIT |
+	                VK_ACCESS_2_MEMORY_WRITE_BIT;
+	        return (access & WRITE_MASK) != 0;
+	    };
 
     auto is_depth_format = [](VkFormat format) {
         switch (format)
@@ -410,10 +425,57 @@ bool RenderGraph::compile()
         }
     };
 
-    const size_t imageCount = _resources.image_count();
-    const size_t bufferCount = _resources.buffer_count();
-    std::vector<ImageState> imageStates(imageCount);
-    std::vector<BufferState> bufferStates(bufferCount);
+	    const size_t imageCount = _resources.image_count();
+	    const size_t bufferCount = _resources.buffer_count();
+	    std::vector<ImageState> imageStates(imageCount);
+	    std::vector<BufferState> bufferStates(bufferCount);
+
+	    // Seed initial states from imported/transient records. If an imported image has a known
+	    // starting layout but no stage/access, be conservative and assume an unknown prior write.
+	    for (size_t i = 0; i < imageCount; ++i)
+	    {
+	        const RGImageRecord *rec = _resources.get_image(RGImageHandle{static_cast<uint32_t>(i)});
+	        if (!rec) continue;
+	        imageStates[i].layout = rec->initialLayout;
+	        if (rec->initialLayout == VK_IMAGE_LAYOUT_UNDEFINED) continue;
+	
+	        VkPipelineStageFlags2 st = rec->initialStage;
+	        VkAccessFlags2 ac = rec->initialAccess;
+	        if (st == VK_PIPELINE_STAGE_2_NONE && ac == 0)
+	        {
+	            st = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+	            ac = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+	        }
+	        if (access_has_write(ac))
+	        {
+	            imageStates[i].writeStage = st;
+	            imageStates[i].writeAccess = ac;
+	        }
+	        else if (ac != 0)
+	        {
+	            imageStates[i].readStage = st;
+	            imageStates[i].readAccess = ac;
+	        }
+	    }
+
+	    for (size_t i = 0; i < bufferCount; ++i)
+	    {
+	        const RGBufferRecord *rec = _resources.get_buffer(RGBufferHandle{static_cast<uint32_t>(i)});
+	        if (!rec) continue;
+	        VkPipelineStageFlags2 st = rec->initialStage;
+	        VkAccessFlags2 ac = rec->initialAccess;
+	        if (st == VK_PIPELINE_STAGE_2_NONE) st = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+	        if (access_has_write(ac))
+	        {
+	            bufferStates[i].writeStage = st;
+	            bufferStates[i].writeAccess = ac;
+	        }
+	        else if (ac != 0)
+	        {
+	            bufferStates[i].readStage = st;
+	            bufferStates[i].readAccess = ac;
+	        }
+	    }
 
     // Track first/last use for lifetime diagnostics and future aliasing
     std::vector<int> imageFirst(imageCount, -1), imageLast(imageCount, -1);
@@ -457,26 +519,50 @@ bool RenderGraph::compile()
 
             ImageUsageInfo desired = usage_info_image(usage);
 
-            ImageState prev = imageStates[id];
-            VkImageLayout prevLayout = prev.initialized ? prev.layout : _resources.initial_layout(RGImageHandle{id});
-			VkPipelineStageFlags2 srcStage = prev.initialized
-				                                 ? prev.stage
-				                                 : (prevLayout == VK_IMAGE_LAYOUT_UNDEFINED
-					                                    ? VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT
-					                                    : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
-			VkAccessFlags2 srcAccess = prev.initialized
-				                           ? prev.access
-				                           : (prevLayout == VK_IMAGE_LAYOUT_UNDEFINED
-					                              ? VkAccessFlags2{0}
-					                              : (VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT));
+            ImageState &state = imageStates[id];
+            const VkImageLayout prevLayout = state.layout;
+            const bool layoutChange = prevLayout != desired.layout;
+            const bool desiredWrite = access_has_write(desired.access);
+            const bool prevHasWrite = state.writeAccess != 0;
+            const bool prevHasReads = state.readAccess != 0;
 
-			bool needBarrier = !prev.initialized
-			                   || prevLayout != desired.layout
-			                   || prev.stage != desired.stage
-			                   || prev.access != desired.access;
+            bool needBarrier = layoutChange || (prevHasReads && desiredWrite);
+            if (prevHasWrite)
+            {
+                // Keep previous behavior: don't force a barrier if we stay in the exact same write state.
+                if (!(desiredWrite && !layoutChange && state.writeStage == desired.stage && state.writeAccess == desired.access))
+                {
+                    needBarrier = true;
+                }
+            }
 
             if (needBarrier)
             {
+                VkPipelineStageFlags2 srcStage = VK_PIPELINE_STAGE_2_NONE;
+                VkAccessFlags2 srcAccess = 0;
+                if (prevHasWrite)
+                {
+                    srcStage = state.writeStage;
+                    srcAccess = state.writeAccess;
+                }
+                else if (prevHasReads)
+                {
+                    srcStage = state.readStage;
+                    srcAccess = state.readAccess;
+                }
+                else if (prevLayout == VK_IMAGE_LAYOUT_UNDEFINED)
+                {
+                    srcStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+                    srcAccess = 0;
+                }
+                else
+                {
+                    // Known layout but unknown access; be conservative.
+                    srcStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                    srcAccess = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+                }
+                if (srcStage == VK_PIPELINE_STAGE_2_NONE) srcStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+
                 VkImageMemoryBarrier2 barrier{.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
                 barrier.srcStageMask = srcStage;
                 barrier.srcAccessMask = srcAccess;
@@ -525,10 +611,28 @@ bool RenderGraph::compile()
                 }
             }
 
-            imageStates[id].initialized = true;
-            imageStates[id].layout = desired.layout;
-            imageStates[id].stage = desired.stage;
-            imageStates[id].access = desired.access;
+            if (needBarrier)
+            {
+                state.readStage = VK_PIPELINE_STAGE_2_NONE;
+                state.readAccess = 0;
+                state.writeStage = VK_PIPELINE_STAGE_2_NONE;
+                state.writeAccess = 0;
+            }
+            state.layout = desired.layout;
+            if (desiredWrite)
+            {
+                state.readStage = VK_PIPELINE_STAGE_2_NONE;
+                state.readAccess = 0;
+                state.writeStage = desired.stage;
+                state.writeAccess = desired.access;
+            }
+            else
+            {
+                state.writeStage = VK_PIPELINE_STAGE_2_NONE;
+                state.writeAccess = 0;
+                state.readStage |= desired.stage;
+                state.readAccess |= desired.access;
+            }
         }
 
         if (bufferCount == 0) continue;
@@ -563,24 +667,37 @@ bool RenderGraph::compile()
 
             BufferUsageInfo desired = usage_info_buffer(usage);
 
-            BufferState prev = bufferStates[id];
-			VkPipelineStageFlags2 srcStage = prev.initialized
-				                                 ? prev.stage
-				                                 : _resources.initial_stage(RGBufferHandle{id});
-			if (srcStage == VK_PIPELINE_STAGE_2_NONE)
-			{
-				srcStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-			}
-			VkAccessFlags2 srcAccess = prev.initialized
-				                           ? prev.access
-				                           : _resources.initial_access(RGBufferHandle{id});
+            BufferState &state = bufferStates[id];
+            const bool desiredWrite = access_has_write(desired.access);
+            const bool prevHasWrite = state.writeAccess != 0;
+            const bool prevHasReads = state.readAccess != 0;
 
-            bool needBarrier = !prev.initialized
-                               || prev.stage != desired.stage
-                               || prev.access != desired.access;
+            bool needBarrier = (prevHasReads && desiredWrite);
+            if (prevHasWrite)
+            {
+                // Keep previous behavior: no barrier if staying in the exact same write state.
+                if (!(desiredWrite && state.writeStage == desired.stage && state.writeAccess == desired.access))
+                {
+                    needBarrier = true;
+                }
+            }
 
             if (needBarrier)
             {
+                VkPipelineStageFlags2 srcStage = VK_PIPELINE_STAGE_2_NONE;
+                VkAccessFlags2 srcAccess = 0;
+                if (prevHasWrite)
+                {
+                    srcStage = state.writeStage;
+                    srcAccess = state.writeAccess;
+                }
+                else if (prevHasReads)
+                {
+                    srcStage = state.readStage;
+                    srcAccess = state.readAccess;
+                }
+                if (srcStage == VK_PIPELINE_STAGE_2_NONE) srcStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+
                 VkBufferMemoryBarrier2 barrier{.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2};
                 barrier.srcStageMask = srcStage;
                 barrier.srcAccessMask = srcAccess;
@@ -616,11 +733,29 @@ bool RenderGraph::compile()
                 }
             }
 
-			bufferStates[id].initialized = true;
-			bufferStates[id].stage = desired.stage;
-			bufferStates[id].access = desired.access;
+            if (needBarrier)
+            {
+                state.readStage = VK_PIPELINE_STAGE_2_NONE;
+                state.readAccess = 0;
+                state.writeStage = VK_PIPELINE_STAGE_2_NONE;
+                state.writeAccess = 0;
+            }
+            if (desiredWrite)
+            {
+                state.readStage = VK_PIPELINE_STAGE_2_NONE;
+                state.readAccess = 0;
+                state.writeStage = desired.stage;
+                state.writeAccess = desired.access;
+            }
+            else
+            {
+                state.writeStage = VK_PIPELINE_STAGE_2_NONE;
+                state.writeAccess = 0;
+                state.readStage |= desired.stage;
+                state.readAccess |= desired.access;
+            }
+			}
 		}
-	}
 
         // Store lifetimes into records for diagnostics/aliasing
         for (size_t i = 0; i < imageCount; ++i)
@@ -760,8 +895,6 @@ void RenderGraph::execute(VkCommandBuffer cmd)
                 	{
                 		depthInfo.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
                 	}
-                	if (p.depthAttachment.clearOnLoad) depthInfo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                    else depthInfo.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
                     if (!p.depthAttachment.store) depthInfo.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
                     hasDepth = true;
                     if (rec->extent.width && rec->extent.height) set_or_clamp(rec->extent);

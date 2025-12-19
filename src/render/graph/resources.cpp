@@ -28,6 +28,9 @@ RGImageHandle RGResourceRegistry::add_imported(const RGImportedImageDesc& d)
         rec.format = d.format;
         rec.extent = d.extent;
         rec.initialLayout = d.currentLayout;
+		// Keep the earliest known stage/access if set; otherwise record provided
+		if (rec.initialStage == VK_PIPELINE_STAGE_2_NONE) rec.initialStage = d.currentStage;
+		if (rec.initialAccess == 0) rec.initialAccess = d.currentAccess;
         return RGImageHandle{it->second};
     }
 
@@ -39,6 +42,8 @@ RGImageHandle RGResourceRegistry::add_imported(const RGImportedImageDesc& d)
     rec.format = d.format;
     rec.extent = d.extent;
     rec.initialLayout = d.currentLayout;
+	rec.initialStage = d.currentStage;
+	rec.initialAccess = d.currentAccess;
     _images.push_back(rec);
     uint32_t id = static_cast<uint32_t>(_images.size() - 1);
     if (d.image != VK_NULL_HANDLE) _imageLookup[d.image] = id;
@@ -53,6 +58,8 @@ RGImageHandle RGResourceRegistry::add_transient(const RGImageDesc& d)
     rec.format = d.format;
     rec.extent = d.extent;
     rec.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	rec.initialStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+	rec.initialAccess = 0;
     rec.creationUsage = d.usage;
 
 	VkExtent3D size{ d.extent.width, d.extent.height, 1 };
@@ -169,6 +176,18 @@ VkFormat RGResourceRegistry::image_format(RGImageHandle h) const
 {
     const RGImageRecord* rec = get_image(h);
     return rec ? rec->format : VK_FORMAT_UNDEFINED;
+}
+
+VkPipelineStageFlags2 RGResourceRegistry::initial_stage(RGImageHandle h) const
+{
+	const RGImageRecord* rec = get_image(h);
+	return rec ? rec->initialStage : VK_PIPELINE_STAGE_2_NONE;
+}
+
+VkAccessFlags2 RGResourceRegistry::initial_access(RGImageHandle h) const
+{
+	const RGImageRecord* rec = get_image(h);
+	return rec ? rec->initialAccess : VkAccessFlags2{0};
 }
 
 VkPipelineStageFlags2 RGResourceRegistry::initial_stage(RGBufferHandle h) const
