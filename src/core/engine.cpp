@@ -1267,7 +1267,7 @@ void VulkanEngine::draw()
                                                                      get_current_frame()._renderSemaphore);
 
     VkSubmitInfo2 submit = vkinit::submit_info(&cmdinfo, &signalInfo, &waitInfo);
-
+    //------------
     VK_CHECK(vkQueueSubmit2(_deviceManager->graphicsQueue(), 1, &submit, get_current_frame()._renderFence));
 
     VkPresentInfoKHR presentInfo = vkinit::present_info();

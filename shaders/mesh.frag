@@ -58,6 +58,13 @@ void main()
         direct += eval_point_light(sceneData.punctualLights[i], inWorldPos, N, V, albedo, roughness, metallic);
     }
 
+    // Spot lights
+    uint spotCount = sceneData.lightCounts.y;
+    for (uint i = 0u; i < spotCount; ++i)
+    {
+        direct += eval_spot_light(sceneData.spotLights[i], inWorldPos, N, V, albedo, roughness, metallic);
+    }
+
     // IBL: specular from equirect 2D mips; diffuse from SH
     vec3 R = reflect(-V, N);
     float levels = float(textureQueryLevels(iblSpec2D));

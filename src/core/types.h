@@ -117,6 +117,15 @@ struct GPUPunctualLight {
 
 static constexpr uint32_t kMaxPunctualLights = 64;
 
+struct GPUSpotLight {
+    glm::vec4 position_radius;        // xyz: position (local), w: radius
+    glm::vec4 direction_cos_outer;    // xyz: direction (unit), w: cos(outer_angle)
+    glm::vec4 color_intensity;        // rgb: color, a: intensity
+    glm::vec4 cone;                   // x: cos(inner_angle), yzw: unused
+};
+
+static constexpr uint32_t kMaxSpotLights = 32;
+
 struct GPUSceneData {
     glm::mat4 view;
     glm::mat4 proj;
@@ -139,6 +148,7 @@ struct GPUSceneData {
     glm::vec4  rtParams;
 
     GPUPunctualLight punctualLights[kMaxPunctualLights];
+    GPUSpotLight spotLights[kMaxSpotLights];
     glm::uvec4 lightCounts;
 };
 

@@ -66,7 +66,7 @@ inline constexpr float kShadowDepthBiasSlope    = 1.5f;
 // Texture streaming / VRAM budget configuration
 // Fraction of total device-local VRAM reserved for streamed textures.
 // The remaining budget is left for attachments, swapchain images, meshes, AS, etc.
-inline constexpr double kTextureBudgetFraction = 0.35;
+inline constexpr double kTextureBudgetFraction = 0.7;
 // Fallback texture budget in bytes when Vulkan memory properties are unavailable.
 inline constexpr size_t kTextureBudgetFallbackBytes = 512ull * 1024ull * 1024ull;
 // Minimum texture budget clamp in bytes.

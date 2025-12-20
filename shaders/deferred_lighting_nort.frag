@@ -235,6 +235,13 @@ void main(){
         direct += eval_point_light(sceneData.punctualLights[i], pos, N, V, albedo, roughness, metallic);
     }
 
+    // Spot lights
+    uint spotCount = sceneData.lightCounts.y;
+    for (uint i = 0u; i < spotCount; ++i)
+    {
+        direct += eval_spot_light(sceneData.spotLights[i], pos, N, V, albedo, roughness, metallic);
+    }
+
     // Image-Based Lighting: split-sum approximation
     vec3 R = reflect(-V, N);
     float levels = float(textureQueryLevels(iblSpec2D));

@@ -148,6 +148,60 @@ This provides accurate point light shadows without additional shadow maps.
 
 Call `clearPointLights()` before adding your own lights to remove these defaults.
 
+## Spot Lights
+
+Adds cone-limited spot lights alongside point lights, sharing the same BRDF helpers.
+
+### Data Structures
+
+**CPU-side (C++)**
+
+```cpp
+// src/scene/vk_scene.h
+struct SpotLight {
+    WorldVec3 position_world;
+    glm::vec3 direction;        // world-space unit direction (cone axis)
+    float radius;
+    glm::vec3 color;
+    float intensity;
+    float inner_angle_deg;      // cone half-angle (deg)
+    float outer_angle_deg;      // cone half-angle (deg), >= inner
+};
+```
+
+**GPU-side (GLSL)**
+
+```glsl
+// shaders/input_structures.glsl
+#define MAX_SPOT_LIGHTS 32
+
+struct GPUSpotLight {
+    vec4 position_radius;      // xyz: position, w: radius
+    vec4 direction_cos_outer;  // xyz: direction (unit), w: cos(outer_angle)
+    vec4 color_intensity;      // rgb: color, a: intensity
+    vec4 cone;                 // x: cos(inner_angle), yzw: unused
+};
+```
+
+The `GPUSceneData` uniform buffer includes:
+- `spotLights[MAX_SPOT_LIGHTS]`: array of packed spot lights
+- `lightCounts.y`: number of active spot lights
+
+### Shader Implementation
+
+**lighting_common.glsl**
+
+- `eval_spot_light(light, pos, N, V, albedo, roughness, metallic)`:
+  - Applies the same smooth inverse-square falloff as point lights
+  - Multiplies by a soft cone attenuation between `outer_angle` and `inner_angle`
+
+### Render Path Integration
+
+- Deferred lighting (`deferred_lighting*.frag`) and forward (`mesh.frag`) both accumulate spot lights:
+  - `uint spotCount = sceneData.lightCounts.y;`
+  - `for (uint i = 0u; i < spotCount; ++i) { direct += eval_spot_light(...); }`
+
 ### Future Extensions
 
-- Spot lights (add cone angle to `GPUPunctualLight`)
+- Shadow maps for spot lights (single frustum)
+- IES profiles / photometric falloff

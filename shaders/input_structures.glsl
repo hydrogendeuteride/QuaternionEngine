@@ -2,10 +2,19 @@
 #define MAX_CASCADES 4
 // Maximum number of punctual (point) lights
 #define MAX_PUNCTUAL_LIGHTS 64
+// Maximum number of spot lights
+#define MAX_SPOT_LIGHTS 32
 
 struct GPUPunctualLight {
     vec4 position_radius;
     vec4 color_intensity;
+};
+
+struct GPUSpotLight {
+    vec4 position_radius;      // xyz: position, w: radius
+    vec4 direction_cos_outer;  // xyz: direction (unit), w: cos(outer_angle)
+    vec4 color_intensity;      // rgb: color, a: intensity
+    vec4 cone;                 // x: cos(inner_angle), yzw: unused
 };
 
 layout(set = 0, binding = 0) uniform  SceneData{
@@ -32,6 +41,9 @@ layout(set = 0, binding = 0) uniform  SceneData{
     vec4  rtParams;
 
     GPUPunctualLight punctualLights[MAX_PUNCTUAL_LIGHTS];
+    GPUSpotLight spotLights[MAX_SPOT_LIGHTS];
+    // lightCounts.x = point light count
+    // lightCounts.y = spot light count
     uvec4 lightCounts;
 } sceneData;
 

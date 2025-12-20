@@ -340,6 +340,52 @@ void main(){
         direct += contrib;
     }
 
+    // Spot lights
+    uint spotCount = sceneData.lightCounts.y;
+    for (uint i = 0u; i < spotCount; ++i)
+    {
+        vec3 contrib = eval_spot_light(sceneData.spotLights[i], pos, N, V, albedo, roughness, metallic);
+
+        // Optional RT shadow for the first few spot lights (hybrid mode)
+        #ifdef GL_EXT_ray_query
+        if (sceneData.rtOptions.x == 1u && sceneData.rtParams.y > 0.0 && i < 4u)
+        {
+            vec3 toL = sceneData.spotLights[i].position_radius.xyz - pos;
+            float maxT = length(toL);
+            if (maxT > 0.01)
+            {
+                vec3 L = toL / maxT;
+                vec3 dir = normalize(sceneData.spotLights[i].direction_cos_outer.xyz);
+                float cosTheta = dot(-L, dir);
+                if (cosTheta > sceneData.spotLights[i].direction_cos_outer.w)
+                {
+                    vec3 origin = pos + N * SHADOW_RAY_ORIGIN_BIAS;
+
+                    rayQueryEXT rq;
+                    rayQueryInitializeEXT(
+                        rq,
+                        topLevelAS,
+                        gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+                        0xFF,
+                        origin,
+                        SHADOW_RAY_TMIN,
+                        L,
+                        maxT
+                    );
+                    while (rayQueryProceedEXT(rq)) { }
+                    bool hit = (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT);
+                    if (hit)
+                    {
+                        contrib = vec3(0.0);
+                    }
+                }
+            }
+        }
+        #endif
+
+        direct += contrib;
+    }
+
     // Image-Based Lighting: split-sum approximation
     vec3 R = reflect(-V, N);
     float levels = float(textureQueryLevels(iblSpec2D));

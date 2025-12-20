@@ -184,6 +184,26 @@ public:
     bool removePointLight(size_t index);
     const std::vector<PointLight> &getPointLights() const { return pointLights; }
 
+    struct SpotLight
+    {
+        WorldVec3 position_world;
+        glm::vec3 direction{0.0f, -1.0f, 0.0f}; // world-space unit vector
+        float radius = 10.0f;
+        glm::vec3 color{1.0f, 1.0f, 1.0f};
+        float intensity = 1.0f;
+        // Cone half-angles in degrees (inner <= outer).
+        float inner_angle_deg = 15.0f;
+        float outer_angle_deg = 25.0f;
+    };
+
+    void addSpotLight(const SpotLight &light);
+    void clearSpotLights();
+    size_t getSpotLightCount() const { return spotLights.size(); }
+    bool getSpotLight(size_t index, SpotLight &outLight) const;
+    bool setSpotLight(size_t index, const SpotLight &light);
+    bool removeSpotLight(size_t index);
+    const std::vector<SpotLight> &getSpotLights() const { return spotLights; }
+
     struct SceneStats
     {
         float scene_update_time = 0.f;
@@ -210,6 +230,7 @@ private:
     GPUSceneData sceneData = {};
     DrawContext mainDrawContext;
     std::vector<PointLight> pointLights;
+    std::vector<SpotLight> spotLights;
     WorldVec3 _origin_world{0.0, 0.0, 0.0};
     glm::vec3 _camera_position_local{0.0f, 0.0f, 0.0f};
     double _floating_origin_recenter_threshold = 1000.0;

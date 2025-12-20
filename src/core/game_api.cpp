@@ -797,6 +797,142 @@ void Engine::clear_point_lights()
 }
 
 // ----------------------------------------------------------------------------
+// Lighting - Spot Lights
+// ----------------------------------------------------------------------------
+
+size_t Engine::add_spot_light(const SpotLight& light)
+{
+    if (!_engine->_sceneManager) return 0;
+
+    SceneManager::SpotLight sl;
+    sl.position_world = WorldVec3(light.position);
+    sl.direction = (glm::length(light.direction) > 1.0e-6f)
+        ? glm::normalize(light.direction)
+        : glm::vec3(0.0f, -1.0f, 0.0f);
+    sl.radius = light.radius;
+    sl.color = light.color;
+    sl.intensity = light.intensity;
+    sl.inner_angle_deg = light.inner_angle_deg;
+    sl.outer_angle_deg = light.outer_angle_deg;
+
+    size_t idx = _engine->_sceneManager->getSpotLightCount();
+    _engine->_sceneManager->addSpotLight(sl);
+    return idx;
+}
+
+size_t Engine::add_spot_light(const SpotLightD& light)
+{
+    if (!_engine->_sceneManager) return 0;
+
+    SceneManager::SpotLight sl;
+    sl.position_world = WorldVec3(light.position);
+    sl.direction = (glm::length(light.direction) > 1.0e-6f)
+        ? glm::normalize(light.direction)
+        : glm::vec3(0.0f, -1.0f, 0.0f);
+    sl.radius = light.radius;
+    sl.color = light.color;
+    sl.intensity = light.intensity;
+    sl.inner_angle_deg = light.inner_angle_deg;
+    sl.outer_angle_deg = light.outer_angle_deg;
+
+    size_t idx = _engine->_sceneManager->getSpotLightCount();
+    _engine->_sceneManager->addSpotLight(sl);
+    return idx;
+}
+
+bool Engine::remove_spot_light(size_t index)
+{
+    return _engine->_sceneManager ? _engine->_sceneManager->removeSpotLight(index) : false;
+}
+
+bool Engine::get_spot_light(size_t index, SpotLight& out) const
+{
+    if (!_engine->_sceneManager) return false;
+
+    SceneManager::SpotLight sl;
+    if (_engine->_sceneManager->getSpotLight(index, sl))
+    {
+        out.position = glm::vec3(sl.position_world);
+        out.direction = sl.direction;
+        out.radius = sl.radius;
+        out.color = sl.color;
+        out.intensity = sl.intensity;
+        out.inner_angle_deg = sl.inner_angle_deg;
+        out.outer_angle_deg = sl.outer_angle_deg;
+        return true;
+    }
+    return false;
+}
+
+bool Engine::get_spot_light(size_t index, SpotLightD& out) const
+{
+    if (!_engine->_sceneManager) return false;
+
+    SceneManager::SpotLight sl;
+    if (_engine->_sceneManager->getSpotLight(index, sl))
+    {
+        out.position = sl.position_world;
+        out.direction = sl.direction;
+        out.radius = sl.radius;
+        out.color = sl.color;
+        out.intensity = sl.intensity;
+        out.inner_angle_deg = sl.inner_angle_deg;
+        out.outer_angle_deg = sl.outer_angle_deg;
+        return true;
+    }
+    return false;
+}
+
+bool Engine::set_spot_light(size_t index, const SpotLight& light)
+{
+    if (!_engine->_sceneManager) return false;
+
+    SceneManager::SpotLight sl;
+    sl.position_world = WorldVec3(light.position);
+    sl.direction = (glm::length(light.direction) > 1.0e-6f)
+        ? glm::normalize(light.direction)
+        : glm::vec3(0.0f, -1.0f, 0.0f);
+    sl.radius = light.radius;
+    sl.color = light.color;
+    sl.intensity = light.intensity;
+    sl.inner_angle_deg = light.inner_angle_deg;
+    sl.outer_angle_deg = light.outer_angle_deg;
+
+    return _engine->_sceneManager->setSpotLight(index, sl);
+}
+
+bool Engine::set_spot_light(size_t index, const SpotLightD& light)
+{
+    if (!_engine->_sceneManager) return false;
+
+    SceneManager::SpotLight sl;
+    sl.position_world = WorldVec3(light.position);
+    sl.direction = (glm::length(light.direction) > 1.0e-6f)
+        ? glm::normalize(light.direction)
+        : glm::vec3(0.0f, -1.0f, 0.0f);
+    sl.radius = light.radius;
+    sl.color = light.color;
+    sl.intensity = light.intensity;
+    sl.inner_angle_deg = light.inner_angle_deg;
+    sl.outer_angle_deg = light.outer_angle_deg;
+
+    return _engine->_sceneManager->setSpotLight(index, sl);
+}
+
+size_t Engine::get_spot_light_count() const
+{
+    return _engine->_sceneManager ? _engine->_sceneManager->getSpotLightCount() : 0;
+}
+
+void Engine::clear_spot_lights()
+{
+    if (_engine->_sceneManager)
+    {
+        _engine->_sceneManager->clearSpotLights();
+    }
+}
+
+// ----------------------------------------------------------------------------
 // Post Processing - FXAA
 // ----------------------------------------------------------------------------
 

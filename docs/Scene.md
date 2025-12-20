@@ -127,6 +127,23 @@ Notes:
   - On level load: call `addPointLight` for each baked/runtime point light.
   - At runtime (e.g. gameplay): read/modify lights via the indexed helpers.
 
+### Spot Lights
+
+- `SceneManager::SpotLight`
+  - `position_world` – world‑space position.
+  - `direction` – world‑space unit direction (cone axis).
+  - `radius` – approximate influence radius (used for falloff).
+  - `inner_angle_deg`, `outer_angle_deg` – cone half‑angles in degrees (inner ≤ outer).
+  - `color` – RGB color.
+  - `intensity` – scalar brightness.
+- API
+  - `addSpotLight(const SpotLight &light)`
+  - `clearSpotLights()`
+  - `getSpotLightCount()`, `getSpotLight(index, outLight)`, `setSpotLight(index, light)`, `removeSpotLight(index)`
+- Usage pattern
+  - On level load: call `addSpotLight` for each flashlight/beam/cone light.
+  - At runtime: read/modify lights via the indexed helpers.
+
 ### Picking & Selection (Game‑Facing)
 
 The scene system exposes CPU ray‑based picking and rectangle selection that the engine uses for editor tools, but you can also call them directly from game code.

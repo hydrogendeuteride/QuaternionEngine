@@ -1425,6 +1425,115 @@ namespace
                 sceneMgr->clearPointLights();
                 selectedLight = -1;
             }
+
+            // Spot light editor
+            ImGui::Separator();
+            ImGui::TextUnformatted("Spot lights");
+
+            const auto &spotLights = sceneMgr->getSpotLights();
+            ImGui::Text("Active spot lights: %zu", spotLights.size());
+
+            static int selectedSpot = -1;
+            if (selectedSpot >= static_cast<int>(spotLights.size()))
+            {
+                selectedSpot = static_cast<int>(spotLights.size()) - 1;
+            }
+
+            if (ImGui::BeginListBox("Spot light list##spot_list"))
+            {
+                for (size_t i = 0; i < spotLights.size(); ++i)
+                {
+                    std::string label = fmt::format("Spot {}", i);
+                    const bool isSelected = (selectedSpot == static_cast<int>(i));
+                    if (ImGui::Selectable(label.c_str(), isSelected))
+                    {
+                        selectedSpot = static_cast<int>(i);
+                    }
+                }
+                ImGui::EndListBox();
+            }
+
+            if (selectedSpot >= 0 && selectedSpot < static_cast<int>(spotLights.size()))
+            {
+                SceneManager::SpotLight sl{};
+                if (sceneMgr->getSpotLight(static_cast<size_t>(selectedSpot), sl))
+                {
+                    double pos[3] = {sl.position_world.x, sl.position_world.y, sl.position_world.z};
+                    float dir[3] = {sl.direction.x, sl.direction.y, sl.direction.z};
+                    float col[3] = {sl.color.r, sl.color.g, sl.color.b};
+                    bool changed = false;
+
+                    changed |= ImGui::InputScalarN("Position (world)##spot_pos", ImGuiDataType_Double, pos, 3, nullptr, nullptr, "%.3f");
+                    changed |= ImGui::InputFloat3("Direction##spot_dir", dir, "%.3f");
+                    changed |= ImGui::SliderFloat("Radius##spot_radius", &sl.radius, 0.1f, 1000.0f);
+                    changed |= ImGui::SliderFloat("Inner angle (deg)##spot_inner", &sl.inner_angle_deg, 0.0f, 89.0f);
+                    changed |= ImGui::SliderFloat("Outer angle (deg)##spot_outer", &sl.outer_angle_deg, 0.0f, 89.9f);
+                    changed |= ImGui::ColorEdit3("Color##spot_color", col);
+                    changed |= ImGui::SliderFloat("Intensity##spot_intensity", &sl.intensity, 0.0f, 100.0f);
+
+                    if (changed)
+                    {
+                        sl.position_world = WorldVec3(pos[0], pos[1], pos[2]);
+                        glm::vec3 d{dir[0], dir[1], dir[2]};
+                        sl.direction = (glm::length(d) > 1.0e-6f) ? glm::normalize(d) : glm::vec3(0.0f, -1.0f, 0.0f);
+                        sl.color = glm::vec3(col[0], col[1], col[2]);
+                        sl.inner_angle_deg = std::clamp(sl.inner_angle_deg, 0.0f, 89.0f);
+                        sl.outer_angle_deg = std::clamp(sl.outer_angle_deg, sl.inner_angle_deg, 89.9f);
+                        sceneMgr->setSpotLight(static_cast<size_t>(selectedSpot), sl);
+                    }
+
+                    if (ImGui::Button("Remove selected spot light##spot_remove"))
+                    {
+                        sceneMgr->removeSpotLight(static_cast<size_t>(selectedSpot));
+                        selectedSpot = -1;
+                    }
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Add spot light");
+            static double newSpotPos[3] = {0.0, 2.0, 0.0};
+            static float newSpotDir[3] = {0.0f, -1.0f, 0.0f};
+            static float newSpotRadius = 10.0f;
+            static float newSpotInner = 15.0f;
+            static float newSpotOuter = 25.0f;
+            static float newSpotColor[3] = {1.0f, 1.0f, 1.0f};
+            static float newSpotIntensity = 10.0f;
+
+            ImGui::InputScalarN("New position (world)##spot_new_pos", ImGuiDataType_Double, newSpotPos, 3, nullptr, nullptr, "%.3f");
+            ImGui::InputFloat3("New direction##spot_new_dir", newSpotDir, "%.3f");
+            ImGui::SliderFloat("New radius##spot_new_radius", &newSpotRadius, 0.1f, 1000.0f);
+            ImGui::SliderFloat("New inner angle (deg)##spot_new_inner", &newSpotInner, 0.0f, 89.0f);
+            ImGui::SliderFloat("New outer angle (deg)##spot_new_outer", &newSpotOuter, 0.0f, 89.9f);
+            if (newSpotInner > newSpotOuter)
+            {
+                newSpotOuter = newSpotInner;
+            }
+            ImGui::ColorEdit3("New color##spot_new_color", newSpotColor);
+            ImGui::SliderFloat("New intensity##spot_new_intensity", &newSpotIntensity, 0.0f, 100.0f);
+
+            if (ImGui::Button("Add spot light##spot_add"))
+            {
+                SceneManager::SpotLight sl{};
+                sl.position_world = WorldVec3(newSpotPos[0], newSpotPos[1], newSpotPos[2]);
+                glm::vec3 d{newSpotDir[0], newSpotDir[1], newSpotDir[2]};
+                sl.direction = (glm::length(d) > 1.0e-6f) ? glm::normalize(d) : glm::vec3(0.0f, -1.0f, 0.0f);
+                sl.radius = newSpotRadius;
+                sl.color = glm::vec3(newSpotColor[0], newSpotColor[1], newSpotColor[2]);
+                sl.intensity = newSpotIntensity;
+                sl.inner_angle_deg = std::clamp(newSpotInner, 0.0f, 89.0f);
+                sl.outer_angle_deg = std::clamp(newSpotOuter, sl.inner_angle_deg, 89.9f);
+
+                const size_t oldCount = sceneMgr->getSpotLightCount();
+                sceneMgr->addSpotLight(sl);
+                selectedSpot = static_cast<int>(oldCount);
+            }
+
+            if (ImGui::Button("Clear all spot lights##spot_clear"))
+            {
+                sceneMgr->clearSpotLights();
+                selectedSpot = -1;
+            }
         }
 
         ImGui::Separator();

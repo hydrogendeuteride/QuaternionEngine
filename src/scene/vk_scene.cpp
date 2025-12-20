@@ -67,6 +67,46 @@ bool SceneManager::removePointLight(size_t index)
     return true;
 }
 
+void SceneManager::addSpotLight(const SpotLight &light)
+{
+    spotLights.push_back(light);
+}
+
+void SceneManager::clearSpotLights()
+{
+    spotLights.clear();
+}
+
+bool SceneManager::getSpotLight(size_t index, SpotLight &outLight) const
+{
+    if (index >= spotLights.size())
+    {
+        return false;
+    }
+    outLight = spotLights[index];
+    return true;
+}
+
+bool SceneManager::setSpotLight(size_t index, const SpotLight &light)
+{
+    if (index >= spotLights.size())
+    {
+        return false;
+    }
+    spotLights[index] = light;
+    return true;
+}
+
+bool SceneManager::removeSpotLight(size_t index)
+{
+    if (index >= spotLights.size())
+    {
+        return false;
+    }
+    spotLights.erase(spotLights.begin() + index);
+    return true;
+}
+
 void SceneManager::init(EngineContext *context)
 {
     _context = context;
@@ -414,7 +454,45 @@ void SceneManager::update_scene()
         sceneData.punctualLights[i].position_radius = glm::vec4(0.0f);
         sceneData.punctualLights[i].color_intensity = glm::vec4(0.0f);
     }
-    sceneData.lightCounts = glm::uvec4(lightCount, 0u, 0u, 0u);
+
+    // Fill spot lights into GPUSceneData
+    const uint32_t spotCount = static_cast<uint32_t>(std::min(spotLights.size(), static_cast<size_t>(kMaxSpotLights)));
+    for (uint32_t i = 0; i < spotCount; ++i)
+    {
+        const SpotLight &sl = spotLights[i];
+        glm::vec3 posLocal = world_to_local(sl.position_world, _origin_world);
+
+        glm::vec3 dir = sl.direction;
+        const float dirLen2 = glm::length2(dir);
+        if (dirLen2 > 1.0e-8f)
+        {
+            dir *= 1.0f / std::sqrt(dirLen2);
+        }
+        else
+        {
+            dir = glm::vec3(0.0f, -1.0f, 0.0f);
+        }
+
+        const float radius = std::max(sl.radius, 0.0001f);
+        const float innerDeg = std::clamp(sl.inner_angle_deg, 0.0f, 89.0f);
+        const float outerDeg = std::clamp(sl.outer_angle_deg, innerDeg, 89.9f);
+        const float cosInner = glm::cos(glm::radians(innerDeg));
+        const float cosOuter = glm::cos(glm::radians(outerDeg));
+
+        sceneData.spotLights[i].position_radius = glm::vec4(posLocal, radius);
+        sceneData.spotLights[i].direction_cos_outer = glm::vec4(dir, cosOuter);
+        sceneData.spotLights[i].color_intensity = glm::vec4(sl.color, sl.intensity);
+        sceneData.spotLights[i].cone = glm::vec4(cosInner, 0.0f, 0.0f, 0.0f);
+    }
+    for (uint32_t i = spotCount; i < kMaxSpotLights; ++i)
+    {
+        sceneData.spotLights[i].position_radius = glm::vec4(0.0f);
+        sceneData.spotLights[i].direction_cos_outer = glm::vec4(0.0f);
+        sceneData.spotLights[i].color_intensity = glm::vec4(0.0f);
+        sceneData.spotLights[i].cone = glm::vec4(0.0f);
+    }
+
+    sceneData.lightCounts = glm::uvec4(lightCount, spotCount, 0u, 0u);
 
     auto end = std::chrono::system_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);

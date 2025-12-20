@@ -82,5 +82,41 @@ vec3 eval_point_light(GPUPunctualLight light, vec3 pos, vec3 N, vec3 V, vec3 alb
     return brdf * lightColor * falloff;
 }
 
-#endif // LIGHTING_COMMON_GLSL
+vec3 eval_spot_light(GPUSpotLight light, vec3 pos, vec3 N, vec3 V, vec3 albedo, float roughness, float metallic)
+{
+    vec3 lightPos = light.position_radius.xyz;
+    float radius  = max(light.position_radius.w, 0.0001);
 
+    vec3 toLight = lightPos - pos;
+    float dist = length(toLight);
+    if (dist <= 0.0001)
+    {
+        return vec3(0.0);
+    }
+    vec3 L = toLight / dist; // surface -> light
+
+    vec3 dir = normalize(light.direction_cos_outer.xyz); // light -> forward
+    float cosOuter = light.direction_cos_outer.w;
+    float cosInner = light.cone.x;
+    float cosTheta = dot(-L, dir); // light -> surface vs light forward
+    if (cosTheta <= cosOuter)
+    {
+        return vec3(0.0);
+    }
+    float denom = max(cosInner - cosOuter, 0.0001);
+    float spot = clamp((cosTheta - cosOuter) / denom, 0.0, 1.0);
+    spot *= spot;
+
+    // Smooth falloff: inverse-square with soft clamp at radius
+    float att = 1.0 / max(dist * dist, 0.0001);
+    float x   = clamp(dist / radius, 0.0, 1.0);
+    float smth = (1.0 - x * x);
+    smth *= smth;
+    float falloff = att * smth;
+
+    vec3 brdf = evaluate_brdf(N, V, L, albedo, roughness, metallic);
+    vec3 lightColor = light.color_intensity.rgb * light.color_intensity.a;
+    return brdf * lightColor * falloff * spot;
+}
+
+#endif // LIGHTING_COMMON_GLSL

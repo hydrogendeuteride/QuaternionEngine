@@ -69,6 +69,30 @@ struct PointLightD
     float intensity{1.0f};
 };
 
+// Spot light data (cone half-angles in degrees; inner <= outer)
+struct SpotLight
+{
+    glm::vec3 position{0.0f};
+    glm::vec3 direction{0.0f, -1.0f, 0.0f};
+    float radius{10.0f};
+    glm::vec3 color{1.0f};
+    float intensity{1.0f};
+    float inner_angle_deg{15.0f};
+    float outer_angle_deg{25.0f};
+};
+
+// Double-precision world-space spot light data (position only).
+struct SpotLightD
+{
+    glm::dvec3 position{0.0};
+    glm::vec3 direction{0.0f, -1.0f, 0.0f};
+    float radius{10.0f};
+    glm::vec3 color{1.0f};
+    float intensity{1.0f};
+    float inner_angle_deg{15.0f};
+    float outer_angle_deg{25.0f};
+};
+
 // IBL (Image-Based Lighting) paths
 struct IBLPaths
 {
@@ -332,6 +356,29 @@ public:
 
     // Clear all point lights
     void clear_point_lights();
+
+    // ------------------------------------------------------------------------
+    // Lighting - Spot Lights
+    // ------------------------------------------------------------------------
+
+    // Add spot light (returns index)
+    size_t add_spot_light(const SpotLight& light);
+    size_t add_spot_light(const SpotLightD& light);
+
+    // Remove spot light by index
+    bool remove_spot_light(size_t index);
+
+    // Get/set spot light properties
+    bool get_spot_light(size_t index, SpotLight& out) const;
+    bool set_spot_light(size_t index, const SpotLight& light);
+    bool get_spot_light(size_t index, SpotLightD& out) const;
+    bool set_spot_light(size_t index, const SpotLightD& light);
+
+    // Get spot light count
+    size_t get_spot_light_count() const;
+
+    // Clear all spot lights
+    void clear_spot_lights();
 
     // ------------------------------------------------------------------------
     // Post Processing - FXAA
