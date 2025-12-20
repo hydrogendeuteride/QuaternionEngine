@@ -487,13 +487,73 @@ bool RenderGraph::compile()
         pass.preBufferBarriers.clear();
         if (!pass.enabled) { continue; }
 
-		std::unordered_map<uint32_t, RGImageUsage> desiredImageUsages;
-		desiredImageUsages.reserve(pass.imageReads.size() + pass.imageWrites.size());
+		struct DesiredImageAccess
+		{
+			ImageUsageInfo info{};
+			RGImageUsage canonical = RGImageUsage::SampledFragment;
+			bool hasAny = false;
+			bool hasDepthUsage = false;
+			bool warnedLayoutMismatch = false;
+		};
+
+		auto image_usage_priority = [](RGImageUsage usage) -> int {
+			switch (usage)
+			{
+				case RGImageUsage::DepthAttachment: return 30;
+				case RGImageUsage::ColorAttachment: return 25;
+				case RGImageUsage::ComputeWrite:    return 20;
+				case RGImageUsage::TransferDst:     return 15;
+				case RGImageUsage::TransferSrc:     return 10;
+				case RGImageUsage::Present:         return 5;
+				case RGImageUsage::SampledCompute:  return 1;
+				case RGImageUsage::SampledFragment: return 1;
+				default:                            return 0;
+			}
+		};
+
+		std::unordered_map<uint32_t, DesiredImageAccess> desiredImages;
+		desiredImages.reserve(pass.imageReads.size() + pass.imageWrites.size());
+
+		auto merge_desired_image = [&](uint32_t id, RGImageUsage usage) {
+			ImageUsageInfo u = usage_info_image(usage);
+			DesiredImageAccess &d = desiredImages[id];
+			if (!d.hasAny)
+			{
+				d.info = u;
+				d.canonical = usage;
+				d.hasAny = true;
+				d.hasDepthUsage = (usage == RGImageUsage::DepthAttachment);
+				return;
+			}
+
+			d.info.stage |= u.stage;
+			d.info.access |= u.access;
+			d.hasDepthUsage = d.hasDepthUsage || (usage == RGImageUsage::DepthAttachment);
+
+			if (d.info.layout != u.layout)
+			{
+				// Conflicting usages/layouts for the same image within one pass is almost
+				// always a bug in the pass declarations (the graph cannot insert mid-pass barriers).
+				if (!d.warnedLayoutMismatch)
+				{
+					fmt::println("[RG][Warn] Pass '{}' declares multiple layouts for image id {} ({} vs {}).",
+					             pass.name, id, (int)d.info.layout, (int)u.layout);
+					d.warnedLayoutMismatch = true;
+				}
+			}
+
+			if (image_usage_priority(usage) >= image_usage_priority(d.canonical))
+			{
+				d.canonical = usage;
+				// Layout is derived from the canonical (highest priority) usage; stages/access are unioned.
+				d.info.layout = u.layout;
+			}
+		};
 
         for (const auto &access: pass.imageReads)
         {
             if (!access.image.valid()) continue;
-            desiredImageUsages.emplace(access.image.id, access.usage);
+            merge_desired_image(access.image.id, access.usage);
             if (access.image.id < imageCount)
             {
                 if (imageFirst[access.image.id] == -1) imageFirst[access.image.id] = (int)(&pass - _passes.data());
@@ -503,7 +563,7 @@ bool RenderGraph::compile()
         for (const auto &access: pass.imageWrites)
         {
             if (!access.image.valid()) continue;
-            desiredImageUsages[access.image.id] = access.usage;
+            merge_desired_image(access.image.id, access.usage);
             if (access.image.id < imageCount)
             {
                 if (imageFirst[access.image.id] == -1) imageFirst[access.image.id] = (int)(&pass - _passes.data());
@@ -513,11 +573,12 @@ bool RenderGraph::compile()
 
         // Validation: basic layout/format/usage checks for images used by this pass
         // Also build barriers
-        for (const auto &[id, usage]: desiredImageUsages)
+        for (const auto &[id, d]: desiredImages)
         {
             if (id >= imageCount) continue;
 
-            ImageUsageInfo desired = usage_info_image(usage);
+            const RGImageUsage usage = d.canonical;
+            const ImageUsageInfo desired = d.info;
 
             ImageState &state = imageStates[id];
             const VkImageLayout prevLayout = state.layout;
@@ -526,15 +587,11 @@ bool RenderGraph::compile()
             const bool prevHasWrite = state.writeAccess != 0;
             const bool prevHasReads = state.readAccess != 0;
 
-            bool needBarrier = layoutChange || (prevHasReads && desiredWrite);
-            if (prevHasWrite)
-            {
-                // Keep previous behavior: don't force a barrier if we stay in the exact same write state.
-                if (!(desiredWrite && !layoutChange && state.writeStage == desired.stage && state.writeAccess == desired.access))
-                {
-                    needBarrier = true;
-                }
-            }
+            // Hazards requiring a barrier:
+            //  - Any layout change
+            //  - Any prior write before a new read or write (RAW/WAW)
+            //  - Prior reads before a new write (WAR)
+            bool needBarrier = layoutChange || prevHasWrite || (prevHasReads && desiredWrite);
 
             if (needBarrier)
             {
@@ -577,7 +634,7 @@ bool RenderGraph::compile()
                 barrier.image = rec ? rec->image : VK_NULL_HANDLE;
 
                 VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-                if (usage == RGImageUsage::DepthAttachment || (rec && is_depth_format(rec->format)))
+                if (d.hasDepthUsage || (rec && is_depth_format(rec->format)))
                 {
                     aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
                 }
@@ -637,13 +694,53 @@ bool RenderGraph::compile()
 
         if (bufferCount == 0) continue;
 
-		std::unordered_map<uint32_t, RGBufferUsage> desiredBufferUsages;
-		desiredBufferUsages.reserve(pass.bufferReads.size() + pass.bufferWrites.size());
+		struct DesiredBufferAccess
+		{
+			BufferUsageInfo info{};
+			RGBufferUsage canonical = RGBufferUsage::UniformRead;
+			bool hasAny = false;
+		};
+
+		auto buffer_usage_priority = [](RGBufferUsage usage) -> int {
+			switch (usage)
+			{
+				case RGBufferUsage::TransferDst:        return 30;
+				case RGBufferUsage::TransferSrc:        return 25;
+				case RGBufferUsage::StorageReadWrite:   return 20;
+				case RGBufferUsage::StorageRead:        return 15;
+				case RGBufferUsage::IndirectArgs:       return 10;
+				case RGBufferUsage::VertexRead:         return 5;
+				case RGBufferUsage::IndexRead:          return 5;
+				case RGBufferUsage::UniformRead:        return 1;
+				default:                                return 0;
+			}
+		};
+
+		std::unordered_map<uint32_t, DesiredBufferAccess> desiredBuffers;
+		desiredBuffers.reserve(pass.bufferReads.size() + pass.bufferWrites.size());
+
+		auto merge_desired_buffer = [&](uint32_t id, RGBufferUsage usage) {
+			BufferUsageInfo u = usage_info_buffer(usage);
+			DesiredBufferAccess &d = desiredBuffers[id];
+			if (!d.hasAny)
+			{
+				d.info = u;
+				d.canonical = usage;
+				d.hasAny = true;
+				return;
+			}
+			d.info.stage |= u.stage;
+			d.info.access |= u.access;
+			if (buffer_usage_priority(usage) >= buffer_usage_priority(d.canonical))
+			{
+				d.canonical = usage;
+			}
+		};
 
         for (const auto &access: pass.bufferReads)
         {
             if (!access.buffer.valid()) continue;
-            desiredBufferUsages.emplace(access.buffer.id, access.usage);
+            merge_desired_buffer(access.buffer.id, access.usage);
             if (access.buffer.id < bufferCount)
             {
                 if (bufferFirst[access.buffer.id] == -1) bufferFirst[access.buffer.id] = (int)(&pass - _passes.data());
@@ -653,7 +750,7 @@ bool RenderGraph::compile()
         for (const auto &access: pass.bufferWrites)
         {
             if (!access.buffer.valid()) continue;
-            desiredBufferUsages[access.buffer.id] = access.usage;
+            merge_desired_buffer(access.buffer.id, access.usage);
             if (access.buffer.id < bufferCount)
             {
                 if (bufferFirst[access.buffer.id] == -1) bufferFirst[access.buffer.id] = (int)(&pass - _passes.data());
@@ -661,26 +758,22 @@ bool RenderGraph::compile()
             }
         }
 
-        for (const auto &[id, usage]: desiredBufferUsages)
+        for (const auto &[id, d]: desiredBuffers)
         {
             if (id >= bufferCount) continue;
 
-            BufferUsageInfo desired = usage_info_buffer(usage);
+            const RGBufferUsage usage = d.canonical;
+            const BufferUsageInfo desired = d.info;
 
             BufferState &state = bufferStates[id];
             const bool desiredWrite = access_has_write(desired.access);
             const bool prevHasWrite = state.writeAccess != 0;
             const bool prevHasReads = state.readAccess != 0;
 
-            bool needBarrier = (prevHasReads && desiredWrite);
-            if (prevHasWrite)
-            {
-                // Keep previous behavior: no barrier if staying in the exact same write state.
-                if (!(desiredWrite && state.writeStage == desired.stage && state.writeAccess == desired.access))
-                {
-                    needBarrier = true;
-                }
-            }
+            // Hazards requiring a barrier:
+            //  - Any prior write before a new read or write (RAW/WAW)
+            //  - Prior reads before a new write (WAR)
+            bool needBarrier = prevHasWrite || (prevHasReads && desiredWrite);
 
             if (needBarrier)
             {
