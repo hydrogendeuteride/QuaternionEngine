@@ -5,8 +5,9 @@
 
 - Build integration
   - CMake invokes `glslangValidator -V` for `*.vert`, `*.frag`, `*.comp` targeting Vulkan 1.2.
-  - Windows PowerShell helper `compile_shaders.ps1` uses `glslc` targeting Vulkan 1.3 and supports additional stages:
+  - Helper `compile_shaders.py` uses `glslc` targeting Vulkan 1.3 and supports additional stages:
     - `.mesh` (`-fshader-stage=mesh`), `.task`, and ray tracing stages (`.rgen`, `.rmiss`, `.rchit`, `.rahit`, `.rint`, `.rcall`).
+    - Windows shim: `compile_shaders.ps1 -Config Debug|Release|RelWithDebInfo`.
   - Keep `glslangValidator`/`glslc` on `PATH` and ensure your Vulkan SDK is installed.
 
 - Hot reload
@@ -55,4 +56,3 @@ GLSL Includes
 | `input_structures.glsl` | SceneData UBO, material bindings, light structs |
 | `lighting_common.glsl` | BRDF evaluation, point light helpers |
 | `ibl_common.glsl` | IBL split-sum, SH irradiance |
-

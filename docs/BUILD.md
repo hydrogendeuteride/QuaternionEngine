@@ -23,7 +23,8 @@
 - Shaders
   - CMake compiles GLSL via `glslangValidator` to SPIR‑V targeting Vulkan 1.2:
     - Files under `shaders/*.vert|*.frag|*.comp` are rebuilt on `cmake --build`.
-  - Windows helper: `./compile_shaders.ps1` uses `glslc` with `--target-env=vulkan1.3` and supports additional stages (mesh/task/ray tracing).
+  - Helper: `./compile_shaders.py --config Debug|Release` uses `glslc` with `--target-env=vulkan1.3` and supports additional stages (mesh/task/ray tracing).
+    - Windows shim: `./compile_shaders.ps1 -Config Debug|Release` (calls the Python script).
   - Ensure `glslangValidator`/`glslc` is on `PATH`. See `docs/SHADERS.md`.
 
 - Windows SDK note
@@ -41,4 +42,3 @@
 - Validation Layers
   - Enabled in Debug (`kUseValidationLayers = true` in `src/core/config.h`).
   - Disable by building Release or toggling the flag during local experimentation.
-

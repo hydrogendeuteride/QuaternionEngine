@@ -1,9 +1,10 @@
-$COMMON = @("--target-env=vulkan1.3", "-O", "-g", "-Werror", "-I", "shaders")
+param(
+  [ValidateSet("Debug", "Release", "RelWithDebInfo")]
+  [string]$Config = "RelWithDebInfo",
+  [string]$Python = "python"
+)
 
-Get-ChildItem -Path "shaders" -Include *.frag,*.vert,*.comp,*.geom,*.tesc,*.tese,*.mesh,*.task,*.rgen,*.rint,*.rahit,*.rchit,*.rmiss,*.rcall -Recurse |
-        ForEach-Object {
-          $extra = @()
-          if ($_.Extension -eq ".mesh") { $extra += "-fshader-stage=mesh" }
-          elseif ($_.Extension -eq ".task") { $extra += "-fshader-stage=task" }
-          glslc $_.FullName @COMMON @extra -o "$($_.FullName).spv"
-        }
+$script_dir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$py = Join-Path $script_dir "compile_shaders.py"
+
+& $Python $py --config $Config
