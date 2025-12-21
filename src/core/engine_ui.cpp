@@ -1840,80 +1840,171 @@ namespace
     }
 } // namespace
 
+// Window visibility states for menu-bar toggles
+namespace
+{
+    struct DebugWindowStates
+    {
+        bool show_overview{false};
+        bool show_window{false};
+        bool show_background{false};
+        bool show_particles{false};
+        bool show_shadows{false};
+        bool show_render_graph{false};
+        bool show_pipelines{false};
+        bool show_ibl{false};
+        bool show_postfx{false};
+        bool show_scene{false};
+        bool show_async_assets{false};
+        bool show_textures{false};
+    };
+    static DebugWindowStates g_debug_windows;
+} // namespace
+
 void vk_engine_draw_debug_ui(VulkanEngine *eng)
 {
     if (!eng) return;
 
     ImGuizmo::BeginFrame();
 
-    // Consolidated debug window with tabs
-    if (ImGui::Begin("Debug"))
+    // Main menu bar at the top
+    if (ImGui::BeginMainMenuBar())
     {
-        const ImGuiTabBarFlags tf =
-                ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_AutoSelectNewTabs;
-        if (ImGui::BeginTabBar("DebugTabs", tf))
+        if (ImGui::BeginMenu("View"))
         {
-            if (ImGui::BeginTabItem("Overview"))
-            {
-                ui_overview(eng);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Window"))
-            {
-                ui_window(eng);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Background"))
-            {
-                ui_background(eng);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Particles"))
-            {
-                ui_particles(eng);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Shadows"))
-            {
-                ui_shadows(eng);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Render Graph"))
-            {
-                ui_render_graph(eng);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Pipelines"))
-            {
-                ui_pipelines(eng);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("IBL"))
-            {
-                ui_ibl(eng);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("PostFX"))
-            {
-                ui_postfx(eng);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Scene"))
-            {
-                ui_scene(eng);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Async Assets"))
-            {
-                ui_async_assets(eng);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Textures"))
-            {
-                ui_textures(eng);
-                ImGui::EndTabItem();
-            }
-            ImGui::EndTabBar();
+            ImGui::MenuItem("Overview", nullptr, &g_debug_windows.show_overview);
+            ImGui::MenuItem("Window", nullptr, &g_debug_windows.show_window);
+            ImGui::Separator();
+            ImGui::MenuItem("Scene", nullptr, &g_debug_windows.show_scene);
+            ImGui::MenuItem("Render Graph", nullptr, &g_debug_windows.show_render_graph);
+            ImGui::MenuItem("Pipelines", nullptr, &g_debug_windows.show_pipelines);
+            ImGui::Separator();
+            ImGui::MenuItem("Shadows", nullptr, &g_debug_windows.show_shadows);
+            ImGui::MenuItem("IBL", nullptr, &g_debug_windows.show_ibl);
+            ImGui::MenuItem("PostFX", nullptr, &g_debug_windows.show_postfx);
+            ImGui::MenuItem("Background", nullptr, &g_debug_windows.show_background);
+            ImGui::Separator();
+            ImGui::MenuItem("Particles", nullptr, &g_debug_windows.show_particles);
+            ImGui::MenuItem("Textures", nullptr, &g_debug_windows.show_textures);
+            ImGui::MenuItem("Async Assets", nullptr, &g_debug_windows.show_async_assets);
+            ImGui::EndMenu();
+        }
+
+        // Quick stats in menu bar
+        ImGui::Separator();
+        ImGui::Text("%.1f ms | %d tris | %d draws",
+                    eng->stats.frametime,
+                    eng->stats.triangle_count,
+                    eng->stats.drawcall_count);
+
+        ImGui::EndMainMenuBar();
+    }
+
+    // Individual debug windows (only shown when toggled)
+    if (g_debug_windows.show_overview)
+    {
+        if (ImGui::Begin("Overview", &g_debug_windows.show_overview))
+        {
+            ui_overview(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_window)
+    {
+        if (ImGui::Begin("Window Settings", &g_debug_windows.show_window))
+        {
+            ui_window(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_background)
+    {
+        if (ImGui::Begin("Background", &g_debug_windows.show_background))
+        {
+            ui_background(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_particles)
+    {
+        if (ImGui::Begin("Particles", &g_debug_windows.show_particles))
+        {
+            ui_particles(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_shadows)
+    {
+        if (ImGui::Begin("Shadows", &g_debug_windows.show_shadows))
+        {
+            ui_shadows(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_render_graph)
+    {
+        if (ImGui::Begin("Render Graph", &g_debug_windows.show_render_graph))
+        {
+            ui_render_graph(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_pipelines)
+    {
+        if (ImGui::Begin("Pipelines", &g_debug_windows.show_pipelines))
+        {
+            ui_pipelines(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_ibl)
+    {
+        if (ImGui::Begin("IBL", &g_debug_windows.show_ibl))
+        {
+            ui_ibl(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_postfx)
+    {
+        if (ImGui::Begin("PostFX", &g_debug_windows.show_postfx))
+        {
+            ui_postfx(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_scene)
+    {
+        if (ImGui::Begin("Scene", &g_debug_windows.show_scene))
+        {
+            ui_scene(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_async_assets)
+    {
+        if (ImGui::Begin("Async Assets", &g_debug_windows.show_async_assets))
+        {
+            ui_async_assets(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_textures)
+    {
+        if (ImGui::Begin("Textures", &g_debug_windows.show_textures))
+        {
+            ui_textures(eng);
         }
         ImGui::End();
     }

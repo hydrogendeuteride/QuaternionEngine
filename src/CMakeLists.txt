@@ -114,6 +114,12 @@ add_executable (vulkan_engine
   # compute
   compute/vk_compute.h
   compute/vk_compute.cpp
+  # runtime
+  runtime/i_game_callbacks.h
+  runtime/time_manager.h
+  runtime/time_manager.cpp
+  runtime/game_runtime.h
+  runtime/game_runtime.cpp
 )
 
 set_property(TARGET vulkan_engine PROPERTY CXX_STANDARD 20)
@@ -270,6 +276,7 @@ target_include_directories(vulkan_engine PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/render/graph"
   "${CMAKE_CURRENT_SOURCE_DIR}/scene"
   "${CMAKE_CURRENT_SOURCE_DIR}/compute"
+  "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
 )
 
 option(ENABLE_MIKKTS "Use MikkTSpace for tangent generation" ON)
