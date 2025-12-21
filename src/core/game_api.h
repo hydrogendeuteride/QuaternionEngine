@@ -51,6 +51,20 @@ enum class PrimitiveType
     Capsule
 };
 
+// Material description for textured primitives
+struct PrimitiveMaterial
+{
+    std::string albedoPath;        // Color/diffuse texture (relative to assets/)
+    std::string metalRoughPath;    // Metallic (R) + Roughness (G) texture
+    std::string normalPath;        // Tangent-space normal map
+    std::string occlusionPath;     // Ambient occlusion (R channel)
+    std::string emissivePath;      // Emissive map
+
+    glm::vec4 colorFactor{1.0f};   // Base color multiplier (RGBA)
+    float metallic{0.0f};          // Metallic factor (0-1)
+    float roughness{0.5f};         // Roughness factor (0-1)
+};
+
 // Point light data
 struct PointLight
 {
@@ -286,6 +300,16 @@ public:
                               const Transform& transform = {});
     bool add_primitive_instance(const std::string& name,
                                 PrimitiveType type,
+                                const TransformD& transform);
+
+    // Add primitive mesh instance with textures
+    bool add_textured_primitive(const std::string& name,
+                                PrimitiveType type,
+                                const PrimitiveMaterial& material,
+                                const Transform& transform = {});
+    bool add_textured_primitive(const std::string& name,
+                                PrimitiveType type,
+                                const PrimitiveMaterial& material,
                                 const TransformD& transform);
 
     // Remove mesh instance (primitives or custom meshes)

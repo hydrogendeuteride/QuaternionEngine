@@ -604,9 +604,50 @@ void VulkanEngine::init_default_data()
                                        BoundsType::Sphere);
     }
 
+    // Test textured primitives
+    {
+        AssetManager::MeshMaterialDesc matDesc;
+        matDesc.kind = AssetManager::MeshMaterialDesc::Kind::Textured;
+        matDesc.options.albedoPath = "textures/grass_albedo.png";
+        matDesc.options.normalPath = "textures/grass_normal.png";
+        matDesc.options.metalRoughPath = "textures/grass_mro.png";
+        matDesc.options.occlusionPath = "textures/grass_ao.png";
+
+        addPrimitiveInstance("textured.cube",
+                             AssetManager::MeshGeometryDesc::Type::Cube,
+                             glm::translate(glm::mat4(1.f), glm::vec3(0.f, 1.f, -4.f)),
+                             matDesc);
+
+        addPrimitiveInstance("textured.sphere",
+                             AssetManager::MeshGeometryDesc::Type::Sphere,
+                             glm::translate(glm::mat4(1.f), glm::vec3(3.f, 1.f, -4.f)),
+                             matDesc);
+
+        addPrimitiveInstance("textured.plane",
+                             AssetManager::MeshGeometryDesc::Type::Plane,
+                             glm::scale(glm::translate(glm::mat4(1.f), glm::vec3(0.f, 0.f, -6.f)), glm::vec3(4.f)),
+                             matDesc);
+    }
+
     if (addGLTFInstance("mirage", "mirage2000/scene.gltf", glm::mat4(1.0f)))
     {
         preloadInstanceTextures("mirage");
+    }
+
+    // Windmill animation test
+    {
+        glm::mat4 windmillTransform = glm::translate(glm::mat4(1.0f), glm::vec3(10.0f, 0.0f, 0.0f));
+        windmillTransform = glm::scale(windmillTransform, glm::vec3(0.5f));
+        if (addGLTFInstance("windmill", "windmill/scene.gltf", windmillTransform))
+        {
+            preloadInstanceTextures("windmill");
+            // Enable first animation (index 0) with looping
+            if (_sceneManager)
+            {
+                _sceneManager->setGLTFInstanceAnimation("windmill", 0, true);
+                _sceneManager->setGLTFInstanceAnimationLoop("windmill", true);
+            }
+        }
     }
 
     _mainDeletionQueue.push_function([&]() {

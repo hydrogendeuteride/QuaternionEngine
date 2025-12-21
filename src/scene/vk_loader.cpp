@@ -244,10 +244,16 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
                  gltf.images.size(),
                  gltf.samplers.size());
 
+    // One material descriptor set binds:
+    // - 1x uniform buffer (material constants)
+    // - 5x combined image samplers (baseColor, metalRough, normal, occlusion, emissive)
+    //
+    // The pool must have at least these counts per material. If the ratio is too low
+    // (e.g. 3 samplers) and the asset has only 1 material, allocating the first set
+    // can fail with VK_ERROR_OUT_OF_POOL_MEMORY.
     std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> sizes = {
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3},
-        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3},
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 5},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
     };
 
     file.descriptorPool.init(engine->_deviceManager->device(), gltf.materials.size(), sizes);

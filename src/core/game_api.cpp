@@ -526,6 +526,71 @@ bool Engine::add_primitive_instance(const std::string& name,
            : false;
 }
 
+bool Engine::add_textured_primitive(const std::string& name,
+                                    PrimitiveType type,
+                                    const PrimitiveMaterial& material,
+                                    const Transform& transform)
+{
+    AssetManager::MeshGeometryDesc::Type geomType;
+    switch (type)
+    {
+    case PrimitiveType::Cube:    geomType = AssetManager::MeshGeometryDesc::Type::Cube; break;
+    case PrimitiveType::Sphere:  geomType = AssetManager::MeshGeometryDesc::Type::Sphere; break;
+    case PrimitiveType::Plane:   geomType = AssetManager::MeshGeometryDesc::Type::Plane; break;
+    case PrimitiveType::Capsule: geomType = AssetManager::MeshGeometryDesc::Type::Capsule; break;
+    default: return false;
+    }
+
+    AssetManager::MeshMaterialDesc matDesc;
+    matDesc.kind = AssetManager::MeshMaterialDesc::Kind::Textured;
+    matDesc.options.albedoPath = material.albedoPath;
+    matDesc.options.metalRoughPath = material.metalRoughPath;
+    matDesc.options.normalPath = material.normalPath;
+    matDesc.options.occlusionPath = material.occlusionPath;
+    matDesc.options.emissivePath = material.emissivePath;
+    matDesc.options.constants.colorFactors = material.colorFactor;
+    matDesc.options.constants.metal_rough_factors = glm::vec4(material.metallic, material.roughness, 0.0f, 0.0f);
+
+    return _engine->addPrimitiveInstance(name, geomType, transform.to_matrix(), matDesc);
+}
+
+bool Engine::add_textured_primitive(const std::string& name,
+                                    PrimitiveType type,
+                                    const PrimitiveMaterial& material,
+                                    const TransformD& transform)
+{
+    AssetManager::MeshGeometryDesc::Type geomType;
+    switch (type)
+    {
+    case PrimitiveType::Cube:    geomType = AssetManager::MeshGeometryDesc::Type::Cube; break;
+    case PrimitiveType::Sphere:  geomType = AssetManager::MeshGeometryDesc::Type::Sphere; break;
+    case PrimitiveType::Plane:   geomType = AssetManager::MeshGeometryDesc::Type::Plane; break;
+    case PrimitiveType::Capsule: geomType = AssetManager::MeshGeometryDesc::Type::Capsule; break;
+    default: return false;
+    }
+
+    AssetManager::MeshMaterialDesc matDesc;
+    matDesc.kind = AssetManager::MeshMaterialDesc::Kind::Textured;
+    matDesc.options.albedoPath = material.albedoPath;
+    matDesc.options.metalRoughPath = material.metalRoughPath;
+    matDesc.options.normalPath = material.normalPath;
+    matDesc.options.occlusionPath = material.occlusionPath;
+    matDesc.options.emissivePath = material.emissivePath;
+    matDesc.options.constants.colorFactors = material.colorFactor;
+    matDesc.options.constants.metal_rough_factors = glm::vec4(material.metallic, material.roughness, 0.0f, 0.0f);
+
+    if (!_engine->addPrimitiveInstance(name, geomType, glm::mat4(1.0f), matDesc))
+    {
+        return false;
+    }
+    return _engine->_sceneManager
+           ? _engine->_sceneManager->setMeshInstanceTRSWorld(name,
+                                                            WorldVec3(transform.position),
+                                                            transform.rotation,
+                                                            transform.scale)
+           : false;
+}
+
 bool Engine::remove_mesh_instance(const std::string& name)
 {
     return _engine->_sceneManager ? _engine->_sceneManager->removeMeshInstance(name) : false;

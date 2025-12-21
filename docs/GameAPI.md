@@ -384,6 +384,99 @@ Docs: `docs/Scene.md`
     - Spawn primitives or dynamic meshes at runtime (e.g. projectiles, props).
     - Use `setMeshInstanceTransform` every frame to move them based on game logic.
 
+### Textured Primitives
+
+Spawn primitive meshes (cube, sphere, plane, capsule) with custom PBR textures at runtime.
+
+#### PrimitiveMaterial Structure
+
+```cpp
+struct PrimitiveMaterial
+{
+    std::string albedoPath;        // Color/diffuse texture (relative to assets/)
+    std::string metalRoughPath;    // Metallic (R) + Roughness (G) texture
+    std::string normalPath;        // Tangent-space normal map
+    std::string occlusionPath;     // Ambient occlusion (R channel)
+    std::string emissivePath;      // Emissive map
+
+    glm::vec4 colorFactor{1.0f};   // Base color multiplier (RGBA)
+    float metallic{0.0f};          // Metallic factor (0-1)
+    float roughness{0.5f};         // Roughness factor (0-1)
+};
+```
+
+#### PrimitiveType Enum
+
+```cpp
+enum class PrimitiveType
+{
+    Cube,
+    Sphere,
+    Plane,
+    Capsule
+};
+```
+
+#### API Functions
+
+```cpp
+bool add_textured_primitive(const std::string& name,
+                            PrimitiveType type,
+                            const PrimitiveMaterial& material,
+                            const Transform& transform = {});
+
+bool add_textured_primitive(const std::string& name,
+                            PrimitiveType type,
+                            const PrimitiveMaterial& material,
+                            const TransformD& transform);  // double-precision
+```
+
+#### Usage Example
+
+```cpp
+GameAPI::Engine api(&engine);
+
+// Create material with textures
+GameAPI::PrimitiveMaterial mat;
+mat.albedoPath = "textures/brick_albedo.png";
+mat.normalPath = "textures/brick_normal.png";
+mat.metalRoughPath = "textures/brick_mro.png";  // Metallic-Roughness-Occlusion packed
+mat.roughness = 0.7f;
+mat.metallic = 0.0f;
+
+// Spawn a textured cube
+GameAPI::Transform transform;
+transform.position = glm::vec3(0.0f, 1.0f, -5.0f);
+transform.scale = glm::vec3(2.0f);
+
+api.add_textured_primitive("my_brick_cube", GameAPI::PrimitiveType::Cube, mat, transform);
+
+// Spawn a textured sphere with different material
+GameAPI::PrimitiveMaterial metalMat;
+metalMat.albedoPath = "textures/metal_albedo.png";
+metalMat.normalPath = "textures/metal_normal.png";
+metalMat.metallic = 1.0f;
+metalMat.roughness = 0.3f;
+metalMat.colorFactor = glm::vec4(0.9f, 0.9f, 1.0f, 1.0f);  // Slight blue tint
+
+GameAPI::Transform sphereT;
+sphereT.position = glm::vec3(3.0f, 1.0f, -5.0f);
+
+api.add_textured_primitive("chrome_sphere", GameAPI::PrimitiveType::Sphere, metalMat, sphereT);
+```
+
+#### Notes
+
+- Texture paths are relative to the `assets/` directory.
+- If a texture path is empty, the engine uses default placeholder textures:
+  - Albedo: error checkerboard (magenta/black)
+  - Normal: flat normal (0.5, 0.5, 1.0)
+  - MetalRough: white (default values from `metallic`/`roughness` factors)
+  - Occlusion: white (no occlusion)
+  - Emissive: black (no emission)
+- Textures are loaded asynchronously via `TextureCache`; placeholders appear until upload completes.
+- For non-textured primitives with solid colors, use `add_primitive_instance()` instead.
+
 - GLTF instances (actors)
   - `void addGLTFInstance(const std::string &name, std::shared_ptr<LoadedGLTF> scene, const glm::mat4 &transform = glm::mat4(1.f));`
   - `bool getGLTFInstanceTransform(const std::string &name, glm::mat4 &outTransform);`
