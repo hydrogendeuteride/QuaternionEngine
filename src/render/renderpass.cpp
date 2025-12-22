@@ -5,6 +5,7 @@
 #include "passes/imgui_pass.h"
 #include "passes/lighting.h"
 #include "passes/ssr.h"
+#include "passes/clouds.h"
 #include "passes/particles.h"
 #include "passes/fxaa.h"
 #include "passes/transparent.h"
@@ -36,6 +37,11 @@ void RenderPassManager::init(EngineContext *context)
     auto ssrPass = std::make_unique<SSRPass>();
     ssrPass->init(context);
     addPass(std::move(ssrPass));
+
+    // Voxel volumetrics pass (cloud/smoke/flame via voxel density SSBO)
+    auto cloudPass = std::make_unique<CloudPass>();
+    cloudPass->init(context);
+    addPass(std::move(cloudPass));
 
     // GPU particle system (compute update + render)
     auto particlePass = std::make_unique<ParticlePass>();

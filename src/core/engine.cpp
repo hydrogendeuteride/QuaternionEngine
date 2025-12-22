@@ -45,6 +45,7 @@
 #include "render/passes/geometry.h"
 #include "render/passes/imgui_pass.h"
 #include "render/passes/lighting.h"
+#include "render/passes/clouds.h"
 #include "render/passes/particles.h"
 #include "render/passes/transparent.h"
 #include "render/passes/fxaa.h"
@@ -253,6 +254,89 @@ void VulkanEngine::init()
         _context->descriptors->init(_deviceManager->device(), 10, sizes);
     }
     _context->logicalRenderExtent = _logicalRenderExtent;
+
+    // Default voxel volumetric presets (up to 4 volumes for performance).
+    // Slot 0 matches the old CloudSettings defaults.
+    if (_context->voxelVolumes.size() >= 1)
+    {
+        VoxelVolumeSettings &v = _context->voxelVolumes[0];
+        v.enabled = false;
+        v.type = VoxelVolumeType::Clouds;
+        v.followCameraXZ = true;
+        v.animateVoxels = false;
+        v.volumeCenterLocal = glm::vec3(0.0f, 80.0f, 0.0f);
+        v.volumeHalfExtents = glm::vec3(128.0f, 20.0f, 128.0f);
+        v.volumeVelocityLocal = glm::vec3(0.0f);
+        v.densityScale = 1.25f;
+        v.coverage = 0.45f;
+        v.extinction = 1.0f;
+        v.stepCount = 64;
+        v.gridResolution = 64;
+        v.windVelocityLocal = glm::vec3(6.0f, 0.0f, 2.0f);
+        v.dissipation = 0.35f;
+        v.noiseStrength = 1.0f;
+        v.noiseScale = 6.0f;
+        v.noiseSpeed = 0.15f;
+        v.emitterUVW = glm::vec3(0.5f, 0.05f, 0.5f);
+        v.emitterRadius = 0.18f;
+        v.albedo = glm::vec3(1.0f);
+        v.scatterStrength = 1.0f;
+        v.emissionColor = glm::vec3(1.0f, 0.6f, 0.25f);
+        v.emissionStrength = 0.0f;
+    }
+    if (_context->voxelVolumes.size() >= 2)
+    {
+        VoxelVolumeSettings &v = _context->voxelVolumes[1];
+        v.enabled = false;
+        v.type = VoxelVolumeType::Smoke;
+        v.followCameraXZ = false;
+        v.animateVoxels = true;
+        v.volumeCenterLocal = glm::vec3(0.0f, 2.0f, 0.0f);
+        v.volumeHalfExtents = glm::vec3(6.0f, 6.0f, 6.0f);
+        v.volumeVelocityLocal = glm::vec3(0.0f);
+        v.densityScale = 1.0f;
+        v.coverage = 0.0f;
+        v.extinction = 2.5f;
+        v.stepCount = 48;
+        v.gridResolution = 48;
+        v.windVelocityLocal = glm::vec3(0.5f, 3.0f, 0.0f);
+        v.dissipation = 1.5f;
+        v.noiseStrength = 2.0f;
+        v.noiseScale = 10.0f;
+        v.noiseSpeed = 1.0f;
+        v.emitterUVW = glm::vec3(0.5f, 0.08f, 0.5f);
+        v.emitterRadius = 0.22f;
+        v.albedo = glm::vec3(0.25f);
+        v.scatterStrength = 0.25f;
+        v.emissionStrength = 0.0f;
+    }
+    if (_context->voxelVolumes.size() >= 3)
+    {
+        VoxelVolumeSettings &v = _context->voxelVolumes[2];
+        v.enabled = false;
+        v.type = VoxelVolumeType::Flame;
+        v.followCameraXZ = false;
+        v.animateVoxels = true;
+        v.volumeCenterLocal = glm::vec3(0.0f, 1.0f, 0.0f);
+        v.volumeHalfExtents = glm::vec3(3.0f, 5.0f, 3.0f);
+        v.volumeVelocityLocal = glm::vec3(0.0f);
+        v.densityScale = 1.5f;
+        v.coverage = 0.0f;
+        v.extinction = 1.0f;
+        v.stepCount = 56;
+        v.gridResolution = 48;
+        v.windVelocityLocal = glm::vec3(0.0f, 4.5f, 0.0f);
+        v.dissipation = 3.0f;
+        v.noiseStrength = 3.0f;
+        v.noiseScale = 14.0f;
+        v.noiseSpeed = 3.0f;
+        v.emitterUVW = glm::vec3(0.5f, 0.10f, 0.5f);
+        v.emitterRadius = 0.18f;
+        v.albedo = glm::vec3(1.0f);
+        v.scatterStrength = 0.0f;
+        v.emissionColor = glm::vec3(1.0f, 0.5f, 0.1f);
+        v.emissionStrength = 12.0f;
+    }
 
     _swapchainManager->init(_deviceManager.get(), _resourceManager.get());
     _swapchainManager->set_render_extent(_drawExtent);
@@ -1189,6 +1273,15 @@ void VulkanEngine::draw()
 
             // Downstream passes draw on top of either the SSR output or the raw HDR draw.
             RGImageHandle hdrTarget = (ssrEnabled && hSSR.valid()) ? hSSR : hDraw;
+
+            // Optional voxel volumetrics pass: reads hdrTarget + gbufferPosition and outputs a new HDR target.
+            if (_context && _context->enableVolumetrics)
+            {
+                if (auto *clouds = _renderPassManager->getPass<CloudPass>())
+                {
+                    hdrTarget = clouds->register_graph(_renderGraph.get(), hdrTarget, hGBufferPosition);
+                }
+            }
 
             if (auto *particles = _renderPassManager->getPass<ParticlePass>())
             {

@@ -32,6 +32,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <string>
 
 #include "mesh_bvh.h"
 
@@ -1208,6 +1209,95 @@ namespace
             reflMode = 0; // guard for unsupported HW
         }
         ctx->reflectionMode = static_cast<uint32_t>(reflMode);
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Volumetrics");
+        bool voxEnabled = ctx->enableVolumetrics;
+        if (ImGui::Checkbox("Enable Voxel Volumetrics (Cloud/Smoke/Flame)", &voxEnabled))
+        {
+            ctx->enableVolumetrics = voxEnabled;
+        }
+
+        const char *typeLabels[] = {"Clouds", "Smoke", "Flame"};
+
+        for (uint32_t i = 0; i < EngineContext::MAX_VOXEL_VOLUMES; ++i)
+        {
+            VoxelVolumeSettings &vs = ctx->voxelVolumes[i];
+
+            std::string header = "Voxel Volume " + std::to_string(i);
+            if (!ImGui::TreeNode(header.c_str()))
+            {
+                continue;
+            }
+
+            std::string id = "##vox" + std::to_string(i);
+            ImGui::Checkbox(("Enabled" + id).c_str(), &vs.enabled);
+
+            int type = static_cast<int>(vs.type);
+            if (ImGui::Combo(("Type" + id).c_str(), &type, typeLabels, IM_ARRAYSIZE(typeLabels)))
+            {
+                type = std::clamp(type, 0, 2);
+                vs.type = static_cast<VoxelVolumeType>(type);
+            }
+
+            ImGui::Checkbox(("Follow Camera XZ" + id).c_str(), &vs.followCameraXZ);
+            ImGui::Checkbox(("Animate Voxels" + id).c_str(), &vs.animateVoxels);
+
+            if (vs.followCameraXZ)
+            {
+                ImGui::InputFloat3(("Volume Offset (local)" + id).c_str(), &vs.volumeCenterLocal.x);
+            }
+            else
+            {
+                ImGui::InputFloat3(("Volume Center (local)" + id).c_str(), &vs.volumeCenterLocal.x);
+            }
+            ImGui::InputFloat3(("Volume Velocity (local)" + id).c_str(), &vs.volumeVelocityLocal.x);
+            ImGui::InputFloat3(("Volume Half Extents" + id).c_str(), &vs.volumeHalfExtents.x);
+            vs.volumeHalfExtents.x = std::max(vs.volumeHalfExtents.x, 0.01f);
+            vs.volumeHalfExtents.y = std::max(vs.volumeHalfExtents.y, 0.01f);
+            vs.volumeHalfExtents.z = std::max(vs.volumeHalfExtents.z, 0.01f);
+
+            ImGui::SliderFloat(("Density Scale" + id).c_str(), &vs.densityScale, 0.0f, 6.0f);
+            ImGui::SliderFloat(("Coverage" + id).c_str(), &vs.coverage, 0.0f, 0.95f);
+            ImGui::SliderFloat(("Extinction" + id).c_str(), &vs.extinction, 0.0f, 8.0f);
+            ImGui::SliderInt(("Steps" + id).c_str(), &vs.stepCount, 8, 256);
+
+            int gridRes = static_cast<int>(vs.gridResolution);
+            if (ImGui::SliderInt(("Grid Resolution" + id).c_str(), &gridRes, 16, 128))
+            {
+                vs.gridResolution = static_cast<uint32_t>(std::max(4, gridRes));
+            }
+
+            if (vs.animateVoxels)
+            {
+                ImGui::InputFloat3(("Wind Velocity (local)" + id).c_str(), &vs.windVelocityLocal.x);
+                ImGui::SliderFloat(("Dissipation" + id).c_str(), &vs.dissipation, 0.0f, 6.0f);
+                ImGui::SliderFloat(("Noise Strength" + id).c_str(), &vs.noiseStrength, 0.0f, 6.0f);
+                ImGui::SliderFloat(("Noise Scale" + id).c_str(), &vs.noiseScale, 0.25f, 32.0f);
+                ImGui::SliderFloat(("Noise Speed" + id).c_str(), &vs.noiseSpeed, 0.0f, 8.0f);
+
+                if (vs.type != VoxelVolumeType::Clouds)
+                {
+                    ImGui::InputFloat3(("Emitter UVW" + id).c_str(), &vs.emitterUVW.x);
+                    ImGui::SliderFloat(("Emitter Radius" + id).c_str(), &vs.emitterRadius, 0.01f, 0.5f);
+                }
+            }
+
+            ImGui::ColorEdit3(("Albedo/Tint" + id).c_str(), &vs.albedo.x);
+            ImGui::SliderFloat(("Scatter Strength" + id).c_str(), &vs.scatterStrength, 0.0f, 2.0f);
+
+            if (vs.type == VoxelVolumeType::Flame)
+            {
+                ImGui::ColorEdit3(("Emission Color" + id).c_str(), &vs.emissionColor.x);
+                ImGui::SliderFloat(("Emission Strength" + id).c_str(), &vs.emissionStrength, 0.0f, 25.0f);
+            }
+            else
+            {
+                vs.emissionStrength = 0.0f;
+            }
+
+            ImGui::TreePop();
+        }
 
         ImGui::Separator();
         if (auto *tm = eng->_renderPassManager ? eng->_renderPassManager->getPass<TonemapPass>() : nullptr)

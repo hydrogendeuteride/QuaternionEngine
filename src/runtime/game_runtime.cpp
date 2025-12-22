@@ -186,6 +186,33 @@ namespace GameRuntime
                 _renderer->_rayManager->pump_blas_builds(1);
             }
 
+            // Commit any completed async IBL load now that the GPU is idle.
+            if (_renderer->_iblManager && _renderer->_pendingIBLRequest.active)
+            {
+                IBLManager::AsyncResult iblRes = _renderer->_iblManager->pump_async();
+                if (iblRes.completed)
+                {
+                    if (iblRes.success)
+                    {
+                        if (_renderer->_pendingIBLRequest.targetVolume >= 0)
+                        {
+                            _renderer->_activeIBLVolume = _renderer->_pendingIBLRequest.targetVolume;
+                        }
+                        else
+                        {
+                            _renderer->_activeIBLVolume = -1;
+                            _renderer->_hasGlobalIBL = true;
+                        }
+                    }
+                    else
+                    {
+                        fmt::println("[Runtime] Warning: async IBL load failed (specular='{}')",
+                                     _renderer->_pendingIBLRequest.paths.specularCube);
+                    }
+                    _renderer->_pendingIBLRequest.active = false;
+                }
+            }
+
             // --- Flush per-frame resources ---
             _renderer->get_current_frame()._deletionQueue.flush();
             if (_renderer->_renderGraph)

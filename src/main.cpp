@@ -20,16 +20,27 @@ class ExampleGame : public GameRuntime::IGameCallbacks
 public:
     void on_init(GameRuntime::Runtime& runtime) override
     {
-        // Example: Set up initial scene
         auto& api = runtime.api();
+        VulkanEngine* renderer = runtime.renderer();
+        if (renderer && renderer->_assetManager)
+        {
+            GameAPI::IBLPaths ibl{};
+            ibl.specularCube = renderer->_assetManager->assetPath("ibl/docklands.ktx2");
+            ibl.diffuseCube = renderer->_assetManager->assetPath("ibl/docklands.ktx2"); // fallback: reuse specular for diffuse
+            ibl.brdfLut = renderer->_assetManager->assetPath("ibl/brdf_lut.ktx2");
+            // Optional dedicated background texture (2D equirect); if omitted, background falls back to specularCube.
+            ibl.background = renderer->_assetManager->assetPath("ibl/sky.KTX2");
+            api.load_global_ibl(ibl);
+        }
+
 
         // Load a glTF model asynchronously
-        // api.load_gltf_async("example_model", "models/example.gltf",
-        //     GameAPI::Transform{}.with_position({0, 0, 0}));
+        // api.add_gltf_instance_async("example_model", "models/example.gltf",
+        //     GameAPI::Transform{.position = {0, 0, 0}});
 
         // Spawn a primitive
-        // api.spawn_mesh_instance("test_cube", api.primitive_cube(),
-        //     GameAPI::Transform{}.with_position({2, 0, 0}));
+        // api.add_primitive_instance("test_cube", GameAPI::PrimitiveType::Cube,
+        //     GameAPI::Transform{.position = {2, 0, 0}});
 
         // Set up camera
         // api.set_camera_position({0, 5, -10});
