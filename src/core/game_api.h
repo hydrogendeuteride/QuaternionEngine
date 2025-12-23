@@ -42,6 +42,21 @@ enum class TonemapOperator : int
     ACES = 1
 };
 
+// Voxel volume type (cloud/smoke/flame)
+enum class VoxelVolumeType : uint32_t
+{
+    Clouds = 0,
+    Smoke = 1,
+    Flame = 2
+};
+
+// Particle blend mode
+enum class ParticleBlendMode : uint32_t
+{
+    Additive = 0,  // Additive blending (for fire, sparks, etc.)
+    Alpha = 1      // Alpha blending with depth sorting
+};
+
 // Primitive geometry types
 enum class PrimitiveType
 {
@@ -105,6 +120,107 @@ struct SpotLightD
     float intensity{1.0f};
     float inner_angle_deg{15.0f};
     float outer_angle_deg{25.0f};
+};
+
+// Voxel volumetric settings (cloud/smoke/flame)
+struct VoxelVolumeSettings
+{
+    bool enabled{false};
+    VoxelVolumeType type{VoxelVolumeType::Clouds};
+
+    // If true, volume follows camera XZ and volumeCenterLocal is treated as offset
+    // If false, volumeCenterLocal is absolute render-local space
+    bool followCameraXZ{false};
+
+    // If true, run voxel advection/update compute pass every frame
+    bool animateVoxels{true};
+
+    // Volume AABB in render-local space
+    glm::vec3 volumeCenterLocal{0.0f, 2.0f, 0.0f};
+    glm::vec3 volumeHalfExtents{8.0f, 8.0f, 8.0f};
+
+    // Optional volume drift (applied only when followCameraXZ == false)
+    glm::vec3 volumeVelocityLocal{0.0f, 0.0f, 0.0f};
+
+    // Raymarch/composite controls
+    float densityScale{1.0f};
+    float coverage{0.0f};        // 0..1 threshold (higher = emptier)
+    float extinction{1.0f};      // absorption/extinction scale
+    int stepCount{48};           // raymarch steps
+
+    // Voxel grid resolution (cubic)
+    uint32_t gridResolution{48};
+
+    // Voxel animation (advection + injection) parameters
+    glm::vec3 windVelocityLocal{0.0f, 2.0f, 0.0f}; // local units/sec (add buoyancy here)
+    float dissipation{1.25f};    // density decay rate (1/sec)
+    float noiseStrength{1.0f};   // injection rate
+    float noiseScale{8.0f};      // noise frequency in UVW space
+    float noiseSpeed{1.0f};      // time scale for injection noise
+
+    // Smoke/flame source in normalized volume UVW space
+    glm::vec3 emitterUVW{0.5f, 0.05f, 0.5f};
+    float emitterRadius{0.18f};  // normalized (0..1-ish)
+
+    // Shading
+    glm::vec3 albedo{1.0f, 1.0f, 1.0f}; // scattering tint (cloud/smoke)
+    float scatterStrength{1.0f};
+    glm::vec3 emissionColor{1.0f, 0.6f, 0.25f}; // flame emissive tint
+    float emissionStrength{0.0f};
+};
+
+// Particle system parameters
+struct ParticleParams
+{
+    glm::vec3 emitterPosLocal{0.0f, 0.0f, 0.0f};
+    float spawnRadius{0.1f};
+
+    glm::vec3 emitterDirLocal{0.0f, 1.0f, 0.0f};
+    float coneAngleDegrees{20.0f};
+
+    float minSpeed{2.0f};
+    float maxSpeed{8.0f};
+
+    float minLife{0.5f};
+    float maxLife{1.5f};
+
+    float minSize{0.05f};
+    float maxSize{0.15f};
+
+    float drag{1.0f};
+    float gravity{0.0f}; // positive pulls down -Y in local space
+
+    glm::vec4 color{1.0f, 0.5f, 0.1f, 1.0f};
+
+    // Fade particles near opaque geometry intersections (0 disables)
+    float softDepthDistance{0.15f};
+
+    // Flipbook sampling (atlas layout and animation)
+    uint32_t flipbookCols{16};
+    uint32_t flipbookRows{4};
+    float flipbookFps{30.0f};
+    float flipbookIntensity{1.0f};
+
+    // Noise UV distortion
+    float noiseScale{6.0f};
+    float noiseStrength{0.05f};
+    glm::vec2 noiseScroll{0.0f, 0.0f};
+};
+
+// Particle system settings
+struct ParticleSystem
+{
+    uint32_t id{0};
+    uint32_t particleCount{0};
+    bool enabled{true};
+    bool reset{true};
+    ParticleBlendMode blendMode{ParticleBlendMode::Additive};
+    ParticleParams params{};
+
+    // Asset-relative texture paths (e.g., "vfx/flame.ktx2")
+    // Empty string disables the texture
+    std::string flipbookTexture{"vfx/flame.ktx2"};
+    std::string noiseTexture{"vfx/simplex.ktx2"};
 };
 
 // IBL (Image-Based Lighting) paths
@@ -495,6 +611,51 @@ public:
     // ------------------------------------------------------------------------
 
     Stats get_stats() const;
+
+    // ------------------------------------------------------------------------
+    // Volumetrics (Cloud/Smoke/Flame)
+    // ------------------------------------------------------------------------
+
+    // Enable/disable volumetrics system
+    void set_volumetrics_enabled(bool enabled);
+    bool get_volumetrics_enabled() const;
+
+    // Get/set voxel volume settings by index (0-3)
+    bool get_voxel_volume(size_t index, VoxelVolumeSettings& out) const;
+    bool set_voxel_volume(size_t index, const VoxelVolumeSettings& settings);
+
+    // Get maximum number of voxel volumes
+    size_t get_max_voxel_volumes() const;
+
+    // ------------------------------------------------------------------------
+    // Particle Systems
+    // ------------------------------------------------------------------------
+
+    // Create a new particle system (returns system ID, 0 on failure)
+    uint32_t create_particle_system(uint32_t particle_count);
+
+    // Destroy a particle system by ID
+    bool destroy_particle_system(uint32_t id);
+
+    // Resize a particle system (reallocates particle count)
+    bool resize_particle_system(uint32_t id, uint32_t new_count);
+
+    // Get particle system settings by ID
+    bool get_particle_system(uint32_t id, ParticleSystem& out) const;
+
+    // Set particle system settings by ID
+    bool set_particle_system(uint32_t id, const ParticleSystem& system);
+
+    // Get all particle system IDs
+    std::vector<uint32_t> get_particle_system_ids() const;
+
+    // Get particle pool statistics
+    uint32_t get_allocated_particles() const;
+    uint32_t get_free_particles() const;
+    uint32_t get_max_particles() const;
+
+    // Preload a VFX texture (e.g., "vfx/flame.ktx2")
+    void preload_particle_texture(const std::string& assetPath);
 
     // ------------------------------------------------------------------------
     // Picking / Selection

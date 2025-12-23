@@ -119,21 +119,6 @@ void SceneManager::init(EngineContext *context)
     sceneData.sunlightDirection = glm::vec4(-0.2f, -1.0f, -0.3f, 1.0f);
     sceneData.sunlightColor = glm::vec4(1.0f, 1.0f, 1.0f, 3.0f);
 
-    // Seed a couple of default point lights for quick testing.
-    PointLight warmKey{};
-    warmKey.position_world = WorldVec3(0.0, 0.0, 0.0);
-    warmKey.radius = 25.0f;
-    warmKey.color = glm::vec3(1.0f, 0.95f, 0.8f);
-    warmKey.intensity = 15.0f;
-    addPointLight(warmKey);
-
-    PointLight coolFill{};
-    coolFill.position_world = WorldVec3(-10.0, 4.0, 10.0);
-    coolFill.radius = 20.0f;
-    coolFill.color = glm::vec3(0.6f, 0.7f, 1.0f);
-    coolFill.intensity = 10.0f;
-    addPointLight(coolFill);
-
     _camera_position_local = world_to_local(mainCamera.position_world, _origin_world);
 }
 

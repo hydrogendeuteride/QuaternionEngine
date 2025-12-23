@@ -1051,7 +1051,7 @@ void VulkanEngine::draw()
 
         if (newVolume != _activeIBLVolume)
         {
-            const IBLPaths *paths = nullptr;
+            IBLPaths *paths = nullptr;
             if (newVolume >= 0)
             {
                 paths = &_iblVolumes[newVolume].paths;
@@ -1067,17 +1067,27 @@ void VulkanEngine::draw()
 
             if (paths && !alreadyPendingForTarget)
             {
-                if (_iblManager->load_async(*paths))
+                IBLPaths resolved = *paths;
+                if (_assetManager)
+                {
+                    if (!resolved.specularCube.empty()) resolved.specularCube = _assetManager->assetPath(resolved.specularCube);
+                    if (!resolved.diffuseCube.empty()) resolved.diffuseCube = _assetManager->assetPath(resolved.diffuseCube);
+                    if (!resolved.brdfLut2D.empty()) resolved.brdfLut2D = _assetManager->assetPath(resolved.brdfLut2D);
+                    if (!resolved.background2D.empty()) resolved.background2D = _assetManager->assetPath(resolved.background2D);
+                }
+                *paths = resolved;
+
+                if (_iblManager->load_async(resolved))
                 {
                     _pendingIBLRequest.active = true;
                     _pendingIBLRequest.targetVolume = newVolume;
-                    _pendingIBLRequest.paths = *paths;
+                    _pendingIBLRequest.paths = resolved;
                 }
                 else
                 {
                     fmt::println("[Engine] Warning: failed to enqueue IBL load for {} (specular='{}')",
                                  (newVolume >= 0) ? "volume" : "global environment",
-                                 paths->specularCube);
+                                 resolved.specularCube);
                 }
             }
         }

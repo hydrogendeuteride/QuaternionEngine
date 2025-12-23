@@ -401,6 +401,7 @@ IBLManager::AsyncResult IBLManager::pump_async()
 
     PreparedIBLData data{};
     bool success = false;
+    std::string error;
     {
         std::lock_guard<std::mutex> lock(state->mutex);
         if (!state->resultReady)
@@ -409,12 +410,17 @@ IBLManager::AsyncResult IBLManager::pump_async()
         }
         data = std::move(state->readyData);
         success = state->resultSuccess;
+        error = std::move(state->lastError);
         state->resultReady = false;
     }
 
     out.completed = true;
     if (!success)
     {
+        if (!error.empty())
+        {
+            fmt::println("[IBL] async load failed: {}", error);
+        }
         out.success = false;
         return out;
     }

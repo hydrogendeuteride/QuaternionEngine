@@ -38,6 +38,18 @@
 
 namespace
 {
+    static IBLPaths resolve_ibl_paths(VulkanEngine *eng, const IBLPaths &paths)
+    {
+        IBLPaths out = paths;
+        if (!eng || !eng->_assetManager) return out;
+
+        if (!out.specularCube.empty()) out.specularCube = eng->_assetManager->assetPath(out.specularCube);
+        if (!out.diffuseCube.empty()) out.diffuseCube = eng->_assetManager->assetPath(out.diffuseCube);
+        if (!out.brdfLut2D.empty()) out.brdfLut2D = eng->_assetManager->assetPath(out.brdfLut2D);
+        if (!out.background2D.empty()) out.background2D = eng->_assetManager->assetPath(out.background2D);
+        return out;
+    }
+
     static void ui_window(VulkanEngine *eng)
     {
         if (!eng || !eng->_window) return;
@@ -639,6 +651,35 @@ namespace
             ImGui::PushID(static_cast<int>(i));
             ImGui::Separator();
             ImGui::Text("Volume %zu", i);
+            ImGui::SameLine();
+            if (ImGui::Button("Delete"))
+            {
+                const int idx = static_cast<int>(i);
+                if (eng->_activeIBLVolume == idx)
+                {
+                    eng->_activeIBLVolume = -1;
+                }
+                else if (eng->_activeIBLVolume > idx)
+                {
+                    eng->_activeIBLVolume -= 1;
+                }
+
+                if (eng->_pendingIBLRequest.active)
+                {
+                    if (eng->_pendingIBLRequest.targetVolume == idx)
+                    {
+                        eng->_pendingIBLRequest.active = false;
+                    }
+                    else if (eng->_pendingIBLRequest.targetVolume > idx)
+                    {
+                        eng->_pendingIBLRequest.targetVolume -= 1;
+                    }
+                }
+
+                eng->_iblVolumes.erase(eng->_iblVolumes.begin() + idx);
+                ImGui::PopID();
+                break;
+            }
             ImGui::Checkbox("Enabled", &vol.enabled);
             {
                 double c[3] = {vol.center_world.x, vol.center_world.y, vol.center_world.z};
@@ -680,6 +721,7 @@ namespace
             {
                 if (eng->_iblManager && vol.enabled)
                 {
+                    vol.paths = resolve_ibl_paths(eng, vol.paths);
                     if (eng->_iblManager->load_async(vol.paths))
                     {
                         eng->_pendingIBLRequest.active = true;
@@ -691,6 +733,7 @@ namespace
             ImGui::SameLine();
             if (ImGui::Button("Set As Global IBL"))
             {
+                vol.paths = resolve_ibl_paths(eng, vol.paths);
                 eng->_globalIBLPaths = vol.paths;
                 if (eng->_iblManager)
                 {
