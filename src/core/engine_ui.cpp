@@ -6,6 +6,7 @@
 
 #include "engine.h"
 #include "core/picking/picking_system.h"
+#include "core/debug_draw/debug_draw.h"
 
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_vulkan.h"
@@ -1412,6 +1413,68 @@ namespace
         else
         {
             ImGui::TextUnformatted("Picking system not available");
+        }
+
+        // Debug draw settings (engine-owned collector + render pass)
+        if (eng->_context && eng->_context->debug_draw)
+        {
+            DebugDrawSystem *dd = eng->_context->debug_draw;
+            auto &s = dd->settings();
+
+            bool enabled = s.enabled;
+            if (ImGui::Checkbox("Enable debug draw", &enabled))
+            {
+                s.enabled = enabled;
+            }
+            if (s.enabled)
+            {
+                ImGui::SameLine();
+                ImGui::Text("Commands: %zu", dd->command_count());
+
+                int seg = s.segments;
+                if (ImGui::SliderInt("Circle segments", &seg, 3, 128))
+                {
+                    s.segments = seg;
+                }
+
+                bool depth_tested = s.show_depth_tested;
+                bool overlay = s.show_overlay;
+                if (ImGui::Checkbox("Depth-tested", &depth_tested))
+                {
+                    s.show_depth_tested = depth_tested;
+                }
+                ImGui::SameLine();
+                if (ImGui::Checkbox("Overlay", &overlay))
+                {
+                    s.show_overlay = overlay;
+                }
+
+                auto layer_checkbox = [&s](const char *label, DebugDrawLayer layer) {
+                    const uint32_t bit = static_cast<uint32_t>(layer);
+                    bool on = (s.layer_mask & bit) != 0u;
+                    if (ImGui::Checkbox(label, &on))
+                    {
+                        if (on) s.layer_mask |= bit;
+                        else s.layer_mask &= ~bit;
+                    }
+                };
+
+                ImGui::TextUnformatted("Layers");
+                layer_checkbox("Physics##dd_layer_physics", DebugDrawLayer::Physics);
+                ImGui::SameLine();
+                layer_checkbox("Picking##dd_layer_picking", DebugDrawLayer::Picking);
+                ImGui::SameLine();
+                layer_checkbox("Lights##dd_layer_lights", DebugDrawLayer::Lights);
+                layer_checkbox("Particles##dd_layer_particles", DebugDrawLayer::Particles);
+                ImGui::SameLine();
+                layer_checkbox("Volumetrics##dd_layer_volumetrics", DebugDrawLayer::Volumetrics);
+                ImGui::SameLine();
+                layer_checkbox("Misc##dd_layer_misc", DebugDrawLayer::Misc);
+            }
+        }
+        else
+        {
+            ImGui::TextUnformatted("Debug draw system not available");
         }
         ImGui::Separator();
 

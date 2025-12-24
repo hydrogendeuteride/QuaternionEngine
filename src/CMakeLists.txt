@@ -17,6 +17,8 @@ add_executable (vulkan_engine
   core/ui/imgui_system.cpp
   core/picking/picking_system.h
   core/picking/picking_system.cpp
+  core/debug_draw/debug_draw.h
+  core/debug_draw/debug_draw.cpp
   core/game_api.h
   core/game_api.cpp
   # core/device
@@ -93,6 +95,8 @@ add_executable (vulkan_engine
   render/passes/imgui_pass.cpp
   render/passes/tonemap.h
   render/passes/tonemap.cpp
+  render/passes/debug_draw.h
+  render/passes/debug_draw.cpp
   # render graph
   render/graph/types.h
   render/graph/graph.h

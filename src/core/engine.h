@@ -41,6 +41,12 @@
 #include "core/picking/picking_system.h"
 
 class InputSystem;
+class DebugDrawSystem;
+
+struct DebugDrawDeleter
+{
+    void operator()(DebugDrawSystem *p) const;
+};
 
 // Number of frames-in-flight. Affects per-frame command buffers, fences,
 // semaphores, and transient descriptor pools in FrameResources.
@@ -87,6 +93,7 @@ public:
 	std::unique_ptr<SceneManager> _sceneManager;
     std::unique_ptr<PickingSystem> _picking;
     std::unique_ptr<InputSystem> _input;
+    std::unique_ptr<DebugDrawSystem, DebugDrawDeleter> _debugDraw;
 	std::unique_ptr<PipelineManager> _pipelineManager;
 	std::unique_ptr<AssetManager> _assetManager;
 	std::unique_ptr<AsyncAssetLoader> _asyncLoader;

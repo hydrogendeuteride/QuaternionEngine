@@ -8,6 +8,7 @@
 #include "passes/clouds.h"
 #include "passes/particles.h"
 #include "passes/fxaa.h"
+#include "passes/debug_draw.h"
 #include "passes/transparent.h"
 #include "passes/tonemap.h"
 #include "passes/shadow.h"
@@ -52,6 +53,10 @@ void RenderPassManager::init(EngineContext *context)
     auto fxaaPass = std::make_unique<FxaaPass>();
     fxaaPass->init(context);
     addPass(std::move(fxaaPass));
+
+    auto debugDrawPass = std::make_unique<DebugDrawPass>();
+    debugDrawPass->init(context);
+    addPass(std::move(debugDrawPass));
 
     auto transparentPass = std::make_unique<TransparentPass>();
     transparentPass->init(context);

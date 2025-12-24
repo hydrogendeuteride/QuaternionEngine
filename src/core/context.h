@@ -34,6 +34,7 @@ class RayTracingManager;
 class TextureCache;
 class IBLManager;
 class InputSystem;
+class DebugDrawSystem;
 
 struct ShadowSettings
 {
@@ -142,6 +143,7 @@ public:
     RenderGraph* renderGraph = nullptr;          // render graph (built per-frame)
     SDL_Window* window = nullptr;                // SDL window handle
     InputSystem* input = nullptr;                // input system (engine-owned)
+    DebugDrawSystem* debug_draw = nullptr;       // debug 3D draw collector (engine-owned)
 
     // Frequently used values
     VkExtent2D drawExtent{};
