@@ -683,6 +683,105 @@ public:
     void set_use_id_buffer_picking(bool use);
     bool get_use_id_buffer_picking() const;
 
+    // ------------------------------------------------------------------------
+    // Debug Drawing
+    // ------------------------------------------------------------------------
+
+    // Enable/disable debug drawing system
+    void set_debug_draw_enabled(bool enabled);
+    bool get_debug_draw_enabled() const;
+
+    // Control which debug layers are visible
+    void set_debug_layer_mask(uint32_t mask);
+    uint32_t get_debug_layer_mask() const;
+
+    // Show/hide depth-tested debug primitives
+    void set_debug_show_depth_tested(bool show);
+    bool get_debug_show_depth_tested() const;
+
+    // Show/hide overlay (always-on-top) debug primitives
+    void set_debug_show_overlay(bool show);
+    bool get_debug_show_overlay() const;
+
+    // Set debug primitive tessellation quality (segments for circles/spheres)
+    void set_debug_segments(int segments);
+    int get_debug_segments() const;
+
+    // Clear all debug draw commands
+    void debug_draw_clear();
+
+    // Debug line primitives (world-space positions)
+    void debug_draw_line(const glm::vec3& a, const glm::vec3& b,
+                         const glm::vec4& color = glm::vec4(1.0f),
+                         float duration_seconds = 0.0f,
+                         bool depth_tested = true);
+    void debug_draw_line(const glm::dvec3& a, const glm::dvec3& b,
+                         const glm::vec4& color = glm::vec4(1.0f),
+                         float duration_seconds = 0.0f,
+                         bool depth_tested = true);
+
+    // Debug ray (origin + direction + length)
+    void debug_draw_ray(const glm::vec3& origin, const glm::vec3& direction, float length,
+                        const glm::vec4& color = glm::vec4(1.0f),
+                        float duration_seconds = 0.0f,
+                        bool depth_tested = true);
+    void debug_draw_ray(const glm::dvec3& origin, const glm::dvec3& direction, double length,
+                        const glm::vec4& color = glm::vec4(1.0f),
+                        float duration_seconds = 0.0f,
+                        bool depth_tested = true);
+
+    // Debug AABB (axis-aligned bounding box)
+    void debug_draw_aabb(const glm::vec3& center, const glm::vec3& half_extents,
+                         const glm::vec4& color = glm::vec4(1.0f),
+                         float duration_seconds = 0.0f,
+                         bool depth_tested = true);
+    void debug_draw_aabb(const glm::dvec3& center, const glm::vec3& half_extents,
+                         const glm::vec4& color = glm::vec4(1.0f),
+                         float duration_seconds = 0.0f,
+                         bool depth_tested = true);
+
+    // Debug sphere
+    void debug_draw_sphere(const glm::vec3& center, float radius,
+                           const glm::vec4& color = glm::vec4(1.0f),
+                           float duration_seconds = 0.0f,
+                           bool depth_tested = true);
+    void debug_draw_sphere(const glm::dvec3& center, float radius,
+                           const glm::vec4& color = glm::vec4(1.0f),
+                           float duration_seconds = 0.0f,
+                           bool depth_tested = true);
+
+    // Debug capsule (line segment + radius)
+    void debug_draw_capsule(const glm::vec3& p0, const glm::vec3& p1, float radius,
+                            const glm::vec4& color = glm::vec4(1.0f),
+                            float duration_seconds = 0.0f,
+                            bool depth_tested = true);
+    void debug_draw_capsule(const glm::dvec3& p0, const glm::dvec3& p1, float radius,
+                            const glm::vec4& color = glm::vec4(1.0f),
+                            float duration_seconds = 0.0f,
+                            bool depth_tested = true);
+
+    // Debug circle (center + normal + radius)
+    void debug_draw_circle(const glm::vec3& center, const glm::vec3& normal, float radius,
+                           const glm::vec4& color = glm::vec4(1.0f),
+                           float duration_seconds = 0.0f,
+                           bool depth_tested = true);
+    void debug_draw_circle(const glm::dvec3& center, const glm::dvec3& normal, float radius,
+                           const glm::vec4& color = glm::vec4(1.0f),
+                           float duration_seconds = 0.0f,
+                           bool depth_tested = true);
+
+    // Debug cone (apex + direction + length + angle)
+    void debug_draw_cone(const glm::vec3& apex, const glm::vec3& direction,
+                         float length, float angle_degrees,
+                         const glm::vec4& color = glm::vec4(1.0f),
+                         float duration_seconds = 0.0f,
+                         bool depth_tested = true);
+    void debug_draw_cone(const glm::dvec3& apex, const glm::dvec3& direction,
+                         float length, float angle_degrees,
+                         const glm::vec4& color = glm::vec4(1.0f),
+                         float duration_seconds = 0.0f,
+                         bool depth_tested = true);
+
 private:
     VulkanEngine* _engine;
 };
