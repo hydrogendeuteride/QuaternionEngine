@@ -25,9 +25,9 @@ vec3 getCameraWorldPosition()
     return -rot * T;                       // C = -R * T
 }
 
-vec3 projectToScreen(vec3 worldPos)
+vec3 projectToScreenFromView(vec3 viewPos)
 {
-    vec4 clip = sceneData.viewproj * vec4(worldPos, 1.0);
+    vec4 clip = sceneData.proj * vec4(viewPos, 1.0);
 
     if (clip.w <= 0.0)
     {
@@ -71,6 +71,8 @@ void main()
     vec3 camPos = getCameraWorldPosition();
     vec3 V      = normalize(camPos - worldPos);
     vec3 R      = reflect(-V, N);
+    vec3 viewPos = (sceneData.view * vec4(worldPos, 1.0)).xyz;
+    vec3 viewDir = normalize((sceneData.view * vec4(R, 0.0)).xyz);
 
     float gloss        = 1.0 - roughness;
     float F0           = mix(0.04, 1.0, metallic);
@@ -107,9 +109,9 @@ void main()
         float t = STEP_LENGTH_SSR;
         for (int i = 0; i < maxSteps && t <= MAX_DISTANCE_SSR; ++i, t += STEP_LENGTH_SSR)
         {
-            vec3 samplePos = worldPos + R * t;
+            vec3 sampleViewPos = viewPos + viewDir * t;
 
-            vec3 proj = projectToScreen(samplePos);
+            vec3 proj = projectToScreenFromView(sampleViewPos);
             if (proj.z < 0.0)
             {
                 break;
@@ -122,10 +124,9 @@ void main()
                 continue;
             }
 
-            vec3 viewSample = (sceneData.view * vec4(samplePos, 1.0)).xyz;
             vec3 viewScene  = (sceneData.view * vec4(scenePosSample.xyz, 1.0)).xyz;
 
-            float depthRay   = -viewSample.z;
+            float depthRay   = -sampleViewPos.z;
             float depthScene = -viewScene.z;
             float depthDiff  = depthRay - depthScene;
 
@@ -190,7 +191,7 @@ void main()
         float tHit = rayQueryGetIntersectionTEXT(rq, true);
         vec3 hitPos = origin + R * tHit;
 
-        vec3 proj = projectToScreen(hitPos);
+        vec3 proj = projectToScreenFromView((sceneData.view * vec4(hitPos, 1.0)).xyz);
         if (proj.z >= 0.0)
         {
             vec2 hitUV = proj.xy;

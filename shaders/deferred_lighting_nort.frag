@@ -27,6 +27,17 @@ const float SHADOW_RPDB_SCALE = 1.0;
 // Minimum clamp to keep a tiny bias even on perpendicular receivers
 const float SHADOW_MIN_BIAS = 1e-5;
 
+vec3 getCameraWorldPosition()
+{
+    // view = [ R^T  -R^T*C ]
+    //        [ 0       1   ]
+    // => C = -R * T, where T is view[3].xyz and R = transpose(mat3(view))
+    mat3 rotT = mat3(sceneData.view);
+    mat3 rot  = transpose(rotT);
+    vec3 T    = sceneData.view[3].xyz;
+    return -rot * T;
+}
+
 float hash12(vec2 p)
 {
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -219,7 +230,7 @@ void main(){
     float ao = extraSample.x;
     vec3 emissive = extraSample.yzw;
 
-    vec3 camPos = vec3(inverse(sceneData.view)[3]);
+    vec3 camPos = getCameraWorldPosition();
     vec3 V = normalize(camPos - pos);
 
     // Directional sun term using evaluate_brdf + cascaded shadowing

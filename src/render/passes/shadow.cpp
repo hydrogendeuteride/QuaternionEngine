@@ -19,6 +19,22 @@
 #include "core/types.h"
 #include "core/config.h"
 
+namespace
+{
+struct ShadowPushConstants
+{
+    glm::mat4 render_matrix;
+    VkDeviceAddress vertexBuffer;
+    uint32_t objectID;
+    uint32_t cascadeIndex;
+};
+static_assert(offsetof(ShadowPushConstants, render_matrix) == 0);
+static_assert(offsetof(ShadowPushConstants, vertexBuffer) == 64);
+static_assert(offsetof(ShadowPushConstants, objectID) == 72);
+static_assert(offsetof(ShadowPushConstants, cascadeIndex) == 76);
+static_assert(sizeof(ShadowPushConstants) == 80);
+} // namespace
+
 void ShadowPass::init(EngineContext *context)
 {
     _context = context;
@@ -29,10 +45,7 @@ void ShadowPass::init(EngineContext *context)
     // Keep push constants matching current shader layout for now
     VkPushConstantRange pc{};
     pc.offset = 0;
-    // Push constants layout in shadow.vert is GPUDrawPushConstants + cascade index, rounded to 16 bytes
-    const uint32_t pcRaw = static_cast<uint32_t>(sizeof(GPUDrawPushConstants) + sizeof(uint32_t));
-    const uint32_t pcAligned = (pcRaw + 15u) & ~15u; // 16-byte alignment to match std430 expectations
-    pc.size = pcAligned;
+    pc.size = static_cast<uint32_t>(sizeof(ShadowPushConstants));
     pc.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
     GraphicsPipelineCreateInfo info{};
@@ -180,12 +193,6 @@ void ShadowPass::draw_shadow(VkCommandBuffer cmd,
     const DrawContext &dc = ctxLocal->getMainDrawContext();
 
     VkBuffer lastIndexBuffer = VK_NULL_HANDLE;
-
-    struct ShadowPC
-    {
-        GPUDrawPushConstants draw;
-        uint32_t cascadeIndex;
-    };
     for (const auto &r : dc.OpaqueSurfaces)
     {
         if (r.indexBuffer != lastIndexBuffer)
@@ -194,12 +201,12 @@ void ShadowPass::draw_shadow(VkCommandBuffer cmd,
             vkCmdBindIndexBuffer(cmd, r.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
         }
 
-        ShadowPC spc{};
-        spc.draw.worldMatrix = r.transform;
-        spc.draw.vertexBuffer = r.vertexBufferAddress;
-        spc.draw.objectID = r.objectID;
+        ShadowPushConstants spc{};
+        spc.render_matrix = r.transform;
+        spc.vertexBuffer = r.vertexBufferAddress;
+        spc.objectID = r.objectID;
         spc.cascadeIndex = cascadeIndex;
-        vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ShadowPC), &spc);
+        vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ShadowPushConstants), &spc);
         vkCmdDrawIndexed(cmd, r.indexCount, 1, r.firstIndex, 0, 0);
     }
 }

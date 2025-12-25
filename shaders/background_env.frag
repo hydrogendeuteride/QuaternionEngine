@@ -10,10 +10,11 @@ void main()
 {
     // Reconstruct world-space direction from screen UV
     vec2 ndc = inUV * 2.0 - 1.0; // [-1,1]
-    vec4 clip = vec4(ndc, 1.0, 1.0);
-    vec4 vpos = inverse(sceneData.proj) * clip;
-    vec3 viewDir = normalize(vpos.xyz / max(vpos.w, 1e-6));
-    vec3 worldDir = normalize((inverse(sceneData.view) * vec4(viewDir, 0.0)).xyz);
+
+    // Avoid per-pixel matrix inverses. With a perspective projection, a view-space ray can be
+    // reconstructed directly from the projection diagonal and then rotated to world space.
+    vec3 viewDir = normalize(vec3(ndc.x / sceneData.proj[0][0], ndc.y / sceneData.proj[1][1], -1.0));
+    vec3 worldDir = normalize(transpose(mat3(sceneData.view)) * viewDir);
 
     vec2 uv = dir_to_equirect(worldDir);
     // Sample a dedicated background environment map when available.

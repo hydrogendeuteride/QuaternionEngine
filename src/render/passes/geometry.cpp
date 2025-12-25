@@ -281,6 +281,12 @@ void GeometryPass::draw_geometry(VkCommandBuffer cmd,
         }
         GPUDrawPushConstants push_constants{};
         push_constants.worldMatrix = r.transform;
+        {
+            const glm::mat3 n = glm::transpose(glm::inverse(glm::mat3(r.transform)));
+            push_constants.normalMatrix[0] = glm::vec4(n[0], 0.0f);
+            push_constants.normalMatrix[1] = glm::vec4(n[1], 0.0f);
+            push_constants.normalMatrix[2] = glm::vec4(n[2], 0.0f);
+        }
         push_constants.vertexBuffer = r.vertexBufferAddress;
         push_constants.objectID = r.objectID;
 

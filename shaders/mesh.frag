@@ -13,6 +13,17 @@ layout (location = 4) in vec4 inTangent;
 
 layout (location = 0) out vec4 outFragColor;
 
+vec3 getCameraWorldPosition()
+{
+    // view = [ R^T  -R^T*C ]
+    //        [ 0       1   ]
+    // => C = -R * T, where T is view[3].xyz and R = transpose(mat3(view))
+    mat3 rotT = mat3(sceneData.view);
+    mat3 rot  = transpose(rotT);
+    vec3 T    = sceneData.view[3].xyz;
+    return -rot * T;
+}
+
 void main()
 {
     // Base color with material factor and texture
@@ -43,7 +54,7 @@ void main()
     vec3 T = normalize(inTangent.xyz);
     vec3 B = normalize(cross(Nn, T)) * inTangent.w;
     vec3 N = normalize(T * Nm.x + B * Nm.y + Nn * Nm.z);
-    vec3 camPos = vec3(inverse(sceneData.view)[3]);
+    vec3 camPos = getCameraWorldPosition();
     vec3 V = normalize(camPos - inWorldPos);
 
     // Directional sun term (no shadows in forward path)

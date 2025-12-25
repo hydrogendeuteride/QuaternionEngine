@@ -195,6 +195,12 @@ void TransparentPass::draw_transparent(VkCommandBuffer cmd,
         }
         GPUDrawPushConstants push{};
         push.worldMatrix = r.transform;
+        {
+            const glm::mat3 n = glm::transpose(glm::inverse(glm::mat3(r.transform)));
+            push.normalMatrix[0] = glm::vec4(n[0], 0.0f);
+            push.normalMatrix[1] = glm::vec4(n[1], 0.0f);
+            push.normalMatrix[2] = glm::vec4(n[2], 0.0f);
+        }
         push.vertexBuffer = r.vertexBufferAddress;
         push.objectID = r.objectID;
         vkCmdPushConstants(cmd, r.material->pipeline->layout,

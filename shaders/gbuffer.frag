@@ -30,6 +30,7 @@ layout(buffer_reference, std430) readonly buffer VertexBuffer{
 layout(push_constant) uniform constants
 {
     mat4 render_matrix;
+    mat3 normal_matrix;
     VertexBuffer vertexBuffer;
     uint objectID;
 } PushConstants;

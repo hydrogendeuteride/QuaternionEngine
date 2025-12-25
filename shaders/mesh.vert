@@ -29,6 +29,7 @@ layout(buffer_reference, std430) readonly buffer VertexBuffer{
 layout(push_constant) uniform constants
 {
     mat4 render_matrix;
+    mat3 normal_matrix;
     VertexBuffer vertexBuffer;
     uint objectID;
 } PushConstants;
@@ -37,8 +38,7 @@ void main()
 {
     Vertex v = PushConstants.vertexBuffer.vertices[gl_VertexIndex];
 
-    mat3 M = mat3(PushConstants.render_matrix);
-    mat3 normalMatrix = transpose(inverse(M));
+    mat3 normalMatrix = PushConstants.normal_matrix;
 
     vec4 worldPos = PushConstants.render_matrix * vec4(v.position, 1.0);
     gl_Position = sceneData.viewproj * worldPos;
@@ -52,4 +52,3 @@ void main()
     outUV    = vec2(v.uv_x, v.uv_y);
     outWorldPos = worldPos.xyz;
 }
-

@@ -28,6 +28,7 @@ inline const char *string_VkFormat(VkFormat) { return "VkFormat"; }
 #include <fmt/core.h>
 
 #include <glm/mat4x4.hpp>
+#include <glm/mat3x4.hpp>
 #include <glm/vec4.hpp>
 #include <glm/vec3.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -194,9 +195,16 @@ struct GPUMeshBuffers {
 // push constants for our mesh object draws
 struct GPUDrawPushConstants {
     glm::mat4 worldMatrix;
+    // std140-compatible representation of mat3 (3 x vec4 columns; w unused).
+    glm::mat3x4 normalMatrix;
     VkDeviceAddress vertexBuffer;
     uint32_t objectID;
 };
+static_assert(offsetof(GPUDrawPushConstants, worldMatrix) == 0);
+static_assert(offsetof(GPUDrawPushConstants, normalMatrix) == 64);
+static_assert(offsetof(GPUDrawPushConstants, vertexBuffer) == 112);
+static_assert(offsetof(GPUDrawPushConstants, objectID) == 120);
+static_assert(sizeof(GPUDrawPushConstants) == 128);
 
 struct DrawContext;
 

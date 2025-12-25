@@ -31,36 +31,50 @@ vec3 aces_tonemap(vec3 x)
     return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
 }
 
+void accum_bloom(vec3 c, float kernel_weight, inout vec3 bloom, inout float weight_sum)
+{
+    float bright = max(max(c.r, c.g), c.b) - pc.bloomThreshold;
+    bright = max(bright, 0.0);
+
+    // Match the old behavior: only normalize over samples that pass the threshold.
+    float contribute = step(1e-5, bright);
+
+    bloom += c * bright * kernel_weight;
+    weight_sum += kernel_weight * contribute;
+}
+
 void main()
 {
     vec3 hdr = texture(uHdr, inUV).rgb;
 
-    // Simple bloom in HDR space: gather bright neighbors and add a small blurred contribution.
-    if (pc.bloomEnabled != 0)
+    // Simple bloom in HDR space: approximate a 5x5 Gaussian blur using 9 bilinear samples (vs. 25 taps).
+    if (pc.bloomEnabled != 0 && pc.bloomIntensity > 0.0)
     {
         vec2 texel = 1.0 / vec2(textureSize(uHdr, 0));
+        vec2 d = texel * 1.2; // Combines 1- and 2-texel taps via linear filtering (4:1 weight).
+
         vec3 bloom = vec3(0.0);
-        int radius = 2;
-        int count = 0;
-        for (int x = -radius; x <= radius; ++x)
+        float wsum = 0.0;
+
+        // 1D weights [1 4 6 4 1] collapsed to 3 linear samples => weights [5 6 5]
+        // 2D separable => center 36, axis 30, corners 25 (sum 256).
+        accum_bloom(hdr, 36.0, bloom, wsum); // reuse center sample
+
+        accum_bloom(texture(uHdr, clamp(inUV + vec2( d.x, 0.0), vec2(0.0), vec2(1.0))).rgb, 30.0, bloom, wsum);
+        accum_bloom(texture(uHdr, clamp(inUV + vec2(-d.x, 0.0), vec2(0.0), vec2(1.0))).rgb, 30.0, bloom, wsum);
+        accum_bloom(texture(uHdr, clamp(inUV + vec2(0.0,  d.y), vec2(0.0), vec2(1.0))).rgb, 30.0, bloom, wsum);
+        accum_bloom(texture(uHdr, clamp(inUV + vec2(0.0, -d.y), vec2(0.0), vec2(1.0))).rgb, 30.0, bloom, wsum);
+
+        accum_bloom(texture(uHdr, clamp(inUV + vec2( d.x,  d.y), vec2(0.0), vec2(1.0))).rgb, 25.0, bloom, wsum);
+        accum_bloom(texture(uHdr, clamp(inUV + vec2(-d.x,  d.y), vec2(0.0), vec2(1.0))).rgb, 25.0, bloom, wsum);
+        accum_bloom(texture(uHdr, clamp(inUV + vec2( d.x, -d.y), vec2(0.0), vec2(1.0))).rgb, 25.0, bloom, wsum);
+        accum_bloom(texture(uHdr, clamp(inUV + vec2(-d.x, -d.y), vec2(0.0), vec2(1.0))).rgb, 25.0, bloom, wsum);
+
+        if (wsum > 0.0)
         {
-            for (int y = -radius; y <= radius; ++y)
-            {
-                vec2 offset = vec2(x, y) * texel;
-                vec3 c = texture(uHdr, clamp(inUV + offset, vec2(0.0), vec2(1.0))).rgb;
-                float bright = max(max(c.r, c.g), c.b) - pc.bloomThreshold;
-                if (bright > 0.0)
-                {
-                    bloom += c * bright;
-                    count++;
-                }
-            }
+            bloom /= wsum;
+            hdr += pc.bloomIntensity * bloom;
         }
-        if (count > 0)
-        {
-            bloom /= float(count);
-        }
-        hdr += pc.bloomIntensity * bloom;
     }
 
     // Simple exposure
@@ -77,4 +91,3 @@ void main()
 
     outColor = vec4(mapped, 1.0);
 }
-
