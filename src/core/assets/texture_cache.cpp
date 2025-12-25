@@ -40,6 +40,23 @@ void TextureCache::cleanup()
         for (auto &t : _decodeThreads) if (t.joinable()) t.join();
         _decodeThreads.clear();
     }
+    // Clear any pending decode/upload work (freeing decode heap pointers)
+    {
+        std::lock_guard<std::mutex> lk(_qMutex);
+        _queue.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lk(_readyMutex);
+        for (auto &r : _ready)
+        {
+            if (r.heap)
+            {
+                stbi_image_free(r.heap);
+                r.heap = nullptr;
+            }
+        }
+        _ready.clear();
+    }
     if (!_context || !_context->getResources()) return;
     auto *rm = _context->getResources();
     for (TextureHandle h = 0; h < _entries.size(); ++h)
@@ -83,10 +100,21 @@ TextureCache::TextureHandle TextureCache::request(const TextureKey &key, VkSampl
     if (it != _lookup.end())
     {
         TextureHandle h = it->second;
-        // Keep most recent sampler for future patches if provided
-        if (h < _entries.size() && sampler != VK_NULL_HANDLE)
+        if (h < _entries.size())
         {
-            _entries[h].sampler = sampler;
+            Entry &e = _entries[h];
+            // Keep most recent sampler for future patches if provided
+            if (sampler != VK_NULL_HANDLE)
+            {
+                e.sampler = sampler;
+            }
+            // Allow re-supplying CPU source bytes for Bytes-backed textures after an unload.
+            if (normKey.kind == TextureKey::SourceKind::Bytes && !normKey.bytes.empty() &&
+                e.key.kind == TextureKey::SourceKind::Bytes && e.bytes.empty() && e.state != EntryState::Resident)
+            {
+                e.bytes = normKey.bytes;
+                _cpuSourceBytes += e.bytes.size();
+            }
         }
         return h;
     }
@@ -96,6 +124,10 @@ TextureCache::TextureHandle TextureCache::request(const TextureKey &key, VkSampl
 
     Entry e{};
     e.key = normKey;
+    // Keep only metadata in the key to avoid duplicating potentially large payloads.
+    e.key.path.clear();
+    e.key.bytes.clear();
+    e.key.bytes.shrink_to_fit();
     e.sampler = sampler;
     e.state = EntryState::Unloaded;
     if (normKey.kind == TextureKey::SourceKind::FilePath)
@@ -185,6 +217,27 @@ void TextureCache::markSetUsed(VkDescriptorSet set, uint32_t frameIndex)
             _entries[h].lastUsedFrame = frameIndex;
         }
     }
+}
+
+void TextureCache::pin(TextureHandle handle)
+{
+    if (handle == InvalidHandle) return;
+    if (handle >= _entries.size()) return;
+    _entries[handle].pinned = true;
+}
+
+void TextureCache::unpin(TextureHandle handle)
+{
+    if (handle == InvalidHandle) return;
+    if (handle >= _entries.size()) return;
+    _entries[handle].pinned = false;
+}
+
+bool TextureCache::is_pinned(TextureHandle handle) const
+{
+    if (handle == InvalidHandle) return false;
+    if (handle >= _entries.size()) return false;
+    return _entries[handle].pinned;
 }
 
 static inline size_t bytes_per_texel(VkFormat fmt)
@@ -378,7 +431,7 @@ void TextureCache::evictToBudget(size_t budgetBytes)
     for (TextureHandle h = 0; h < _entries.size(); ++h)
     {
         const auto &e = _entries[h];
-        if (e.state == EntryState::Resident)
+        if (e.state == EntryState::Resident && !e.pinned)
         {
             order.emplace_back(h, e.lastUsedFrame);
         }
@@ -392,6 +445,8 @@ void TextureCache::evictToBudget(size_t budgetBytes)
         TextureHandle h = pair.first;
         Entry &e = _entries[h];
         if (e.state != EntryState::Resident) continue;
+        // Never evict pinned textures
+        if (e.pinned) continue;
         // Prefer not to evict textures used this frame unless strictly necessary.
         if (e.lastUsedFrame == now) continue;
 
@@ -412,12 +467,84 @@ void TextureCache::evictToBudget(size_t budgetBytes)
     }
 }
 
+bool TextureCache::unload(TextureHandle handle, bool drop_source_bytes)
+{
+    if (handle == InvalidHandle) return false;
+    if (handle >= _entries.size()) return false;
+
+    Entry &e = _entries[handle];
+    const uint32_t now = _context ? _context->frameIndex : 0u;
+
+    // Invalidate any in-flight decode results for this entry.
+    e.generation++;
+
+    // Drop queued decode requests for this handle.
+    {
+        std::lock_guard<std::mutex> lk(_qMutex);
+        _queue.erase(std::remove_if(_queue.begin(), _queue.end(),
+                                    [&](const DecodeRequest &rq) { return rq.handle == handle; }),
+                     _queue.end());
+    }
+
+    // Drop already-decoded results waiting for upload for this handle.
+    {
+        std::lock_guard<std::mutex> lk(_readyMutex);
+        for (auto it = _ready.begin(); it != _ready.end();)
+        {
+            if (it->handle == handle)
+            {
+                if (it->heap)
+                {
+                    stbi_image_free(it->heap);
+                    it->heap = nullptr;
+                }
+                it = _ready.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+
+    // If resident, patch watchers back to fallback and destroy the image.
+    if (e.state == EntryState::Resident && e.image.image != VK_NULL_HANDLE)
+    {
+        patch_to_fallback(e);
+
+        if (_context && _context->getResources())
+        {
+            fmt::println("[TextureCache] unload destroy handle={} path='{}' bytes={} residentBytesBefore={}",
+                         handle,
+                         e.path.empty() ? "<bytes>" : e.path,
+                         e.sizeBytes,
+                         _residentBytes);
+            _context->getResources()->destroy_image(e.image);
+        }
+
+        e.image = {};
+        if (_residentBytes >= e.sizeBytes) _residentBytes -= e.sizeBytes; else _residentBytes = 0;
+    }
+
+    e.state = EntryState::Evicted;
+    e.lastEvictedFrame = now;
+    e.nextAttemptFrame = std::max(e.nextAttemptFrame, now + _reloadCooldownFrames);
+
+    if (drop_source_bytes)
+    {
+        this->drop_source_bytes(e);
+    }
+
+    return true;
+}
+
 void TextureCache::enqueue_decode(Entry &e)
 {
     if (e.state != EntryState::Unloaded && e.state != EntryState::Evicted) return;
     e.state = EntryState::Loading;
     DecodeRequest rq{};
     rq.handle = static_cast<TextureHandle>(&e - _entries.data());
+    rq.generation = e.generation;
     rq.key = e.key;
     if (e.key.kind == TextureKey::SourceKind::FilePath) rq.path = e.path; else rq.bytes = e.bytes;
     {
@@ -442,6 +569,7 @@ void TextureCache::worker_loop()
 
         DecodedResult out{};
         out.handle = rq.handle;
+        out.generation = rq.generation;
         out.mipmapped = rq.key.mipmapped;
         out.srgb = rq.key.srgb;
         out.channels = rq.key.channels;
@@ -618,15 +746,31 @@ size_t TextureCache::drain_ready_uploads(ResourceManager &rm, size_t budgetBytes
     size_t admitted = 0;
     for (auto &res : local)
     {
-        if (res.handle == InvalidHandle || res.handle >= _entries.size()) continue;
-        Entry &e = _entries[res.handle];
-        if (!res.isKTX2 && ((res.heap == nullptr && res.rgba.empty()) || res.width <= 0 || res.height <= 0))
+        const uint32_t now = _context ? _context->frameIndex : 0u;
+        if (res.handle == InvalidHandle || res.handle >= _entries.size())
         {
-            e.state = EntryState::Evicted; // failed decode; keep fallback
+            if (res.heap) { stbi_image_free(res.heap); res.heap = nullptr; }
             continue;
         }
 
-        const uint32_t now = _context ? _context->frameIndex : 0u;
+        Entry &e = _entries[res.handle];
+
+        // Drop stale results from cancelled/unloaded requests.
+        if (res.generation != e.generation || e.state != EntryState::Loading)
+        {
+            if (res.heap) { stbi_image_free(res.heap); res.heap = nullptr; }
+            continue;
+        }
+
+        if (!res.isKTX2 && ((res.heap == nullptr && res.rgba.empty()) || res.width <= 0 || res.height <= 0))
+        {
+            if (res.heap) { stbi_image_free(res.heap); res.heap = nullptr; }
+            e.state = EntryState::Evicted; // failed decode; keep fallback
+            e.lastEvictedFrame = now;
+            e.nextAttemptFrame = std::max(e.nextAttemptFrame, now + _reloadCooldownFrames);
+            continue;
+        }
+
         VkExtent3D extent{static_cast<uint32_t>(std::max(0, res.width)), static_cast<uint32_t>(std::max(0, res.height)), 1u};
         TextureKey::ChannelsHint hint = (e.key.channels == TextureKey::ChannelsHint::Auto)
                                             ? TextureKey::ChannelsHint::Auto
@@ -869,7 +1013,7 @@ bool TextureCache::try_make_space(size_t bytesNeeded, uint32_t now)
     for (TextureHandle h = 0; h < _entries.size(); ++h)
     {
         const auto &e = _entries[h];
-        if (e.state == EntryState::Resident && e.lastUsedFrame != now)
+        if (e.state == EntryState::Resident && e.lastUsedFrame != now && !e.pinned)
         {
             order.emplace_back(h, e.lastUsedFrame);
         }
@@ -883,6 +1027,8 @@ bool TextureCache::try_make_space(size_t bytesNeeded, uint32_t now)
         TextureHandle h = pair.first;
         Entry &e = _entries[h];
         if (e.state != EntryState::Resident) continue;
+        // Never evict pinned textures
+        if (e.pinned) continue;
 
         patch_to_fallback(e);
         fmt::println("[TextureCache] try_make_space destroy handle={} path='{}' bytes={} residentBytesBefore={}",
@@ -947,4 +1093,14 @@ TextureCache::EntryState TextureCache::state(TextureHandle handle) const
     if (handle == InvalidHandle) return EntryState::Unloaded;
     if (handle >= _entries.size()) return EntryState::Unloaded;
     return _entries[handle].state;
+}
+
+VkImageView TextureCache::image_view(TextureHandle handle) const
+{
+    if (handle == InvalidHandle) return VK_NULL_HANDLE;
+    if (handle >= _entries.size()) return VK_NULL_HANDLE;
+
+    const Entry &e = _entries[handle];
+    if (e.state != EntryState::Resident) return VK_NULL_HANDLE;
+    return e.image.imageView;
 }

@@ -19,6 +19,28 @@ namespace GameAPI
 // Forward declarations and simple POD types
 // ============================================================================
 
+// Texture handle (opaque reference to a cached texture)
+using TextureHandle = uint32_t;
+static constexpr TextureHandle InvalidTexture = 0xFFFFFFFFu;
+
+// Texture channel hint for memory optimization
+enum class TextureChannels : uint8_t
+{
+    Auto = 0,  // Detect from source (default)
+    R = 1,     // Single channel (e.g., occlusion, metallic)
+    RG = 2,    // Two channels (e.g., normal map XY)
+    RGBA = 3   // Full color
+};
+
+// Texture loading parameters
+struct TextureLoadParams
+{
+    bool srgb{false};                      // Use sRGB color space (true for albedo/emissive)
+    bool mipmapped{true};                  // Generate mipmap chain
+    TextureChannels channels{TextureChannels::Auto};  // Channel hint
+    uint32_t mipLevels{0};                 // 0 = full chain, otherwise limit to N levels
+};
+
 // Shadow rendering mode
 enum class ShadowMode : uint32_t
 {
@@ -325,6 +347,41 @@ public:
 
     // Force eviction to budget (call after loading large assets)
     void evict_textures_to_budget();
+
+    // ------------------------------------------------------------------------
+    // Texture Loading
+    // ------------------------------------------------------------------------
+
+    // Load a texture from file path (relative to assets/textures/ or absolute)
+    // Returns a handle that can be used to query state or bind to materials
+    TextureHandle load_texture(const std::string& path,
+                                const TextureLoadParams& params = {});
+
+    // Load a texture from memory (compressed image data: PNG, JPG, KTX2, etc.)
+    // Useful for runtime-generated or downloaded textures
+    TextureHandle load_texture_from_memory(const std::vector<uint8_t>& data,
+                                            const TextureLoadParams& params = {});
+
+    // Check if a texture is loaded and resident in VRAM
+    bool is_texture_loaded(TextureHandle handle) const;
+
+    // Get the internal Vulkan image view for advanced use cases
+    // Returns VK_NULL_HANDLE if texture is not yet loaded
+    void* get_texture_image_view(TextureHandle handle) const;  // Returns VkImageView
+
+    // Pin a texture to prevent automatic eviction (useful for UI elements, critical assets)
+    // Pinned textures are never removed from VRAM by LRU or budget constraints
+    void pin_texture(TextureHandle handle);
+
+    // Unpin a texture, allowing it to be evicted normally
+    void unpin_texture(TextureHandle handle);
+
+    // Check if a texture is currently pinned
+    bool is_texture_pinned(TextureHandle handle) const;
+
+    // Unload a texture and free VRAM (textures are ref-counted and auto-evicted by LRU)
+    // This is optional - the cache manages memory automatically
+    void unload_texture(TextureHandle handle);
 
     // ------------------------------------------------------------------------
     // Shadows

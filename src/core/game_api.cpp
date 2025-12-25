@@ -3,6 +3,7 @@
 #include "context.h"
 #include "core/assets/texture_cache.h"
 #include "core/assets/ibl_manager.h"
+#include "core/assets/manager.h"
 #include "core/pipeline/manager.h"
 #include "core/debug_draw/debug_draw.h"
 #include "render/passes/tonemap.h"
@@ -15,6 +16,8 @@
 
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
+#include <cstdint>
+#include <filesystem>
 
 namespace GameAPI
 {
@@ -149,6 +152,184 @@ void Engine::evict_textures_to_budget()
         size_t budget = _engine->query_texture_budget_bytes();
         _engine->_textureCache->evictToBudget(budget);
     }
+}
+
+// ----------------------------------------------------------------------------
+// Texture Loading
+// ----------------------------------------------------------------------------
+
+TextureHandle Engine::load_texture(const std::string& path, const TextureLoadParams& params)
+{
+    if (!_engine || !_engine->_textureCache || path.empty())
+    {
+        return InvalidTexture;
+    }
+
+    // Resolve path relative to assets/textures/ if not absolute
+    std::string resolvedPath = path;
+    std::filesystem::path p(path);
+    if (p.is_relative())
+    {
+        resolvedPath = _engine->_assetManager->assetPath(std::string("textures/") + path);
+    }
+
+    // Build TextureKey
+    TextureCache::TextureKey key{};
+    key.kind = TextureCache::TextureKey::SourceKind::FilePath;
+    key.path = resolvedPath;
+    key.srgb = params.srgb;
+    key.mipmapped = params.mipmapped;
+    key.mipClampLevels = params.mipLevels;
+
+    // Map channel hint
+    switch (params.channels)
+    {
+        case TextureChannels::R:
+            key.channels = TextureCache::TextureKey::ChannelsHint::R;
+            break;
+        case TextureChannels::RG:
+            key.channels = TextureCache::TextureKey::ChannelsHint::RG;
+            break;
+        case TextureChannels::RGBA:
+            key.channels = TextureCache::TextureKey::ChannelsHint::RGBA;
+            break;
+        case TextureChannels::Auto:
+        default:
+            key.channels = TextureCache::TextureKey::ChannelsHint::Auto;
+            break;
+    }
+
+    // Generate hash for deduplication
+    std::string id = std::string("PATH:") + key.path + (key.srgb ? "#sRGB" : "#UNORM");
+    key.hash = texcache::fnv1a64(id);
+
+    // Use default linear sampler
+    VkSampler sampler = VK_NULL_HANDLE;
+    if (_engine->_context && _engine->_context->samplers)
+    {
+        sampler = _engine->_context->samplers->defaultLinear();
+    }
+
+    // Request texture from cache
+    TextureCache::TextureHandle handle = _engine->_textureCache->request(key, sampler);
+    return static_cast<TextureHandle>(handle);
+}
+
+TextureHandle Engine::load_texture_from_memory(const std::vector<uint8_t>& data,
+                                                 const TextureLoadParams& params)
+{
+    if (!_engine || !_engine->_textureCache || data.empty())
+    {
+        return InvalidTexture;
+    }
+
+    // Build TextureKey from bytes
+    TextureCache::TextureKey key{};
+    key.kind = TextureCache::TextureKey::SourceKind::Bytes;
+    key.bytes = data;
+    key.srgb = params.srgb;
+    key.mipmapped = params.mipmapped;
+    key.mipClampLevels = params.mipLevels;
+
+    // Map channel hint
+    switch (params.channels)
+    {
+        case TextureChannels::R:
+            key.channels = TextureCache::TextureKey::ChannelsHint::R;
+            break;
+        case TextureChannels::RG:
+            key.channels = TextureCache::TextureKey::ChannelsHint::RG;
+            break;
+        case TextureChannels::RGBA:
+            key.channels = TextureCache::TextureKey::ChannelsHint::RGBA;
+            break;
+        case TextureChannels::Auto:
+        default:
+            key.channels = TextureCache::TextureKey::ChannelsHint::Auto;
+            break;
+    }
+
+    // Generate hash for deduplication
+    uint64_t h = texcache::fnv1a64(key.bytes.data(), key.bytes.size());
+    key.hash = h ^ (key.srgb ? 0x9E3779B97F4A7C15ull : 0ull);
+
+    // Use default linear sampler
+    VkSampler sampler = VK_NULL_HANDLE;
+    if (_engine->_context && _engine->_context->samplers)
+    {
+        sampler = _engine->_context->samplers->defaultLinear();
+    }
+
+    // Request texture from cache
+    TextureCache::TextureHandle handle = _engine->_textureCache->request(key, sampler);
+    return static_cast<TextureHandle>(handle);
+}
+
+bool Engine::is_texture_loaded(TextureHandle handle) const
+{
+    if (!_engine || !_engine->_textureCache)
+    {
+        return false;
+    }
+
+    auto cacheHandle = static_cast<TextureCache::TextureHandle>(handle);
+    return _engine->_textureCache->state(cacheHandle) == TextureCache::EntryState::Resident;
+}
+
+void* Engine::get_texture_image_view(TextureHandle handle) const
+{
+    if (!_engine || !_engine->_textureCache)
+    {
+        return nullptr;
+    }
+
+    auto cacheHandle = static_cast<TextureCache::TextureHandle>(handle);
+    VkImageView view = _engine->_textureCache->image_view(cacheHandle);
+    return reinterpret_cast<void*>(view);
+}
+
+void Engine::pin_texture(TextureHandle handle)
+{
+    if (!_engine || !_engine->_textureCache)
+    {
+        return;
+    }
+
+    auto cacheHandle = static_cast<TextureCache::TextureHandle>(handle);
+    _engine->_textureCache->pin(cacheHandle);
+}
+
+void Engine::unpin_texture(TextureHandle handle)
+{
+    if (!_engine || !_engine->_textureCache)
+    {
+        return;
+    }
+
+    auto cacheHandle = static_cast<TextureCache::TextureHandle>(handle);
+    _engine->_textureCache->unpin(cacheHandle);
+}
+
+bool Engine::is_texture_pinned(TextureHandle handle) const
+{
+    if (!_engine || !_engine->_textureCache)
+    {
+        return false;
+    }
+
+    auto cacheHandle = static_cast<TextureCache::TextureHandle>(handle);
+    return _engine->_textureCache->is_pinned(cacheHandle);
+}
+
+void Engine::unload_texture(TextureHandle handle)
+{
+    if (!_engine || !_engine->_textureCache)
+    {
+        return;
+    }
+
+    auto cacheHandle = static_cast<TextureCache::TextureHandle>(handle);
+    _engine->_textureCache->unload(cacheHandle);
 }
 
 // ----------------------------------------------------------------------------

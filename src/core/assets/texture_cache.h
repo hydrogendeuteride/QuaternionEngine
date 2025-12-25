@@ -63,11 +63,25 @@ public:
     // Convenience: mark all handles watched by a descriptor set.
     void markSetUsed(VkDescriptorSet set, uint32_t frameIndex);
 
+    // Pin a texture to prevent eviction (useful for UI elements, critical assets).
+    // Pinned textures are never evicted by LRU or budget constraints.
+    void pin(TextureHandle handle);
+    // Unpin a texture, allowing it to be evicted normally.
+    void unpin(TextureHandle handle);
+    // Check if a texture is currently pinned.
+    bool is_pinned(TextureHandle handle) const;
+
     // Schedule pending loads and patch descriptors for newly created images.
     void pumpLoads(ResourceManager &rm, FrameResources &frame);
 
     // Evict least-recently-used entries to fit within a budget in bytes.
     void evictToBudget(size_t budgetBytes);
+
+    // Manually unload a texture. This immediately frees GPU memory (if resident),
+    // patches watched descriptor bindings back to their fallbacks, and cancels any
+    // in-flight decode/upload work for the handle. The handle remains valid and
+    // can be re-requested/reloaded later.
+    bool unload(TextureHandle handle, bool drop_source_bytes = true);
 
     // Debug snapshot for UI
     struct DebugRow
@@ -87,6 +101,8 @@ public:
     void debug_snapshot(std::vector<DebugRow>& outRows, DebugStats& outStats) const;
     // Read-only per-handle state query (main-thread only).
     EntryState state(TextureHandle handle) const;
+    // Returns the default image view for a Resident texture, otherwise VK_NULL_HANDLE.
+    VkImageView image_view(TextureHandle handle) const;
     size_t resident_bytes() const { return _residentBytes; }
     // CPU-side source bytes currently retained (compressed image payloads kept
     // for potential re-decode). Only applies to entries created with Bytes keys.
@@ -135,6 +151,8 @@ private:
         TextureKey key{};
         VkSampler sampler{VK_NULL_HANDLE};
         EntryState state{EntryState::Unloaded};
+        uint32_t generation{1};    // bumps to invalidate in-flight decode results
+        bool pinned{false};        // if true, never evict (for UI, critical assets)
         AllocatedImage image{};     // valid when Resident
         size_t sizeBytes{0};        // approximate VRAM cost
         uint32_t lastUsedFrame{0};
@@ -171,6 +189,7 @@ private:
     struct DecodeRequest
     {
         TextureHandle handle{InvalidHandle};
+        uint32_t generation{0};
         TextureKey key{};
         std::string path;
         std::vector<uint8_t> bytes;
@@ -178,6 +197,7 @@ private:
     struct DecodedResult
     {
         TextureHandle handle{InvalidHandle};
+        uint32_t generation{0};
         int width{0};
         int height{0};
         // Prefer heap pointer from stb to avoid an extra memcpy into a vector.
