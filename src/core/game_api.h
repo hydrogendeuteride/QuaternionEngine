@@ -383,6 +383,15 @@ public:
     // This is optional - the cache manages memory automatically
     void unload_texture(TextureHandle handle);
 
+    // Create an ImGui descriptor set for a texture (for use with ImGui::Image())
+    // Returns ImTextureID (actually VkDescriptorSet) that can be used in ImGui
+    // The returned descriptor set is managed by ImGui and valid until cleanup
+    // sampler: VK_NULL_HANDLE uses default linear sampler
+    void* create_imgui_texture(TextureHandle handle, void* sampler = nullptr);
+
+    // Free an ImGui descriptor set created by create_imgui_texture()
+    void free_imgui_texture(void* imgui_texture_id);
+
     // ------------------------------------------------------------------------
     // Shadows
     // ------------------------------------------------------------------------

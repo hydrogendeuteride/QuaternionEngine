@@ -16,8 +16,11 @@
 
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
-#include <cstdint>
 #include <filesystem>
+
+// ImGui integration for texture display
+#include "imgui.h"
+#include "imgui_impl_vulkan.h"
 
 namespace GameAPI
 {
@@ -330,6 +333,49 @@ void Engine::unload_texture(TextureHandle handle)
 
     auto cacheHandle = static_cast<TextureCache::TextureHandle>(handle);
     _engine->_textureCache->unload(cacheHandle);
+}
+
+void* Engine::create_imgui_texture(TextureHandle handle, void* sampler)
+{
+    if (!_engine || !_engine->_textureCache)
+    {
+        return nullptr;
+    }
+
+    auto cacheHandle = static_cast<TextureCache::TextureHandle>(handle);
+    VkImageView imageView = _engine->_textureCache->image_view(cacheHandle);
+
+    if (imageView == VK_NULL_HANDLE)
+    {
+        return nullptr;
+    }
+
+    // Use provided sampler or default linear sampler
+    VkSampler vkSampler = reinterpret_cast<VkSampler>(sampler);
+    if (vkSampler == VK_NULL_HANDLE && _engine->_context && _engine->_context->samplers)
+    {
+        vkSampler = _engine->_context->samplers->defaultLinear();
+    }
+
+    // Create ImGui descriptor set using ImGui_ImplVulkan
+    VkDescriptorSet descriptorSet = ImGui_ImplVulkan_AddTexture(
+        vkSampler,
+        imageView,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+
+    return reinterpret_cast<void*>(descriptorSet);
+}
+
+void Engine::free_imgui_texture(void* imgui_texture_id)
+{
+    if (imgui_texture_id == nullptr)
+    {
+        return;
+    }
+
+    VkDescriptorSet descriptorSet = reinterpret_cast<VkDescriptorSet>(imgui_texture_id);
+    ImGui_ImplVulkan_RemoveTexture(descriptorSet);
 }
 
 // ----------------------------------------------------------------------------
