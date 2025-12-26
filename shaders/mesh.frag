@@ -44,16 +44,22 @@ void main()
 
     // Normal mapping path for forward/transparent pipeline
     // Expect UNORM normal map; support BC5 (RG) by reconstructing Z from XY.
-    vec2 enc = texture(normalMap, inUV).xy * 2.0 - 1.0;
-    float normalScale = max(materialData.extra[0].x, 0.0);
-    enc *= normalScale;
-    float z2 = 1.0 - dot(enc, enc);
-    float nz = z2 > 0.0 ? sqrt(z2) : 0.0;
-    vec3 Nm = vec3(enc, nz);
     vec3 Nn = normalize(inNormal);
-    vec3 T = normalize(inTangent.xyz);
-    vec3 B = normalize(cross(Nn, T)) * inTangent.w;
-    vec3 N = normalize(T * Nm.x + B * Nm.y + Nn * Nm.z);
+    vec3 N = Nn;
+
+    float normalScale = max(materialData.extra[0].x, 0.0);
+    if (normalScale > 0.0)
+    {
+        vec2 enc = texture(normalMap, inUV).xy * 2.0 - 1.0;
+        enc *= normalScale;
+        float z2 = 1.0 - dot(enc, enc);
+        float nz = z2 > 0.0 ? sqrt(z2) : 0.0;
+        vec3 Nm = vec3(enc, nz);
+
+        vec3 T = normalize(inTangent.xyz);
+        vec3 B = normalize(cross(Nn, T)) * inTangent.w;
+        N = normalize(T * Nm.x + B * Nm.y + Nn * Nm.z);
+    }
     vec3 camPos = getCameraWorldPosition();
     vec3 V = normalize(camPos - inWorldPos);
 
@@ -78,11 +84,12 @@ void main()
 
     // IBL: specular from equirect 2D mips; diffuse from SH
     vec3 R = reflect(-V, N);
+    float NdotV = max(dot(N, V), 0.0);
     float levels = float(textureQueryLevels(iblSpec2D));
     float lod = ibl_lod_from_roughness(roughness, levels);
-    vec2 uv = dir_to_equirect(R);
+    vec2 uv = dir_to_equirect_normalized(R);
     vec3 prefiltered = textureLod(iblSpec2D, uv, lod).rgb;
-    vec2 brdf = texture(iblBRDF, vec2(max(dot(N, V), 0.0), roughness)).rg;
+    vec2 brdf = texture(iblBRDF, vec2(NdotV, roughness)).rg;
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 specIBL = prefiltered * (F0 * brdf.x + brdf.y);
     vec3 diffIBL = (1.0 - metallic) * albedo * sh_eval_irradiance(N);
@@ -91,17 +98,21 @@ void main()
     // extra[0].y = AO strength, extra[0].z = hasAO flag (1 = use AO texture)
     float hasAO = materialData.extra[0].z;
     float aoStrength = clamp(materialData.extra[0].y, 0.0, 1.0);
-    float aoTex = texture(occlusionTex, inUV).r;
     float ao = 1.0;
-    if (hasAO > 0.5)
+    if (hasAO > 0.5 && aoStrength > 0.0)
     {
+        float aoTex = texture(occlusionTex, inUV).r;
         ao = 1.0 - aoStrength + aoStrength * aoTex;
     }
 
     // Emissive from texture and factor
+    vec3 emissive = vec3(0.0);
     vec3 emissiveFactor = materialData.extra[1].rgb;
-    vec3 emissiveTex = texture(emissiveTex, inUV).rgb;
-    vec3 emissive = emissiveTex * emissiveFactor;
+    if (any(greaterThan(emissiveFactor, vec3(0.0))))
+    {
+        vec3 emissiveSample = texture(emissiveTex, inUV).rgb;
+        emissive = emissiveSample * emissiveFactor;
+    }
 
     vec3 indirect = diffIBL + specIBL;
     vec3 color = direct + indirect * ao + emissive;

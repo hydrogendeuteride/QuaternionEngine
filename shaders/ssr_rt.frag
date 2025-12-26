@@ -25,6 +25,12 @@ vec3 getCameraWorldPosition()
     return -rot * T;                       // C = -R * T
 }
 
+float pow5(float x)
+{
+    float x2 = x * x;
+    return x2 * x2 * x;
+}
+
 vec3 projectToScreenFromView(vec3 viewPos)
 {
     vec4 clip = sceneData.proj * vec4(viewPos, 1.0);
@@ -72,7 +78,7 @@ void main()
     vec3 V      = normalize(camPos - worldPos);
     vec3 R      = reflect(-V, N);
     vec3 viewPos = (sceneData.view * vec4(worldPos, 1.0)).xyz;
-    vec3 viewDir = normalize((sceneData.view * vec4(R, 0.0)).xyz);
+    vec3 viewDir = (sceneData.view * vec4(R, 0.0)).xyz;
 
     float gloss        = 1.0 - roughness;
     float F0           = mix(0.04, 1.0, metallic);
@@ -146,7 +152,7 @@ void main()
         vec3 reflColor = texture(hdrColor, ssrUV).rgb;
 
         float NoV = clamp(dot(N, V), 0.0, 1.0);
-        float F   = F0 + (1.0 - F0) * pow(1.0 - NoV, 5.0); // Schlick
+        float F   = F0 + (1.0 - F0) * pow5(1.0 - NoV); // Schlick
         float ssrVisibility = gloss;
 
         float weight = clamp(F * ssrVisibility, 0.0, 1.0);
@@ -198,7 +204,7 @@ void main()
             vec3 reflColor = texture(hdrColor, hitUV).rgb;
 
             float NoV = clamp(dot(N, V), 0.0, 1.0);
-            float F   = F0 + (1.0 - F0) * pow(1.0 - NoV, 5.0); // Schlick
+            float F   = F0 + (1.0 - F0) * pow5(1.0 - NoV); // Schlick
             float rtVisibility = gloss;
 
             float weight = clamp(F * rtVisibility, 0.0, 1.0);

@@ -100,6 +100,7 @@ float sample_density_trilinear(vec3 uvw, int res)
 {
     uvw = clamp(uvw, vec3(0.0), vec3(1.0));
 
+    int slice = res * res;
     float fres = float(res);
     vec3 g = uvw * (fres - 1.0);
 
@@ -108,16 +109,23 @@ float sample_density_trilinear(vec3 uvw, int res)
     vec3 f = fract(g);
 
     ivec3 b1 = min(base + ivec3(1), ivec3(res - 1));
+    ivec3 step = b1 - base; // 0 or 1 per axis
 
-    float d000 = vox_in.density[idx3(ivec3(base.x, base.y, base.z), res)];
-    float d100 = vox_in.density[idx3(ivec3(b1.x,   base.y, base.z), res)];
-    float d010 = vox_in.density[idx3(ivec3(base.x, b1.y,   base.z), res)];
-    float d110 = vox_in.density[idx3(ivec3(b1.x,   b1.y,   base.z), res)];
+    int baseIndex = base.x + base.y * res + base.z * slice;
+    int dx = step.x;
+    int dy = step.y * res;
+    int dz = step.z * slice;
 
-    float d001 = vox_in.density[idx3(ivec3(base.x, base.y, b1.z), res)];
-    float d101 = vox_in.density[idx3(ivec3(b1.x,   base.y, b1.z), res)];
-    float d011 = vox_in.density[idx3(ivec3(base.x, b1.y,   b1.z), res)];
-    float d111 = vox_in.density[idx3(ivec3(b1.x,   b1.y,   b1.z), res)];
+    float d000 = vox_in.density[baseIndex];
+    float d100 = vox_in.density[baseIndex + dx];
+    float d010 = vox_in.density[baseIndex + dy];
+    float d110 = vox_in.density[baseIndex + dy + dx];
+
+    int baseIndexZ = baseIndex + dz;
+    float d001 = vox_in.density[baseIndexZ];
+    float d101 = vox_in.density[baseIndexZ + dx];
+    float d011 = vox_in.density[baseIndexZ + dy];
+    float d111 = vox_in.density[baseIndexZ + dy + dx];
 
     float x00 = mix(d000, d100, f.x);
     float x10 = mix(d010, d110, f.x);
@@ -223,4 +231,3 @@ void main()
 
     vox_out.density[idx3(c, res)] = out_d;
 }
-

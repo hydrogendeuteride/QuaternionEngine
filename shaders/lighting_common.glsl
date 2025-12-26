@@ -3,9 +3,16 @@
 
 const float PI = 3.14159265359;
 
+float pow5(float x)
+{
+    float x2 = x * x;
+    return x2 * x2 * x;
+}
+
 vec3 fresnelSchlick(float cosTheta, vec3 F0)
 {
-    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+    float m = clamp(1.0 - cosTheta, 0.0, 1.0);
+    return F0 + (1.0 - F0) * pow5(m);
 }
 
 float DistributionGGX(vec3 N, vec3 H, float roughness)
@@ -42,19 +49,21 @@ vec3 evaluate_brdf(vec3 N, vec3 V, vec3 L, vec3 albedo, float roughness, float m
 {
     vec3 H = normalize(V + L);
 
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 F  = fresnelSchlick(max(dot(H, V), 0.0), F0);
     float NDF = DistributionGGX(N, H, roughness);
     float G   = GeometrySmith(N, V, L, roughness);
 
     vec3 numerator    = NDF * G * F;
-    float denom       = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0);
+    float denom       = 4.0 * NdotV * NdotL;
     vec3 specular     = numerator / max(denom, 0.001);
 
     vec3 kS = F;
     vec3 kD = (1.0 - kS) * (1.0 - metallic);
 
-    float NdotL = max(dot(N, L), 0.0);
     return (kD * albedo / PI + specular) * NdotL;
 }
 
@@ -62,16 +71,19 @@ vec3 eval_point_light(GPUPunctualLight light, vec3 pos, vec3 N, vec3 V, vec3 alb
 {
     vec3 lightPos = light.position_radius.xyz;
     float radius  = max(light.position_radius.w, 0.0001);
-    vec3 L        = lightPos - pos;
-    float dist    = length(L);
-    if (dist <= 0.0001)
+
+    vec3 toLight = lightPos - pos;
+    float dist2  = dot(toLight, toLight);
+    if (dist2 <= 1.0e-8)
     {
         return vec3(0.0);
     }
-    L /= dist;
+    float invDist = inversesqrt(dist2);
+    float dist    = dist2 * invDist;
+    vec3 L        = toLight * invDist;
 
     // Smooth falloff: inverse-square with soft clamp at radius
-    float att = 1.0 / max(dist * dist, 0.0001);
+    float att = 1.0 / max(dist2, 1.0e-8);
     float x   = clamp(dist / radius, 0.0, 1.0);
     float smth = (1.0 - x * x);
     smth *= smth;
@@ -88,14 +100,17 @@ vec3 eval_spot_light(GPUSpotLight light, vec3 pos, vec3 N, vec3 V, vec3 albedo, 
     float radius  = max(light.position_radius.w, 0.0001);
 
     vec3 toLight = lightPos - pos;
-    float dist = length(toLight);
-    if (dist <= 0.0001)
+    float dist2 = dot(toLight, toLight);
+    if (dist2 <= 1.0e-8)
     {
         return vec3(0.0);
     }
-    vec3 L = toLight / dist; // surface -> light
+    float invDist = inversesqrt(dist2);
+    float dist = dist2 * invDist;
+    vec3 L = toLight * invDist; // surface -> light
 
-    vec3 dir = normalize(light.direction_cos_outer.xyz); // light -> forward
+    // direction_cos_outer.xyz is expected to be unit length (normalized on the CPU).
+    vec3 dir = light.direction_cos_outer.xyz; // light -> forward
     float cosOuter = light.direction_cos_outer.w;
     float cosInner = light.cone.x;
     float cosTheta = dot(-L, dir); // light -> surface vs light forward
@@ -108,7 +123,7 @@ vec3 eval_spot_light(GPUSpotLight light, vec3 pos, vec3 N, vec3 V, vec3 albedo, 
     spot *= spot;
 
     // Smooth falloff: inverse-square with soft clamp at radius
-    float att = 1.0 / max(dist * dist, 0.0001);
+    float att = 1.0 / max(dist2, 1.0e-8);
     float x   = clamp(dist / radius, 0.0, 1.0);
     float smth = (1.0 - x * x);
     smth *= smth;

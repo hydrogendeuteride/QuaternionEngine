@@ -54,16 +54,22 @@ void main() {
 
     // Normal mapping: decode tangent-space normal and transform to world space
     // Expect UNORM normal map; support BC5 (RG) by reconstructing Z from XY.
-    vec2 enc = texture(normalMap, inUV).xy * 2.0 - 1.0;
-    float normalScale = max(materialData.extra[0].x, 0.0);
-    enc *= normalScale;
-    float z2 = 1.0 - dot(enc, enc);
-    float nz = z2 > 0.0 ? sqrt(z2) : 0.0;
-    vec3 Nm = vec3(enc, nz);
     vec3 N = normalize(inNormal);
-    vec3 T = normalize(inTangent.xyz);
-    vec3 B = normalize(cross(N, T)) * inTangent.w;
-    vec3 Nw = normalize(T * Nm.x + B * Nm.y + N * Nm.z);
+    vec3 Nw = N;
+
+    float normalScale = max(materialData.extra[0].x, 0.0);
+    if (normalScale > 0.0)
+    {
+        vec2 enc = texture(normalMap, inUV).xy * 2.0 - 1.0;
+        enc *= normalScale;
+        float z2 = 1.0 - dot(enc, enc);
+        float nz = z2 > 0.0 ? sqrt(z2) : 0.0;
+        vec3 Nm = vec3(enc, nz);
+
+        vec3 T = normalize(inTangent.xyz);
+        vec3 B = normalize(cross(N, T)) * inTangent.w;
+        Nw = normalize(T * Nm.x + B * Nm.y + N * Nm.z);
+    }
 
     outPos = vec4(inWorldPos, 1.0);
     outNorm = vec4(Nw, roughness);
@@ -72,15 +78,20 @@ void main() {
     // extra[0].y = AO strength, extra[0].z = hasAO flag (1 = use AO texture)
     float hasAO = materialData.extra[0].z;
     float aoStrength = clamp(materialData.extra[0].y, 0.0, 1.0);
-    float aoTex = texture(occlusionTex, inUV).r;
     float ao = 1.0;
-    if (hasAO > 0.5)
+    if (hasAO > 0.5 && aoStrength > 0.0)
     {
+        float aoTex = texture(occlusionTex, inUV).r;
         ao = 1.0 - aoStrength + aoStrength * aoTex;
     }
+
+    vec3 emissive = vec3(0.0);
     vec3 emissiveFactor = materialData.extra[1].rgb;
-    vec3 emissiveTex = texture(emissiveTex, inUV).rgb;
-    vec3 emissive = emissiveTex * emissiveFactor;
+    if (any(greaterThan(emissiveFactor, vec3(0.0))))
+    {
+        vec3 emissiveSample = texture(emissiveTex, inUV).rgb;
+        emissive = emissiveSample * emissiveFactor;
+    }
     outExtra = vec4(ao, emissive);
     outObjectID = PushConstants.objectID;
 }

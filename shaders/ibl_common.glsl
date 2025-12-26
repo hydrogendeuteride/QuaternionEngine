@@ -17,32 +17,36 @@ vec3 sh_eval_irradiance(vec3 n)
     const float c2 = 1.0925484306;
     const float c3 = 0.3153915653;
     const float c4 = 0.5462742153;
-    float Y[9];
-    Y[0] = c0;
-    Y[1] = c1 * y;
-    Y[2] = c1 * z;
-    Y[3] = c1 * x;
-    Y[4] = c2 * x * y;
-    Y[5] = c2 * y * z;
-    Y[6] = c3 * (3.0 * z * z - 1.0);
-    Y[7] = c2 * x * z;
-    Y[8] = c4 * (x * x - y * y);
+
+    float x2 = x * x;
+    float y2 = y * y;
+    float z2 = z * z;
+
     vec3 r = vec3(0.0);
-    for (int i = 0; i < 9; ++i)
-    {
-        r += iblSH.sh[i].rgb * Y[i];
-    }
+    r += iblSH.sh[0].rgb * c0;
+    r += iblSH.sh[1].rgb * (c1 * y);
+    r += iblSH.sh[2].rgb * (c1 * z);
+    r += iblSH.sh[3].rgb * (c1 * x);
+    r += iblSH.sh[4].rgb * (c2 * x * y);
+    r += iblSH.sh[5].rgb * (c2 * y * z);
+    r += iblSH.sh[6].rgb * (c3 * (3.0 * z2 - 1.0));
+    r += iblSH.sh[7].rgb * (c2 * x * z);
+    r += iblSH.sh[8].rgb * (c4 * (x2 - y2));
     return r;
 }
 
 // Map direction to equirectangular UV (same convention across shaders).
-vec2 dir_to_equirect(vec3 d)
+vec2 dir_to_equirect_normalized(vec3 d)
 {
-    d = normalize(d);
     float phi = atan(d.z, d.x);
     float theta = acos(clamp(d.y, -1.0, 1.0));
     // 1/(2*pi) = 0.15915494309, 1/pi = 0.31830988618
     return vec2(phi * 0.15915494309 + 0.5, theta * 0.31830988618);
+}
+
+vec2 dir_to_equirect(vec3 d)
+{
+    return dir_to_equirect_normalized(normalize(d));
 }
 
 // Helper for selecting mip LOD from roughness and available levels.
@@ -55,4 +59,3 @@ float ibl_lod_from_roughness(float roughness, float levels)
 }
 
 #endif // IBL_COMMON_GLSL
-

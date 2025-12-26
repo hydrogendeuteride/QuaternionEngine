@@ -52,11 +52,6 @@ bool intersectAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tmin, out f
     return tmax >= max(tmin, 0.0);
 }
 
-int idx3(ivec3 c, int res)
-{
-    return c.x + c.y * res + c.z * res * res;
-}
-
 float sample_voxel_density(vec3 p, vec3 bmin, vec3 bmax)
 {
     vec3 uvw = (p - bmin) / (bmax - bmin);
@@ -66,6 +61,7 @@ float sample_voxel_density(vec3 p, vec3 bmin, vec3 bmax)
     }
 
     int res = max(pc.misc.y, 1);
+    int slice = res * res;
     float fres = float(res);
     vec3 g = uvw * (fres - 1.0);
 
@@ -74,16 +70,23 @@ float sample_voxel_density(vec3 p, vec3 bmin, vec3 bmax)
     vec3 f = fract(g);
 
     ivec3 b1 = min(base + ivec3(1), ivec3(res - 1));
+    ivec3 step = b1 - base; // 0 or 1 per axis
 
-    float d000 = voxel.density[idx3(ivec3(base.x, base.y, base.z), res)];
-    float d100 = voxel.density[idx3(ivec3(b1.x,   base.y, base.z), res)];
-    float d010 = voxel.density[idx3(ivec3(base.x, b1.y,   base.z), res)];
-    float d110 = voxel.density[idx3(ivec3(b1.x,   b1.y,   base.z), res)];
+    int baseIndex = base.x + base.y * res + base.z * slice;
+    int dx = step.x;
+    int dy = step.y * res;
+    int dz = step.z * slice;
 
-    float d001 = voxel.density[idx3(ivec3(base.x, base.y, b1.z), res)];
-    float d101 = voxel.density[idx3(ivec3(b1.x,   base.y, b1.z), res)];
-    float d011 = voxel.density[idx3(ivec3(base.x, b1.y,   b1.z), res)];
-    float d111 = voxel.density[idx3(ivec3(b1.x,   b1.y,   b1.z), res)];
+    float d000 = voxel.density[baseIndex];
+    float d100 = voxel.density[baseIndex + dx];
+    float d010 = voxel.density[baseIndex + dy];
+    float d110 = voxel.density[baseIndex + dy + dx];
+
+    int baseIndexZ = baseIndex + dz;
+    float d001 = voxel.density[baseIndexZ];
+    float d101 = voxel.density[baseIndexZ + dx];
+    float d011 = voxel.density[baseIndexZ + dy];
+    float d111 = voxel.density[baseIndexZ + dy + dx];
 
     float x00 = mix(d000, d100, f.x);
     float x10 = mix(d010, d110, f.x);
@@ -103,11 +106,9 @@ void main()
     vec3 camPos = getCameraWorldPosition();
 
     // Reconstruct a world-space ray for this pixel (Vulkan depth range 0..1).
-    mat4 invViewProj = inverse(sceneData.viewproj);
     vec2 ndc = inUV * 2.0 - 1.0;
-    vec4 farH = invViewProj * vec4(ndc, 1.0, 1.0);
-    vec3 farP = farH.xyz / max(farH.w, 1e-6);
-    vec3 rd = normalize(farP - camPos);
+    vec3 viewDir = normalize(vec3(ndc.x / sceneData.proj[0][0], ndc.y / sceneData.proj[1][1], -1.0));
+    vec3 rd = transpose(mat3(sceneData.view)) * viewDir;
 
     // Define a local-space cloud volume (optionally anchored to camera XZ).
     vec3 center = pc.volume_center_follow.xyz;
@@ -180,7 +181,8 @@ void main()
             else
             {
                 float cosTheta = clamp(dot(rd, Lsun), 0.0, 1.0);
-                float phase = 0.30 + 0.70 * pow(cosTheta, 4.0); // cheap forward-scatter bias
+                float cos2 = cosTheta * cosTheta;
+                float phase = 0.30 + 0.70 * (cos2 * cos2); // cheap forward-scatter bias
                 vec3 light = ambCol * 0.25 + sunCol * phase;
 
                 vec3 albedo = clamp(pc.scatter_params.rgb, vec3(0.0), vec3(1.0));
@@ -205,4 +207,3 @@ void main()
     vec3 outRgb = scatter + trans * baseColor;
     outColor = vec4(outRgb, 1.0);
 }
-

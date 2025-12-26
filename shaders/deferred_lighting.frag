@@ -63,6 +63,15 @@ vec2(0.0281, -0.2468), vec2(-0.2104, 0.0573),
 vec2(0.1197, 0.0779), vec2(-0.0905, -0.1203)
 );
 
+// Precomputed per-tap weights: w = 1 - smoothstep(0, 0.65, length(POISSON_16[i])).
+// (Rotation preserves length, so these are invariant.)
+const float POISSON_16_WEIGHT[16] = float[16](
+0.46137072, 0.56308092, 0.37907144, 0.34930667,
+0.17150249, 0.22669642, 0.16976301, 0.19912809,
+0.20140948, 0.24589236, 0.18334537, 0.14418702,
+0.67350789, 0.73787198, 0.87638682, 0.86392944
+);
+
 // Compute primary cascade and an optional neighbor for cross-fade near borders
 struct CascadeMix { uint i0; uint i1; float w1; };
 
@@ -154,11 +163,13 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
     // Slope-based tiny baseline bias (cheap safety net)
     float NoL       = max(dot(N, L), 0.0);
     float slopeBias = max(0.0006 * (1.0 - NoL), SHADOW_MIN_BIAS);
+    float currentBias = current + slopeBias;
 
     // Receiver-plane depth gradient in shadow UV space
     vec3 dndc_dx = dFdx(ndc);
     vec3 dndc_dy = dFdy(ndc);
     vec2 dz_duv  = receiverPlaneDepthGradient(ndc, dndc_dx, dndc_dy);
+    vec2 abs_dz_duv = abs(dz_duv) * SHADOW_RPDB_SCALE;
 
     ivec2 dim       = textureSize(shadowTex[ci], 0);
     vec2  texelSize = 1.0 / vec2(dim);
@@ -179,16 +190,15 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
         vec2  pu   = rot * POISSON_16[i];
         vec2  off  = pu * radius * texelSize;// uv-space offset of this tap
 
-        float pr   = length(pu);
-        float w    = 1.0 - smoothstep(0.0, 0.65, pr);
+        float w    = POISSON_16_WEIGHT[i];
 
         float mapD = texture(shadowTex[ci], suv + off).r;
 
         // Receiver-plane depth bias: conservative depth delta over this tap's offset
         // Approximate |Δz| ≈ |dz/du|*|Δu| + |dz/dv|*|Δv|
-        float rpdb = dot(abs(dz_duv), abs(off)) * SHADOW_RPDB_SCALE;
+        float rpdb = dot(abs_dz_duv, abs(off));
 
-        float vis  = step(mapD, current + slopeBias + rpdb);
+        float vis  = step(mapD, currentBias + rpdb);
 
         visible += vis * w;
         wsum    += w;
@@ -366,7 +376,7 @@ void main(){
             if (maxT > 0.01)
             {
                 vec3 L = toL / maxT;
-                vec3 dir = normalize(sceneData.spotLights[i].direction_cos_outer.xyz);
+                vec3 dir = sceneData.spotLights[i].direction_cos_outer.xyz;
                 float cosTheta = dot(-L, dir);
                 if (cosTheta > sceneData.spotLights[i].direction_cos_outer.w)
                 {
@@ -399,11 +409,12 @@ void main(){
 
     // Image-Based Lighting: split-sum approximation
     vec3 R = reflect(-V, N);
+    float NdotV = max(dot(N, V), 0.0);
     float levels = float(textureQueryLevels(iblSpec2D));
     float lod = ibl_lod_from_roughness(roughness, levels);
-    vec2 uv = dir_to_equirect(R);
+    vec2 uv = dir_to_equirect_normalized(R);
     vec3 prefiltered = textureLod(iblSpec2D, uv, lod).rgb;
-    vec2 brdf = texture(iblBRDF, vec2(max(dot(N, V), 0.0), roughness)).rg;
+    vec2 brdf = texture(iblBRDF, vec2(NdotV, roughness)).rg;
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 specIBL = prefiltered * (F0 * brdf.x + brdf.y);
     vec3 diffIBL = (1.0 - metallic) * albedo * sh_eval_irradiance(N);
