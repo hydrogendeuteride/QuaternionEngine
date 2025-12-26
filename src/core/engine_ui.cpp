@@ -21,6 +21,7 @@
 #include "render/passes/background.h"
 #include "render/passes/particles.h"
 #include <glm/gtx/euler_angles.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "render/graph/graph.h"
 #include "core/pipeline/manager.h"
@@ -778,6 +779,213 @@ namespace
             ImGui::Text("Origin (world): (%.3f, %.3f, %.3f)", origin.x, origin.y, origin.z);
             ImGui::Text("Camera (world): (%.3f, %.3f, %.3f)", camWorld.x, camWorld.y, camWorld.z);
             ImGui::Text("Camera (local): (%.3f, %.3f, %.3f)", camLocal.x, camLocal.y, camLocal.z);
+        }
+    }
+
+    static void ui_camera(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_sceneManager)
+        {
+            ImGui::TextUnformatted("SceneManager not available");
+            return;
+        }
+
+        SceneManager *sceneMgr = eng->_sceneManager.get();
+        CameraRig &rig = sceneMgr->getCameraRig();
+        Camera &cam = sceneMgr->getMainCamera();
+
+        // Mode switch
+        static const char *k_mode_names[] = {"Free", "Orbit", "Follow", "Chase", "Fixed"};
+        int mode = static_cast<int>(rig.mode());
+        if (ImGui::Combo("Mode", &mode, k_mode_names, IM_ARRAYSIZE(k_mode_names)))
+        {
+            rig.set_mode(static_cast<CameraMode>(mode), *sceneMgr, cam);
+            if (eng->_input)
+            {
+                eng->_input->set_cursor_mode(CursorMode::Normal);
+            }
+        }
+
+        ImGui::Text("Active mode: %s", rig.mode_name());
+        ImGui::Separator();
+
+        // Camera state (world)
+        double pos[3] = {cam.position_world.x, cam.position_world.y, cam.position_world.z};
+        if (ImGui::InputScalarN("Position (world)", ImGuiDataType_Double, pos, 3, nullptr, nullptr, "%.3f"))
+        {
+            cam.position_world = WorldVec3(pos[0], pos[1], pos[2]);
+        }
+        float fov = cam.fovDegrees;
+        if (ImGui::SliderFloat("FOV (deg)", &fov, 30.0f, 110.0f))
+        {
+            cam.fovDegrees = fov;
+        }
+
+        WorldVec3 origin = sceneMgr->get_world_origin();
+        glm::vec3 camLocal = sceneMgr->get_camera_local_position();
+        ImGui::Text("Origin (world): (%.3f, %.3f, %.3f)", origin.x, origin.y, origin.z);
+        ImGui::Text("Camera (local): (%.3f, %.3f, %.3f)", camLocal.x, camLocal.y, camLocal.z);
+
+        auto target_from_last_pick = [&](CameraTarget &target) -> bool {
+            PickingSystem *picking = eng->picking();
+            if (!picking) return false;
+            const auto &pick = picking->last_pick();
+            if (!pick.valid) return false;
+
+            if (pick.ownerType == RenderObject::OwnerType::MeshInstance)
+            {
+                target.type = CameraTargetType::MeshInstance;
+                target.name = pick.ownerName;
+            }
+            else if (pick.ownerType == RenderObject::OwnerType::GLTFInstance)
+            {
+                target.type = CameraTargetType::GLTFInstance;
+                target.name = pick.ownerName;
+            }
+            else
+            {
+                target.type = CameraTargetType::WorldPoint;
+                target.world_point = pick.worldPos;
+                target.name.clear();
+            }
+            return true;
+        };
+
+        auto draw_target = [&](const char *id, CameraTarget &target, char *name_buf, size_t name_buf_size) {
+            ImGui::PushID(id);
+            static const char *k_target_types[] = {"None", "WorldPoint", "MeshInstance", "GLTFInstance"};
+            int type = static_cast<int>(target.type);
+            if (ImGui::Combo("Target type", &type, k_target_types, IM_ARRAYSIZE(k_target_types)))
+            {
+                target.type = static_cast<CameraTargetType>(type);
+                if (target.type != CameraTargetType::MeshInstance && target.type != CameraTargetType::GLTFInstance)
+                {
+                    target.name.clear();
+                    if (name_buf_size > 0)
+                    {
+                        name_buf[0] = '\0';
+                    }
+                }
+            }
+
+            if (target.type == CameraTargetType::WorldPoint)
+            {
+                double p[3] = {target.world_point.x, target.world_point.y, target.world_point.z};
+                if (ImGui::InputScalarN("World point", ImGuiDataType_Double, p, 3, nullptr, nullptr, "%.3f"))
+                {
+                    target.world_point = WorldVec3(p[0], p[1], p[2]);
+                }
+            }
+            else if (target.type == CameraTargetType::MeshInstance || target.type == CameraTargetType::GLTFInstance)
+            {
+                if (std::strncmp(name_buf, target.name.c_str(), name_buf_size) != 0)
+                {
+                    std::snprintf(name_buf, name_buf_size, "%s", target.name.c_str());
+                }
+                ImGui::InputText("Target name", name_buf, name_buf_size);
+                target.name = name_buf;
+            }
+
+            WorldVec3 tpos{};
+            glm::quat trot{};
+            bool ok = rig.resolve_target(*sceneMgr, target, tpos, trot);
+            ImGui::Text("Resolved: %s", ok ? "yes" : "no");
+            if (ok)
+            {
+                ImGui::Text("Target world: (%.3f, %.3f, %.3f)", tpos.x, tpos.y, tpos.z);
+            }
+            ImGui::PopID();
+        };
+
+        // Free
+        if (ImGui::CollapsingHeader("Free", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            auto &s = rig.free_settings();
+            ImGui::InputFloat("Move speed (u/s)", &s.move_speed);
+            s.move_speed = std::clamp(s.move_speed, 0.06f, 300.0f);
+            ImGui::InputFloat("Look sensitivity", &s.look_sensitivity);
+            ImGui::InputFloat("Roll speed (rad/s)", &s.roll_speed);
+            ImGui::TextUnformatted("Roll keys: Q/E");
+        }
+
+        // Orbit
+        if (ImGui::CollapsingHeader("Orbit"))
+        {
+            auto &s = rig.orbit_settings();
+            static char orbitName[128] = "";
+            draw_target("orbit_target", s.target, orbitName, IM_ARRAYSIZE(orbitName));
+            if (ImGui::Button("Orbit target = Last Pick"))
+            {
+                target_from_last_pick(s.target);
+            }
+            ImGui::InputDouble("Distance", &s.distance, 0.1, 1.0, "%.3f");
+            s.distance = std::clamp(s.distance, 0.2, 100000.0);
+            float yawDeg = glm::degrees(s.yaw);
+            float pitchDeg = glm::degrees(s.pitch);
+            if (ImGui::SliderFloat("Yaw (deg)", &yawDeg, -180.0f, 180.0f))
+            {
+                s.yaw = glm::radians(yawDeg);
+            }
+            if (ImGui::SliderFloat("Pitch (deg)", &pitchDeg, -89.0f, 89.0f))
+            {
+                s.pitch = glm::radians(pitchDeg);
+            }
+            ImGui::InputFloat("Look sensitivity##orbit", &s.look_sensitivity);
+        }
+
+        // Follow
+        if (ImGui::CollapsingHeader("Follow"))
+        {
+            auto &s = rig.follow_settings();
+            static char followName[128] = "";
+            draw_target("follow_target", s.target, followName, IM_ARRAYSIZE(followName));
+            if (ImGui::Button("Follow target = Last Pick"))
+            {
+                target_from_last_pick(s.target);
+            }
+            ImGui::InputFloat3("Position offset (local)", &s.position_offset_local.x);
+
+            glm::vec3 rotDeg = glm::degrees(glm::eulerAngles(s.rotation_offset));
+            float r[3] = {rotDeg.x, rotDeg.y, rotDeg.z};
+            if (ImGui::InputFloat3("Rotation offset (deg XYZ)", r))
+            {
+                glm::mat4 R = glm::eulerAngleXYZ(glm::radians(r[0]), glm::radians(r[1]), glm::radians(r[2]));
+                s.rotation_offset = glm::quat_cast(R);
+            }
+            if (ImGui::Button("Reset rotation offset"))
+            {
+                s.rotation_offset = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            }
+        }
+
+        // Chase
+        if (ImGui::CollapsingHeader("Chase"))
+        {
+            auto &s = rig.chase_settings();
+            static char chaseName[128] = "";
+            draw_target("chase_target", s.target, chaseName, IM_ARRAYSIZE(chaseName));
+            if (ImGui::Button("Chase target = Last Pick"))
+            {
+                target_from_last_pick(s.target);
+            }
+            ImGui::InputFloat3("Position offset (local)##chase", &s.position_offset_local.x);
+
+            glm::vec3 rotDeg = glm::degrees(glm::eulerAngles(s.rotation_offset));
+            float r[3] = {rotDeg.x, rotDeg.y, rotDeg.z};
+            if (ImGui::InputFloat3("Rotation offset (deg XYZ)##chase", r))
+            {
+                glm::mat4 R = glm::eulerAngleXYZ(glm::radians(r[0]), glm::radians(r[1]), glm::radians(r[2]));
+                s.rotation_offset = glm::quat_cast(R);
+            }
+
+            ImGui::SliderFloat("Position lag (1/s)", &s.position_lag, 0.0f, 30.0f);
+            ImGui::SliderFloat("Rotation lag (1/s)", &s.rotation_lag, 0.0f, 30.0f);
+        }
+
+        // Fixed
+        if (ImGui::CollapsingHeader("Fixed"))
+        {
+            ImGui::TextUnformatted("Fixed mode does not modify the camera automatically.");
         }
     }
 
@@ -2051,6 +2259,7 @@ namespace
         bool show_ibl{false};
         bool show_postfx{false};
         bool show_scene{false};
+        bool show_camera{false};
         bool show_async_assets{false};
         bool show_textures{false};
     };
@@ -2072,6 +2281,7 @@ void vk_engine_draw_debug_ui(VulkanEngine *eng)
             ImGui::MenuItem("Window", nullptr, &g_debug_windows.show_window);
             ImGui::Separator();
             ImGui::MenuItem("Scene", nullptr, &g_debug_windows.show_scene);
+            ImGui::MenuItem("Camera", nullptr, &g_debug_windows.show_camera);
             ImGui::MenuItem("Render Graph", nullptr, &g_debug_windows.show_render_graph);
             ImGui::MenuItem("Pipelines", nullptr, &g_debug_windows.show_pipelines);
             ImGui::Separator();
@@ -2183,6 +2393,15 @@ void vk_engine_draw_debug_ui(VulkanEngine *eng)
         if (ImGui::Begin("Scene", &g_debug_windows.show_scene))
         {
             ui_scene(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_camera)
+    {
+        if (ImGui::Begin("Camera", &g_debug_windows.show_camera))
+        {
+            ui_camera(eng);
         }
         ImGui::End();
     }

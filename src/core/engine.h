@@ -39,8 +39,8 @@
 #include "core/assets/ibl_manager.h"
 #include "core/ui/imgui_system.h"
 #include "core/picking/picking_system.h"
+#include "core/input/input_system.h"
 
-class InputSystem;
 class DebugDrawSystem;
 
 struct DebugDrawDeleter

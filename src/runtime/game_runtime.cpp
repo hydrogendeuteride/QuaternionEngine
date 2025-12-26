@@ -128,7 +128,7 @@ namespace GameRuntime
             // --- Camera input (if not captured by UI) ---
             if (_renderer->_sceneManager && input)
             {
-                _renderer->_sceneManager->getMainCamera().process_input(*input, ui_capture_keyboard, ui_capture_mouse);
+                _renderer->_sceneManager->getCameraRig().process_input(*input, ui_capture_keyboard, ui_capture_mouse);
             }
 
             // --- Throttle when minimized ---

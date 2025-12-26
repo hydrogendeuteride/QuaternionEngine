@@ -1671,7 +1671,7 @@ void VulkanEngine::run()
 
         if (_sceneManager && _input)
         {
-            _sceneManager->getMainCamera().process_input(*_input, ui_capture_keyboard, ui_capture_mouse);
+            _sceneManager->getCameraRig().process_input(*_input, ui_capture_keyboard, ui_capture_mouse);
         }
 
         if (freeze_rendering)

@@ -13,6 +13,7 @@
 #include "core/picking/picking_system.h"
 #include "scene/vk_scene.h"
 #include "scene/camera.h"
+#include "scene/camera/camera_rig.h"
 
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
@@ -1577,6 +1578,268 @@ void Engine::camera_look_at(const glm::dvec3& target)
     rot[2] = -f; // -Z forward
 
     cam.orientation = glm::quat_cast(rot);
+}
+
+namespace
+{
+    ::CameraMode to_internal_camera_mode(GameAPI::CameraMode mode)
+    {
+        switch (mode)
+        {
+            case GameAPI::CameraMode::Free: return ::CameraMode::Free;
+            case GameAPI::CameraMode::Orbit: return ::CameraMode::Orbit;
+            case GameAPI::CameraMode::Follow: return ::CameraMode::Follow;
+            case GameAPI::CameraMode::Chase: return ::CameraMode::Chase;
+            case GameAPI::CameraMode::Fixed: return ::CameraMode::Fixed;
+            default: return ::CameraMode::Free;
+        }
+    }
+
+    GameAPI::CameraMode to_api_camera_mode(::CameraMode mode)
+    {
+        switch (mode)
+        {
+            case ::CameraMode::Free: return GameAPI::CameraMode::Free;
+            case ::CameraMode::Orbit: return GameAPI::CameraMode::Orbit;
+            case ::CameraMode::Follow: return GameAPI::CameraMode::Follow;
+            case ::CameraMode::Chase: return GameAPI::CameraMode::Chase;
+            case ::CameraMode::Fixed: return GameAPI::CameraMode::Fixed;
+            default: return GameAPI::CameraMode::Free;
+        }
+    }
+
+    ::CameraTargetType to_internal_target_type(GameAPI::CameraTargetType type)
+    {
+        switch (type)
+        {
+            case GameAPI::CameraTargetType::None: return ::CameraTargetType::None;
+            case GameAPI::CameraTargetType::WorldPoint: return ::CameraTargetType::WorldPoint;
+            case GameAPI::CameraTargetType::MeshInstance: return ::CameraTargetType::MeshInstance;
+            case GameAPI::CameraTargetType::GLTFInstance: return ::CameraTargetType::GLTFInstance;
+            default: return ::CameraTargetType::None;
+        }
+    }
+
+    GameAPI::CameraTargetType to_api_target_type(::CameraTargetType type)
+    {
+        switch (type)
+        {
+            case ::CameraTargetType::None: return GameAPI::CameraTargetType::None;
+            case ::CameraTargetType::WorldPoint: return GameAPI::CameraTargetType::WorldPoint;
+            case ::CameraTargetType::MeshInstance: return GameAPI::CameraTargetType::MeshInstance;
+            case ::CameraTargetType::GLTFInstance: return GameAPI::CameraTargetType::GLTFInstance;
+            default: return GameAPI::CameraTargetType::None;
+        }
+    }
+
+    ::CameraTarget to_internal_target(const GameAPI::CameraTarget &target)
+    {
+        ::CameraTarget t;
+        t.type = to_internal_target_type(target.type);
+        t.name = target.name;
+        t.world_point = WorldVec3(target.worldPoint);
+        return t;
+    }
+
+    GameAPI::CameraTarget to_api_target(const ::CameraTarget &target)
+    {
+        GameAPI::CameraTarget t;
+        t.type = to_api_target_type(target.type);
+        t.name = target.name;
+        t.worldPoint = glm::dvec3(target.world_point);
+        return t;
+    }
+} // namespace
+
+void Engine::set_camera_mode(CameraMode mode)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return;
+    }
+
+    SceneManager *scene = _engine->_sceneManager.get();
+    Camera &cam = scene->getMainCamera();
+    CameraRig &rig = scene->getCameraRig();
+
+    if (_engine->_input)
+    {
+        _engine->_input->set_cursor_mode(CursorMode::Normal);
+    }
+
+    rig.set_mode(to_internal_camera_mode(mode), *scene, cam);
+}
+
+CameraMode Engine::get_camera_mode() const
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return CameraMode::Free;
+    }
+    return to_api_camera_mode(_engine->_sceneManager->getCameraRig().mode());
+}
+
+void Engine::set_free_camera_settings(const FreeCameraSettings& settings)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return;
+    }
+
+    ::FreeCameraSettings &s = _engine->_sceneManager->getCameraRig().free_settings();
+    s.move_speed = settings.moveSpeed;
+    s.look_sensitivity = settings.lookSensitivity;
+    s.roll_speed = settings.rollSpeed;
+}
+
+FreeCameraSettings Engine::get_free_camera_settings() const
+{
+    FreeCameraSettings out{};
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return out;
+    }
+
+    const ::FreeCameraSettings &s = _engine->_sceneManager->getCameraRig().free_settings();
+    out.moveSpeed = s.move_speed;
+    out.lookSensitivity = s.look_sensitivity;
+    out.rollSpeed = s.roll_speed;
+    return out;
+}
+
+void Engine::set_orbit_camera_settings(const OrbitCameraSettings& settings)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return;
+    }
+
+    ::OrbitCameraSettings &s = _engine->_sceneManager->getCameraRig().orbit_settings();
+    s.target = to_internal_target(settings.target);
+    s.distance = settings.distance;
+    s.yaw = settings.yaw;
+    s.pitch = settings.pitch;
+    s.look_sensitivity = settings.lookSensitivity;
+}
+
+OrbitCameraSettings Engine::get_orbit_camera_settings() const
+{
+    OrbitCameraSettings out{};
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return out;
+    }
+
+    const ::OrbitCameraSettings &s = _engine->_sceneManager->getCameraRig().orbit_settings();
+    out.target = to_api_target(s.target);
+    out.distance = s.distance;
+    out.yaw = s.yaw;
+    out.pitch = s.pitch;
+    out.lookSensitivity = s.look_sensitivity;
+    return out;
+}
+
+void Engine::set_follow_camera_settings(const FollowCameraSettings& settings)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return;
+    }
+
+    ::FollowCameraSettings &s = _engine->_sceneManager->getCameraRig().follow_settings();
+    s.target = to_internal_target(settings.target);
+    s.position_offset_local = settings.positionOffsetLocal;
+    s.rotation_offset = settings.rotationOffset;
+}
+
+FollowCameraSettings Engine::get_follow_camera_settings() const
+{
+    FollowCameraSettings out{};
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return out;
+    }
+
+    const ::FollowCameraSettings &s = _engine->_sceneManager->getCameraRig().follow_settings();
+    out.target = to_api_target(s.target);
+    out.positionOffsetLocal = s.position_offset_local;
+    out.rotationOffset = s.rotation_offset;
+    return out;
+}
+
+void Engine::set_chase_camera_settings(const ChaseCameraSettings& settings)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return;
+    }
+
+    ::ChaseCameraSettings &s = _engine->_sceneManager->getCameraRig().chase_settings();
+    s.target = to_internal_target(settings.target);
+    s.position_offset_local = settings.positionOffsetLocal;
+    s.rotation_offset = settings.rotationOffset;
+    s.position_lag = settings.positionLag;
+    s.rotation_lag = settings.rotationLag;
+}
+
+ChaseCameraSettings Engine::get_chase_camera_settings() const
+{
+    ChaseCameraSettings out{};
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return out;
+    }
+
+    const ::ChaseCameraSettings &s = _engine->_sceneManager->getCameraRig().chase_settings();
+    out.target = to_api_target(s.target);
+    out.positionOffsetLocal = s.position_offset_local;
+    out.rotationOffset = s.rotation_offset;
+    out.positionLag = s.position_lag;
+    out.rotationLag = s.rotation_lag;
+    return out;
+}
+
+bool Engine::set_camera_target_from_last_pick()
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    const PickingSystem *picking = _engine->picking();
+    if (!picking)
+    {
+        return false;
+    }
+
+    const auto &pick = picking->last_pick();
+    if (!pick.valid)
+    {
+        return false;
+    }
+
+    ::CameraTarget t;
+    if (pick.ownerType == RenderObject::OwnerType::MeshInstance)
+    {
+        t.type = ::CameraTargetType::MeshInstance;
+        t.name = pick.ownerName;
+    }
+    else if (pick.ownerType == RenderObject::OwnerType::GLTFInstance)
+    {
+        t.type = ::CameraTargetType::GLTFInstance;
+        t.name = pick.ownerName;
+    }
+    else
+    {
+        t.type = ::CameraTargetType::WorldPoint;
+        t.world_point = pick.worldPos;
+    }
+
+    CameraRig &rig = _engine->_sceneManager->getCameraRig();
+    rig.orbit_settings().target = t;
+    rig.follow_settings().target = t;
+    rig.chase_settings().target = t;
+    return true;
 }
 
 // ----------------------------------------------------------------------------

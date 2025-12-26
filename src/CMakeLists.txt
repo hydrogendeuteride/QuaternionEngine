@@ -117,6 +117,19 @@ add_executable (vulkan_engine
   scene/tangent_space.cpp
   scene/camera.h
   scene/camera.cpp
+  scene/camera/icamera_mode.h
+  scene/camera/camera_rig.h
+  scene/camera/camera_rig.cpp
+  scene/camera/mode_free.h
+  scene/camera/mode_free.cpp
+  scene/camera/mode_orbit.h
+  scene/camera/mode_orbit.cpp
+  scene/camera/mode_follow.h
+  scene/camera/mode_follow.cpp
+  scene/camera/mode_chase.h
+  scene/camera/mode_chase.cpp
+  scene/camera/mode_fixed.h
+  scene/camera/mode_fixed.cpp
   # compute
   compute/vk_compute.h
   compute/vk_compute.cpp

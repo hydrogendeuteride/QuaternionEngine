@@ -2,6 +2,7 @@
 #include <core/types.h>
 #include <core/world.h>
 #include <scene/camera.h>
+#include <scene/camera/camera_rig.h>
 #include <unordered_map>
 #include <memory>
 #include <optional>
@@ -68,6 +69,8 @@ public:
     void update_scene();
 
     Camera &getMainCamera() { return mainCamera; }
+    CameraRig &getCameraRig() { return cameraRig; }
+    const CameraRig &getCameraRig() const { return cameraRig; }
 
     WorldVec3 get_world_origin() const { return _origin_world; }
     glm::vec3 get_camera_local_position() const { return _camera_position_local; }
@@ -227,6 +230,7 @@ private:
     EngineContext *_context = nullptr;
 
     Camera mainCamera = {};
+    CameraRig cameraRig{};
     GPUSceneData sceneData = {};
     DrawContext mainDrawContext;
     std::vector<PointLight> pointLights;

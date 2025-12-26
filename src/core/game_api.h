@@ -305,6 +305,66 @@ struct Stats
 };
 
 // ============================================================================
+// Camera Rig Types
+// ============================================================================
+
+enum class CameraMode : uint8_t
+{
+    Free = 0,
+    Orbit = 1,
+    Follow = 2,
+    Chase = 3,
+    Fixed = 4
+};
+
+enum class CameraTargetType : uint8_t
+{
+    None = 0,
+    WorldPoint = 1,
+    MeshInstance = 2,
+    GLTFInstance = 3
+};
+
+struct CameraTarget
+{
+    CameraTargetType type{CameraTargetType::None};
+    std::string name{};
+    glm::dvec3 worldPoint{0.0, 0.0, 0.0};
+};
+
+struct FreeCameraSettings
+{
+    float moveSpeed{1.8f};        // world units / second
+    float lookSensitivity{0.0020f};
+    float rollSpeed{1.0f};        // radians / second
+};
+
+struct OrbitCameraSettings
+{
+    CameraTarget target{};
+    double distance{10.0};
+    float yaw{0.0f};              // radians
+    float pitch{0.0f};            // radians
+    float lookSensitivity{0.0020f};
+};
+
+struct FollowCameraSettings
+{
+    CameraTarget target{};
+    glm::vec3 positionOffsetLocal{0.0f, 2.0f, 6.0f};
+    glm::quat rotationOffset{1.0f, 0.0f, 0.0f, 0.0f};
+};
+
+struct ChaseCameraSettings
+{
+    CameraTarget target{};
+    glm::vec3 positionOffsetLocal{0.0f, 2.0f, 6.0f};
+    glm::quat rotationOffset{1.0f, 0.0f, 0.0f, 0.0f};
+    float positionLag{8.0f};      // smoothing rate (1/sec), higher = snappier
+    float rotationLag{10.0f};     // smoothing rate (1/sec)
+};
+
+// ============================================================================
 // Main API Class
 // ============================================================================
 
@@ -650,6 +710,25 @@ public:
     // Look at a target position
     void camera_look_at(const glm::vec3& target);
     void camera_look_at(const glm::dvec3& target);
+
+    // Camera mode and per-mode settings
+    void set_camera_mode(CameraMode mode);
+    CameraMode get_camera_mode() const;
+
+    void set_free_camera_settings(const FreeCameraSettings& settings);
+    FreeCameraSettings get_free_camera_settings() const;
+
+    void set_orbit_camera_settings(const OrbitCameraSettings& settings);
+    OrbitCameraSettings get_orbit_camera_settings() const;
+
+    void set_follow_camera_settings(const FollowCameraSettings& settings);
+    FollowCameraSettings get_follow_camera_settings() const;
+
+    void set_chase_camera_settings(const ChaseCameraSettings& settings);
+    ChaseCameraSettings get_chase_camera_settings() const;
+
+    // Convenience: set Orbit/Follow/Chase target from the engine's last pick.
+    bool set_camera_target_from_last_pick();
 
     // ------------------------------------------------------------------------
     // Rendering

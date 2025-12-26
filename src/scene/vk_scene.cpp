@@ -111,13 +111,14 @@ void SceneManager::init(EngineContext *context)
 {
     _context = context;
 
-    mainCamera.velocity = glm::vec3(0.f);
     mainCamera.position_world = WorldVec3(30.0, 0.0, 85.0);
     mainCamera.orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 
     sceneData.ambientColor = glm::vec4(0.1f, 0.1f, 0.1f, 1.0f);
     sceneData.sunlightDirection = glm::vec4(-0.2f, -1.0f, -0.3f, 1.0f);
     sceneData.sunlightColor = glm::vec4(1.0f, 1.0f, 1.0f, 3.0f);
+
+    cameraRig.init(*this, mainCamera);
 
     _camera_position_local = world_to_local(mainCamera.position_world, _origin_world);
 }
@@ -151,7 +152,25 @@ void SceneManager::update_scene()
     mainDrawContext.nextID = 1;
     mainDrawContext.gltfNodeLocalOverrides = nullptr;
 
-    mainCamera.update();
+    // Simple per-frame dt (seconds) for animations and camera behavior.
+    auto now = std::chrono::steady_clock::now();
+    if (_lastFrameTime.time_since_epoch().count() == 0)
+    {
+        _lastFrameTime = now;
+    }
+    float dt = std::chrono::duration<float>(now - _lastFrameTime).count();
+    _lastFrameTime = now;
+    if (dt < 0.f)
+    {
+        dt = 0.f;
+    }
+    if (dt > 0.1f)
+    {
+        dt = 0.1f;
+    }
+    _deltaTime = dt;
+
+    cameraRig.update(*this, mainCamera, dt);
 
     // Floating origin: keep render-local coordinates near (0,0,0) by shifting the origin
     // when the camera drifts too far in world space.
@@ -170,24 +189,6 @@ void SceneManager::update_scene()
     }
 
     _camera_position_local = world_to_local(mainCamera.position_world, _origin_world);
-
-    // Simple per-frame dt (seconds) for animations
-    auto now = std::chrono::steady_clock::now();
-    if (_lastFrameTime.time_since_epoch().count() == 0)
-    {
-        _lastFrameTime = now;
-    }
-    float dt = std::chrono::duration<float>(now - _lastFrameTime).count();
-    _lastFrameTime = now;
-    if (dt < 0.f)
-    {
-        dt = 0.f;
-    }
-    if (dt > 0.1f)
-    {
-        dt = 0.1f;
-    }
-    _deltaTime = dt;
 
     auto tagOwner = [&](RenderObject::OwnerType type, const std::string &name,
                         size_t opaqueBegin, size_t transpBegin)
