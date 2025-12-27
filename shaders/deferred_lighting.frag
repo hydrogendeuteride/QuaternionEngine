@@ -35,6 +35,26 @@ const float SHADOW_MIN_BIAS = 1e-5;
 const float SHADOW_RAY_TMIN = 0.02;// start a bit away from the surface
 const float SHADOW_RAY_ORIGIN_BIAS = 0.01;// world units
 
+// Estimate the float ULP scale at this world position magnitude, used to keep
+// ray bias and tMin effective even when world coordinates are very large.
+float world_pos_ulp(vec3 p)
+{
+    float m = max(max(abs(p.x), abs(p.y)), abs(p.z));
+    // For IEEE-754 float, relative precision is ~2^-23 (~1.192e-7). Clamp to a
+    // small baseline to avoid tiny values near the origin.
+    return max(1e-4, m * 1.1920929e-7);
+}
+
+float shadow_ray_origin_bias(vec3 p)
+{
+    return max(SHADOW_RAY_ORIGIN_BIAS, world_pos_ulp(p) * 8.0);
+}
+
+float shadow_ray_tmin(vec3 p)
+{
+    return max(SHADOW_RAY_TMIN, world_pos_ulp(p) * 16.0);
+}
+
 vec3 getCameraWorldPosition()
 {
     // view = [ R^T  -R^T*C ]
@@ -223,9 +243,11 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
         #ifdef GL_EXT_ray_query
         float farR = max(max(sceneData.cascadeSplitsView.x, sceneData.cascadeSplitsView.y),
         max(sceneData.cascadeSplitsView.z, sceneData.cascadeSplitsView.w));
+        float originBias = shadow_ray_origin_bias(wp);
+        float tmin = shadow_ray_tmin(wp);
         rayQueryEXT rq;
         rayQueryInitializeEXT(rq, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-        0xFF, wp + N * SHADOW_RAY_ORIGIN_BIAS, SHADOW_RAY_TMIN, L, farR);
+        0xFF, wp + N * originBias, tmin, L, farR);
         while (rayQueryProceedEXT(rq)) { }
         bool hit = (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT);
         return hit ? 0.0 : 1.0;
@@ -249,10 +271,12 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
             if (cascadeEnabled && NoL < sceneData.rtParams.x)
             {
                 float maxT = sceneData.cascadeSplitsView[cm.i0];
+                float originBias = shadow_ray_origin_bias(wp);
+                float tmin = shadow_ray_tmin(wp);
                 rayQueryEXT rq;
                 // tmin: small offset to avoid self-hits
                 rayQueryInitializeEXT(rq, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-                0xFF, wp + N * SHADOW_RAY_ORIGIN_BIAS, SHADOW_RAY_TMIN, L, maxT);
+                0xFF, wp + N * originBias, tmin, L, maxT);
                 bool hit = false;
                 while (rayQueryProceedEXT(rq)) { }
                 hit = (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT);
@@ -278,9 +302,11 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
             float maxT0 = sceneData.cascadeSplitsView[cm.i0];
             float maxT1 = sceneData.cascadeSplitsView[cm.i1];
             float maxT = max(maxT0, maxT1);
+            float originBias = shadow_ray_origin_bias(wp);
+            float tmin = shadow_ray_tmin(wp);
             rayQueryEXT rq;
             rayQueryInitializeEXT(rq, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-            0xFF, wp + N * SHADOW_RAY_ORIGIN_BIAS, SHADOW_RAY_TMIN, L, maxT);
+            0xFF, wp + N * originBias, tmin, L, maxT);
             while (rayQueryProceedEXT(rq)) { }
             bool hit = (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT);
             if (hit) vis = min(vis, 0.0);
@@ -335,7 +361,9 @@ void main(){
             if (maxT > 0.01)
             {
                 vec3 dir = toL / maxT;
-                vec3 origin = pos + N * SHADOW_RAY_ORIGIN_BIAS;
+                float originBias = shadow_ray_origin_bias(pos);
+                float tmin = shadow_ray_tmin(pos);
+                vec3 origin = pos + N * originBias;
 
                 rayQueryEXT rq;
                 rayQueryInitializeEXT(
@@ -344,7 +372,7 @@ void main(){
                     gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
                     0xFF,
                     origin,
-                    SHADOW_RAY_TMIN,
+                    tmin,
                     dir,
                     maxT
                 );
@@ -380,7 +408,9 @@ void main(){
                 float cosTheta = dot(-L, dir);
                 if (cosTheta > sceneData.spotLights[i].direction_cos_outer.w)
                 {
-                    vec3 origin = pos + N * SHADOW_RAY_ORIGIN_BIAS;
+                    float originBias = shadow_ray_origin_bias(pos);
+                    float tmin = shadow_ray_tmin(pos);
+                    vec3 origin = pos + N * originBias;
 
                     rayQueryEXT rq;
                     rayQueryInitializeEXT(
@@ -389,7 +419,7 @@ void main(){
                         gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
                         0xFF,
                         origin,
-                        SHADOW_RAY_TMIN,
+                        tmin,
                         L,
                         maxT
                     );

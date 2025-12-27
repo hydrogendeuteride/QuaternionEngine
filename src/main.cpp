@@ -33,6 +33,16 @@ public:
             api.load_global_ibl(ibl);
         }
 
+        // Planet demo defaults (Milestone A): start outside Earth and speed up the free camera.
+        {
+            constexpr double kEarthRadiusM = 6378137.0;
+            GameAPI::FreeCameraSettings free = api.get_free_camera_settings();
+            free.moveSpeed = 20000.0f;
+            api.set_free_camera_settings(free);
+
+            api.set_camera_position(glm::dvec3(0.0, 0.0, kEarthRadiusM + 1.0e6));
+            api.camera_look_at(glm::dvec3(0.0, 0.0, 0.0));
+        }
 
         // Load a glTF model asynchronously
         // api.add_gltf_instance_async("example_model", "models/example.gltf",

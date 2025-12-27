@@ -37,6 +37,7 @@
 #include <string>
 
 #include "mesh_bvh.h"
+#include "scene/planet/planet_system.h"
 
 namespace
 {
@@ -2242,6 +2243,111 @@ namespace
             pick->worldPos = local_to_world(glm::vec3(targetTransform[3]), sceneMgr->get_world_origin());
         }
     }
+
+    static void ui_planets(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_sceneManager)
+        {
+            return;
+        }
+
+        SceneManager *scene = eng->_sceneManager.get();
+        PlanetSystem *planets = scene->get_planet_system();
+        if (!planets)
+        {
+            ImGui::TextUnformatted("Planet system not available");
+            return;
+        }
+
+        bool enabled = planets->enabled();
+        if (ImGui::Checkbox("Enable planet rendering", &enabled))
+        {
+            planets->set_enabled(enabled);
+        }
+
+        const WorldVec3 origin_world = scene->get_world_origin();
+        const WorldVec3 cam_world = scene->getMainCamera().position_world;
+        const glm::vec3 cam_local = scene->get_camera_local_position();
+
+        ImGui::Separator();
+        ImGui::Text("Camera world (m):  %.3f, %.3f, %.3f", cam_world.x, cam_world.y, cam_world.z);
+        ImGui::Text("Camera local (m):  %.3f, %.3f, %.3f", cam_local.x, cam_local.y, cam_local.z);
+        ImGui::Text("World origin (m):  %.3f, %.3f, %.3f", origin_world.x, origin_world.y, origin_world.z);
+
+        auto look_at_world = [](Camera &cam, const WorldVec3 &target_world)
+        {
+            glm::dvec3 dirD = glm::normalize(target_world - cam.position_world);
+            glm::vec3 dir = glm::normalize(glm::vec3(dirD));
+
+            glm::vec3 up(0.0f, 1.0f, 0.0f);
+            if (glm::length2(glm::cross(dir, up)) < 1e-6f)
+            {
+                up = glm::vec3(0.0f, 0.0f, 1.0f);
+            }
+
+            glm::vec3 f = dir;
+            glm::vec3 r = glm::normalize(glm::cross(up, f));
+            glm::vec3 u = glm::cross(f, r);
+
+            glm::mat3 rot;
+            rot[0] = r;
+            rot[1] = u;
+            rot[2] = -f; // -Z forward
+            cam.orientation = glm::quat_cast(rot);
+        };
+
+        PlanetSystem::PlanetBody *earth = planets->get_body(PlanetSystem::BodyID::Earth);
+        PlanetSystem::PlanetBody *moon = planets->get_body(PlanetSystem::BodyID::Moon);
+
+        if (earth)
+        {
+            ImGui::Separator();
+
+            bool vis = earth->visible;
+            if (ImGui::Checkbox("Render Earth", &vis))
+            {
+                earth->visible = vis;
+            }
+            ImGui::SameLine();
+            ImGui::Text("(R=%.1f km)", earth->radius_m / 1000.0);
+
+            const double dist = glm::length(cam_world - earth->center_world);
+            const double alt_m = dist - earth->radius_m;
+            ImGui::Text("Altitude above Earth: %.3f km", alt_m / 1000.0);
+
+            if (ImGui::Button("Teleport: 10000 km above surface"))
+            {
+                scene->getMainCamera().position_world =
+                    earth->center_world + WorldVec3(0.0, 0.0, earth->radius_m + 1.0e7);
+                look_at_world(scene->getMainCamera(), earth->center_world);
+            }
+
+            if (ImGui::Button("Teleport: 1000 km orbit"))
+            {
+                scene->getMainCamera().position_world =
+                    earth->center_world + WorldVec3(0.0, 0.0, earth->radius_m + 1.0e6);
+                look_at_world(scene->getMainCamera(), earth->center_world);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Teleport: 10 km above surface"))
+            {
+                scene->getMainCamera().position_world =
+                    earth->center_world + WorldVec3(0.0, 0.0, earth->radius_m + 1.0e4);
+                look_at_world(scene->getMainCamera(), earth->center_world);
+            }
+        }
+
+        if (moon)
+        {
+            bool vis = moon->visible;
+            if (ImGui::Checkbox("Render Moon", &vis))
+            {
+                moon->visible = vis;
+            }
+            ImGui::SameLine();
+            ImGui::Text("(R=%.1f km)", moon->radius_m / 1000.0);
+        }
+    }
 } // namespace
 
 // Window visibility states for menu-bar toggles
@@ -2260,6 +2366,7 @@ namespace
         bool show_postfx{false};
         bool show_scene{false};
         bool show_camera{false};
+        bool show_planets{false};
         bool show_async_assets{false};
         bool show_textures{false};
     };
@@ -2282,6 +2389,7 @@ void vk_engine_draw_debug_ui(VulkanEngine *eng)
             ImGui::Separator();
             ImGui::MenuItem("Scene", nullptr, &g_debug_windows.show_scene);
             ImGui::MenuItem("Camera", nullptr, &g_debug_windows.show_camera);
+            ImGui::MenuItem("Planets", nullptr, &g_debug_windows.show_planets);
             ImGui::MenuItem("Render Graph", nullptr, &g_debug_windows.show_render_graph);
             ImGui::MenuItem("Pipelines", nullptr, &g_debug_windows.show_pipelines);
             ImGui::Separator();
@@ -2402,6 +2510,15 @@ void vk_engine_draw_debug_ui(VulkanEngine *eng)
         if (ImGui::Begin("Camera", &g_debug_windows.show_camera))
         {
             ui_camera(eng);
+        }
+        ImGui::End();
+    }
+
+    if (g_debug_windows.show_planets)
+    {
+        if (ImGui::Begin("Planets", &g_debug_windows.show_planets))
+        {
+            ui_planets(eng);
         }
         ImGui::End();
     }

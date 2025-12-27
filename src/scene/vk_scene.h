@@ -12,6 +12,7 @@
 
 #include "scene/vk_loader.h"
 class EngineContext;
+class PlanetSystem;
 
 struct RenderObject
 {
@@ -61,6 +62,7 @@ struct DrawContext
 class SceneManager
 {
 public:
+    SceneManager();
     ~SceneManager();
     void init(EngineContext *context);
 
@@ -223,6 +225,8 @@ public:
 
     const PickingDebug &getPickingDebug() const { return pickingDebug; }
 
+    PlanetSystem *get_planet_system() const { return _planetSystem.get(); }
+
     // Returns the LoadedGLTF scene for a named GLTF instance, or nullptr if not found.
     std::shared_ptr<LoadedGLTF> getGLTFInstanceScene(const std::string &instanceName) const;
 
@@ -251,6 +255,8 @@ private:
     // Keep GLTF assets alive until after the next frame fence to avoid destroying
     // GPU resources that might still be in-flight.
     std::vector<std::shared_ptr<LoadedGLTF>> pendingGLTFRelease;
+
+    std::unique_ptr<PlanetSystem> _planetSystem;
 
     PickingDebug pickingDebug{};
 };

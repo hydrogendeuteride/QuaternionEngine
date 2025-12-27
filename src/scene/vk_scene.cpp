@@ -4,6 +4,7 @@
 #include <unordered_set>
 #include <chrono>
 
+#include "scene/planet/planet_system.h"
 #include "core/device/swapchain.h"
 #include "core/context.h"
 #include "core/config.h"
@@ -18,6 +19,8 @@
 #include "core/frame/resources.h"
 #include "core/config.h"
 #include <fmt/core.h>
+
+SceneManager::SceneManager() = default;
 
 SceneManager::~SceneManager()
 {
@@ -121,6 +124,9 @@ void SceneManager::init(EngineContext *context)
     cameraRig.init(*this, mainCamera);
 
     _camera_position_local = world_to_local(mainCamera.position_world, _origin_world);
+
+    _planetSystem = std::make_unique<PlanetSystem>();
+    _planetSystem->init(_context);
 }
 
 void SceneManager::update_scene()
@@ -304,6 +310,11 @@ void SceneManager::update_scene()
                 mainDrawContext.OpaqueSurfaces.push_back(obj);
             }
         }
+    }
+
+    if (_planetSystem)
+    {
+        _planetSystem->update_and_emit(*this, mainDrawContext);
     }
 
     glm::mat4 view = mainCamera.getViewMatrix(_camera_position_local);
