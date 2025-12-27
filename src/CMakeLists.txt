@@ -195,7 +195,7 @@ if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDeb
             /OPT:ICF
         )
         # Optional: AVX2
-        # target_compile_options(vulkan_engine PRIVATE /arch:AVX2)
+        target_compile_options(vulkan_engine PRIVATE /arch:AVX2)
 
     elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         # GCC (g++)
@@ -311,23 +311,73 @@ target_include_directories(vma_impl PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../thir
 target_link_libraries(vma_impl PRIVATE Vulkan::Vulkan)
 target_link_libraries(vulkan_engine PUBLIC $<TARGET_OBJECTS:vma_impl>)
 
-target_precompile_headers(vulkan_engine PUBLIC <optional> <vector> <memory> <string> <vector> <unordered_map> <glm/mat4x4.hpp>  <glm/vec4.hpp> <vulkan/vulkan.h>)
+target_precompile_headers(vulkan_engine PRIVATE
+  <optional>
+  <vector>
+  <memory>
+  <string>
+  <unordered_map>
+  <glm/mat4x4.hpp>
+  <glm/vec4.hpp>
+  <vulkan/vulkan.h>
+)
 
-add_custom_command(TARGET vulkan_engine POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:vulkan_engine> $<TARGET_FILE_DIR:vulkan_engine>
-  COMMAND_EXPAND_LISTS
-  )
+if(WIN32)
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.21)
+    add_custom_command(TARGET vulkan_engine POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:vulkan_engine> $<TARGET_FILE_DIR:vulkan_engine>
+      COMMAND_EXPAND_LISTS
+    )
+  else()
+    message(WARNING "CMake < 3.21: skipping runtime DLL copy step for vulkan_engine")
+  endif()
+endif()
 
-find_package(ktx CONFIG REQUIRED)
-set(_KTX_TARGET "")
-if (TARGET ktx::ktx)
-  set(_KTX_TARGET ktx::ktx)
-elseif (TARGET KTX::ktx)
-  set(_KTX_TARGET KTX::ktx)
-elseif (TARGET ktx)
-  set(_KTX_TARGET ktx)
+# KTX (libktx)
+# NOTE: Under WSL it's easy to accidentally pick up the Windows KTX package (ktx.dll),
+# which will configure but fail to link on Linux. Prefer the native library when needed.
+find_package(ktx CONFIG QUIET)
+
+set(_KTX_CMAKE_TARGET "")
+if(TARGET ktx::ktx)
+  set(_KTX_CMAKE_TARGET ktx::ktx)
+elseif(TARGET KTX::ktx)
+  set(_KTX_CMAKE_TARGET KTX::ktx)
+elseif(TARGET ktx)
+  set(_KTX_CMAKE_TARGET ktx)
 endif()
-if (_KTX_TARGET STREQUAL "")
-  message(FATAL_ERROR "libktx not found; please install KTX v2 and expose its CMake package")
+
+set(_KTX_USE_FALLBACK OFF)
+if(_KTX_CMAKE_TARGET STREQUAL "")
+  set(_KTX_USE_FALLBACK ON)
+else()
+  get_target_property(_KTX_IMPORTED "${_KTX_CMAKE_TARGET}" IMPORTED)
+  if(_KTX_IMPORTED)
+    set(_KTX_IMPORTED_LOCATION "")
+    get_target_property(_KTX_IMPORTED_LOCATION "${_KTX_CMAKE_TARGET}" IMPORTED_LOCATION)
+    if(NOT _KTX_IMPORTED_LOCATION)
+      get_target_property(_KTX_IMPORTED_LOCATION "${_KTX_CMAKE_TARGET}" IMPORTED_LOCATION_RELEASE)
+    endif()
+    if(NOT _KTX_IMPORTED_LOCATION)
+      get_target_property(_KTX_IMPORTED_LOCATION "${_KTX_CMAKE_TARGET}" IMPORTED_LOCATION_DEBUG)
+    endif()
+
+    if(NOT _KTX_IMPORTED_LOCATION)
+      set(_KTX_USE_FALLBACK ON)
+    elseif(NOT WIN32 AND _KTX_IMPORTED_LOCATION MATCHES "\\.dll$|\\.lib$")
+      set(_KTX_USE_FALLBACK ON)
+    endif()
+  endif()
 endif()
-target_link_libraries(vulkan_engine PUBLIC ${_KTX_TARGET})
+
+if(_KTX_USE_FALLBACK)
+  find_path(KTX_INCLUDE_DIR NAMES ktx.h)
+  find_library(KTX_LIBRARY NAMES ktx)
+  if(NOT KTX_INCLUDE_DIR OR NOT KTX_LIBRARY)
+    message(FATAL_ERROR "libktx not found; please install KTX v2 and make it discoverable via ktx_DIR or CMAKE_PREFIX_PATH")
+  endif()
+  target_include_directories(vulkan_engine PUBLIC "${KTX_INCLUDE_DIR}")
+  target_link_libraries(vulkan_engine PUBLIC "${KTX_LIBRARY}")
+else()
+  target_link_libraries(vulkan_engine PUBLIC "${_KTX_CMAKE_TARGET}")
+endif()

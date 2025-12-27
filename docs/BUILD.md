@@ -2,7 +2,7 @@
 
 - Prerequisites
   - Vulkan SDK installed and `VULKAN_SDK` set.
-  - A C++20 compiler and CMake ≥ 3.8.
+  - A C++20 compiler and CMake ≥ 3.16.
   - GPU drivers with Vulkan 1.2+.
   - KTX software with libktx
 

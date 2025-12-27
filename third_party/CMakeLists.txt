@@ -1,5 +1,3 @@
-find_package(Vulkan REQUIRED)
-
 add_library(vkbootstrap STATIC)
 add_library(glm INTERFACE)
 add_library(vma INTERFACE)
@@ -60,11 +58,6 @@ add_library(ImGuizmo STATIC
 target_include_directories(ImGuizmo PUBLIC
   ImGuizmo
   imgui
-)
-
-target_compile_definitions(ImGuizmo
-        PRIVATE
-        IMGUI_DEFINE_MATH_OPERATORS
 )
 
 target_link_libraries(ImGuizmo PUBLIC imgui)
