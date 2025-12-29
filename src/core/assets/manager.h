@@ -107,11 +107,13 @@ public:
     std::shared_ptr<MeshAsset> createMesh(const std::string &name,
                                           std::span<Vertex> vertices,
                                           std::span<uint32_t> indices,
-                                          std::shared_ptr<GLTFMaterial> material = {});
+                                          std::shared_ptr<GLTFMaterial> material = {},
+                                          bool build_bvh = true);
 
     std::shared_ptr<MeshAsset> getMesh(const std::string &name) const;
 
     bool removeMesh(const std::string &name);
+    bool removeMeshDeferred(const std::string &name, DeletionQueue &dq);
 
     // Convenience: create a PBR material from constants using engine default textures
     std::shared_ptr<GLTFMaterial> createMaterialFromConstants(const std::string &name,

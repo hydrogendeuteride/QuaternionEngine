@@ -130,6 +130,10 @@ add_executable (vulkan_engine
   scene/camera/mode_chase.cpp
   scene/camera/mode_fixed.h
   scene/camera/mode_fixed.cpp
+  scene/planet/cubesphere.h
+  scene/planet/cubesphere.cpp
+  scene/planet/planet_quadtree.h
+  scene/planet/planet_quadtree.cpp
   scene/planet/planet_system.h
   scene/planet/planet_system.cpp
   # compute

@@ -587,7 +587,8 @@ std::pair<AllocatedImage, bool> AssetManager::loadImageFromAsset(std::string_vie
 std::shared_ptr<MeshAsset> AssetManager::createMesh(const std::string &name,
                                                     std::span<Vertex> vertices,
                                                     std::span<uint32_t> indices,
-                                                    std::shared_ptr<GLTFMaterial> material)
+                                                    std::shared_ptr<GLTFMaterial> material,
+                                                    bool build_bvh)
 {
     if (!_engine || !_engine->_resourceManager) return {};
     if (name.empty()) return {};
@@ -631,9 +632,12 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const std::string &name,
     surf.bounds = compute_bounds(vertices);
     mesh->surfaces.push_back(surf);
 
-    // Build CPU-side BVH for precise ray picking over this mesh.
-    // This uses the same mesh-local vertex/index data as the GPU upload.
-    mesh->bvh = build_mesh_bvh(*mesh, vertices, indices);
+    if (build_bvh)
+    {
+        // Build CPU-side BVH for precise ray picking over this mesh.
+        // This uses the same mesh-local vertex/index data as the GPU upload.
+        mesh->bvh = build_mesh_bvh(*mesh, vertices, indices);
+    }
 
     _meshCache.emplace(name, mesh);
     return mesh;
@@ -707,5 +711,67 @@ bool AssetManager::removeMesh(const std::string &name)
         }
         _meshOwnedImages.erase(iti);
     }
+    return true;
+}
+
+bool AssetManager::removeMeshDeferred(const std::string &name, DeletionQueue &dq)
+{
+    auto it = _meshCache.find(name);
+    if (it == _meshCache.end()) return false;
+
+    const std::shared_ptr<MeshAsset> mesh = it->second;
+    if (!mesh) return false;
+
+    // Remove from cache immediately so callers won't retrieve a mesh we plan to destroy.
+    _meshCache.erase(it);
+
+    if (_engine && _engine->_rayManager)
+    {
+        // Clean up BLAS cached for this mesh (if ray tracing is enabled).
+        // RayTracingManager defers actual AS destruction internally.
+        _engine->_rayManager->removeBLASForBuffer(mesh->meshBuffers.vertexBuffer.buffer);
+    }
+
+    ResourceManager *rm = (_engine && _engine->_resourceManager) ? _engine->_resourceManager.get() : nullptr;
+    if (!rm)
+    {
+        return true;
+    }
+
+    const AllocatedBuffer indexBuffer = mesh->meshBuffers.indexBuffer;
+    const AllocatedBuffer vertexBuffer = mesh->meshBuffers.vertexBuffer;
+
+    std::optional<AllocatedBuffer> materialBuffer;
+    auto itb = _meshMaterialBuffers.find(name);
+    if (itb != _meshMaterialBuffers.end())
+    {
+        materialBuffer = itb->second;
+        _meshMaterialBuffers.erase(itb);
+    }
+
+    std::vector<AllocatedImage> ownedImages;
+    auto iti = _meshOwnedImages.find(name);
+    if (iti != _meshOwnedImages.end())
+    {
+        ownedImages = std::move(iti->second);
+        _meshOwnedImages.erase(iti);
+    }
+
+    dq.push_function([rm, indexBuffer, vertexBuffer, materialBuffer, ownedImages = std::move(ownedImages)]() mutable
+    {
+        if (indexBuffer.buffer) rm->destroy_buffer(indexBuffer);
+        if (vertexBuffer.buffer) rm->destroy_buffer(vertexBuffer);
+
+        if (materialBuffer.has_value() && materialBuffer->buffer)
+        {
+            rm->destroy_buffer(*materialBuffer);
+        }
+
+        for (const auto &img : ownedImages)
+        {
+            if (img.image) rm->destroy_image(img);
+        }
+    });
+
     return true;
 }

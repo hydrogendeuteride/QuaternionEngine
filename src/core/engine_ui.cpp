@@ -1595,97 +1595,17 @@ namespace
         }
     }
 
-    // Scene debug bits
-    static void ui_scene(VulkanEngine *eng)
+    // Scene editor - spawn and delete instances
+    static void ui_scene_editor(VulkanEngine *eng)
     {
-        if (!eng) return;
-        const DrawContext &dc = eng->_context->getMainDrawContext();
-        ImGui::Text("Opaque draws: %zu", dc.OpaqueSurfaces.size());
-        ImGui::Text("Transp draws: %zu", dc.TransparentSurfaces.size());
+        if (!eng || !eng->_sceneManager)
+        {
+            ImGui::TextUnformatted("SceneManager not available");
+            return;
+        }
+
+        SceneManager *sceneMgr = eng->_sceneManager.get();
         PickingSystem *picking = eng->picking();
-        if (picking)
-        {
-            bool use_id = picking->use_id_buffer_picking();
-            if (ImGui::Checkbox("Use ID-buffer picking", &use_id))
-            {
-                picking->set_use_id_buffer_picking(use_id);
-            }
-            ImGui::Text("Picking mode: %s",
-                        use_id ? "ID buffer (async, 1-frame latency)" : "CPU raycast");
-
-            bool debug_bvh = picking->debug_draw_bvh();
-            if (ImGui::Checkbox("Debug draw mesh BVH (last pick)", &debug_bvh))
-            {
-                picking->set_debug_draw_bvh(debug_bvh);
-            }
-        }
-        else
-        {
-            ImGui::TextUnformatted("Picking system not available");
-        }
-
-        // Debug draw settings (engine-owned collector + render pass)
-        if (eng->_context && eng->_context->debug_draw)
-        {
-            DebugDrawSystem *dd = eng->_context->debug_draw;
-            auto &s = dd->settings();
-
-            bool enabled = s.enabled;
-            if (ImGui::Checkbox("Enable debug draw", &enabled))
-            {
-                s.enabled = enabled;
-            }
-            if (s.enabled)
-            {
-                ImGui::SameLine();
-                ImGui::Text("Commands: %zu", dd->command_count());
-
-                int seg = s.segments;
-                if (ImGui::SliderInt("Circle segments", &seg, 3, 128))
-                {
-                    s.segments = seg;
-                }
-
-                bool depth_tested = s.show_depth_tested;
-                bool overlay = s.show_overlay;
-                if (ImGui::Checkbox("Depth-tested", &depth_tested))
-                {
-                    s.show_depth_tested = depth_tested;
-                }
-                ImGui::SameLine();
-                if (ImGui::Checkbox("Overlay", &overlay))
-                {
-                    s.show_overlay = overlay;
-                }
-
-                auto layer_checkbox = [&s](const char *label, DebugDrawLayer layer) {
-                    const uint32_t bit = static_cast<uint32_t>(layer);
-                    bool on = (s.layer_mask & bit) != 0u;
-                    if (ImGui::Checkbox(label, &on))
-                    {
-                        if (on) s.layer_mask |= bit;
-                        else s.layer_mask &= ~bit;
-                    }
-                };
-
-                ImGui::TextUnformatted("Layers");
-                layer_checkbox("Physics##dd_layer_physics", DebugDrawLayer::Physics);
-                ImGui::SameLine();
-                layer_checkbox("Picking##dd_layer_picking", DebugDrawLayer::Picking);
-                ImGui::SameLine();
-                layer_checkbox("Lights##dd_layer_lights", DebugDrawLayer::Lights);
-                layer_checkbox("Particles##dd_layer_particles", DebugDrawLayer::Particles);
-                ImGui::SameLine();
-                layer_checkbox("Volumetrics##dd_layer_volumetrics", DebugDrawLayer::Volumetrics);
-                ImGui::SameLine();
-                layer_checkbox("Misc##dd_layer_misc", DebugDrawLayer::Misc);
-            }
-        }
-        else
-        {
-            ImGui::TextUnformatted("Debug draw system not available");
-        }
-        ImGui::Separator();
 
         // Spawn glTF instances (runtime)
         ImGui::TextUnformatted("Spawn glTF instance");
@@ -1739,13 +1659,73 @@ namespace
             }
         }
 
-        // Point light editor
-        if (eng->_sceneManager)
+        ImGui::Separator();
+        // Delete selected model/primitive (uses last pick if valid, otherwise hover)
+        static std::string deleteStatus;
+        if (ImGui::Button("Delete selected"))
         {
-            ImGui::Separator();
-            ImGui::TextUnformatted("Point lights");
+            deleteStatus.clear();
+            const PickingSystem::PickInfo *pick = nullptr;
+            if (picking)
+            {
+                const auto &last = picking->last_pick();
+                const auto &hover = picking->hover_pick();
+                pick = last.valid ? &last : (hover.valid ? &hover : nullptr);
+            }
+            if (!pick || pick->ownerName.empty())
+            {
+                deleteStatus = "No selection to delete.";
+            }
+            else if (pick->ownerType == RenderObject::OwnerType::MeshInstance)
+            {
+                bool ok = eng->_sceneManager->removeMeshInstance(pick->ownerName);
+                if (ok && picking)
+                {
+                    picking->clear_owner_picks(RenderObject::OwnerType::MeshInstance, pick->ownerName);
+                }
+                deleteStatus = ok ? "Removed mesh instance: " + pick->ownerName
+                                  : "Mesh instance not found: " + pick->ownerName;
+            }
+            else if (pick->ownerType == RenderObject::OwnerType::GLTFInstance)
+            {
+                bool ok = eng->_sceneManager->removeGLTFInstance(pick->ownerName);
+                if (ok)
+                {
+                    deleteStatus = "Removed glTF instance: " + pick->ownerName;
+                    if (picking)
+                    {
+                        picking->clear_owner_picks(RenderObject::OwnerType::GLTFInstance, pick->ownerName);
+                    }
+                }
+                else
+                {
+                    deleteStatus = "glTF instance not found: " + pick->ownerName;
+                }
+            }
+            else
+            {
+                deleteStatus = "Cannot delete this object type (static scene).";
+            }
+        }
+        if (!deleteStatus.empty())
+        {
+            ImGui::TextUnformatted(deleteStatus.c_str());
+        }
+    }
 
-            SceneManager *sceneMgr = eng->_sceneManager.get();
+    // Lights editor (Point + Spot lights)
+    static void ui_lights(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_sceneManager)
+        {
+            ImGui::TextUnformatted("SceneManager not available");
+            return;
+        }
+
+        SceneManager *sceneMgr = eng->_sceneManager.get();
+
+        // Point light editor
+        ImGui::TextUnformatted("Point lights");
             const auto &lights = sceneMgr->getPointLights();
             ImGui::Text("Active lights: %zu", lights.size());
 
@@ -1939,62 +1919,21 @@ namespace
                 sceneMgr->clearSpotLights();
                 selectedSpot = -1;
             }
+    }
+
+    // Picking & Gizmo - picking info and transform editor
+    static void ui_picking_gizmo(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_sceneManager)
+        {
+            ImGui::TextUnformatted("SceneManager not available");
+            return;
         }
 
-        ImGui::Separator();
-        // Delete selected model/primitive (uses last pick if valid, otherwise hover)
-        static std::string deleteStatus;
-        if (ImGui::Button("Delete selected"))
-        {
-            deleteStatus.clear();
-            const PickingSystem::PickInfo *pick = nullptr;
-            if (picking)
-            {
-                const auto &last = picking->last_pick();
-                const auto &hover = picking->hover_pick();
-                pick = last.valid ? &last : (hover.valid ? &hover : nullptr);
-            }
-            if (!pick || pick->ownerName.empty())
-            {
-                deleteStatus = "No selection to delete.";
-            }
-            else if (pick->ownerType == RenderObject::OwnerType::MeshInstance)
-            {
-                bool ok = eng->_sceneManager->removeMeshInstance(pick->ownerName);
-                if (ok && picking)
-                {
-                    picking->clear_owner_picks(RenderObject::OwnerType::MeshInstance, pick->ownerName);
-                }
-                deleteStatus = ok ? "Removed mesh instance: " + pick->ownerName
-                                  : "Mesh instance not found: " + pick->ownerName;
-            }
-            else if (pick->ownerType == RenderObject::OwnerType::GLTFInstance)
-            {
-                bool ok = eng->_sceneManager->removeGLTFInstance(pick->ownerName);
-                if (ok)
-                {
-                    deleteStatus = "Removed glTF instance: " + pick->ownerName;
-                    if (picking)
-                    {
-                        picking->clear_owner_picks(RenderObject::OwnerType::GLTFInstance, pick->ownerName);
-                    }
-                }
-                else
-                {
-                    deleteStatus = "glTF instance not found: " + pick->ownerName;
-                }
-            }
-            else
-            {
-                deleteStatus = "Cannot delete this object type (static scene).";
-            }
-        }
-        if (!deleteStatus.empty())
-        {
-            ImGui::TextUnformatted(deleteStatus.c_str());
-        }
-        ImGui::Separator();
+        SceneManager *sceneMgr = eng->_sceneManager.get();
+        PickingSystem *picking = eng->picking();
 
+        // Last pick info
         if (picking && picking->last_pick().valid)
         {
             const auto &last = picking->last_pick();
@@ -2074,14 +2013,6 @@ namespace
 
         ImGui::Separator();
         ImGui::TextUnformatted("Object Gizmo (ImGuizmo)");
-
-        if (!eng->_sceneManager)
-        {
-            ImGui::TextUnformatted("SceneManager not available");
-            return;
-        }
-
-        SceneManager *sceneMgr = eng->_sceneManager.get();
 
         // Choose a pick to edit: prefer last pick, then hover.
         PickingSystem::PickInfo *pick = nullptr;
@@ -2299,11 +2230,11 @@ namespace
         PlanetSystem::PlanetBody *earth = planets->get_body(PlanetSystem::BodyID::Earth);
         PlanetSystem::PlanetBody *moon = planets->get_body(PlanetSystem::BodyID::Moon);
 
-        if (earth)
-        {
-            ImGui::Separator();
+	        if (earth)
+	        {
+	            ImGui::Separator();
 
-            bool vis = earth->visible;
+	            bool vis = earth->visible;
             if (ImGui::Checkbox("Render Earth", &vis))
             {
                 earth->visible = vis;
@@ -2322,20 +2253,103 @@ namespace
                 look_at_world(scene->getMainCamera(), earth->center_world);
             }
 
-            if (ImGui::Button("Teleport: 1000 km orbit"))
-            {
-                scene->getMainCamera().position_world =
-                    earth->center_world + WorldVec3(0.0, 0.0, earth->radius_m + 1.0e6);
-                look_at_world(scene->getMainCamera(), earth->center_world);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Teleport: 10 km above surface"))
-            {
-                scene->getMainCamera().position_world =
-                    earth->center_world + WorldVec3(0.0, 0.0, earth->radius_m + 1.0e4);
-                look_at_world(scene->getMainCamera(), earth->center_world);
-            }
-        }
+	            if (ImGui::Button("Teleport: 1000 km orbit"))
+	            {
+	                scene->getMainCamera().position_world =
+	                    earth->center_world + WorldVec3(0.0, 0.0, earth->radius_m + 1.0e6);
+	                look_at_world(scene->getMainCamera(), earth->center_world);
+	            }
+	            ImGui::SameLine();
+	            if (ImGui::Button("Teleport: 10 km above surface"))
+	            {
+	                scene->getMainCamera().position_world =
+	                    earth->center_world + WorldVec3(0.0, 0.0, earth->radius_m + 1.0e4);
+	                look_at_world(scene->getMainCamera(), earth->center_world);
+	            }
+
+	            ImGui::Separator();
+	            if (ImGui::CollapsingHeader("Earth LOD / Perf", ImGuiTreeNodeFlags_DefaultOpen))
+	            {
+	                auto settings = planets->earth_quadtree_settings();
+	                bool changed = false;
+
+	                int maxLevel = static_cast<int>(settings.max_level);
+	                if (ImGui::SliderInt("Max LOD level", &maxLevel, 0, 20))
+	                {
+	                    settings.max_level = static_cast<uint32_t>(std::max(0, maxLevel));
+	                    changed = true;
+	                }
+
+	                if (ImGui::SliderFloat("Target SSE (px)", &settings.target_sse_px, 4.0f, 128.0f, "%.1f"))
+	                {
+	                    settings.target_sse_px = std::max(settings.target_sse_px, 0.1f);
+	                    changed = true;
+	                }
+
+	                int maxPatches = static_cast<int>(settings.max_patches_visible);
+	                if (ImGui::SliderInt("Max visible patches", &maxPatches, 64, 20000))
+	                {
+	                    settings.max_patches_visible = static_cast<uint32_t>(std::max(6, maxPatches));
+	                    changed = true;
+	                }
+
+	                int createBudget = static_cast<int>(planets->earth_patch_create_budget_per_frame());
+	                if (ImGui::SliderInt("Patch create budget/frame", &createBudget, 0, 512))
+	                {
+	                    planets->set_earth_patch_create_budget_per_frame(static_cast<uint32_t>(std::max(0, createBudget)));
+	                }
+
+	                float createBudgetMs = planets->earth_patch_create_budget_ms();
+	                if (ImGui::DragFloat("Patch create budget (ms)", &createBudgetMs, 0.25f, 0.0f, 50.0f, "%.2f"))
+	                {
+	                    planets->set_earth_patch_create_budget_ms(std::max(0.0f, createBudgetMs));
+	                }
+
+	                int cacheMax = static_cast<int>(planets->earth_patch_cache_max());
+	                if (ImGui::SliderInt("Patch cache max", &cacheMax, 0, 50000))
+	                {
+	                    planets->set_earth_patch_cache_max(static_cast<uint32_t>(std::max(0, cacheMax)));
+	                }
+
+	                if (ImGui::Checkbox("Frustum cull", &settings.frustum_cull)) changed = true;
+	                if (ImGui::Checkbox("Horizon cull", &settings.horizon_cull)) changed = true;
+
+	                if (ImGui::Checkbox("RT guardrail (LOD floor)", &settings.rt_guardrail)) changed = true;
+	                if (settings.rt_guardrail)
+	                {
+	                    float maxEdge = static_cast<float>(settings.max_patch_edge_rt_m);
+	                    if (ImGui::DragFloat("RT max patch edge (m)", &maxEdge, 100.0f, 0.0f, 200000.0f, "%.0f"))
+	                    {
+	                        settings.max_patch_edge_rt_m = static_cast<double>(std::max(0.0f, maxEdge));
+	                        changed = true;
+	                    }
+
+	                    float maxAlt = static_cast<float>(settings.rt_guardrail_max_altitude_m);
+	                    if (ImGui::DragFloat("RT max altitude (m)", &maxAlt, 1000.0f, 0.0f, 2.0e6f, "%.0f"))
+	                    {
+	                        settings.rt_guardrail_max_altitude_m = static_cast<double>(std::max(0.0f, maxAlt));
+	                        changed = true;
+	                    }
+	                }
+
+	                if (changed)
+	                {
+	                    planets->set_earth_quadtree_settings(settings);
+	                }
+
+	                const PlanetSystem::EarthDebugStats &s = planets->earth_debug_stats();
+	                ImGui::Separator();
+	                ImGui::Text("Visible patches: %u  (est. tris: %u)", s.visible_patches, s.estimated_triangles);
+	                ImGui::Text("Cache size: %u  (created this frame: %u)", s.patch_cache_size, s.created_patches);
+	                ImGui::Text("Quadtree: max level used %u | visited %u | culled %u | budget-limited %u",
+	                            s.quadtree.max_level_used,
+	                            s.quadtree.nodes_visited,
+	                            s.quadtree.nodes_culled,
+	                            s.quadtree.splits_budget_limited);
+	                ImGui::Text("CPU ms: quadtree %.2f | create %.2f | emit %.2f | total %.2f",
+	                            s.ms_quadtree, s.ms_patch_create, s.ms_emit, s.ms_total);
+	            }
+	        }
 
         if (moon)
         {
@@ -2353,24 +2367,7 @@ namespace
 // Window visibility states for menu-bar toggles
 namespace
 {
-    struct DebugWindowStates
-    {
-        bool show_overview{false};
-        bool show_window{false};
-        bool show_background{false};
-        bool show_particles{false};
-        bool show_shadows{false};
-        bool show_render_graph{false};
-        bool show_pipelines{false};
-        bool show_ibl{false};
-        bool show_postfx{false};
-        bool show_scene{false};
-        bool show_camera{false};
-        bool show_planets{false};
-        bool show_async_assets{false};
-        bool show_textures{false};
-    };
-    static DebugWindowStates g_debug_windows;
+    static bool g_show_debug_window = false;
 } // namespace
 
 void vk_engine_draw_debug_ui(VulkanEngine *eng)
@@ -2384,23 +2381,7 @@ void vk_engine_draw_debug_ui(VulkanEngine *eng)
     {
         if (ImGui::BeginMenu("View"))
         {
-            ImGui::MenuItem("Overview", nullptr, &g_debug_windows.show_overview);
-            ImGui::MenuItem("Window", nullptr, &g_debug_windows.show_window);
-            ImGui::Separator();
-            ImGui::MenuItem("Scene", nullptr, &g_debug_windows.show_scene);
-            ImGui::MenuItem("Camera", nullptr, &g_debug_windows.show_camera);
-            ImGui::MenuItem("Planets", nullptr, &g_debug_windows.show_planets);
-            ImGui::MenuItem("Render Graph", nullptr, &g_debug_windows.show_render_graph);
-            ImGui::MenuItem("Pipelines", nullptr, &g_debug_windows.show_pipelines);
-            ImGui::Separator();
-            ImGui::MenuItem("Shadows", nullptr, &g_debug_windows.show_shadows);
-            ImGui::MenuItem("IBL", nullptr, &g_debug_windows.show_ibl);
-            ImGui::MenuItem("PostFX", nullptr, &g_debug_windows.show_postfx);
-            ImGui::MenuItem("Background", nullptr, &g_debug_windows.show_background);
-            ImGui::Separator();
-            ImGui::MenuItem("Particles", nullptr, &g_debug_windows.show_particles);
-            ImGui::MenuItem("Textures", nullptr, &g_debug_windows.show_textures);
-            ImGui::MenuItem("Async Assets", nullptr, &g_debug_windows.show_async_assets);
+            ImGui::MenuItem("Engine Debug", nullptr, &g_show_debug_window);
             ImGui::EndMenu();
         }
 
@@ -2414,129 +2395,112 @@ void vk_engine_draw_debug_ui(VulkanEngine *eng)
         ImGui::EndMainMenuBar();
     }
 
-    // Individual debug windows (only shown when toggled)
-    if (g_debug_windows.show_overview)
+    // Single consolidated debug window with tabs
+    if (g_show_debug_window)
     {
-        if (ImGui::Begin("Overview", &g_debug_windows.show_overview))
+        ImGui::SetNextWindowSize(ImVec2(800, 600), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Engine Debug", &g_show_debug_window))
         {
-            ui_overview(eng);
-        }
-        ImGui::End();
-    }
+            if (ImGui::BeginTabBar("DebugTabs", ImGuiTabBarFlags_None))
+            {
+                if (ImGui::BeginTabItem("Overview"))
+                {
+                    ui_overview(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_window)
-    {
-        if (ImGui::Begin("Window Settings", &g_debug_windows.show_window))
-        {
-            ui_window(eng);
-        }
-        ImGui::End();
-    }
+                if (ImGui::BeginTabItem("Scene Editor"))
+                {
+                    ui_scene_editor(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_background)
-    {
-        if (ImGui::Begin("Background", &g_debug_windows.show_background))
-        {
-            ui_background(eng);
-        }
-        ImGui::End();
-    }
+                if (ImGui::BeginTabItem("Lights"))
+                {
+                    ui_lights(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_particles)
-    {
-        if (ImGui::Begin("Particles", &g_debug_windows.show_particles))
-        {
-            ui_particles(eng);
-        }
-        ImGui::End();
-    }
+                if (ImGui::BeginTabItem("Picking & Gizmo"))
+                {
+                    ui_picking_gizmo(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_shadows)
-    {
-        if (ImGui::Begin("Shadows", &g_debug_windows.show_shadows))
-        {
-            ui_shadows(eng);
-        }
-        ImGui::End();
-    }
+                if (ImGui::BeginTabItem("Camera"))
+                {
+                    ui_camera(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_render_graph)
-    {
-        if (ImGui::Begin("Render Graph", &g_debug_windows.show_render_graph))
-        {
-            ui_render_graph(eng);
-        }
-        ImGui::End();
-    }
+                if (ImGui::BeginTabItem("Planets"))
+                {
+                    ui_planets(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_pipelines)
-    {
-        if (ImGui::Begin("Pipelines", &g_debug_windows.show_pipelines))
-        {
-            ui_pipelines(eng);
-        }
-        ImGui::End();
-    }
+                if (ImGui::BeginTabItem("Render Graph"))
+                {
+                    ui_render_graph(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_ibl)
-    {
-        if (ImGui::Begin("IBL", &g_debug_windows.show_ibl))
-        {
-            ui_ibl(eng);
-        }
-        ImGui::End();
-    }
+                if (ImGui::BeginTabItem("Pipelines"))
+                {
+                    ui_pipelines(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_postfx)
-    {
-        if (ImGui::Begin("PostFX", &g_debug_windows.show_postfx))
-        {
-            ui_postfx(eng);
-        }
-        ImGui::End();
-    }
+                if (ImGui::BeginTabItem("Shadows"))
+                {
+                    ui_shadows(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_scene)
-    {
-        if (ImGui::Begin("Scene", &g_debug_windows.show_scene))
-        {
-            ui_scene(eng);
-        }
-        ImGui::End();
-    }
+                if (ImGui::BeginTabItem("IBL"))
+                {
+                    ui_ibl(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_camera)
-    {
-        if (ImGui::Begin("Camera", &g_debug_windows.show_camera))
-        {
-            ui_camera(eng);
-        }
-        ImGui::End();
-    }
+                if (ImGui::BeginTabItem("PostFX"))
+                {
+                    ui_postfx(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_planets)
-    {
-        if (ImGui::Begin("Planets", &g_debug_windows.show_planets))
-        {
-            ui_planets(eng);
-        }
-        ImGui::End();
-    }
+                if (ImGui::BeginTabItem("Background"))
+                {
+                    ui_background(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_async_assets)
-    {
-        if (ImGui::Begin("Async Assets", &g_debug_windows.show_async_assets))
-        {
-            ui_async_assets(eng);
-        }
-        ImGui::End();
-    }
+                if (ImGui::BeginTabItem("Particles"))
+                {
+                    ui_particles(eng);
+                    ImGui::EndTabItem();
+                }
 
-    if (g_debug_windows.show_textures)
-    {
-        if (ImGui::Begin("Textures", &g_debug_windows.show_textures))
-        {
-            ui_textures(eng);
+                if (ImGui::BeginTabItem("Window"))
+                {
+                    ui_window(eng);
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Textures"))
+                {
+                    ui_textures(eng);
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Async Assets"))
+                {
+                    ui_async_assets(eng);
+                    ImGui::EndTabItem();
+                }
+
+                ImGui::EndTabBar();
+            }
         }
         ImGui::End();
     }

@@ -312,11 +312,6 @@ void SceneManager::update_scene()
         }
     }
 
-    if (_planetSystem)
-    {
-        _planetSystem->update_and_emit(*this, mainDrawContext);
-    }
-
     glm::mat4 view = mainCamera.getViewMatrix(_camera_position_local);
     // Use reversed infinite-Z projection (right-handed, -Z forward) to avoid far-plane clipping
     // on very large scenes. Vulkan clip space is 0..1 (GLM_FORCE_DEPTH_ZERO_TO_ONE) and requires Y flip.
@@ -435,6 +430,11 @@ void SceneManager::update_scene()
         // rtParams.x = N·L threshold for hybrid shadows
         // rtParams.y = shadows enabled flag (1.0 = on, 0.0 = off)
         sceneData.rtParams  = glm::vec4(ss.hybridRayNoLThreshold, ss.enabled ? 1.0f : 0.0f, 0.0f, 0.0f);
+    }
+
+    if (_planetSystem)
+    {
+        _planetSystem->update_and_emit(*this, mainDrawContext);
     }
 
     // Fill punctual lights into GPUSceneData

@@ -71,6 +71,7 @@ public:
     void update_scene();
 
     Camera &getMainCamera() { return mainCamera; }
+    const Camera &getMainCamera() const { return mainCamera; }
     CameraRig &getCameraRig() { return cameraRig; }
     const CameraRig &getCameraRig() const { return cameraRig; }
 
