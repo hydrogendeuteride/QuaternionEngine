@@ -16,11 +16,54 @@ namespace planet
             PatchKey key{};
         };
 
+        void compute_patch_visibility_terms(const PatchKey &key,
+                                            const glm::dvec3 &patch_center_dir,
+                                            double radius_m,
+                                            double &out_cos_patch_radius,
+                                            double &out_sin_patch_radius,
+                                            double &out_bound_radius_m)
+        {
+            glm::dvec3 c = patch_center_dir;
+            const double c_len2 = glm::dot(c, c);
+            if (!(c_len2 > 0.0))
+            {
+                c = glm::dvec3(0.0, 0.0, 1.0);
+            }
+            else
+            {
+                c *= (1.0 / std::sqrt(c_len2));
+            }
+
+            double u0 = 0.0, u1 = 0.0, v0 = 0.0, v1 = 0.0;
+            cubesphere_tile_uv_bounds(key.level, key.x, key.y, u0, u1, v0, v1);
+
+            // Conservative angular radius: max angle from patch center direction to any corner direction.
+            double min_dot = 1.0;
+            min_dot = std::min(min_dot, glm::dot(c, cubesphere_unit_direction(key.face, u0, v0)));
+            min_dot = std::min(min_dot, glm::dot(c, cubesphere_unit_direction(key.face, u1, v0)));
+            min_dot = std::min(min_dot, glm::dot(c, cubesphere_unit_direction(key.face, u0, v1)));
+            min_dot = std::min(min_dot, glm::dot(c, cubesphere_unit_direction(key.face, u1, v1)));
+
+            const double cos_a = glm::clamp(min_dot, -1.0, 1.0);
+            const double sin_a = std::sqrt(glm::max(0.0, 1.0 - cos_a * cos_a));
+
+            // Vertex positions are built as (unit_dir - patch_center_dir) * radius (chord length).
+            const double chord_r = radius_m * std::sqrt(glm::max(0.0, 2.0 - 2.0 * cos_a));
+
+            // Skirts extend inward; add a small safety margin so CPU culling stays conservative.
+            const double skirt_depth = cubesphere_skirt_depth_m(radius_m, key.level);
+
+            out_cos_patch_radius = cos_a;
+            out_sin_patch_radius = sin_a;
+            out_bound_radius_m = glm::max(1.0, chord_r + skirt_depth);
+        }
+
         bool is_patch_visible_horizon(const WorldVec3 &body_center_world,
                                       double radius_m,
                                       const WorldVec3 &camera_world,
                                       const glm::dvec3 &patch_center_dir,
-                                      double patch_edge_m)
+                                      double cos_patch_radius,
+                                      double sin_patch_radius)
         {
             const glm::dvec3 w = camera_world - body_center_world;
             const double d = glm::length(w);
@@ -36,15 +79,13 @@ namespace planet
             const double cos_h = glm::clamp(radius_m / d, 0.0, 1.0);
             const double sin_h = std::sqrt(glm::max(0.0, 1.0 - cos_h * cos_h));
 
-            // Expand horizon by patch angular radius to avoid culling near silhouettes.
-            const double half_diag_m = patch_edge_m * 0.7071067811865476; // sqrt(2)/2
-            const double ang = glm::clamp(half_diag_m / radius_m, 0.0, glm::pi<double>());
-            const double cos_a = std::cos(ang);
-            const double sin_a = std::sin(ang);
-
             // Visible if theta <= theta_h + ang:
             // cos(theta) >= cos(theta_h + ang)
-            const double cos_limit = cos_h * cos_a - sin_h * sin_a;
+            const double cos_limit = cos_h * cos_patch_radius - sin_h * sin_patch_radius;
+            if (!std::isfinite(cos_theta) || !std::isfinite(cos_limit))
+            {
+                return true; // fail-safe: avoid catastrophic full culls
+            }
             return cos_theta >= cos_limit;
         }
 
@@ -161,9 +202,22 @@ namespace planet
             const double patch_edge_m = cubesphere_patch_edge_m(radius_m, k.level);
             const glm::dvec3 patch_dir = cubesphere_patch_center_direction(k.face, k.level, k.x, k.y);
 
+            double cos_patch_radius = 1.0;
+            double sin_patch_radius = 0.0;
+            double patch_bound_r_m = 1.0;
+            if (_settings.horizon_cull || _settings.frustum_cull)
+            {
+                compute_patch_visibility_terms(k, patch_dir, radius_m, cos_patch_radius, sin_patch_radius, patch_bound_r_m);
+            }
+
             if (_settings.horizon_cull)
             {
-                if (!is_patch_visible_horizon(body_center_world, radius_m, camera_world, patch_dir, patch_edge_m))
+                if (!is_patch_visible_horizon(body_center_world,
+                                              radius_m,
+                                              camera_world,
+                                              patch_dir,
+                                              cos_patch_radius,
+                                              sin_patch_radius))
                 {
                     _stats.nodes_culled++;
                     continue;
@@ -176,7 +230,7 @@ namespace planet
             if (_settings.frustum_cull)
             {
                 const glm::vec3 patch_center_local = world_to_local(patch_center_world, origin_world);
-                const float bound_r = static_cast<float>(patch_edge_m * 0.7071067811865476);
+                const float bound_r = static_cast<float>(patch_bound_r_m);
                 if (!is_patch_visible_frustum(patch_center_local, bound_r, scene_data.viewproj))
                 {
                     _stats.nodes_culled++;
