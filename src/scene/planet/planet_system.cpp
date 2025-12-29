@@ -1,6 +1,7 @@
 #include "planet_system.h"
 
 #include <core/context.h>
+#include <core/device/resource.h>
 #include <core/frame/resources.h>
 #include <core/types.h>
 #include <core/assets/manager.h>
@@ -16,11 +17,41 @@
 #include <chrono>
 #include <cmath>
 
+#include "device.h"
+
 namespace
 {
     constexpr double kEarthRadiusM = 6378137.0;    // WGS84 equatorial radius
     constexpr double kMoonRadiusM = 1737400.0;     // mean radius
     constexpr double kMoonDistanceM = 384400000.0; // mean Earth-Moon distance
+
+    struct PatchBoundsData
+    {
+        glm::vec3 origin{0.0f};
+        glm::vec3 extents{0.5f};
+        float sphere_radius{0.5f};
+    };
+
+    PatchBoundsData compute_patch_bounds(const std::vector<Vertex> &vertices)
+    {
+        PatchBoundsData b{};
+        if (vertices.empty())
+        {
+            return b;
+        }
+
+        glm::vec3 minpos = vertices[0].position;
+        glm::vec3 maxpos = vertices[0].position;
+        for (const auto &v : vertices)
+        {
+            minpos = glm::min(minpos, v.position);
+            maxpos = glm::max(maxpos, v.position);
+        }
+        b.origin = (maxpos + minpos) * 0.5f;
+        b.extents = (maxpos - minpos) * 0.5f;
+        b.sphere_radius = glm::length(b.extents);
+        return b;
+    }
 
     GLTFMetallic_Roughness::MaterialConstants make_planet_constants()
     {
@@ -114,52 +145,193 @@ void PlanetSystem::ensure_bodies_created()
     _bodies.push_back(std::move(moon));
 }
 
-std::shared_ptr<MeshAsset> PlanetSystem::get_or_create_earth_patch_mesh(const PlanetBody &earth,
-                                                                        const planet::PatchKey &key)
+PlanetSystem::EarthPatch *PlanetSystem::find_earth_patch(const planet::PatchKey &key)
 {
-    auto it = _earth_patch_cache.find(key);
-    if (it != _earth_patch_cache.end())
+    auto it = _earth_patch_lookup.find(key);
+    if (it == _earth_patch_lookup.end())
     {
-        it->second.last_used_frame = _context ? _context->frameIndex : 0;
-        _earth_patch_lru.splice(_earth_patch_lru.begin(), _earth_patch_lru, it->second.lru_it);
-        return it->second.mesh;
+        return nullptr;
+    }
+    const uint32_t idx = it->second;
+    if (idx >= _earth_patches.size())
+    {
+        return nullptr;
+    }
+    return &_earth_patches[idx];
+}
+
+void PlanetSystem::ensure_earth_patch_index_buffer()
+{
+    if (_earth_patch_index_buffer.buffer != VK_NULL_HANDLE && _earth_patch_index_resolution == _earth_patch_resolution)
+    {
+        return;
     }
 
-    if (!_context || !_context->assets || !earth.material)
+    if (!_context)
     {
-        return {};
+        return;
     }
 
-    planet::CubeSpherePatchMesh mesh{};
-    planet::build_cubesphere_patch_mesh(mesh,
-                                        earth.center_world,
-                                        earth.radius_m,
-                                        key.face,
-                                        key.level,
-                                        key.x,
-                                        key.y,
-                                        _earth_patch_resolution,
-                                        debug_color_for_level(key.level),
-                                        /*generate_tangents=*/false);
+    ResourceManager *rm = _context->getResources();
+    if (!rm)
+    {
+        return;
+    }
 
-    const uint32_t face_i = static_cast<uint32_t>(key.face);
-    const std::string name =
-        "Planet_EarthPatch_f" + std::to_string(face_i) +
-        "_L" + std::to_string(key.level) +
-        "_X" + std::to_string(key.x) +
-        "_Y" + std::to_string(key.y);
+    // Resolution changed (or first init): clear existing patch cache and shared index buffer.
+    if (_earth_patch_index_buffer.buffer != VK_NULL_HANDLE)
+    {
+        FrameResources *frame = _context->currentFrame;
 
-    std::shared_ptr<MeshAsset> out =
-        _context->assets->createMesh(name, mesh.vertices, mesh.indices, earth.material, /*build_bvh=*/false);
+        // Destroy per-patch vertex buffers.
+        for (const auto &kv : _earth_patch_lookup)
+        {
+            const uint32_t idx = kv.second;
+            if (idx >= _earth_patches.size())
+            {
+                continue;
+            }
+            EarthPatch &p = _earth_patches[idx];
+            if (p.vertex_buffer.buffer == VK_NULL_HANDLE)
+            {
+                continue;
+            }
 
-    EarthPatchCacheEntry entry{};
-    entry.mesh = out;
-    entry.patch_center_dir = planet::cubesphere_patch_center_direction(key.face, key.level, key.x, key.y);
-    entry.last_used_frame = _context ? _context->frameIndex : 0;
-    _earth_patch_lru.push_front(key);
-    entry.lru_it = _earth_patch_lru.begin();
-    _earth_patch_cache.emplace(key, std::move(entry));
-    return out;
+            const AllocatedBuffer vb = p.vertex_buffer;
+            if (frame)
+            {
+                frame->_deletionQueue.push_function([rm, vb]() { rm->destroy_buffer(vb); });
+            }
+            else
+            {
+                rm->destroy_buffer(vb);
+            }
+        }
+
+        _earth_patch_lookup.clear();
+        _earth_patch_lru.clear();
+        _earth_patch_free.clear();
+        _earth_patches.clear();
+
+        const AllocatedBuffer ib = _earth_patch_index_buffer;
+        if (frame)
+        {
+            frame->_deletionQueue.push_function([rm, ib]() { rm->destroy_buffer(ib); });
+        }
+        else
+        {
+            rm->destroy_buffer(ib);
+        }
+        _earth_patch_index_buffer = {};
+        _earth_patch_index_count = 0;
+        _earth_patch_index_resolution = 0;
+    }
+
+    std::vector<uint32_t> indices;
+    planet::build_cubesphere_patch_indices(indices, _earth_patch_resolution);
+    _earth_patch_index_count = static_cast<uint32_t>(indices.size());
+    _earth_patch_index_buffer =
+        rm->upload_buffer(indices.data(),
+                          indices.size() * sizeof(uint32_t),
+                          VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                              VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
+    _earth_patch_index_resolution = _earth_patch_resolution;
+}
+
+PlanetSystem::EarthPatch *PlanetSystem::get_or_create_earth_patch(const PlanetBody &earth,
+                                                                  const planet::PatchKey &key,
+                                                                  uint32_t frame_index)
+{
+    if (EarthPatch *p = find_earth_patch(key))
+    {
+        p->last_used_frame = frame_index;
+        _earth_patch_lru.splice(_earth_patch_lru.begin(), _earth_patch_lru, p->lru_it);
+        return p;
+    }
+
+    if (!_context)
+    {
+        return nullptr;
+    }
+
+    ResourceManager *rm = _context->getResources();
+    DeviceManager *device = _context->getDevice();
+    if (!rm || !device)
+    {
+        return nullptr;
+    }
+
+    if (_earth_patch_index_buffer.buffer == VK_NULL_HANDLE || _earth_patch_index_count == 0)
+    {
+        return nullptr;
+    }
+
+    std::vector<Vertex> vertices;
+    const glm::dvec3 patch_center_dir =
+        planet::build_cubesphere_patch_vertices(vertices,
+                                                earth.radius_m,
+                                                key.face,
+                                                key.level,
+                                                key.x,
+                                                key.y,
+                                                _earth_patch_resolution,
+                                                debug_color_for_level(key.level));
+
+    if (vertices.empty())
+    {
+        return nullptr;
+    }
+
+    const PatchBoundsData bounds = compute_patch_bounds(vertices);
+
+    AllocatedBuffer vb =
+        rm->upload_buffer(vertices.data(),
+                          vertices.size() * sizeof(Vertex),
+                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                              VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
+    if (vb.buffer == VK_NULL_HANDLE)
+    {
+        return nullptr;
+    }
+
+    VkBufferDeviceAddressInfo addrInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    addrInfo.buffer = vb.buffer;
+    VkDeviceAddress addr = vkGetBufferDeviceAddress(device->device(), &addrInfo);
+
+    uint32_t idx = 0;
+    if (!_earth_patch_free.empty())
+    {
+        idx = _earth_patch_free.back();
+        _earth_patch_free.pop_back();
+    }
+    else
+    {
+        idx = static_cast<uint32_t>(_earth_patches.size());
+        _earth_patches.emplace_back();
+    }
+
+    if (idx >= _earth_patches.size())
+    {
+        return nullptr;
+    }
+
+    EarthPatch &p = _earth_patches[idx];
+    p.key = key;
+    p.state = EarthPatchState::Ready;
+    p.vertex_buffer = vb;
+    p.vertex_buffer_address = addr;
+    p.bounds_origin = bounds.origin;
+    p.bounds_extents = bounds.extents;
+    p.bounds_sphere_radius = bounds.sphere_radius;
+    p.patch_center_dir = patch_center_dir;
+    p.last_used_frame = frame_index;
+    _earth_patch_lru.push_front(idx);
+    p.lru_it = _earth_patch_lru.begin();
+
+    _earth_patch_lookup.emplace(key, idx);
+    return &p;
 }
 
 void PlanetSystem::trim_earth_patch_cache()
@@ -169,46 +341,72 @@ void PlanetSystem::trim_earth_patch_cache()
         return;
     }
 
-    if (_earth_patch_cache.size() <= static_cast<size_t>(_earth_patch_cache_max))
+    if (_earth_patch_lookup.size() <= static_cast<size_t>(_earth_patch_cache_max))
     {
         return;
     }
 
-    if (!_context || !_context->assets)
+    if (!_context)
     {
         return;
     }
 
-    AssetManager *assets = _context->assets;
+    ResourceManager *rm = _context->getResources();
+    if (!rm)
+    {
+        return;
+    }
+
     FrameResources *frame = _context->currentFrame;
+    const uint32_t now = _earth_patch_frame_stamp;
 
-    while (_earth_patch_cache.size() > static_cast<size_t>(_earth_patch_cache_max) && !_earth_patch_lru.empty())
+    size_t guard = 0;
+    const size_t guard_limit = _earth_patch_lru.size();
+
+    while (_earth_patch_lookup.size() > static_cast<size_t>(_earth_patch_cache_max) && !_earth_patch_lru.empty())
     {
-        const planet::PatchKey key = _earth_patch_lru.back();
-        _earth_patch_lru.pop_back();
-
-        auto it = _earth_patch_cache.find(key);
-        if (it == _earth_patch_cache.end())
+        if (guard++ >= guard_limit)
         {
+            // No evictable patches (all used this frame). Avoid thrashing.
+            break;
+        }
+
+        const uint32_t idx = _earth_patch_lru.back();
+        if (idx >= _earth_patches.size())
+        {
+            _earth_patch_lru.pop_back();
             continue;
         }
 
-        std::shared_ptr<MeshAsset> mesh = std::move(it->second.mesh);
-        _earth_patch_cache.erase(it);
-
-        if (!mesh)
+        EarthPatch &p = _earth_patches[idx];
+        if (p.last_used_frame == now)
         {
+            // Keep all patches referenced this frame.
+            _earth_patch_lru.splice(_earth_patch_lru.begin(), _earth_patch_lru, p.lru_it);
             continue;
         }
 
-        if (frame)
+        // Made progress: we found an evictable patch.
+        guard = 0;
+
+        _earth_patch_lru.erase(p.lru_it);
+        _earth_patch_lookup.erase(p.key);
+
+        if (p.vertex_buffer.buffer != VK_NULL_HANDLE)
         {
-            assets->removeMeshDeferred(mesh->name, frame->_deletionQueue);
+            const AllocatedBuffer vb = p.vertex_buffer;
+            if (frame)
+            {
+                frame->_deletionQueue.push_function([rm, vb]() { rm->destroy_buffer(vb); });
+            }
+            else
+            {
+                rm->destroy_buffer(vb);
+            }
         }
-        else
-        {
-            assets->removeMesh(mesh->name);
-        }
+
+        p = EarthPatch{};
+        _earth_patch_free.push_back(idx);
     }
 }
 
@@ -246,24 +444,24 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                                    logical_extent);
             const Clock::time_point t_q1 = Clock::now();
 
+            ensure_earth_patch_index_buffer();
+
             uint32_t created_patches = 0;
             double ms_patch_create = 0.0;
             const uint32_t max_create = _earth_patch_create_budget_per_frame;
             const double max_create_ms =
                 (_earth_patch_create_budget_ms > 0.0f) ? static_cast<double>(_earth_patch_create_budget_ms) : 0.0;
-            const uint32_t frame_index = _context->frameIndex;
+            const uint32_t frame_index = ++_earth_patch_frame_stamp;
 
             const Clock::time_point t_emit0 = Clock::now();
             for (const planet::PatchKey &k : _earth_quadtree.visible_leaves())
             {
-                EarthPatchCacheEntry *entry = nullptr;
+                EarthPatch *patch = find_earth_patch(k);
                 {
-                    auto it = _earth_patch_cache.find(k);
-                    if (it != _earth_patch_cache.end())
+                    if (patch)
                     {
-                        it->second.last_used_frame = frame_index;
-                        _earth_patch_lru.splice(_earth_patch_lru.begin(), _earth_patch_lru, it->second.lru_it);
-                        entry = &it->second;
+                        patch->last_used_frame = frame_index;
+                        _earth_patch_lru.splice(_earth_patch_lru.begin(), _earth_patch_lru, patch->lru_it);
                     }
                     else
                     {
@@ -272,53 +470,55 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                         if (!hit_count_budget && !hit_time_budget)
                         {
                             const Clock::time_point t_c0 = Clock::now();
-                            (void)get_or_create_earth_patch_mesh(*earth, k);
+                            patch = get_or_create_earth_patch(*earth, k, frame_index);
                             const Clock::time_point t_c1 = Clock::now();
 
-                            created_patches++;
+                            if (patch)
+                            {
+                                created_patches++;
+                            }
                             ms_patch_create += std::chrono::duration<double, std::milli>(t_c1 - t_c0).count();
-                        }
-
-                        auto it2 = _earth_patch_cache.find(k);
-                        if (it2 != _earth_patch_cache.end())
-                        {
-                            entry = &it2->second;
                         }
                     }
                 }
-                if (!entry || !entry->mesh || entry->mesh->surfaces.empty())
+                if (!patch ||
+                    patch->state != EarthPatchState::Ready ||
+                    patch->vertex_buffer.buffer == VK_NULL_HANDLE ||
+                    patch->vertex_buffer_address == 0 ||
+                    _earth_patch_index_buffer.buffer == VK_NULL_HANDLE ||
+                    _earth_patch_index_count == 0)
                 {
                     continue;
                 }
 
-                const std::shared_ptr<MeshAsset> &mesh = entry->mesh;
-
                 const WorldVec3 patch_center_world =
-                    earth->center_world + entry->patch_center_dir * earth->radius_m;
+                    earth->center_world + patch->patch_center_dir * earth->radius_m;
                 const glm::vec3 patch_center_local = world_to_local(patch_center_world, origin_world);
                 const glm::mat4 transform = glm::translate(glm::mat4(1.0f), patch_center_local);
 
-                uint32_t surface_index = 0;
-                for (const GeoSurface &surf : mesh->surfaces)
-                {
-                    RenderObject obj{};
-                    obj.indexCount = surf.count;
-                    obj.firstIndex = surf.startIndex;
-                    obj.indexBuffer = mesh->meshBuffers.indexBuffer.buffer;
-                    obj.vertexBuffer = mesh->meshBuffers.vertexBuffer.buffer;
-                    obj.vertexBufferAddress = mesh->meshBuffers.vertexBufferAddress;
-                    obj.material = surf.material ? &surf.material->data : nullptr;
-                    obj.bounds = surf.bounds;
-                    obj.transform = transform;
-                    // Planet terrain patches are not meaningful RT occluders; skip BLAS/TLAS builds.
-                    obj.sourceMesh = nullptr;
-                    obj.surfaceIndex = surface_index++;
-                    obj.objectID = draw_context.nextID++;
-                    obj.ownerType = RenderObject::OwnerType::MeshInstance;
-                    obj.ownerName = earth->name;
+                Bounds b{};
+                b.origin = patch->bounds_origin;
+                b.extents = patch->bounds_extents;
+                b.sphereRadius = patch->bounds_sphere_radius;
+                b.type = BoundsType::Box;
 
-                    draw_context.OpaqueSurfaces.push_back(obj);
-                }
+                RenderObject obj{};
+                obj.indexCount = _earth_patch_index_count;
+                obj.firstIndex = 0;
+                obj.indexBuffer = _earth_patch_index_buffer.buffer;
+                obj.vertexBuffer = patch->vertex_buffer.buffer;
+                obj.vertexBufferAddress = patch->vertex_buffer_address;
+                obj.material = earth->material ? &earth->material->data : nullptr;
+                obj.bounds = b;
+                obj.transform = transform;
+                // Planet terrain patches are not meaningful RT occluders; skip BLAS/TLAS builds.
+                obj.sourceMesh = nullptr;
+                obj.surfaceIndex = 0;
+                obj.objectID = draw_context.nextID++;
+                obj.ownerType = RenderObject::OwnerType::MeshInstance;
+                obj.ownerName = earth->name;
+
+                draw_context.OpaqueSurfaces.push_back(obj);
             }
             const Clock::time_point t_emit1 = Clock::now();
 
@@ -333,7 +533,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             _earth_debug_stats.quadtree = _earth_quadtree.stats();
             _earth_debug_stats.visible_patches = visible_patches;
             _earth_debug_stats.created_patches = created_patches;
-            _earth_debug_stats.patch_cache_size = static_cast<uint32_t>(_earth_patch_cache.size());
+            _earth_debug_stats.patch_cache_size = static_cast<uint32_t>(_earth_patch_lookup.size());
             _earth_debug_stats.estimated_triangles = estimated_tris;
             _earth_debug_stats.ms_quadtree = static_cast<float>(std::chrono::duration<double, std::milli>(t_q1 - t_q0).count());
             _earth_debug_stats.ms_patch_create = static_cast<float>(ms_patch_create);

@@ -74,16 +74,35 @@ public:
     void set_earth_patch_cache_max(uint32_t max_patches) { _earth_patch_cache_max = max_patches; }
 
 private:
-    struct EarthPatchCacheEntry
+    enum class EarthPatchState : uint8_t
     {
-        std::shared_ptr<MeshAsset> mesh;
+        Allocating = 0,
+        Ready = 1,
+    };
+
+    struct EarthPatch
+    {
+        planet::PatchKey key{};
+        EarthPatchState state = EarthPatchState::Allocating;
+
+        AllocatedBuffer vertex_buffer{};
+        VkDeviceAddress vertex_buffer_address = 0;
+
+        glm::vec3 bounds_origin{0.0f};
+        glm::vec3 bounds_extents{0.5f};
+        float bounds_sphere_radius = 0.5f;
+
         WorldVec3 patch_center_dir{0.0, 0.0, 1.0};
         uint32_t last_used_frame = 0;
-        std::list<planet::PatchKey>::iterator lru_it;
+        std::list<uint32_t>::iterator lru_it{};
     };
 
     void ensure_bodies_created();
-    std::shared_ptr<MeshAsset> get_or_create_earth_patch_mesh(const PlanetBody &earth, const planet::PatchKey &key);
+    EarthPatch *find_earth_patch(const planet::PatchKey &key);
+    EarthPatch *get_or_create_earth_patch(const PlanetBody &earth,
+                                          const planet::PatchKey &key,
+                                          uint32_t frame_index);
+    void ensure_earth_patch_index_buffer();
     void trim_earth_patch_cache();
 
     EngineContext *_context = nullptr;
@@ -94,8 +113,14 @@ private:
     planet::PlanetQuadtree _earth_quadtree{};
     planet::PlanetQuadtree::Settings _earth_quadtree_settings{};
     EarthDebugStats _earth_debug_stats{};
-    std::unordered_map<planet::PatchKey, EarthPatchCacheEntry, planet::PatchKeyHash> _earth_patch_cache;
-    std::list<planet::PatchKey> _earth_patch_lru;
+    std::unordered_map<planet::PatchKey, uint32_t, planet::PatchKeyHash> _earth_patch_lookup;
+    std::vector<EarthPatch> _earth_patches;
+    std::vector<uint32_t> _earth_patch_free;
+    std::list<uint32_t> _earth_patch_lru;
+    AllocatedBuffer _earth_patch_index_buffer{};
+    uint32_t _earth_patch_index_count = 0;
+    uint32_t _earth_patch_index_resolution = 0;
+    uint32_t _earth_patch_frame_stamp = 0;
     uint32_t _earth_patch_resolution = 33;
     uint32_t _earth_patch_create_budget_per_frame = 16;
     float _earth_patch_create_budget_ms = 2.0f;

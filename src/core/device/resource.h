@@ -94,6 +94,12 @@ public:
 
     GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
 
+    // Upload raw bytes into a GPU buffer. The destination buffer is created with the provided 'usage'
+    // flags plus VK_BUFFER_USAGE_TRANSFER_DST_BIT. Staging is handled internally and freed via the
+    // per-frame deletion queue when deferred uploads are enabled.
+    AllocatedBuffer upload_buffer(const void *data, size_t size, VkBufferUsageFlags usage,
+                                  VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY);
+
     void immediate_submit(std::function<void(VkCommandBuffer)> &&function) const;
 
     bool has_pending_uploads() const;

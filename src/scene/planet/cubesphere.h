@@ -55,6 +55,21 @@ namespace planet
         WorldVec3 patch_center_world{0.0, 0.0, 0.0};
     };
 
+    // Build the shared index list for a patch grid with skirts. Indices are identical for all
+    // patches as long as 'resolution' is constant.
+    void build_cubesphere_patch_indices(std::vector<uint32_t> &out_indices, uint32_t resolution);
+
+    // Build patch vertices (including skirts). Vertex positions are relative to the patch center on
+    // the sphere surface (computed from face/level/x/y). Returns the patch center direction.
+    glm::dvec3 build_cubesphere_patch_vertices(std::vector<Vertex> &out_vertices,
+                                               double radius_m,
+                                               CubeFace face,
+                                               uint32_t level,
+                                               uint32_t x,
+                                               uint32_t y,
+                                               uint32_t resolution,
+                                               const glm::vec4 &vertex_color);
+
     // Build a cube-sphere patch mesh with skirts. Vertex positions are relative to patch_center_world.
     void build_cubesphere_patch_mesh(CubeSpherePatchMesh &out,
                                      const WorldVec3 &center_world,

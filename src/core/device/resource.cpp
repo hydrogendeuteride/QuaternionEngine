@@ -359,6 +359,44 @@ GPUMeshBuffers ResourceManager::uploadMesh(std::span<uint32_t> indices, std::spa
     return newSurface;
 }
 
+AllocatedBuffer ResourceManager::upload_buffer(const void *data, size_t size, VkBufferUsageFlags usage,
+                                              VmaMemoryUsage memoryUsage)
+{
+    if (data == nullptr || size == 0)
+    {
+        return {};
+    }
+
+    AllocatedBuffer dst = create_buffer(size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, memoryUsage);
+
+    AllocatedBuffer staging = create_buffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                           VMA_MEMORY_USAGE_CPU_ONLY);
+
+    memcpy(staging.info.pMappedData, data, size);
+    vmaFlushAllocation(_deviceManager->allocator(), staging.allocation, 0, size);
+
+    PendingBufferUpload pending{};
+    pending.staging = staging;
+    pending.copies.push_back(BufferCopyRegion{
+        .destination = dst.buffer,
+        .dstOffset = 0,
+        .size = size,
+        .stagingOffset = 0,
+    });
+
+    {
+        std::lock_guard<std::mutex> lk(_pendingMutex);
+        _pendingBufferUploads.push_back(std::move(pending));
+    }
+
+    if (!_deferUploads)
+    {
+        process_queued_uploads_immediate();
+    }
+
+    return dst;
+}
+
 bool ResourceManager::has_pending_uploads() const
 {
     std::lock_guard<std::mutex> lk(_pendingMutex);

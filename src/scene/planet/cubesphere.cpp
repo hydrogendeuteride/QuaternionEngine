@@ -83,25 +83,104 @@ namespace planet
         return glm::max(10.0, 0.02 * edge_m);
     }
 
-    void build_cubesphere_patch_mesh(CubeSpherePatchMesh &out,
-                                     const WorldVec3 &center_world,
-                                     double radius_m,
-                                     CubeFace face,
-                                     uint32_t level,
-                                     uint32_t x,
-                                     uint32_t y,
-                                     uint32_t resolution,
-                                     const glm::vec4 &vertex_color,
-                                     bool generate_tangents)
+    void build_cubesphere_patch_indices(std::vector<uint32_t> &out_indices, uint32_t resolution)
     {
-        out.vertices.clear();
-        out.indices.clear();
-        out.patch_center_world = center_world;
+        out_indices.clear();
 
         if (resolution < 2)
         {
             return;
         }
+
+        const size_t grid_index_count =
+            static_cast<size_t>(resolution - 1u) * static_cast<size_t>(resolution - 1u) * 6u;
+        const size_t skirt_index_count = static_cast<size_t>(4u) * static_cast<size_t>(resolution - 1u) * 6u;
+        out_indices.reserve(grid_index_count + skirt_index_count);
+
+        // Base grid indices
+        for (uint32_t j = 0; j + 1 < resolution; ++j)
+        {
+            for (uint32_t i = 0; i + 1 < resolution; ++i)
+            {
+                const uint32_t i0 = j * resolution + i;
+                const uint32_t i1 = i0 + 1;
+                const uint32_t i2 = i0 + resolution;
+                const uint32_t i3 = i2 + 1;
+
+                // CCW winding when viewed from outside the sphere.
+                out_indices.push_back(i0);
+                out_indices.push_back(i1);
+                out_indices.push_back(i2);
+
+                out_indices.push_back(i2);
+                out_indices.push_back(i1);
+                out_indices.push_back(i3);
+            }
+        }
+
+        auto add_skirt_quads = [&](uint32_t base0, uint32_t base1, uint32_t skirt0, uint32_t skirt1)
+        {
+            out_indices.push_back(base0);
+            out_indices.push_back(base1);
+            out_indices.push_back(skirt0);
+
+            out_indices.push_back(skirt0);
+            out_indices.push_back(base1);
+            out_indices.push_back(skirt1);
+        };
+
+        const uint32_t base_vertex_count = resolution * resolution;
+        const uint32_t top_skirt_start = base_vertex_count + 0u * resolution;
+        const uint32_t right_skirt_start = base_vertex_count + 1u * resolution;
+        const uint32_t bottom_skirt_start = base_vertex_count + 2u * resolution;
+        const uint32_t left_skirt_start = base_vertex_count + 3u * resolution;
+
+        // Skirt indices: 4 edges, (N-1) segments each.
+        for (uint32_t i = 0; i + 1 < resolution; ++i)
+        {
+            // Top edge
+            add_skirt_quads(0u * resolution + i,
+                            0u * resolution + (i + 1u),
+                            top_skirt_start + i,
+                            top_skirt_start + (i + 1u));
+            // Bottom edge
+            add_skirt_quads((resolution - 1u) * resolution + i,
+                            (resolution - 1u) * resolution + (i + 1u),
+                            bottom_skirt_start + i,
+                            bottom_skirt_start + (i + 1u));
+        }
+        for (uint32_t j = 0; j + 1 < resolution; ++j)
+        {
+            // Left edge
+            add_skirt_quads(j * resolution + 0u,
+                            (j + 1u) * resolution + 0u,
+                            left_skirt_start + j,
+                            left_skirt_start + (j + 1u));
+            // Right edge
+            add_skirt_quads(j * resolution + (resolution - 1u),
+                            (j + 1u) * resolution + (resolution - 1u),
+                            right_skirt_start + j,
+                            right_skirt_start + (j + 1u));
+        }
+    }
+
+    glm::dvec3 build_cubesphere_patch_vertices(std::vector<Vertex> &out_vertices,
+                                               double radius_m,
+                                               CubeFace face,
+                                               uint32_t level,
+                                               uint32_t x,
+                                               uint32_t y,
+                                               uint32_t resolution,
+                                               const glm::vec4 &vertex_color)
+    {
+        out_vertices.clear();
+
+        if (resolution < 2)
+        {
+            return glm::dvec3(0.0, 0.0, 1.0);
+        }
+
+        const glm::dvec3 patch_center_dir = cubesphere_patch_center_direction(face, level, x, y);
 
         const double skirt_depth_m = cubesphere_skirt_depth_m(radius_m, level);
         const double skirt_radius_m = glm::max(0.0, radius_m - skirt_depth_m);
@@ -109,12 +188,9 @@ namespace planet
         double u0 = 0.0, u1 = 0.0, v0 = 0.0, v1 = 0.0;
         cubesphere_tile_uv_bounds(level, x, y, u0, u1, v0, v1);
 
-        const glm::dvec3 patch_center_dir = cubesphere_patch_center_direction(face, level, x, y);
-        out.patch_center_world = center_world + patch_center_dir * radius_m;
-
         const uint32_t base_vertex_count = resolution * resolution;
         const uint32_t skirt_vertex_count = 4u * resolution;
-        out.vertices.resize(static_cast<size_t>(base_vertex_count) + static_cast<size_t>(skirt_vertex_count));
+        out_vertices.resize(static_cast<size_t>(base_vertex_count) + static_cast<size_t>(skirt_vertex_count));
 
         const double inv = 1.0 / static_cast<double>(resolution - 1u);
         const double du = (u1 - u0) * inv;
@@ -145,26 +221,26 @@ namespace planet
                 vert.tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
 
                 const uint32_t idx = j * resolution + i;
-                out.vertices[idx] = vert;
+                out_vertices[idx] = vert;
             }
         }
 
         auto add_skirt_vertex = [&](uint32_t base_index, uint32_t skirt_index)
         {
-            const glm::vec3 n = out.vertices[base_index].normal;
+            const glm::vec3 n = out_vertices[base_index].normal;
             const glm::dvec3 unit_dir(static_cast<double>(n.x),
                                       static_cast<double>(n.y),
                                       static_cast<double>(n.z));
             const glm::dvec3 delta_d = unit_dir * skirt_radius_m - patch_center_dir * radius_m;
 
-            Vertex vert = out.vertices[base_index];
+            Vertex vert = out_vertices[base_index];
             vert.position = glm::vec3(static_cast<float>(delta_d.x),
                                       static_cast<float>(delta_d.y),
                                       static_cast<float>(delta_d.z));
             vert.normal = glm::vec3(static_cast<float>(unit_dir.x),
                                     static_cast<float>(unit_dir.y),
                                     static_cast<float>(unit_dir.z));
-            out.vertices[skirt_index] = vert;
+            out_vertices[skirt_index] = vert;
         };
 
         const uint32_t top_skirt_start = base_vertex_count + 0u * resolution;
@@ -193,70 +269,34 @@ namespace planet
             add_skirt_vertex(j * resolution + 0u, left_skirt_start + j);
         }
 
-        const size_t grid_index_count =
-            static_cast<size_t>(resolution - 1u) * static_cast<size_t>(resolution - 1u) * 6u;
-        const size_t skirt_index_count = static_cast<size_t>(4u) * static_cast<size_t>(resolution - 1u) * 6u;
-        out.indices.reserve(grid_index_count + skirt_index_count);
+        return patch_center_dir;
+    }
 
-        // Base grid indices
-        for (uint32_t j = 0; j + 1 < resolution; ++j)
+    void build_cubesphere_patch_mesh(CubeSpherePatchMesh &out,
+                                     const WorldVec3 &center_world,
+                                     double radius_m,
+                                     CubeFace face,
+                                     uint32_t level,
+                                     uint32_t x,
+                                     uint32_t y,
+                                     uint32_t resolution,
+                                     const glm::vec4 &vertex_color,
+                                     bool generate_tangents)
+    {
+        out.vertices.clear();
+        out.indices.clear();
+        out.patch_center_world = center_world;
+
+        if (resolution < 2)
         {
-            for (uint32_t i = 0; i + 1 < resolution; ++i)
-            {
-                const uint32_t i0 = j * resolution + i;
-                const uint32_t i1 = i0 + 1;
-                const uint32_t i2 = i0 + resolution;
-                const uint32_t i3 = i2 + 1;
-
-                // CCW winding when viewed from outside the sphere.
-                out.indices.push_back(i0);
-                out.indices.push_back(i1);
-                out.indices.push_back(i2);
-
-                out.indices.push_back(i2);
-                out.indices.push_back(i1);
-                out.indices.push_back(i3);
-            }
+            return;
         }
 
-        auto add_skirt_quads = [&](uint32_t base0, uint32_t base1, uint32_t skirt0, uint32_t skirt1)
-        {
-            out.indices.push_back(base0);
-            out.indices.push_back(base1);
-            out.indices.push_back(skirt0);
+        const glm::dvec3 patch_center_dir =
+            build_cubesphere_patch_vertices(out.vertices, radius_m, face, level, x, y, resolution, vertex_color);
+        build_cubesphere_patch_indices(out.indices, resolution);
 
-            out.indices.push_back(skirt0);
-            out.indices.push_back(base1);
-            out.indices.push_back(skirt1);
-        };
-
-        // Skirt indices: 4 edges, (N-1) segments each.
-        for (uint32_t i = 0; i + 1 < resolution; ++i)
-        {
-            // Top edge
-            add_skirt_quads(0u * resolution + i,
-                            0u * resolution + (i + 1u),
-                            top_skirt_start + i,
-                            top_skirt_start + (i + 1u));
-            // Bottom edge
-            add_skirt_quads((resolution - 1u) * resolution + i,
-                            (resolution - 1u) * resolution + (i + 1u),
-                            bottom_skirt_start + i,
-                            bottom_skirt_start + (i + 1u));
-        }
-        for (uint32_t j = 0; j + 1 < resolution; ++j)
-        {
-            // Left edge
-            add_skirt_quads(j * resolution + 0u,
-                            (j + 1u) * resolution + 0u,
-                            left_skirt_start + j,
-                            left_skirt_start + (j + 1u));
-            // Right edge
-            add_skirt_quads(j * resolution + (resolution - 1u),
-                            (j + 1u) * resolution + (resolution - 1u),
-                            right_skirt_start + j,
-                            right_skirt_start + (j + 1u));
-        }
+        out.patch_center_world = center_world + patch_center_dir * radius_m;
 
         if (generate_tangents)
         {
