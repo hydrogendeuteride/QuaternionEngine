@@ -835,8 +835,38 @@ namespace
 
             if (pick.ownerType == RenderObject::OwnerType::MeshInstance)
             {
-                target.type = CameraTargetType::MeshInstance;
-                target.name = pick.ownerName;
+                // Many procedural objects (planets etc.) tag draws as "MeshInstance" for picking,
+                // but they don't exist in SceneManager::dynamicMeshInstances. Only use a
+                // MeshInstance camera target if it resolves.
+                WorldVec3 t{};
+                glm::quat r{};
+                glm::vec3 s{};
+                if (sceneMgr->getMeshInstanceTRSWorld(pick.ownerName, t, r, s))
+                {
+                    target.type = CameraTargetType::MeshInstance;
+                    target.name = pick.ownerName;
+                }
+                else if (PlanetSystem *planets = sceneMgr->get_planet_system())
+                {
+                    if (PlanetSystem::PlanetBody *body = planets->find_body_by_name(pick.ownerName))
+                    {
+                        target.type = CameraTargetType::WorldPoint;
+                        target.world_point = body->center_world;
+                        target.name = body->name;
+                    }
+                    else
+                    {
+                        target.type = CameraTargetType::WorldPoint;
+                        target.world_point = pick.worldPos;
+                        target.name.clear();
+                    }
+                }
+                else
+                {
+                    target.type = CameraTargetType::WorldPoint;
+                    target.world_point = pick.worldPos;
+                    target.name.clear();
+                }
             }
             else if (pick.ownerType == RenderObject::OwnerType::GLTFInstance)
             {
@@ -920,7 +950,9 @@ namespace
                 target_from_last_pick(s.target);
             }
             ImGui::InputDouble("Distance", &s.distance, 0.1, 1.0, "%.3f");
-            s.distance = std::clamp(s.distance, 0.2, 100000.0);
+            s.distance = std::clamp(s.distance,
+                                    OrbitCameraSettings::kMinDistance,
+                                    OrbitCameraSettings::kMaxDistance);
             float yawDeg = glm::degrees(s.yaw);
             float pitchDeg = glm::degrees(s.pitch);
             if (ImGui::SliderFloat("Yaw (deg)", &yawDeg, -180.0f, 180.0f))

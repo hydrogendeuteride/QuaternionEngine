@@ -182,6 +182,19 @@ PlanetSystem::PlanetBody *PlanetSystem::get_body(BodyID id)
     return &_bodies[i];
 }
 
+PlanetSystem::PlanetBody *PlanetSystem::find_body_by_name(std::string_view name)
+{
+    ensure_bodies_created();
+    for (PlanetBody &b : _bodies)
+    {
+        if (b.name == name)
+        {
+            return &b;
+        }
+    }
+    return nullptr;
+}
+
 void PlanetSystem::ensure_bodies_created()
 {
     if (!_bodies.empty())

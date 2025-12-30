@@ -9,6 +9,7 @@
 #include <list>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -61,6 +62,7 @@ public:
 
     const PlanetBody *get_body(BodyID id) const;
     PlanetBody *get_body(BodyID id);
+    PlanetBody *find_body_by_name(std::string_view name);
     const std::vector<PlanetBody> &bodies() const { return _bodies; }
 
     const planet::PlanetQuadtree::Settings &earth_quadtree_settings() const { return _earth_quadtree_settings; }

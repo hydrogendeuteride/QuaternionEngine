@@ -14,6 +14,7 @@
 #include "scene/vk_scene.h"
 #include "scene/camera.h"
 #include "scene/camera/camera_rig.h"
+#include "scene/planet/planet_system.h"
 
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
@@ -1821,8 +1822,35 @@ bool Engine::set_camera_target_from_last_pick()
     ::CameraTarget t;
     if (pick.ownerType == RenderObject::OwnerType::MeshInstance)
     {
-        t.type = ::CameraTargetType::MeshInstance;
-        t.name = pick.ownerName;
+        // RenderObject::OwnerType::MeshInstance is also used for some procedural objects
+        // (planets etc.) which don't exist in SceneManager::dynamicMeshInstances.
+        WorldVec3 inst_t{};
+        glm::quat inst_r{};
+        glm::vec3 inst_s{};
+        if (_engine->_sceneManager->getMeshInstanceTRSWorld(pick.ownerName, inst_t, inst_r, inst_s))
+        {
+            t.type = ::CameraTargetType::MeshInstance;
+            t.name = pick.ownerName;
+        }
+        else if (PlanetSystem *planets = _engine->_sceneManager->get_planet_system())
+        {
+            if (PlanetSystem::PlanetBody *body = planets->find_body_by_name(pick.ownerName))
+            {
+                t.type = ::CameraTargetType::WorldPoint;
+                t.name = body->name;
+                t.world_point = body->center_world;
+            }
+            else
+            {
+                t.type = ::CameraTargetType::WorldPoint;
+                t.world_point = pick.worldPos;
+            }
+        }
+        else
+        {
+            t.type = ::CameraTargetType::WorldPoint;
+            t.world_point = pick.worldPos;
+        }
     }
     else if (pick.ownerType == RenderObject::OwnerType::GLTFInstance)
     {

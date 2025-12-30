@@ -102,7 +102,9 @@ void OrbitCameraMode::process_input(SceneManager & /*scene*/,
             else
             {
                 const double factor = std::pow(1.15, -static_cast<double>(steps));
-                _settings.distance = std::clamp(_settings.distance * factor, 0.2, 100000.0);
+                _settings.distance = std::clamp(_settings.distance * factor,
+                                                OrbitCameraSettings::kMinDistance,
+                                                OrbitCameraSettings::kMaxDistance);
             }
         }
     }
@@ -137,7 +139,7 @@ void OrbitCameraMode::update(SceneManager &scene, Camera &camera, float /*dt*/)
                              glm::half_pi<float>() - 0.01f);
     _settings.yaw = yaw;
     _settings.pitch = pitch;
-    double dist = std::max(0.2, _settings.distance);
+    double dist = std::max(OrbitCameraSettings::kMinDistance, _settings.distance);
 
     glm::quat yaw_q = glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f));
     glm::vec3 right = glm::rotate(yaw_q, glm::vec3(1.0f, 0.0f, 0.0f));
