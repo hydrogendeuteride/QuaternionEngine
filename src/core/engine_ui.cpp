@@ -2273,6 +2273,12 @@ namespace
 	                auto settings = planets->earth_quadtree_settings();
 	                bool changed = false;
 
+                    bool tint = planets->earth_debug_tint_patches_by_lod();
+                    if (ImGui::Checkbox("Debug: tint patches by LOD", &tint))
+                    {
+                        planets->set_earth_debug_tint_patches_by_lod(tint);
+                    }
+
 	                int maxLevel = static_cast<int>(settings.max_level);
 	                if (ImGui::SliderInt("Max LOD level", &maxLevel, 0, 20))
 	                {

@@ -5,6 +5,7 @@
 #include <scene/planet/planet_quadtree.h>
 
 #include <cstdint>
+#include <array>
 #include <list>
 #include <memory>
 #include <string>
@@ -75,6 +76,9 @@ public:
     uint32_t earth_patch_cache_max() const { return _earth_patch_cache_max; }
     void set_earth_patch_cache_max(uint32_t max_patches) { _earth_patch_cache_max = max_patches; }
 
+    bool earth_debug_tint_patches_by_lod() const { return _earth_debug_tint_patches_by_lod; }
+    void set_earth_debug_tint_patches_by_lod(bool enabled);
+
 private:
     enum class EarthPatchState : uint8_t
     {
@@ -89,8 +93,6 @@ private:
 
         AllocatedBuffer vertex_buffer{};
         VkDeviceAddress vertex_buffer_address = 0;
-
-        MaterialInstance material_instance{};
 
         glm::vec3 bounds_origin{0.0f};
         glm::vec3 bounds_extents{0.5f};
@@ -109,7 +111,8 @@ private:
     void ensure_earth_patch_index_buffer();
     void ensure_earth_patch_material_layout();
     void ensure_earth_patch_material_constants_buffer();
-    void ensure_earth_patch_material_instance(EarthPatch &patch, const PlanetBody &earth);
+    void ensure_earth_face_materials(const PlanetBody &earth);
+    void clear_earth_patch_cache();
     void trim_earth_patch_cache();
 
     EngineContext *_context = nullptr;
@@ -132,10 +135,14 @@ private:
     DescriptorAllocatorGrowable _earth_patch_material_allocator{};
     bool _earth_patch_material_allocator_initialized = false;
     AllocatedBuffer _earth_patch_material_constants_buffer{};
+    std::array<MaterialInstance, 6> _earth_face_materials{};
 
     uint32_t _earth_patch_frame_stamp = 0;
     uint32_t _earth_patch_resolution = 33;
     uint32_t _earth_patch_create_budget_per_frame = 16;
     float _earth_patch_create_budget_ms = 2.0f;
     uint32_t _earth_patch_cache_max = 2048;
+
+    bool _earth_debug_tint_patches_by_lod = false;
+    bool _earth_patch_cache_dirty = false;
 };

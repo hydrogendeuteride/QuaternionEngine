@@ -192,6 +192,9 @@ namespace planet
         const uint32_t skirt_vertex_count = 4u * resolution;
         out_vertices.resize(static_cast<size_t>(base_vertex_count) + static_cast<size_t>(skirt_vertex_count));
 
+        const uint32_t tiles_per_axis = (level < 31u) ? (1u << level) : 1u;
+        const double inv_tiles = (tiles_per_axis > 0u) ? (1.0 / static_cast<double>(tiles_per_axis)) : 1.0;
+
         const double inv = 1.0 / static_cast<double>(resolution - 1u);
         const double du = (u1 - u0) * inv;
         const double dv = (v1 - v0) * inv;
@@ -215,8 +218,13 @@ namespace planet
                 vert.normal = glm::vec3(static_cast<float>(unit_dir.x),
                                         static_cast<float>(unit_dir.y),
                                         static_cast<float>(unit_dir.z));
-                vert.uv_x = s;
-                vert.uv_y = t;
+
+                // UVs cover the entire cube face (0..1) so all patches on this face
+                // sample from a single per-face texture.
+                const double u_face = (static_cast<double>(x) + static_cast<double>(s)) * inv_tiles;
+                const double v_face = (static_cast<double>(y) + static_cast<double>(t)) * inv_tiles;
+                vert.uv_x = static_cast<float>(u_face);
+                vert.uv_y = static_cast<float>(v_face);
                 vert.color = vertex_color;
                 vert.tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
 

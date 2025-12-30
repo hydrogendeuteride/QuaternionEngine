@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <filesystem>
 
 #include "device.h"
 
@@ -79,6 +78,16 @@ void PlanetSystem::init(EngineContext *context)
     _context = context;
 }
 
+void PlanetSystem::set_earth_debug_tint_patches_by_lod(bool enabled)
+{
+    if (_earth_debug_tint_patches_by_lod == enabled)
+    {
+        return;
+    }
+    _earth_debug_tint_patches_by_lod = enabled;
+    _earth_patch_cache_dirty = true;
+}
+
 void PlanetSystem::cleanup()
 {
     if (!_context)
@@ -89,11 +98,11 @@ void PlanetSystem::cleanup()
     TextureCache *textures = _context->textures;
     if (textures)
     {
-        for (EarthPatch &p : _earth_patches)
+        for (MaterialInstance &mat : _earth_face_materials)
         {
-            if (p.material_instance.materialSet != VK_NULL_HANDLE)
+            if (mat.materialSet != VK_NULL_HANDLE)
             {
-                textures->unwatchSet(p.material_instance.materialSet);
+                textures->unwatchSet(mat.materialSet);
             }
         }
     }
@@ -146,6 +155,7 @@ void PlanetSystem::cleanup()
     _earth_patch_lru.clear();
     _earth_patch_free.clear();
     _earth_patches.clear();
+    _earth_face_materials = {};
 
     _earth_patch_index_count = 0;
     _earth_patch_index_resolution = 0;
@@ -235,6 +245,46 @@ PlanetSystem::EarthPatch *PlanetSystem::find_earth_patch(const planet::PatchKey 
     return &_earth_patches[idx];
 }
 
+void PlanetSystem::clear_earth_patch_cache()
+{
+    if (!_context)
+    {
+        return;
+    }
+
+    ResourceManager *rm = _context->getResources();
+    FrameResources *frame = _context->currentFrame;
+
+    if (rm)
+    {
+        for (EarthPatch &p : _earth_patches)
+        {
+            if (p.vertex_buffer.buffer == VK_NULL_HANDLE)
+            {
+                continue;
+            }
+
+            const AllocatedBuffer vb = p.vertex_buffer;
+            if (frame)
+            {
+                frame->_deletionQueue.push_function([rm, vb]() { rm->destroy_buffer(vb); });
+            }
+            else
+            {
+                rm->destroy_buffer(vb);
+            }
+
+            p.vertex_buffer = {};
+            p.vertex_buffer_address = 0;
+        }
+    }
+
+    _earth_patch_lookup.clear();
+    _earth_patch_lru.clear();
+    _earth_patch_free.clear();
+    _earth_patches.clear();
+}
+
 void PlanetSystem::ensure_earth_patch_index_buffer()
 {
     if (_earth_patch_index_buffer.buffer != VK_NULL_HANDLE && _earth_patch_index_resolution == _earth_patch_resolution)
@@ -257,7 +307,6 @@ void PlanetSystem::ensure_earth_patch_index_buffer()
     if (_earth_patch_index_buffer.buffer != VK_NULL_HANDLE)
     {
         FrameResources *frame = _context->currentFrame;
-        TextureCache *textures = _context->textures;
 
         // Destroy per-patch vertex buffers.
         for (const auto &kv : _earth_patch_lookup)
@@ -286,28 +335,8 @@ void PlanetSystem::ensure_earth_patch_index_buffer()
 
         _earth_patch_lookup.clear();
         _earth_patch_lru.clear();
-
-        if (textures)
-        {
-            for (EarthPatch &p : _earth_patches)
-            {
-                if (p.material_instance.materialSet != VK_NULL_HANDLE)
-                {
-                    textures->unwatchSet(p.material_instance.materialSet);
-                }
-            }
-        }
-
         _earth_patch_free.clear();
-        _earth_patch_free.reserve(_earth_patches.size());
-        for (uint32_t idx = 0; idx < static_cast<uint32_t>(_earth_patches.size()); ++idx)
-        {
-            EarthPatch &p = _earth_patches[idx];
-            const VkDescriptorSet keep_set = p.material_instance.materialSet;
-            p = EarthPatch{};
-            p.material_instance.materialSet = keep_set;
-            _earth_patch_free.push_back(idx);
-        }
+        _earth_patches.clear();
 
         const AllocatedBuffer ib = _earth_patch_index_buffer;
         if (frame)
@@ -408,7 +437,7 @@ void PlanetSystem::ensure_earth_patch_material_constants_buffer()
     }
 }
 
-void PlanetSystem::ensure_earth_patch_material_instance(EarthPatch &patch, const PlanetBody &earth)
+void PlanetSystem::ensure_earth_face_materials(const PlanetBody &earth)
 {
     if (!_context || !earth.material)
     {
@@ -418,6 +447,7 @@ void PlanetSystem::ensure_earth_patch_material_instance(EarthPatch &patch, const
     DeviceManager *device = _context->getDevice();
     SamplerManager *samplers = _context->getSamplers();
     AssetManager *assets = _context->assets;
+    TextureCache *textures = _context->textures;
     if (!device || !assets)
     {
         return;
@@ -438,23 +468,18 @@ void PlanetSystem::ensure_earth_patch_material_instance(EarthPatch &patch, const
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6},
         };
-        _earth_patch_material_allocator.init(device->device(), 128, sizes);
+        _earth_patch_material_allocator.init(device->device(), 16, sizes);
         _earth_patch_material_allocator_initialized = true;
     }
-
-    if (patch.material_instance.materialSet == VK_NULL_HANDLE)
-    {
-        patch.material_instance.materialSet =
-            _earth_patch_material_allocator.allocate(device->device(), _earth_patch_material_layout);
-    }
-
-    patch.material_instance.pipeline = earth.material->data.pipeline;
-    patch.material_instance.passType = earth.material->data.passType;
 
     VkSampler tileSampler = samplers ? samplers->linearClampEdge() : VK_NULL_HANDLE;
     if (tileSampler == VK_NULL_HANDLE && samplers)
     {
         tileSampler = samplers->defaultLinear();
+    }
+    if (tileSampler == VK_NULL_HANDLE)
+    {
+        return;
     }
 
     VkImageView checker = assets->fallback_checkerboard_view();
@@ -467,91 +492,78 @@ void PlanetSystem::ensure_earth_patch_material_instance(EarthPatch &patch, const
     if (flatNormal == VK_NULL_HANDLE) flatNormal = white;
     if (black == VK_NULL_HANDLE) black = white;
 
-    if (patch.material_instance.materialSet != VK_NULL_HANDLE)
-    {
-        DescriptorWriter writer;
-        writer.write_buffer(0,
-                            _earth_patch_material_constants_buffer.buffer,
-                            sizeof(GLTFMetallic_Roughness::MaterialConstants),
-                            0,
-                            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-        writer.write_image(1,
-                           checker,
-                           tileSampler,
-                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.write_image(2,
-                           white,
-                           tileSampler,
-                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.write_image(3,
-                           flatNormal,
-                           tileSampler,
-                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.write_image(4,
-                           white,
-                           tileSampler,
-                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.write_image(5,
-                           black,
-                           tileSampler,
-                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.update_set(device->device(), patch.material_instance.materialSet);
-    }
-
-    // Per-patch tiled textures via TextureCache (albedo only for now).
-    if (_context->textures && tileSampler != VK_NULL_HANDLE && patch.material_instance.materialSet != VK_NULL_HANDLE)
-    {
-        auto face_legacy = [](planet::CubeFace f) -> const char * {
-            switch (f)
-            {
-                case planet::CubeFace::PosX: return "px";
-                case planet::CubeFace::NegX: return "nx";
-                case planet::CubeFace::PosY: return "py";
-                case planet::CubeFace::NegY: return "ny";
-                case planet::CubeFace::PosZ: return "pz";
-                case planet::CubeFace::NegZ: return "nz";
-            }
-            return "px";
-        };
-
-        const planet::PatchKey &k = patch.key;
-        const uint32_t face_index = static_cast<uint32_t>(k.face);
-
-        std::vector<std::string> candidates;
-        candidates.reserve(2);
-        candidates.push_back(fmt::format("planets/earth/albedo/face{}/L{}/X{}_Y{}.ktx2", face_index, k.level, k.x, k.y));
-        if (k.level == 0u && k.x == 0u && k.y == 0u)
+    auto face_legacy = [](planet::CubeFace f) -> const char * {
+        switch (f)
         {
-            candidates.push_back(fmt::format("planets/earth/albedo/L0/{}.ktx2", face_legacy(k.face)));
+            case planet::CubeFace::PosX: return "px";
+            case planet::CubeFace::NegX: return "nx";
+            case planet::CubeFace::PosY: return "py";
+            case planet::CubeFace::NegY: return "ny";
+            case planet::CubeFace::PosZ: return "pz";
+            case planet::CubeFace::NegZ: return "nz";
         }
+        return "px";
+    };
 
-        std::string resolved_path;
-        for (const std::string &rel : candidates)
+    for (size_t face_index = 0; face_index < _earth_face_materials.size(); ++face_index)
+    {
+        MaterialInstance &mat = _earth_face_materials[face_index];
+
+        mat.pipeline = earth.material->data.pipeline;
+        mat.passType = earth.material->data.passType;
+
+        if (mat.materialSet == VK_NULL_HANDLE)
         {
-            std::string abs = assets->assetPath(rel);
-            std::error_code ec;
-            if (!abs.empty() && std::filesystem::exists(abs, ec) && !ec)
+            mat.materialSet = _earth_patch_material_allocator.allocate(device->device(), _earth_patch_material_layout);
+
+            DescriptorWriter writer;
+            writer.write_buffer(0,
+                                _earth_patch_material_constants_buffer.buffer,
+                                sizeof(GLTFMetallic_Roughness::MaterialConstants),
+                                0,
+                                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+            writer.write_image(1,
+                               checker,
+                               tileSampler,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            writer.write_image(2,
+                               white,
+                               tileSampler,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            writer.write_image(3,
+                               flatNormal,
+                               tileSampler,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            writer.write_image(4,
+                               white,
+                               tileSampler,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            writer.write_image(5,
+                               black,
+                               tileSampler,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            writer.update_set(device->device(), mat.materialSet);
+
+            if (textures && tileSampler != VK_NULL_HANDLE)
             {
-                resolved_path = std::move(abs);
-                break;
+                const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
+                const std::string rel = fmt::format("planets/earth/albedo/L0/{}.ktx2", face_legacy(face));
+
+                TextureCache::TextureKey tk{};
+                tk.kind = TextureCache::TextureKey::SourceKind::FilePath;
+                tk.path = assets->assetPath(rel);
+                tk.srgb = true;
+                tk.mipmapped = true;
+
+                TextureCache::TextureHandle h = textures->request(tk, tileSampler);
+                textures->watchBinding(h, mat.materialSet, 1u, tileSampler, checker);
+                textures->pin(h);
             }
-        }
-
-        if (!resolved_path.empty())
-        {
-            TextureCache::TextureKey tk{};
-            tk.kind = TextureCache::TextureKey::SourceKind::FilePath;
-            tk.path = resolved_path;
-            tk.srgb = true;
-            tk.mipmapped = true;
-
-            TextureCache::TextureHandle h = _context->textures->request(tk, tileSampler);
-            _context->textures->watchBinding(h, patch.material_instance.materialSet, 1u, tileSampler, checker);
         }
     }
 }
@@ -584,6 +596,9 @@ PlanetSystem::EarthPatch *PlanetSystem::get_or_create_earth_patch(const PlanetBo
         return nullptr;
     }
 
+    const glm::vec4 vertex_color =
+        _earth_debug_tint_patches_by_lod ? debug_color_for_level(key.level) : glm::vec4(1.0f);
+
     std::vector<Vertex> vertices;
     const glm::dvec3 patch_center_dir =
         planet::build_cubesphere_patch_vertices(vertices,
@@ -593,7 +608,7 @@ PlanetSystem::EarthPatch *PlanetSystem::get_or_create_earth_patch(const PlanetBo
                                                 key.x,
                                                 key.y,
                                                 _earth_patch_resolution,
-                                                debug_color_for_level(key.level));
+                                                vertex_color);
 
     if (vertices.empty())
     {
@@ -647,8 +662,6 @@ PlanetSystem::EarthPatch *PlanetSystem::get_or_create_earth_patch(const PlanetBo
     _earth_patch_lru.push_front(idx);
     p.lru_it = _earth_patch_lru.begin();
 
-    ensure_earth_patch_material_instance(p, earth);
-
     _earth_patch_lookup.emplace(key, idx);
     return &p;
 }
@@ -677,7 +690,6 @@ void PlanetSystem::trim_earth_patch_cache()
     }
 
     FrameResources *frame = _context->currentFrame;
-    TextureCache *textures = _context->textures;
     const uint32_t now = _earth_patch_frame_stamp;
 
     size_t guard = 0;
@@ -712,11 +724,6 @@ void PlanetSystem::trim_earth_patch_cache()
         _earth_patch_lru.erase(p.lru_it);
         _earth_patch_lookup.erase(p.key);
 
-        if (textures && p.material_instance.materialSet != VK_NULL_HANDLE)
-        {
-            textures->unwatchSet(p.material_instance.materialSet);
-        }
-
         if (p.vertex_buffer.buffer != VK_NULL_HANDLE)
         {
             const AllocatedBuffer vb = p.vertex_buffer;
@@ -730,9 +737,7 @@ void PlanetSystem::trim_earth_patch_cache()
             }
         }
 
-        const VkDescriptorSet keep_set = p.material_instance.materialSet;
         p = EarthPatch{};
-        p.material_instance.materialSet = keep_set;
         _earth_patch_free.push_back(idx);
     }
 }
@@ -755,6 +760,12 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
         PlanetBody *earth = get_body(BodyID::Earth);
         if (earth && earth->visible && earth->material && _context)
         {
+            if (_earth_patch_cache_dirty)
+            {
+                clear_earth_patch_cache();
+                _earth_patch_cache_dirty = false;
+            }
+
             const Clock::time_point t0 = Clock::now();
 
             _earth_quadtree.set_settings(_earth_quadtree_settings);
@@ -772,6 +783,17 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             const Clock::time_point t_q1 = Clock::now();
 
             ensure_earth_patch_index_buffer();
+            ensure_earth_face_materials(*earth);
+            if (_context->textures)
+            {
+                for (const MaterialInstance &mat : _earth_face_materials)
+                {
+                    if (mat.materialSet != VK_NULL_HANDLE)
+                    {
+                        _context->textures->markSetUsed(mat.materialSet, _context->frameIndex);
+                    }
+                }
+            }
 
             size_t desired_capacity =
                 static_cast<size_t>(_earth_patches.size()) +
@@ -809,10 +831,6 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                     {
                         patch->last_used_frame = frame_index;
                         _earth_patch_lru.splice(_earth_patch_lru.begin(), _earth_patch_lru, patch->lru_it);
-                        if (patch->material_instance.materialSet == VK_NULL_HANDLE || patch->material_instance.pipeline == nullptr)
-                        {
-                            ensure_earth_patch_material_instance(*patch, *earth);
-                        }
                     }
                     else
                     {
@@ -850,10 +868,19 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 if (patch.state != EarthPatchState::Ready ||
                     patch.vertex_buffer.buffer == VK_NULL_HANDLE ||
                     patch.vertex_buffer_address == 0 ||
-                    patch.material_instance.materialSet == VK_NULL_HANDLE ||
-                    patch.material_instance.pipeline == nullptr ||
                     _earth_patch_index_buffer.buffer == VK_NULL_HANDLE ||
                     _earth_patch_index_count == 0)
+                {
+                    continue;
+                }
+
+                const uint32_t face_index = static_cast<uint32_t>(patch.key.face);
+                if (face_index >= _earth_face_materials.size())
+                {
+                    continue;
+                }
+                MaterialInstance *material = &_earth_face_materials[face_index];
+                if (material->materialSet == VK_NULL_HANDLE || material->pipeline == nullptr)
                 {
                     continue;
                 }
@@ -875,7 +902,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 obj.indexBuffer = _earth_patch_index_buffer.buffer;
                 obj.vertexBuffer = patch.vertex_buffer.buffer;
                 obj.vertexBufferAddress = patch.vertex_buffer_address;
-                obj.material = &patch.material_instance;
+                obj.material = material;
                 obj.bounds = b;
                 obj.transform = transform;
                 // Planet terrain patches are not meaningful RT occluders; skip BLAS/TLAS builds.
