@@ -2259,8 +2259,8 @@ namespace
             cam.orientation = glm::quat_cast(rot);
         };
 
-        PlanetSystem::PlanetBody *earth = planets->get_body(PlanetSystem::BodyID::Earth);
-        PlanetSystem::PlanetBody *moon = planets->get_body(PlanetSystem::BodyID::Moon);
+        PlanetSystem::PlanetBody *earth = planets->find_body_by_name("Earth");
+        PlanetSystem::PlanetBody *moon = planets->find_body_by_name("Moon");
 
 	        if (earth)
 	        {
@@ -2398,6 +2398,94 @@ namespace
             }
             ImGui::SameLine();
             ImGui::Text("(R=%.1f km)", moon->radius_m / 1000.0);
+        }
+
+        ImGui::Separator();
+        if (ImGui::CollapsingHeader("Planet Tools", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            bool auto_defaults = planets->auto_create_defaults();
+            if (ImGui::Checkbox("Auto-create default Earth/Moon", &auto_defaults))
+            {
+                planets->set_auto_create_defaults(auto_defaults);
+            }
+
+            if (ImGui::Button("Clear all planets"))
+            {
+                planets->clear_planets(true);
+            }
+
+            static int selected_planet = 0;
+            const auto &bodies = planets->bodies();
+            if (selected_planet < 0) selected_planet = 0;
+            if (!bodies.empty() && selected_planet >= static_cast<int>(bodies.size()))
+            {
+                selected_planet = static_cast<int>(bodies.size()) - 1;
+            }
+
+            if (ImGui::BeginListBox("Planets"))
+            {
+                for (int i = 0; i < static_cast<int>(bodies.size()); ++i)
+                {
+                    const PlanetSystem::PlanetBody &b = bodies[i];
+                    const bool is_selected = (selected_planet == i);
+                    const char *tag = b.terrain ? " (terrain)" : " (mesh)";
+                    const std::string label = b.name + tag;
+                    if (ImGui::Selectable(label.c_str(), is_selected))
+                    {
+                        selected_planet = i;
+                    }
+                }
+                ImGui::EndListBox();
+            }
+
+            if (!bodies.empty())
+            {
+                const PlanetSystem::PlanetBody &b = bodies[static_cast<size_t>(selected_planet)];
+                ImGui::Text("Selected: %s", b.name.c_str());
+                ImGui::Text("Center (world m): %.3f, %.3f, %.3f", b.center_world.x, b.center_world.y, b.center_world.z);
+                ImGui::Text("Radius: %.3f km", b.radius_m / 1000.0);
+
+                if (ImGui::Button("Destroy selected"))
+                {
+                    planets->destroy_planet(b.name);
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Create mesh planet");
+
+            static char new_name[64] = "Mars";
+            static double new_center[3] = {50000000.0, 0.0, 0.0};
+            static double new_radius_km = 3390.0;
+            static float new_color[4] = {0.8f, 0.35f, 0.25f, 1.0f};
+            static float new_metallic = 0.0f;
+            static float new_roughness = 1.0f;
+            static int new_sectors = 48;
+            static int new_stacks = 24;
+
+            ImGui::InputText("Name", new_name, IM_ARRAYSIZE(new_name));
+            ImGui::InputScalarN("Center (world m)", ImGuiDataType_Double, new_center, 3, nullptr, nullptr, "%.3f");
+            ImGui::DragScalar("Radius (km)", ImGuiDataType_Double, &new_radius_km, 10.0f, nullptr, nullptr, "%.3f");
+            ImGui::ColorEdit4("Base color", new_color);
+            ImGui::DragFloat("Metallic", &new_metallic, 0.01f, 0.0f, 1.0f, "%.2f");
+            ImGui::DragFloat("Roughness", &new_roughness, 0.01f, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderInt("Sectors", &new_sectors, 8, 256);
+            ImGui::SliderInt("Stacks", &new_stacks, 4, 256);
+
+            if (ImGui::Button("Create"))
+            {
+                PlanetSystem::MeshPlanetCreateInfo info{};
+                info.name = new_name;
+                info.center_world = WorldVec3(new_center[0], new_center[1], new_center[2]);
+                info.radius_m = std::max(1.0, new_radius_km * 1000.0);
+                info.visible = true;
+                info.base_color = glm::vec4(new_color[0], new_color[1], new_color[2], new_color[3]);
+                info.metallic = std::clamp(new_metallic, 0.0f, 1.0f);
+                info.roughness = std::clamp(new_roughness, 0.0f, 1.0f);
+                info.sectors = static_cast<uint32_t>(std::max(3, new_sectors));
+                info.stacks = static_cast<uint32_t>(std::max(2, new_stacks));
+                planets->create_mesh_planet(info);
+            }
         }
     }
 } // namespace

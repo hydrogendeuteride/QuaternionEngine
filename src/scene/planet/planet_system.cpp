@@ -63,6 +63,16 @@ namespace
         return c;
     }
 
+    GLTFMetallic_Roughness::MaterialConstants make_planet_constants(const glm::vec4 &base_color,
+                                                                    float metallic,
+                                                                    float roughness)
+    {
+        GLTFMetallic_Roughness::MaterialConstants c = make_planet_constants();
+        c.colorFactors = base_color;
+        c.metal_rough_factors = glm::vec4(metallic, roughness, 0.0f, 0.0f);
+        return c;
+    }
+
     glm::vec4 debug_color_for_level(uint32_t level)
     {
         const float t = static_cast<float>(level) * 0.37f;
@@ -160,26 +170,8 @@ void PlanetSystem::cleanup()
     _earth_patch_index_count = 0;
     _earth_patch_index_resolution = 0;
     _earth_patch_frame_stamp = 0;
-}
 
-const PlanetSystem::PlanetBody *PlanetSystem::get_body(BodyID id) const
-{
-    size_t i = static_cast<size_t>(id);
-    if (i >= _bodies.size())
-    {
-        return nullptr;
-    }
-    return &_bodies[i];
-}
-
-PlanetSystem::PlanetBody *PlanetSystem::get_body(BodyID id)
-{
-    size_t i = static_cast<size_t>(id);
-    if (i >= _bodies.size())
-    {
-        return nullptr;
-    }
-    return &_bodies[i];
+    _bodies.clear();
 }
 
 PlanetSystem::PlanetBody *PlanetSystem::find_body_by_name(std::string_view name)
@@ -195,9 +187,120 @@ PlanetSystem::PlanetBody *PlanetSystem::find_body_by_name(std::string_view name)
     return nullptr;
 }
 
+PlanetSystem::PlanetBody *PlanetSystem::create_mesh_planet(const MeshPlanetCreateInfo &info)
+{
+    if (info.name.empty())
+    {
+        return nullptr;
+    }
+
+    // Avoid implicit default creation when the user is explicitly managing planets.
+    for (const PlanetBody &b : _bodies)
+    {
+        if (b.name == info.name)
+        {
+            return nullptr;
+        }
+    }
+
+    PlanetBody body{};
+    body.name = info.name;
+    body.center_world = info.center_world;
+    body.radius_m = info.radius_m;
+    body.visible = info.visible;
+    body.terrain = false;
+
+    if (_context && _context->assets)
+    {
+        AssetManager *assets = _context->assets;
+
+        const std::string asset_name = fmt::format("Planet_{}", info.name);
+        const GLTFMetallic_Roughness::MaterialConstants mc =
+            make_planet_constants(info.base_color, info.metallic, info.roughness);
+
+        body.material = assets->createMaterialFromConstants(asset_name, mc, MaterialPass::MainColor);
+
+        std::vector<Vertex> verts;
+        std::vector<uint32_t> inds;
+        primitives::buildSphere(verts, inds,
+                                static_cast<int>(std::max(3u, info.sectors)),
+                                static_cast<int>(std::max(2u, info.stacks)));
+        geom::generate_tangents(verts, inds);
+
+        body.mesh = assets->createMesh(asset_name, verts, inds, body.material);
+    }
+
+    _bodies.push_back(std::move(body));
+    return &_bodies.back();
+}
+
+bool PlanetSystem::destroy_planet(std::string_view name)
+{
+    if (name.empty())
+    {
+        return false;
+    }
+
+    auto it = std::find_if(_bodies.begin(), _bodies.end(), [&](const PlanetBody &b) { return b.name == name; });
+    if (it == _bodies.end())
+    {
+        return false;
+    }
+
+    // If we destroy the active terrain body, make sure we free its patch cache.
+    if (it->terrain)
+    {
+        clear_earth_patch_cache();
+        _earth_debug_stats = {};
+    }
+
+    if (it->mesh && _context && _context->assets)
+    {
+        AssetManager *assets = _context->assets;
+        if (_context->currentFrame)
+        {
+            assets->removeMeshDeferred(it->mesh->name, _context->currentFrame->_deletionQueue);
+        }
+        else
+        {
+            assets->removeMesh(it->mesh->name);
+        }
+    }
+
+    _bodies.erase(it);
+    return true;
+}
+
+void PlanetSystem::clear_planets(bool destroy_mesh_assets)
+{
+    if (destroy_mesh_assets && _context && _context->assets)
+    {
+        AssetManager *assets = _context->assets;
+        for (const PlanetBody &b : _bodies)
+        {
+            if (!b.mesh) continue;
+            if (_context->currentFrame)
+            {
+                assets->removeMeshDeferred(b.mesh->name, _context->currentFrame->_deletionQueue);
+            }
+            else
+            {
+                assets->removeMesh(b.mesh->name);
+            }
+        }
+    }
+
+    // Terrain patches can be very large; clear them even if we keep the
+    // shared index/material resources around.
+    clear_earth_patch_cache();
+    _earth_debug_stats = {};
+
+    _bodies.clear();
+}
+
 void PlanetSystem::ensure_bodies_created()
 {
-    if (!_bodies.empty())
+    if (!_auto_create_defaults || !_bodies.empty())
     {
         return;
     }
@@ -206,11 +309,13 @@ void PlanetSystem::ensure_bodies_created()
     earth.name = "Earth";
     earth.center_world = WorldVec3(0.0, 0.0, 0.0);
     earth.radius_m = kEarthRadiusM;
+    earth.terrain = true;
 
     PlanetBody moon{};
     moon.name = "Moon";
     moon.center_world = WorldVec3(kMoonDistanceM, 0.0, 0.0);
     moon.radius_m = kMoonRadiusM;
+    moon.terrain = false;
 
     if (_context && _context->assets)
     {
@@ -241,6 +346,30 @@ void PlanetSystem::ensure_bodies_created()
 
     _bodies.push_back(std::move(earth));
     _bodies.push_back(std::move(moon));
+}
+
+PlanetSystem::PlanetBody *PlanetSystem::find_terrain_body()
+{
+    for (PlanetBody &b : _bodies)
+    {
+        if (b.terrain)
+        {
+            return &b;
+        }
+    }
+    return nullptr;
+}
+
+const PlanetSystem::PlanetBody *PlanetSystem::find_terrain_body() const
+{
+    for (const PlanetBody &b : _bodies)
+    {
+        if (b.terrain)
+        {
+            return &b;
+        }
+    }
+    return nullptr;
 }
 
 PlanetSystem::EarthPatch *PlanetSystem::find_earth_patch(const planet::PatchKey &key)
@@ -766,11 +895,11 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
 
     const WorldVec3 origin_world = scene.get_world_origin();
 
-    // Earth: quadtree patches.
+    // Terrain body: quadtree patches (defaults to Earth).
     {
         using Clock = std::chrono::steady_clock;
 
-        PlanetBody *earth = get_body(BodyID::Earth);
+        PlanetBody *earth = find_terrain_body();
         if (earth && earth->visible && earth->material && _context)
         {
             if (_earth_patch_cache_dirty)
@@ -955,7 +1084,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
     {
         PlanetBody &b = _bodies[body_index];
 
-        if (body_index == static_cast<size_t>(BodyID::Earth))
+        if (b.terrain)
         {
             continue;
         }

@@ -88,6 +88,22 @@ enum class PrimitiveType
     Capsule
 };
 
+// Simple procedural planet (sphere mesh) parameters
+struct PlanetSphere
+{
+    std::string name;
+    glm::dvec3 center{0.0};
+    double radius_m{1.0};
+    bool visible{true};
+
+    glm::vec4 base_color{1.0f};
+    float metallic{0.0f};
+    float roughness{1.0f};
+
+    uint32_t sectors{48};
+    uint32_t stacks{24};
+};
+
 // Material description for textured primitives
 struct PrimitiveMaterial
 {
@@ -568,6 +584,19 @@ public:
 
     // Clear all dynamic instances
     void clear_all_instances();
+
+    // ------------------------------------------------------------------------
+    // Planets
+    // ------------------------------------------------------------------------
+
+    // Enable/disable auto creation of default Earth/Moon when the planet list is empty.
+    void set_auto_create_default_planets(bool enabled);
+    bool get_auto_create_default_planets() const;
+
+    // Create/destroy simple sphere planets (procedural mesh in PlanetSystem).
+    bool add_planet_sphere(const PlanetSphere &planet);
+    bool remove_planet(const std::string &name);
+    void clear_planets(bool destroy_mesh_assets = true);
 
     // ------------------------------------------------------------------------
     // Animation

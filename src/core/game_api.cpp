@@ -888,6 +888,84 @@ void Engine::clear_all_instances()
     }
 }
 
+void Engine::set_auto_create_default_planets(bool enabled)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return;
+    }
+
+    if (PlanetSystem *planets = _engine->_sceneManager->get_planet_system())
+    {
+        planets->set_auto_create_defaults(enabled);
+    }
+}
+
+bool Engine::get_auto_create_default_planets() const
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    if (const PlanetSystem *planets = _engine->_sceneManager->get_planet_system())
+    {
+        return planets->auto_create_defaults();
+    }
+    return false;
+}
+
+bool Engine::add_planet_sphere(const PlanetSphere &planet)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    PlanetSystem *planets = _engine->_sceneManager->get_planet_system();
+    if (!planets)
+    {
+        return false;
+    }
+
+    PlanetSystem::MeshPlanetCreateInfo info{};
+    info.name = planet.name;
+    info.center_world = WorldVec3(planet.center);
+    info.radius_m = planet.radius_m;
+    info.visible = planet.visible;
+    info.base_color = planet.base_color;
+    info.metallic = planet.metallic;
+    info.roughness = planet.roughness;
+    info.sectors = planet.sectors;
+    info.stacks = planet.stacks;
+
+    return planets->create_mesh_planet(info) != nullptr;
+}
+
+bool Engine::remove_planet(const std::string &name)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    PlanetSystem *planets = _engine->_sceneManager->get_planet_system();
+    return planets ? planets->destroy_planet(name) : false;
+}
+
+void Engine::clear_planets(bool destroy_mesh_assets)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return;
+    }
+
+    if (PlanetSystem *planets = _engine->_sceneManager->get_planet_system())
+    {
+        planets->clear_planets(destroy_mesh_assets);
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Animation
 // ----------------------------------------------------------------------------

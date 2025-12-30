@@ -22,10 +22,21 @@ struct GLTFMaterial;
 class PlanetSystem
 {
 public:
-    enum class BodyID : uint8_t
+    struct MeshPlanetCreateInfo
     {
-        Earth = 0,
-        Moon = 1,
+        std::string name;
+        WorldVec3 center_world{0.0, 0.0, 0.0};
+        double radius_m = 1.0;
+        bool visible = true;
+
+        // Simple PBR constants (uses engine default white/flat/black textures).
+        glm::vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
+        float metallic = 0.0f;
+        float roughness = 1.0f;
+
+        // Sphere tessellation (only used when generating a new mesh).
+        uint32_t sectors = 48;
+        uint32_t stacks = 24;
     };
 
     struct EarthDebugStats
@@ -48,6 +59,10 @@ public:
         double radius_m = 1.0;
         bool visible = true;
 
+        // If true, this body is rendered as a cube-sphere quadtree terrain using the Earth patch path.
+        // Otherwise, it is rendered as a regular mesh instance (sphere mesh etc.).
+        bool terrain = false;
+
         std::shared_ptr<MeshAsset> mesh;
         std::shared_ptr<GLTFMaterial> material;
     };
@@ -60,10 +75,18 @@ public:
     bool enabled() const { return _enabled; }
     void set_enabled(bool enabled) { _enabled = enabled; }
 
-    const PlanetBody *get_body(BodyID id) const;
-    PlanetBody *get_body(BodyID id);
     PlanetBody *find_body_by_name(std::string_view name);
     const std::vector<PlanetBody> &bodies() const { return _bodies; }
+
+    // Runtime planet management
+    // - Planets are identified by 'name' (must be unique).
+    // - By default, Earth+Moon are auto-created on first use when no bodies exist.
+    PlanetBody *create_mesh_planet(const MeshPlanetCreateInfo &info);
+    bool destroy_planet(std::string_view name);
+    void clear_planets(bool destroy_mesh_assets = true);
+
+    bool auto_create_defaults() const { return _auto_create_defaults; }
+    void set_auto_create_defaults(bool enabled) { _auto_create_defaults = enabled; }
 
     const planet::PlanetQuadtree::Settings &earth_quadtree_settings() const { return _earth_quadtree_settings; }
     void set_earth_quadtree_settings(const planet::PlanetQuadtree::Settings &settings) { _earth_quadtree_settings = settings; }
@@ -106,6 +129,8 @@ private:
     };
 
     void ensure_bodies_created();
+    PlanetBody *find_terrain_body();
+    const PlanetBody *find_terrain_body() const;
     EarthPatch *find_earth_patch(const planet::PatchKey &key);
     EarthPatch *get_or_create_earth_patch(const PlanetBody &earth,
                                           const planet::PatchKey &key,
@@ -119,6 +144,7 @@ private:
 
     EngineContext *_context = nullptr;
     bool _enabled = true;
+    bool _auto_create_defaults = true;
     std::vector<PlanetBody> _bodies;
 
     // Earth cube-sphere quadtree
