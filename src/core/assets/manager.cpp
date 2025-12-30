@@ -669,6 +669,26 @@ std::shared_ptr<GLTFMaterial> AssetManager::createMaterialFromConstants(
     return createMaterial(pass, res);
 }
 
+VkImageView AssetManager::fallback_checkerboard_view() const
+{
+    return (_engine) ? _engine->_errorCheckerboardImage.imageView : VK_NULL_HANDLE;
+}
+
+VkImageView AssetManager::fallback_white_view() const
+{
+    return (_engine) ? _engine->_whiteImage.imageView : VK_NULL_HANDLE;
+}
+
+VkImageView AssetManager::fallback_flat_normal_view() const
+{
+    return (_engine) ? _engine->_flatNormalImage.imageView : VK_NULL_HANDLE;
+}
+
+VkImageView AssetManager::fallback_black_view() const
+{
+    return (_engine) ? _engine->_blackImage.imageView : VK_NULL_HANDLE;
+}
+
 std::shared_ptr<MeshAsset> AssetManager::getMesh(const std::string &name) const
 {
     auto it = _meshCache.find(name);

@@ -29,6 +29,13 @@ void SamplerManager::init(DeviceManager *deviceManager)
     sampl.minFilter = VK_FILTER_LINEAR;
     vkCreateSampler(_deviceManager->device(), &sampl, nullptr, &_defaultSamplerLinear);
 
+    // Linear clamp-to-edge (useful for tiled textures)
+    VkSamplerCreateInfo clampEdge = sampl;
+    clampEdge.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    clampEdge.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    clampEdge.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    vkCreateSampler(_deviceManager->device(), &clampEdge, nullptr, &_linearClampEdge);
+
     // Shadow linear clamp sampler (border=white)
     VkSamplerCreateInfo sh = sampl;
     sh.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
@@ -59,5 +66,11 @@ void SamplerManager::cleanup()
     {
         vkDestroySampler(_deviceManager->device(), _shadowLinearClamp, nullptr);
         _shadowLinearClamp = VK_NULL_HANDLE;
+    }
+
+    if (_linearClampEdge)
+    {
+        vkDestroySampler(_deviceManager->device(), _linearClampEdge, nullptr);
+        _linearClampEdge = VK_NULL_HANDLE;
     }
 }

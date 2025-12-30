@@ -1,6 +1,7 @@
 #pragma once
 
 #include <core/world.h>
+#include <core/descriptor/descriptors.h>
 #include <scene/planet/planet_quadtree.h>
 
 #include <cstdint>
@@ -50,6 +51,7 @@ public:
     };
 
     void init(EngineContext *context);
+    void cleanup();
 
     void update_and_emit(const SceneManager &scene, DrawContext &draw_context);
 
@@ -88,6 +90,8 @@ private:
         AllocatedBuffer vertex_buffer{};
         VkDeviceAddress vertex_buffer_address = 0;
 
+        MaterialInstance material_instance{};
+
         glm::vec3 bounds_origin{0.0f};
         glm::vec3 bounds_extents{0.5f};
         float bounds_sphere_radius = 0.5f;
@@ -103,13 +107,16 @@ private:
                                           const planet::PatchKey &key,
                                           uint32_t frame_index);
     void ensure_earth_patch_index_buffer();
+    void ensure_earth_patch_material_layout();
+    void ensure_earth_patch_material_constants_buffer();
+    void ensure_earth_patch_material_instance(EarthPatch &patch, const PlanetBody &earth);
     void trim_earth_patch_cache();
 
     EngineContext *_context = nullptr;
     bool _enabled = true;
     std::vector<PlanetBody> _bodies;
 
-    // Earth cube-sphere quadtree (Milestone B4).
+    // Earth cube-sphere quadtree
     planet::PlanetQuadtree _earth_quadtree{};
     planet::PlanetQuadtree::Settings _earth_quadtree_settings{};
     EarthDebugStats _earth_debug_stats{};
@@ -120,6 +127,12 @@ private:
     AllocatedBuffer _earth_patch_index_buffer{};
     uint32_t _earth_patch_index_count = 0;
     uint32_t _earth_patch_index_resolution = 0;
+
+    VkDescriptorSetLayout _earth_patch_material_layout = VK_NULL_HANDLE;
+    DescriptorAllocatorGrowable _earth_patch_material_allocator{};
+    bool _earth_patch_material_allocator_initialized = false;
+    AllocatedBuffer _earth_patch_material_constants_buffer{};
+
     uint32_t _earth_patch_frame_stamp = 0;
     uint32_t _earth_patch_resolution = 33;
     uint32_t _earth_patch_create_budget_per_frame = 16;

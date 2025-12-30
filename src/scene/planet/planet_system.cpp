@@ -7,6 +7,7 @@
 #include <core/assets/manager.h>
 #include <render/materials.h>
 #include <render/primitives.h>
+#include <core/pipeline/sampler.h>
 #include <scene/planet/cubesphere.h>
 #include <scene/tangent_space.h>
 #include <scene/vk_scene.h>
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
 
 #include "device.h"
 
@@ -75,6 +77,79 @@ namespace
 void PlanetSystem::init(EngineContext *context)
 {
     _context = context;
+}
+
+void PlanetSystem::cleanup()
+{
+    if (!_context)
+    {
+        return;
+    }
+
+    TextureCache *textures = _context->textures;
+    if (textures)
+    {
+        for (EarthPatch &p : _earth_patches)
+        {
+            if (p.material_instance.materialSet != VK_NULL_HANDLE)
+            {
+                textures->unwatchSet(p.material_instance.materialSet);
+            }
+        }
+    }
+
+    ResourceManager *rm = _context->getResources();
+    if (rm)
+    {
+        for (EarthPatch &p : _earth_patches)
+        {
+            if (p.vertex_buffer.buffer != VK_NULL_HANDLE)
+            {
+                rm->destroy_buffer(p.vertex_buffer);
+                p.vertex_buffer = {};
+                p.vertex_buffer_address = 0;
+            }
+        }
+
+        if (_earth_patch_index_buffer.buffer != VK_NULL_HANDLE)
+        {
+            rm->destroy_buffer(_earth_patch_index_buffer);
+            _earth_patch_index_buffer = {};
+        }
+
+        if (_earth_patch_material_constants_buffer.buffer != VK_NULL_HANDLE)
+        {
+            rm->destroy_buffer(_earth_patch_material_constants_buffer);
+            _earth_patch_material_constants_buffer = {};
+        }
+    }
+
+    if (_earth_patch_material_allocator_initialized)
+    {
+        if (DeviceManager *device = _context->getDevice())
+        {
+            _earth_patch_material_allocator.destroy_pools(device->device());
+        }
+        _earth_patch_material_allocator_initialized = false;
+    }
+
+    if (_earth_patch_material_layout != VK_NULL_HANDLE)
+    {
+        if (DeviceManager *device = _context->getDevice())
+        {
+            vkDestroyDescriptorSetLayout(device->device(), _earth_patch_material_layout, nullptr);
+        }
+        _earth_patch_material_layout = VK_NULL_HANDLE;
+    }
+
+    _earth_patch_lookup.clear();
+    _earth_patch_lru.clear();
+    _earth_patch_free.clear();
+    _earth_patches.clear();
+
+    _earth_patch_index_count = 0;
+    _earth_patch_index_resolution = 0;
+    _earth_patch_frame_stamp = 0;
 }
 
 const PlanetSystem::PlanetBody *PlanetSystem::get_body(BodyID id) const
@@ -182,6 +257,7 @@ void PlanetSystem::ensure_earth_patch_index_buffer()
     if (_earth_patch_index_buffer.buffer != VK_NULL_HANDLE)
     {
         FrameResources *frame = _context->currentFrame;
+        TextureCache *textures = _context->textures;
 
         // Destroy per-patch vertex buffers.
         for (const auto &kv : _earth_patch_lookup)
@@ -210,8 +286,28 @@ void PlanetSystem::ensure_earth_patch_index_buffer()
 
         _earth_patch_lookup.clear();
         _earth_patch_lru.clear();
+
+        if (textures)
+        {
+            for (EarthPatch &p : _earth_patches)
+            {
+                if (p.material_instance.materialSet != VK_NULL_HANDLE)
+                {
+                    textures->unwatchSet(p.material_instance.materialSet);
+                }
+            }
+        }
+
         _earth_patch_free.clear();
-        _earth_patches.clear();
+        _earth_patch_free.reserve(_earth_patches.size());
+        for (uint32_t idx = 0; idx < static_cast<uint32_t>(_earth_patches.size()); ++idx)
+        {
+            EarthPatch &p = _earth_patches[idx];
+            const VkDescriptorSet keep_set = p.material_instance.materialSet;
+            p = EarthPatch{};
+            p.material_instance.materialSet = keep_set;
+            _earth_patch_free.push_back(idx);
+        }
 
         const AllocatedBuffer ib = _earth_patch_index_buffer;
         if (frame)
@@ -237,6 +333,227 @@ void PlanetSystem::ensure_earth_patch_index_buffer()
                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
     _earth_patch_index_resolution = _earth_patch_resolution;
+}
+
+void PlanetSystem::ensure_earth_patch_material_layout()
+{
+    if (_earth_patch_material_layout != VK_NULL_HANDLE)
+    {
+        return;
+    }
+
+    if (!_context)
+    {
+        return;
+    }
+
+    DeviceManager *device = _context->getDevice();
+    if (!device)
+    {
+        return;
+    }
+
+    DescriptorLayoutBuilder layoutBuilder;
+    layoutBuilder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    layoutBuilder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    layoutBuilder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    layoutBuilder.add_binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    layoutBuilder.add_binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    layoutBuilder.add_binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+
+    _earth_patch_material_layout = layoutBuilder.build(device->device(),
+                                                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                                       nullptr,
+                                                       VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
+}
+
+void PlanetSystem::ensure_earth_patch_material_constants_buffer()
+{
+    if (_earth_patch_material_constants_buffer.buffer != VK_NULL_HANDLE)
+    {
+        return;
+    }
+
+    if (!_context)
+    {
+        return;
+    }
+
+    ResourceManager *rm = _context->getResources();
+    DeviceManager *device = _context->getDevice();
+    if (!rm || !device)
+    {
+        return;
+    }
+
+    const GLTFMetallic_Roughness::MaterialConstants constants = make_planet_constants();
+
+    _earth_patch_material_constants_buffer =
+        rm->create_buffer(sizeof(GLTFMetallic_Roughness::MaterialConstants),
+                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                          VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+    if (_earth_patch_material_constants_buffer.buffer == VK_NULL_HANDLE)
+    {
+        return;
+    }
+
+    VmaAllocationInfo allocInfo{};
+    vmaGetAllocationInfo(device->allocator(), _earth_patch_material_constants_buffer.allocation, &allocInfo);
+    auto *mapped = static_cast<GLTFMetallic_Roughness::MaterialConstants *>(allocInfo.pMappedData);
+    if (mapped)
+    {
+        *mapped = constants;
+        vmaFlushAllocation(device->allocator(), _earth_patch_material_constants_buffer.allocation, 0, sizeof(constants));
+    }
+}
+
+void PlanetSystem::ensure_earth_patch_material_instance(EarthPatch &patch, const PlanetBody &earth)
+{
+    if (!_context || !earth.material)
+    {
+        return;
+    }
+
+    DeviceManager *device = _context->getDevice();
+    SamplerManager *samplers = _context->getSamplers();
+    AssetManager *assets = _context->assets;
+    if (!device || !assets)
+    {
+        return;
+    }
+
+    ensure_earth_patch_material_layout();
+    ensure_earth_patch_material_constants_buffer();
+
+    if (_earth_patch_material_layout == VK_NULL_HANDLE ||
+        _earth_patch_material_constants_buffer.buffer == VK_NULL_HANDLE)
+    {
+        return;
+    }
+
+    if (!_earth_patch_material_allocator_initialized)
+    {
+        std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> sizes = {
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6},
+        };
+        _earth_patch_material_allocator.init(device->device(), 128, sizes);
+        _earth_patch_material_allocator_initialized = true;
+    }
+
+    if (patch.material_instance.materialSet == VK_NULL_HANDLE)
+    {
+        patch.material_instance.materialSet =
+            _earth_patch_material_allocator.allocate(device->device(), _earth_patch_material_layout);
+    }
+
+    patch.material_instance.pipeline = earth.material->data.pipeline;
+    patch.material_instance.passType = earth.material->data.passType;
+
+    VkSampler tileSampler = samplers ? samplers->linearClampEdge() : VK_NULL_HANDLE;
+    if (tileSampler == VK_NULL_HANDLE && samplers)
+    {
+        tileSampler = samplers->defaultLinear();
+    }
+
+    VkImageView checker = assets->fallback_checkerboard_view();
+    VkImageView white = assets->fallback_white_view();
+    VkImageView flatNormal = assets->fallback_flat_normal_view();
+    VkImageView black = assets->fallback_black_view();
+
+    if (checker == VK_NULL_HANDLE) checker = white;
+    if (white == VK_NULL_HANDLE) white = checker;
+    if (flatNormal == VK_NULL_HANDLE) flatNormal = white;
+    if (black == VK_NULL_HANDLE) black = white;
+
+    if (patch.material_instance.materialSet != VK_NULL_HANDLE)
+    {
+        DescriptorWriter writer;
+        writer.write_buffer(0,
+                            _earth_patch_material_constants_buffer.buffer,
+                            sizeof(GLTFMetallic_Roughness::MaterialConstants),
+                            0,
+                            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        writer.write_image(1,
+                           checker,
+                           tileSampler,
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.write_image(2,
+                           white,
+                           tileSampler,
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.write_image(3,
+                           flatNormal,
+                           tileSampler,
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.write_image(4,
+                           white,
+                           tileSampler,
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.write_image(5,
+                           black,
+                           tileSampler,
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.update_set(device->device(), patch.material_instance.materialSet);
+    }
+
+    // Per-patch tiled textures via TextureCache (albedo only for now).
+    if (_context->textures && tileSampler != VK_NULL_HANDLE && patch.material_instance.materialSet != VK_NULL_HANDLE)
+    {
+        auto face_legacy = [](planet::CubeFace f) -> const char * {
+            switch (f)
+            {
+                case planet::CubeFace::PosX: return "px";
+                case planet::CubeFace::NegX: return "nx";
+                case planet::CubeFace::PosY: return "py";
+                case planet::CubeFace::NegY: return "ny";
+                case planet::CubeFace::PosZ: return "pz";
+                case planet::CubeFace::NegZ: return "nz";
+            }
+            return "px";
+        };
+
+        const planet::PatchKey &k = patch.key;
+        const uint32_t face_index = static_cast<uint32_t>(k.face);
+
+        std::vector<std::string> candidates;
+        candidates.reserve(2);
+        candidates.push_back(fmt::format("planets/earth/albedo/face{}/L{}/X{}_Y{}.ktx2", face_index, k.level, k.x, k.y));
+        if (k.level == 0u && k.x == 0u && k.y == 0u)
+        {
+            candidates.push_back(fmt::format("planets/earth/albedo/L0/{}.ktx2", face_legacy(k.face)));
+        }
+
+        std::string resolved_path;
+        for (const std::string &rel : candidates)
+        {
+            std::string abs = assets->assetPath(rel);
+            std::error_code ec;
+            if (!abs.empty() && std::filesystem::exists(abs, ec) && !ec)
+            {
+                resolved_path = std::move(abs);
+                break;
+            }
+        }
+
+        if (!resolved_path.empty())
+        {
+            TextureCache::TextureKey tk{};
+            tk.kind = TextureCache::TextureKey::SourceKind::FilePath;
+            tk.path = resolved_path;
+            tk.srgb = true;
+            tk.mipmapped = true;
+
+            TextureCache::TextureHandle h = _context->textures->request(tk, tileSampler);
+            _context->textures->watchBinding(h, patch.material_instance.materialSet, 1u, tileSampler, checker);
+        }
+    }
 }
 
 PlanetSystem::EarthPatch *PlanetSystem::get_or_create_earth_patch(const PlanetBody &earth,
@@ -330,6 +647,8 @@ PlanetSystem::EarthPatch *PlanetSystem::get_or_create_earth_patch(const PlanetBo
     _earth_patch_lru.push_front(idx);
     p.lru_it = _earth_patch_lru.begin();
 
+    ensure_earth_patch_material_instance(p, earth);
+
     _earth_patch_lookup.emplace(key, idx);
     return &p;
 }
@@ -358,6 +677,7 @@ void PlanetSystem::trim_earth_patch_cache()
     }
 
     FrameResources *frame = _context->currentFrame;
+    TextureCache *textures = _context->textures;
     const uint32_t now = _earth_patch_frame_stamp;
 
     size_t guard = 0;
@@ -392,6 +712,11 @@ void PlanetSystem::trim_earth_patch_cache()
         _earth_patch_lru.erase(p.lru_it);
         _earth_patch_lookup.erase(p.key);
 
+        if (textures && p.material_instance.materialSet != VK_NULL_HANDLE)
+        {
+            textures->unwatchSet(p.material_instance.materialSet);
+        }
+
         if (p.vertex_buffer.buffer != VK_NULL_HANDLE)
         {
             const AllocatedBuffer vb = p.vertex_buffer;
@@ -405,7 +730,9 @@ void PlanetSystem::trim_earth_patch_cache()
             }
         }
 
+        const VkDescriptorSet keep_set = p.material_instance.materialSet;
         p = EarthPatch{};
+        p.material_instance.materialSet = keep_set;
         _earth_patch_free.push_back(idx);
     }
 }
@@ -446,6 +773,23 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
 
             ensure_earth_patch_index_buffer();
 
+            size_t desired_capacity =
+                static_cast<size_t>(_earth_patches.size()) +
+                static_cast<size_t>(_earth_patch_create_budget_per_frame) +
+                32u;
+            if (_earth_patch_cache_max != 0)
+            {
+                desired_capacity = std::max(
+                    desired_capacity,
+                    static_cast<size_t>(_earth_patch_cache_max) +
+                        static_cast<size_t>(_earth_patch_create_budget_per_frame) +
+                        32u);
+            }
+            if (_earth_patches.capacity() < desired_capacity)
+            {
+                _earth_patches.reserve(desired_capacity);
+            }
+
             uint32_t created_patches = 0;
             double ms_patch_create = 0.0;
             const uint32_t max_create = _earth_patch_create_budget_per_frame;
@@ -454,6 +798,9 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             const uint32_t frame_index = ++_earth_patch_frame_stamp;
 
             const Clock::time_point t_emit0 = Clock::now();
+            std::vector<uint32_t> ready_patch_indices;
+            ready_patch_indices.reserve(_earth_quadtree.visible_leaves().size());
+
             for (const planet::PatchKey &k : _earth_quadtree.visible_leaves())
             {
                 EarthPatch *patch = find_earth_patch(k);
@@ -462,6 +809,10 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                     {
                         patch->last_used_frame = frame_index;
                         _earth_patch_lru.splice(_earth_patch_lru.begin(), _earth_patch_lru, patch->lru_it);
+                        if (patch->material_instance.materialSet == VK_NULL_HANDLE || patch->material_instance.pipeline == nullptr)
+                        {
+                            ensure_earth_patch_material_instance(*patch, *earth);
+                        }
                     }
                     else
                     {
@@ -481,10 +832,26 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                         }
                     }
                 }
-                if (!patch ||
-                    patch->state != EarthPatchState::Ready ||
-                    patch->vertex_buffer.buffer == VK_NULL_HANDLE ||
-                    patch->vertex_buffer_address == 0 ||
+                if (patch)
+                {
+                    const uint32_t idx = static_cast<uint32_t>(patch - _earth_patches.data());
+                    ready_patch_indices.push_back(idx);
+                }
+            }
+
+            for (uint32_t idx : ready_patch_indices)
+            {
+                if (idx >= _earth_patches.size())
+                {
+                    continue;
+                }
+
+                EarthPatch &patch = _earth_patches[idx];
+                if (patch.state != EarthPatchState::Ready ||
+                    patch.vertex_buffer.buffer == VK_NULL_HANDLE ||
+                    patch.vertex_buffer_address == 0 ||
+                    patch.material_instance.materialSet == VK_NULL_HANDLE ||
+                    patch.material_instance.pipeline == nullptr ||
                     _earth_patch_index_buffer.buffer == VK_NULL_HANDLE ||
                     _earth_patch_index_count == 0)
                 {
@@ -492,23 +859,23 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 }
 
                 const WorldVec3 patch_center_world =
-                    earth->center_world + patch->patch_center_dir * earth->radius_m;
+                    earth->center_world + patch.patch_center_dir * earth->radius_m;
                 const glm::vec3 patch_center_local = world_to_local(patch_center_world, origin_world);
                 const glm::mat4 transform = glm::translate(glm::mat4(1.0f), patch_center_local);
 
                 Bounds b{};
-                b.origin = patch->bounds_origin;
-                b.extents = patch->bounds_extents;
-                b.sphereRadius = patch->bounds_sphere_radius;
+                b.origin = patch.bounds_origin;
+                b.extents = patch.bounds_extents;
+                b.sphereRadius = patch.bounds_sphere_radius;
                 b.type = BoundsType::Box;
 
                 RenderObject obj{};
                 obj.indexCount = _earth_patch_index_count;
                 obj.firstIndex = 0;
                 obj.indexBuffer = _earth_patch_index_buffer.buffer;
-                obj.vertexBuffer = patch->vertex_buffer.buffer;
-                obj.vertexBufferAddress = patch->vertex_buffer_address;
-                obj.material = earth->material ? &earth->material->data : nullptr;
+                obj.vertexBuffer = patch.vertex_buffer.buffer;
+                obj.vertexBufferAddress = patch.vertex_buffer_address;
+                obj.material = &patch.material_instance;
                 obj.bounds = b;
                 obj.transform = transform;
                 // Planet terrain patches are not meaningful RT occluders; skip BLAS/TLAS builds.
