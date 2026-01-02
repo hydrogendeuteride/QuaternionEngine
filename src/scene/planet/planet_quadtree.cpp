@@ -134,7 +134,8 @@ namespace planet
                                 const WorldVec3 &camera_world,
                                 const WorldVec3 &origin_world,
                                 const GPUSceneData &scene_data,
-                                VkExtent2D logical_extent)
+                                VkExtent2D logical_extent,
+                                uint32_t patch_resolution)
     {
         _visible_leaves.clear();
         _stats = {};
@@ -241,7 +242,9 @@ namespace planet
             const double dist_m = glm::max(1.0, glm::length(camera_world - patch_center_world));
 
             // Screen-space error metric.
-            const double error_m = 0.5 * patch_edge_m;
+            const uint32_t safe_res = std::max(2u, patch_resolution);
+            const double segments = static_cast<double>(safe_res - 1u);
+            const double error_m = 0.5 * patch_edge_m / segments;
             const float sse_px = static_cast<float>((error_m / dist_m) * static_cast<double>(proj_scale));
 
             bool refine = (k.level < _settings.max_level) && (sse_px > _settings.target_sse_px);

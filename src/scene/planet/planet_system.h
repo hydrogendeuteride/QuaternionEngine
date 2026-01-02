@@ -98,6 +98,9 @@ public:
     float earth_patch_create_budget_ms() const { return _earth_patch_create_budget_ms; }
     void set_earth_patch_create_budget_ms(float budget_ms) { _earth_patch_create_budget_ms = budget_ms; }
 
+    uint32_t earth_patch_resolution() const { return _earth_patch_resolution; }
+    void set_earth_patch_resolution(uint32_t resolution);
+
     uint32_t earth_patch_cache_max() const { return _earth_patch_cache_max; }
     void set_earth_patch_cache_max(uint32_t max_patches) { _earth_patch_cache_max = max_patches; }
 

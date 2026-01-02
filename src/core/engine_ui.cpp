@@ -2363,17 +2363,23 @@ namespace
 	                    planets->set_earth_patch_create_budget_per_frame(static_cast<uint32_t>(std::max(0, createBudget)));
 	                }
 
-	                float createBudgetMs = planets->earth_patch_create_budget_ms();
-	                if (ImGui::DragFloat("Patch create budget (ms)", &createBudgetMs, 0.25f, 0.0f, 50.0f, "%.2f"))
-	                {
-	                    planets->set_earth_patch_create_budget_ms(std::max(0.0f, createBudgetMs));
-	                }
+		                float createBudgetMs = planets->earth_patch_create_budget_ms();
+		                if (ImGui::DragFloat("Patch create budget (ms)", &createBudgetMs, 0.25f, 0.0f, 50.0f, "%.2f"))
+		                {
+		                    planets->set_earth_patch_create_budget_ms(std::max(0.0f, createBudgetMs));
+		                }
 
-	                int cacheMax = static_cast<int>(planets->earth_patch_cache_max());
-	                if (ImGui::SliderInt("Patch cache max", &cacheMax, 0, 50000))
-	                {
-	                    planets->set_earth_patch_cache_max(static_cast<uint32_t>(std::max(0, cacheMax)));
-	                }
+		                int patchRes = static_cast<int>(planets->earth_patch_resolution());
+		                if (ImGui::SliderInt("Patch resolution (verts/edge)", &patchRes, 2, 129))
+		                {
+		                    planets->set_earth_patch_resolution(static_cast<uint32_t>(std::max(2, patchRes)));
+		                }
+
+		                int cacheMax = static_cast<int>(planets->earth_patch_cache_max());
+		                if (ImGui::SliderInt("Patch cache max", &cacheMax, 0, 50000))
+		                {
+		                    planets->set_earth_patch_cache_max(static_cast<uint32_t>(std::max(0, cacheMax)));
+		                }
 
 	                if (ImGui::Checkbox("Frustum cull", &settings.frustum_cull)) changed = true;
 	                if (ImGui::Checkbox("Horizon cull", &settings.horizon_cull)) changed = true;

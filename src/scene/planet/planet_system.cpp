@@ -98,6 +98,18 @@ void PlanetSystem::set_earth_debug_tint_patches_by_lod(bool enabled)
     _earth_patch_cache_dirty = true;
 }
 
+void PlanetSystem::set_earth_patch_resolution(uint32_t resolution)
+{
+    const uint32_t clamped = std::max(2u, resolution);
+    if (_earth_patch_resolution == clamped)
+    {
+        return;
+    }
+
+    _earth_patch_resolution = clamped;
+    _earth_patch_cache_dirty = true;
+}
+
 void PlanetSystem::cleanup()
 {
     if (!_context)
@@ -741,27 +753,31 @@ PlanetSystem::EarthPatch *PlanetSystem::get_or_create_earth_patch(const PlanetBo
     const glm::vec4 vertex_color =
         _earth_debug_tint_patches_by_lod ? debug_color_for_level(key.level) : glm::vec4(1.0f);
 
-    std::vector<Vertex> vertices;
+    thread_local std::vector<Vertex> scratch_vertices;
+    const uint32_t safe_res = std::max(2u, _earth_patch_resolution);
+    scratch_vertices.reserve(
+        static_cast<size_t>(safe_res) * static_cast<size_t>(safe_res) +
+        static_cast<size_t>(4u) * static_cast<size_t>(safe_res));
     const glm::dvec3 patch_center_dir =
-        planet::build_cubesphere_patch_vertices(vertices,
+        planet::build_cubesphere_patch_vertices(scratch_vertices,
                                                 earth.radius_m,
                                                 key.face,
                                                 key.level,
                                                 key.x,
                                                 key.y,
-                                                _earth_patch_resolution,
+                                                safe_res,
                                                 vertex_color);
 
-    if (vertices.empty())
+    if (scratch_vertices.empty())
     {
         return nullptr;
     }
 
-    const PatchBoundsData bounds = compute_patch_bounds(vertices);
+    const PatchBoundsData bounds = compute_patch_bounds(scratch_vertices);
 
     AllocatedBuffer vb =
-        rm->upload_buffer(vertices.data(),
-                          vertices.size() * sizeof(Vertex),
+        rm->upload_buffer(scratch_vertices.data(),
+                          scratch_vertices.size() * sizeof(Vertex),
                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
@@ -921,7 +937,8 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                                    cam_world,
                                    origin_world,
                                    scene.getSceneData(),
-                                   logical_extent);
+                                   logical_extent,
+                                   _earth_patch_resolution);
             const Clock::time_point t_q1 = Clock::now();
 
             ensure_earth_patch_index_buffer();
@@ -962,37 +979,58 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             const uint32_t frame_index = ++_earth_patch_frame_stamp;
 
             const Clock::time_point t_emit0 = Clock::now();
+
+            // Patch creation priority: create higher-LOD (smaller) patches first so we fill
+            // near-camera terrain before spending budget on far patches.
+            std::vector<planet::PatchKey> create_queue = _earth_quadtree.visible_leaves();
+            std::sort(create_queue.begin(), create_queue.end(),
+                      [](const planet::PatchKey &a, const planet::PatchKey &b)
+                      {
+                          if (a.level != b.level) return a.level > b.level;
+                          if (a.face != b.face) return a.face < b.face;
+                          if (a.x != b.x) return a.x < b.x;
+                          return a.y < b.y;
+                      });
+
+            for (const planet::PatchKey &k : create_queue)
+            {
+                if (find_earth_patch(k))
+                {
+                    continue;
+                }
+
+                const bool hit_count_budget = (max_create != 0u) && (created_patches >= max_create);
+                const bool hit_time_budget = (max_create_ms > 0.0) && (ms_patch_create >= max_create_ms);
+                if (hit_count_budget || hit_time_budget)
+                {
+                    break;
+                }
+
+                const Clock::time_point t_c0 = Clock::now();
+                EarthPatch *patch = get_or_create_earth_patch(*earth, k, frame_index);
+                const Clock::time_point t_c1 = Clock::now();
+
+                if (patch)
+                {
+                    created_patches++;
+                }
+                ms_patch_create += std::chrono::duration<double, std::milli>(t_c1 - t_c0).count();
+            }
+
             std::vector<uint32_t> ready_patch_indices;
             ready_patch_indices.reserve(_earth_quadtree.visible_leaves().size());
 
             for (const planet::PatchKey &k : _earth_quadtree.visible_leaves())
             {
                 EarthPatch *patch = find_earth_patch(k);
+                if (!patch)
                 {
-                    if (patch)
-                    {
-                        patch->last_used_frame = frame_index;
-                        _earth_patch_lru.splice(_earth_patch_lru.begin(), _earth_patch_lru, patch->lru_it);
-                    }
-                    else
-                    {
-                        const bool hit_count_budget = (max_create != 0u) && (created_patches >= max_create);
-                        const bool hit_time_budget = (max_create_ms > 0.0) && (ms_patch_create >= max_create_ms);
-                        if (!hit_count_budget && !hit_time_budget)
-                        {
-                            const Clock::time_point t_c0 = Clock::now();
-                            patch = get_or_create_earth_patch(*earth, k, frame_index);
-                            const Clock::time_point t_c1 = Clock::now();
-
-                            if (patch)
-                            {
-                                created_patches++;
-                            }
-                            ms_patch_create += std::chrono::duration<double, std::milli>(t_c1 - t_c0).count();
-                        }
-                    }
+                    continue;
                 }
-                if (patch)
+
+                patch->last_used_frame = frame_index;
+                _earth_patch_lru.splice(_earth_patch_lru.begin(), _earth_patch_lru, patch->lru_it);
+
                 {
                     const uint32_t idx = static_cast<uint32_t>(patch - _earth_patches.data());
                     ready_patch_indices.push_back(idx);

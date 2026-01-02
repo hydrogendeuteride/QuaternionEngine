@@ -72,7 +72,8 @@ namespace planet
                     const WorldVec3 &camera_world,
                     const WorldVec3 &origin_world,
                     const GPUSceneData &scene_data,
-                    VkExtent2D logical_extent);
+                    VkExtent2D logical_extent,
+                    uint32_t patch_resolution);
 
     private:
         Settings _settings{};
