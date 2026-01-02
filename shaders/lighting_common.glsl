@@ -47,10 +47,22 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
 
 vec3 evaluate_brdf(vec3 N, vec3 V, vec3 L, vec3 albedo, float roughness, float metallic)
 {
-    vec3 H = normalize(V + L);
-
     float NdotV = max(dot(N, V), 0.0);
     float NdotL = max(dot(N, L), 0.0);
+    // Avoid undefined half-vector when V and L are opposite (normalize(0) => NaN),
+    // which can manifest as single-pixel "fireflies" on smooth surfaces.
+    if (NdotL <= 0.0 || NdotV <= 0.0)
+    {
+        return vec3(0.0);
+    }
+
+    vec3 H = V + L;
+    float Hlen2 = dot(H, H);
+    if (Hlen2 <= 1.0e-8)
+    {
+        return vec3(0.0);
+    }
+    H *= inversesqrt(Hlen2);
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 F  = fresnelSchlick(max(dot(H, V), 0.0), F0);

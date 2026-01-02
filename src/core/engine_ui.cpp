@@ -1756,6 +1756,32 @@ namespace
 
         SceneManager *sceneMgr = eng->_sceneManager.get();
 
+        // Sunlight editor (Directional light)
+        ImGui::TextUnformatted("Sunlight (directional)");
+        {
+            // Shaders use Lsun = normalize(-sceneData.sunlightDirection.xyz).
+            // Expose Lsun directly in the UI (direction *towards* the sun).
+            glm::vec3 Lsun = -sceneMgr->getSunlightDirection();
+            const float len2 = glm::length2(Lsun);
+            Lsun = (len2 > 1.0e-8f) ? glm::normalize(Lsun) : glm::vec3(0.0f, 1.0f, 0.0f);
+
+            float dir[3] = {Lsun.x, Lsun.y, Lsun.z};
+            if (ImGui::InputFloat3("Direction (to sun)##sun_dir", dir, "%.3f"))
+            {
+                glm::vec3 v{dir[0], dir[1], dir[2]};
+                const float vlen2 = glm::length2(v);
+                v = (vlen2 > 1.0e-8f) ? glm::normalize(v) : glm::vec3(0.0f, 1.0f, 0.0f);
+                sceneMgr->setSunlightDirection(-v);
+            }
+
+            if (ImGui::Button("Reset##sun_reset"))
+            {
+                sceneMgr->setSunlightDirection(glm::vec3(-0.2f, -1.0f, -0.3f));
+            }
+        }
+
+        ImGui::Separator();
+
         // Point light editor
         ImGui::TextUnformatted("Point lights");
             const auto &lights = sceneMgr->getPointLights();

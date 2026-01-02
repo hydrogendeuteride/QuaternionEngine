@@ -976,7 +976,10 @@ bool SceneManager::setGLTFInstanceAnimationLoop(const std::string &instanceName,
 
 void SceneManager::setSunlightDirection(const glm::vec3& dir)
 {
-    glm::vec3 normalized = glm::normalize(dir);
+    const float len2 = glm::length2(dir);
+    const glm::vec3 normalized = (len2 > 1.0e-8f)
+                                     ? (dir * (1.0f / std::sqrt(len2)))
+                                     : glm::vec3(0.0f, -1.0f, 0.0f);
     sceneData.sunlightDirection = glm::vec4(normalized, sceneData.sunlightDirection.w);
 }
 
