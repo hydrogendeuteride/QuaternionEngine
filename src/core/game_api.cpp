@@ -888,33 +888,6 @@ void Engine::clear_all_instances()
     }
 }
 
-void Engine::set_auto_create_default_planets(bool enabled)
-{
-    if (!_engine || !_engine->_sceneManager)
-    {
-        return;
-    }
-
-    if (PlanetSystem *planets = _engine->_sceneManager->get_planet_system())
-    {
-        planets->set_auto_create_defaults(enabled);
-    }
-}
-
-bool Engine::get_auto_create_default_planets() const
-{
-    if (!_engine || !_engine->_sceneManager)
-    {
-        return false;
-    }
-
-    if (const PlanetSystem *planets = _engine->_sceneManager->get_planet_system())
-    {
-        return planets->auto_create_defaults();
-    }
-    return false;
-}
-
 bool Engine::add_planet_sphere(const PlanetSphere &planet)
 {
     if (!_engine || !_engine->_sceneManager)
@@ -942,6 +915,32 @@ bool Engine::add_planet_sphere(const PlanetSphere &planet)
     return planets->create_mesh_planet(info) != nullptr;
 }
 
+bool Engine::add_planet_terrain(const PlanetTerrain &planet)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    PlanetSystem *planets = _engine->_sceneManager->get_planet_system();
+    if (!planets)
+    {
+        return false;
+    }
+
+    PlanetSystem::TerrainPlanetCreateInfo info{};
+    info.name = planet.name;
+    info.center_world = WorldVec3(planet.center);
+    info.radius_m = planet.radius_m;
+    info.visible = planet.visible;
+    info.base_color = planet.base_color;
+    info.metallic = planet.metallic;
+    info.roughness = planet.roughness;
+    info.albedo_dir = planet.albedo_dir;
+
+    return planets->create_terrain_planet(info) != nullptr;
+}
+
 bool Engine::remove_planet(const std::string &name)
 {
     if (!_engine || !_engine->_sceneManager)
@@ -964,6 +963,120 @@ void Engine::clear_planets(bool destroy_mesh_assets)
     {
         planets->clear_planets(destroy_mesh_assets);
     }
+}
+
+bool Engine::get_planet(const std::string &name, PlanetInfo &out) const
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    const PlanetSystem *planets = _engine->_sceneManager->get_planet_system();
+    if (!planets)
+    {
+        return false;
+    }
+
+    for (const PlanetSystem::PlanetBody &b : planets->bodies())
+    {
+        if (b.name == name)
+        {
+            out.name = b.name;
+            out.center = glm::dvec3(b.center_world);
+            out.radius_m = b.radius_m;
+            out.visible = b.visible;
+            out.terrain = b.terrain;
+            return true;
+        }
+    }
+    return false;
+}
+
+size_t Engine::get_planet_count() const
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return 0;
+    }
+
+    const PlanetSystem *planets = _engine->_sceneManager->get_planet_system();
+    if (!planets)
+    {
+        return 0;
+    }
+    return planets->bodies().size();
+}
+
+bool Engine::get_planet(size_t index, PlanetInfo &out) const
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    const PlanetSystem *planets = _engine->_sceneManager->get_planet_system();
+    if (!planets)
+    {
+        return false;
+    }
+    const auto &bodies = planets->bodies();
+    if (index >= bodies.size())
+    {
+        return false;
+    }
+
+    const PlanetSystem::PlanetBody &b = bodies[index];
+    out.name = b.name;
+    out.center = glm::dvec3(b.center_world);
+    out.radius_m = b.radius_m;
+    out.visible = b.visible;
+    out.terrain = b.terrain;
+    return true;
+}
+
+bool Engine::set_planet_center(const std::string &name, const glm::dvec3 &center)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    PlanetSystem *planets = _engine->_sceneManager->get_planet_system();
+    return planets ? planets->set_planet_center(name, WorldVec3(center)) : false;
+}
+
+bool Engine::set_planet_radius(const std::string &name, double radius_m)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    PlanetSystem *planets = _engine->_sceneManager->get_planet_system();
+    return planets ? planets->set_planet_radius(name, radius_m) : false;
+}
+
+bool Engine::set_planet_visible(const std::string &name, bool visible)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    PlanetSystem *planets = _engine->_sceneManager->get_planet_system();
+    return planets ? planets->set_planet_visible(name, visible) : false;
+}
+
+bool Engine::set_planet_terrain(const std::string &name, bool terrain)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    PlanetSystem *planets = _engine->_sceneManager->get_planet_system();
+    return planets ? planets->set_planet_terrain(name, terrain) : false;
 }
 
 // ----------------------------------------------------------------------------

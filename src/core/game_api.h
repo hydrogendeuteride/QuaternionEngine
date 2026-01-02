@@ -104,6 +104,33 @@ struct PlanetSphere
     uint32_t stacks{24};
 };
 
+// Procedural planet terrain (cube-sphere quadtree patches) parameters.
+// Note: only one terrain planet can be active at a time in the current implementation.
+struct PlanetTerrain
+{
+    std::string name;
+    glm::dvec3 center{0.0};
+    double radius_m{1.0};
+    bool visible{true};
+
+    glm::vec4 base_color{1.0f};
+    float metallic{0.0f};
+    float roughness{1.0f};
+
+    // Optional terrain texture root relative to assets/ (e.g. "planets/earth/albedo/L0").
+    // Expected files: {px,nx,py,ny,pz,nz}.ktx2
+    std::string albedo_dir;
+};
+
+struct PlanetInfo
+{
+    std::string name;
+    glm::dvec3 center{0.0};
+    double radius_m{1.0};
+    bool visible{true};
+    bool terrain{false};
+};
+
 // Material description for textured primitives
 struct PrimitiveMaterial
 {
@@ -589,14 +616,20 @@ public:
     // Planets
     // ------------------------------------------------------------------------
 
-    // Enable/disable auto creation of default Earth/Moon when the planet list is empty.
-    void set_auto_create_default_planets(bool enabled);
-    bool get_auto_create_default_planets() const;
-
     // Create/destroy simple sphere planets (procedural mesh in PlanetSystem).
     bool add_planet_sphere(const PlanetSphere &planet);
+    bool add_planet_terrain(const PlanetTerrain &planet);
     bool remove_planet(const std::string &name);
     void clear_planets(bool destroy_mesh_assets = true);
+
+    // Planet queries / edits (by name).
+    bool get_planet(const std::string &name, PlanetInfo &out) const;
+    size_t get_planet_count() const;
+    bool get_planet(size_t index, PlanetInfo &out) const;
+    bool set_planet_center(const std::string &name, const glm::dvec3 &center);
+    bool set_planet_radius(const std::string &name, double radius_m);
+    bool set_planet_visible(const std::string &name, bool visible);
+    bool set_planet_terrain(const std::string &name, bool terrain);
 
     // ------------------------------------------------------------------------
     // Animation

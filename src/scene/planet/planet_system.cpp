@@ -22,10 +22,6 @@
 
 namespace
 {
-    constexpr double kEarthRadiusM = 6378137.0;    // WGS84 equatorial radius
-    constexpr double kMoonRadiusM = 1737400.0;     // mean radius
-    constexpr double kMoonDistanceM = 384400000.0; // mean Earth-Moon distance
-
     struct PatchBoundsData
     {
         glm::vec3 origin{0.0f};
@@ -54,20 +50,12 @@ namespace
         return b;
     }
 
-    GLTFMetallic_Roughness::MaterialConstants make_planet_constants()
+    GLTFMetallic_Roughness::MaterialConstants make_planet_constants(
+        const glm::vec4 &base_color = glm::vec4(1.0f),
+        float metallic = 0.0f,
+        float roughness = 1.0f)
     {
         GLTFMetallic_Roughness::MaterialConstants c{};
-        c.colorFactors = glm::vec4(1.0f);
-        // metal_rough_factors.x = metallic, .y = roughness
-        c.metal_rough_factors = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
-        return c;
-    }
-
-    GLTFMetallic_Roughness::MaterialConstants make_planet_constants(const glm::vec4 &base_color,
-                                                                    float metallic,
-                                                                    float roughness)
-    {
-        GLTFMetallic_Roughness::MaterialConstants c = make_planet_constants();
         c.colorFactors = base_color;
         c.metal_rough_factors = glm::vec4(metallic, roughness, 0.0f, 0.0f);
         return c;
@@ -182,37 +170,26 @@ void PlanetSystem::cleanup()
     _earth_patch_index_count = 0;
     _earth_patch_index_resolution = 0;
     _earth_patch_frame_stamp = 0;
+    _earth_patch_bound_base_color = glm::vec4(1.0f);
+    _earth_patch_bound_metallic = 0.0f;
+    _earth_patch_bound_roughness = 1.0f;
+    _earth_patch_bound_albedo_dir.clear();
 
     _bodies.clear();
 }
 
 PlanetSystem::PlanetBody *PlanetSystem::find_body_by_name(std::string_view name)
 {
-    ensure_bodies_created();
-    for (PlanetBody &b : _bodies)
-    {
-        if (b.name == name)
-        {
-            return &b;
-        }
-    }
-    return nullptr;
+    auto it = std::find_if(_bodies.begin(), _bodies.end(),
+                           [&](const PlanetBody &b) { return b.name == name; });
+    return it != _bodies.end() ? &(*it) : nullptr;
 }
 
 PlanetSystem::PlanetBody *PlanetSystem::create_mesh_planet(const MeshPlanetCreateInfo &info)
 {
-    if (info.name.empty())
+    if (info.name.empty() || find_body_by_name(info.name))
     {
         return nullptr;
-    }
-
-    // Avoid implicit default creation when the user is explicitly managing planets.
-    for (const PlanetBody &b : _bodies)
-    {
-        if (b.name == info.name)
-        {
-            return nullptr;
-        }
     }
 
     PlanetBody body{};
@@ -221,6 +198,9 @@ PlanetSystem::PlanetBody *PlanetSystem::create_mesh_planet(const MeshPlanetCreat
     body.radius_m = info.radius_m;
     body.visible = info.visible;
     body.terrain = false;
+    body.base_color = info.base_color;
+    body.metallic = info.metallic;
+    body.roughness = info.roughness;
 
     if (_context && _context->assets)
     {
@@ -246,6 +226,51 @@ PlanetSystem::PlanetBody *PlanetSystem::create_mesh_planet(const MeshPlanetCreat
     return &_bodies.back();
 }
 
+PlanetSystem::PlanetBody *PlanetSystem::create_terrain_planet(const TerrainPlanetCreateInfo &info)
+{
+    if (info.name.empty() || find_body_by_name(info.name))
+    {
+        return nullptr;
+    }
+
+    PlanetBody body{};
+    body.name = info.name;
+    body.center_world = info.center_world;
+    body.radius_m = info.radius_m;
+    body.visible = info.visible;
+
+    // Only one terrain body is supported today; demote any existing terrain body.
+    for (PlanetBody &b : _bodies)
+    {
+        b.terrain = false;
+    }
+
+    body.terrain = true;
+    body.base_color = info.base_color;
+    body.metallic = info.metallic;
+    body.roughness = info.roughness;
+    body.terrain_albedo_dir = info.albedo_dir;
+
+    if (_context && _context->assets)
+    {
+        AssetManager *assets = _context->assets;
+
+        const std::string asset_name = fmt::format("Planet_{}_TerrainMaterial", info.name);
+        const GLTFMetallic_Roughness::MaterialConstants mc =
+            make_planet_constants(info.base_color, info.metallic, info.roughness);
+        body.material = assets->createMaterialFromConstants(asset_name, mc, MaterialPass::MainColor);
+    }
+
+    // Patch cache and materials are single-body today; clear so we don't render stale data.
+    clear_earth_patch_cache();
+    _earth_debug_stats = {};
+    _earth_patch_cache_dirty = false;
+    _earth_patch_bound_albedo_dir.clear();
+
+    _bodies.push_back(std::move(body));
+    return &_bodies.back();
+}
+
 bool PlanetSystem::destroy_planet(std::string_view name)
 {
     if (name.empty())
@@ -264,6 +289,7 @@ bool PlanetSystem::destroy_planet(std::string_view name)
     {
         clear_earth_patch_cache();
         _earth_debug_stats = {};
+        _earth_patch_bound_albedo_dir.clear();
     }
 
     if (it->mesh && _context && _context->assets)
@@ -306,82 +332,90 @@ void PlanetSystem::clear_planets(bool destroy_mesh_assets)
     // shared index/material resources around.
     clear_earth_patch_cache();
     _earth_debug_stats = {};
+    _earth_patch_bound_albedo_dir.clear();
 
     _bodies.clear();
 }
 
-void PlanetSystem::ensure_bodies_created()
+bool PlanetSystem::set_planet_center(std::string_view name, const WorldVec3 &center_world)
 {
-    if (!_auto_create_defaults || !_bodies.empty())
+    PlanetBody *b = find_body_by_name(name);
+    if (!b) return false;
+    b->center_world = center_world;
+    return true;
+}
+
+bool PlanetSystem::set_planet_radius(std::string_view name, double radius_m)
+{
+    PlanetBody *b = find_body_by_name(name);
+    if (!b) return false;
+
+    const double safe_radius = std::max(1.0, radius_m);
+    if (b->radius_m == safe_radius) return true;
+
+    b->radius_m = safe_radius;
+    if (b->terrain)
     {
-        return;
+        clear_earth_patch_cache();
+        _earth_debug_stats = {};
+    }
+    return true;
+}
+
+bool PlanetSystem::set_planet_visible(std::string_view name, bool visible)
+{
+    PlanetBody *b = find_body_by_name(name);
+    if (!b) return false;
+    b->visible = visible;
+    return true;
+}
+
+bool PlanetSystem::set_planet_terrain(std::string_view name, bool terrain)
+{
+    PlanetBody *target = find_body_by_name(name);
+    if (!target) return false;
+
+    bool changed = false;
+    if (terrain)
+    {
+        for (PlanetBody &b : _bodies)
+        {
+            const bool want = (&b == target);
+            if (b.terrain != want)
+            {
+                b.terrain = want;
+                changed = true;
+            }
+        }
+    }
+    else if (target->terrain)
+    {
+        target->terrain = false;
+        changed = true;
     }
 
-    PlanetBody earth{};
-    earth.name = "Earth";
-    earth.center_world = WorldVec3(0.0, 0.0, 0.0);
-    earth.radius_m = kEarthRadiusM;
-    earth.terrain = true;
-
-    PlanetBody moon{};
-    moon.name = "Moon";
-    moon.center_world = WorldVec3(kMoonDistanceM, 0.0, 0.0);
-    moon.radius_m = kMoonRadiusM;
-    moon.terrain = false;
-
-    if (_context && _context->assets)
+    if (changed)
     {
-        AssetManager *assets = _context->assets;
-
-        // Earth: cube-sphere quadtree patches (Milestones B2-B4). Material is shared.
-        {
-            GLTFMetallic_Roughness::MaterialConstants mc = make_planet_constants();
-            mc.colorFactors = glm::vec4(1.0f);
-            earth.material = assets->createMaterialFromConstants("Planet_EarthMaterial", mc, MaterialPass::MainColor);
-        }
-
-        // Moon: constant albedo (no texture yet).
-        {
-            GLTFMetallic_Roughness::MaterialConstants mc = make_planet_constants();
-            mc.colorFactors = glm::vec4(0.72f, 0.72f, 0.75f, 1.0f);
-
-            moon.material = assets->createMaterialFromConstants("Planet_MoonMaterial", mc, MaterialPass::MainColor);
-
-            std::vector<Vertex> verts;
-            std::vector<uint32_t> inds;
-            primitives::buildSphere(verts, inds, 48, 24);
-            geom::generate_tangents(verts, inds);
-
-            moon.mesh = assets->createMesh("Planet_MoonSphere", verts, inds, moon.material);
-        }
+        clear_earth_patch_cache();
+        _earth_debug_stats = {};
+        _earth_patch_cache_dirty = false;
+        _earth_patch_bound_albedo_dir.clear();
     }
-
-    _bodies.push_back(std::move(earth));
-    _bodies.push_back(std::move(moon));
+    return true;
 }
 
 PlanetSystem::PlanetBody *PlanetSystem::find_terrain_body()
 {
-    for (PlanetBody &b : _bodies)
-    {
-        if (b.terrain)
-        {
-            return &b;
-        }
-    }
-    return nullptr;
+    auto it = std::find_if(_bodies.begin(), _bodies.end(),
+                           [](const PlanetBody &b) { return b.terrain; });
+    return it != _bodies.end() ? &(*it) : nullptr;
 }
 
 const PlanetSystem::PlanetBody *PlanetSystem::find_terrain_body() const
 {
-    for (const PlanetBody &b : _bodies)
-    {
-        if (b.terrain)
-        {
-            return &b;
-        }
-    }
-    return nullptr;
+    auto it = std::find_if(_bodies.begin(), _bodies.end(),
+                           [](const PlanetBody &b) { return b.terrain; });
+    return it != _bodies.end() ? &(*it) : nullptr;
 }
 
 PlanetSystem::EarthPatch *PlanetSystem::find_earth_patch(const planet::PatchKey &key)
@@ -550,10 +584,48 @@ void PlanetSystem::ensure_earth_patch_material_layout()
                                                        VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
 }
 
-void PlanetSystem::ensure_earth_patch_material_constants_buffer()
+void PlanetSystem::ensure_earth_patch_material_constants_buffer(const PlanetBody &earth)
 {
     if (_earth_patch_material_constants_buffer.buffer != VK_NULL_HANDLE)
     {
+        if (!_context)
+        {
+            return;
+        }
+
+        DeviceManager *device = _context->getDevice();
+        if (!device)
+        {
+            return;
+        }
+
+        const bool same_constants =
+            _earth_patch_bound_base_color == earth.base_color &&
+            _earth_patch_bound_metallic == earth.metallic &&
+            _earth_patch_bound_roughness == earth.roughness;
+        if (same_constants)
+        {
+            return;
+        }
+
+        const GLTFMetallic_Roughness::MaterialConstants constants =
+            make_planet_constants(earth.base_color, earth.metallic, earth.roughness);
+
+        VmaAllocationInfo allocInfo{};
+        vmaGetAllocationInfo(device->allocator(), _earth_patch_material_constants_buffer.allocation, &allocInfo);
+        auto *mapped = static_cast<GLTFMetallic_Roughness::MaterialConstants *>(allocInfo.pMappedData);
+        if (mapped)
+        {
+            *mapped = constants;
+            vmaFlushAllocation(device->allocator(),
+                               _earth_patch_material_constants_buffer.allocation,
+                               0,
+                               sizeof(constants));
+
+            _earth_patch_bound_base_color = earth.base_color;
+            _earth_patch_bound_metallic = earth.metallic;
+            _earth_patch_bound_roughness = earth.roughness;
+        }
         return;
     }
 
@@ -569,7 +641,8 @@ void PlanetSystem::ensure_earth_patch_material_constants_buffer()
         return;
     }
 
-    const GLTFMetallic_Roughness::MaterialConstants constants = make_planet_constants();
+    const GLTFMetallic_Roughness::MaterialConstants constants =
+        make_planet_constants(earth.base_color, earth.metallic, earth.roughness);
 
     _earth_patch_material_constants_buffer =
         rm->create_buffer(sizeof(GLTFMetallic_Roughness::MaterialConstants),
@@ -588,6 +661,10 @@ void PlanetSystem::ensure_earth_patch_material_constants_buffer()
     {
         *mapped = constants;
         vmaFlushAllocation(device->allocator(), _earth_patch_material_constants_buffer.allocation, 0, sizeof(constants));
+
+        _earth_patch_bound_base_color = earth.base_color;
+        _earth_patch_bound_metallic = earth.metallic;
+        _earth_patch_bound_roughness = earth.roughness;
     }
 }
 
@@ -608,7 +685,7 @@ void PlanetSystem::ensure_earth_face_materials(const PlanetBody &earth)
     }
 
     ensure_earth_patch_material_layout();
-    ensure_earth_patch_material_constants_buffer();
+    ensure_earth_patch_material_constants_buffer(earth);
 
     if (_earth_patch_material_layout == VK_NULL_HANDLE ||
         _earth_patch_material_constants_buffer.buffer == VK_NULL_HANDLE)
@@ -645,6 +722,13 @@ void PlanetSystem::ensure_earth_face_materials(const PlanetBody &earth)
     if (white == VK_NULL_HANDLE) white = checker;
     if (flatNormal == VK_NULL_HANDLE) flatNormal = white;
     if (black == VK_NULL_HANDLE) black = white;
+
+    const std::string desired_albedo_dir = earth.terrain_albedo_dir;
+    const bool albedo_dir_changed = desired_albedo_dir != _earth_patch_bound_albedo_dir;
+    if (albedo_dir_changed)
+    {
+        _earth_patch_bound_albedo_dir = desired_albedo_dir;
+    }
 
     auto face_legacy = [](planet::CubeFace f) -> const char * {
         switch (f)
@@ -703,10 +787,10 @@ void PlanetSystem::ensure_earth_face_materials(const PlanetBody &earth)
                                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
             writer.update_set(device->device(), mat.materialSet);
 
-            if (textures && tileSampler != VK_NULL_HANDLE)
+            if (textures && tileSampler != VK_NULL_HANDLE && !desired_albedo_dir.empty())
             {
                 const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
-                const std::string rel = fmt::format("planets/earth/albedo/L0/{}.ktx2", face_legacy(face));
+                const std::string rel = fmt::format("{}/{}.ktx2", desired_albedo_dir, face_legacy(face));
 
                 TextureCache::TextureKey tk{};
                 tk.kind = TextureCache::TextureKey::SourceKind::FilePath;
@@ -716,7 +800,35 @@ void PlanetSystem::ensure_earth_face_materials(const PlanetBody &earth)
 
                 TextureCache::TextureHandle h = textures->request(tk, tileSampler);
                 textures->watchBinding(h, mat.materialSet, 1u, tileSampler, checker);
-                textures->pin(h);
+            }
+        }
+        else if (albedo_dir_changed && textures && tileSampler != VK_NULL_HANDLE)
+        {
+            // Rebind the per-face albedo tile for the currently active terrain body.
+            textures->unwatchSet(mat.materialSet);
+
+            // Reset binding to a fallback until the new tile becomes resident.
+            DescriptorWriter writer;
+            writer.write_image(1,
+                               checker,
+                               tileSampler,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            writer.update_set(device->device(), mat.materialSet);
+
+            if (!desired_albedo_dir.empty())
+            {
+                const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
+                const std::string rel = fmt::format("{}/{}.ktx2", desired_albedo_dir, face_legacy(face));
+
+                TextureCache::TextureKey tk{};
+                tk.kind = TextureCache::TextureKey::SourceKind::FilePath;
+                tk.path = assets->assetPath(rel);
+                tk.srgb = true;
+                tk.mipmapped = true;
+
+                TextureCache::TextureHandle h = textures->request(tk, tileSampler);
+                textures->watchBinding(h, mat.materialSet, 1u, tileSampler, checker);
             }
         }
     }
@@ -907,11 +1019,9 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
         return;
     }
 
-    ensure_bodies_created();
-
     const WorldVec3 origin_world = scene.get_world_origin();
 
-    // Terrain body: quadtree patches (defaults to Earth).
+    // Terrain body: quadtree patches (only one active terrain body at a time).
     {
         using Clock = std::chrono::steady_clock;
 

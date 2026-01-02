@@ -2285,168 +2285,134 @@ namespace
             cam.orientation = glm::quat_cast(rot);
         };
 
-        PlanetSystem::PlanetBody *earth = planets->find_body_by_name("Earth");
-        PlanetSystem::PlanetBody *moon = planets->find_body_by_name("Moon");
-
-	        if (earth)
-	        {
-	            ImGui::Separator();
-
-	            bool vis = earth->visible;
-            if (ImGui::Checkbox("Render Earth", &vis))
+        const PlanetSystem::PlanetBody *terrain_body = nullptr;
+        for (const PlanetSystem::PlanetBody &b : planets->bodies())
+        {
+            if (b.terrain)
             {
-                earth->visible = vis;
+                terrain_body = &b;
+                break;
             }
-            ImGui::SameLine();
-            ImGui::Text("(R=%.1f km)", earth->radius_m / 1000.0);
+        }
 
-            const double dist = glm::length(cam_world - earth->center_world);
-            const double alt_m = dist - earth->radius_m;
-            ImGui::Text("Altitude above Earth: %.3f km", alt_m / 1000.0);
-
-            if (ImGui::Button("Teleport: 10000 km above surface"))
+        ImGui::Separator();
+        if (terrain_body)
+        {
+            const std::string label = "Terrain LOD / Perf (" + terrain_body->name + ")";
+            if (ImGui::CollapsingHeader(label.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
             {
-                scene->getMainCamera().position_world =
-                    earth->center_world + WorldVec3(0.0, 0.0, earth->radius_m + 1.0e7);
-                look_at_world(scene->getMainCamera(), earth->center_world);
-            }
+                auto settings = planets->earth_quadtree_settings();
+                bool changed = false;
 
-	            if (ImGui::Button("Teleport: 1000 km orbit"))
-	            {
-	                scene->getMainCamera().position_world =
-	                    earth->center_world + WorldVec3(0.0, 0.0, earth->radius_m + 1.0e6);
-	                look_at_world(scene->getMainCamera(), earth->center_world);
-	            }
-	            ImGui::SameLine();
-	            if (ImGui::Button("Teleport: 10 km above surface"))
-	            {
-	                scene->getMainCamera().position_world =
-	                    earth->center_world + WorldVec3(0.0, 0.0, earth->radius_m + 1.0e4);
-	                look_at_world(scene->getMainCamera(), earth->center_world);
-	            }
+                bool tint = planets->earth_debug_tint_patches_by_lod();
+                if (ImGui::Checkbox("Debug: tint patches by LOD", &tint))
+                {
+                    planets->set_earth_debug_tint_patches_by_lod(tint);
+                }
 
-	            ImGui::Separator();
-	            if (ImGui::CollapsingHeader("Earth LOD / Perf", ImGuiTreeNodeFlags_DefaultOpen))
-	            {
-	                auto settings = planets->earth_quadtree_settings();
-	                bool changed = false;
+                int maxLevel = static_cast<int>(settings.max_level);
+                if (ImGui::SliderInt("Max LOD level", &maxLevel, 0, 20))
+                {
+                    settings.max_level = static_cast<uint32_t>(std::max(0, maxLevel));
+                    changed = true;
+                }
 
-                    bool tint = planets->earth_debug_tint_patches_by_lod();
-                    if (ImGui::Checkbox("Debug: tint patches by LOD", &tint))
+                if (ImGui::SliderFloat("Target SSE (px)", &settings.target_sse_px, 4.0f, 128.0f, "%.1f"))
+                {
+                    settings.target_sse_px = std::max(settings.target_sse_px, 0.1f);
+                    changed = true;
+                }
+
+                int maxPatches = static_cast<int>(settings.max_patches_visible);
+                if (ImGui::SliderInt("Max visible patches", &maxPatches, 64, 20000))
+                {
+                    settings.max_patches_visible = static_cast<uint32_t>(std::max(6, maxPatches));
+                    changed = true;
+                }
+
+                int createBudget = static_cast<int>(planets->earth_patch_create_budget_per_frame());
+                if (ImGui::SliderInt("Patch create budget/frame", &createBudget, 0, 512))
+                {
+                    planets->set_earth_patch_create_budget_per_frame(static_cast<uint32_t>(std::max(0, createBudget)));
+                }
+
+                float createBudgetMs = planets->earth_patch_create_budget_ms();
+                if (ImGui::DragFloat("Patch create budget (ms)", &createBudgetMs, 0.25f, 0.0f, 50.0f, "%.2f"))
+                {
+                    planets->set_earth_patch_create_budget_ms(std::max(0.0f, createBudgetMs));
+                }
+
+                int patchRes = static_cast<int>(planets->earth_patch_resolution());
+                if (ImGui::SliderInt("Patch resolution (verts/edge)", &patchRes, 2, 129))
+                {
+                    planets->set_earth_patch_resolution(static_cast<uint32_t>(std::max(2, patchRes)));
+                }
+
+                int cacheMax = static_cast<int>(planets->earth_patch_cache_max());
+                if (ImGui::SliderInt("Patch cache max", &cacheMax, 0, 50000))
+                {
+                    planets->set_earth_patch_cache_max(static_cast<uint32_t>(std::max(0, cacheMax)));
+                }
+
+                if (ImGui::Checkbox("Frustum cull", &settings.frustum_cull)) changed = true;
+                if (ImGui::Checkbox("Horizon cull", &settings.horizon_cull)) changed = true;
+
+                if (ImGui::Checkbox("RT guardrail (LOD floor)", &settings.rt_guardrail)) changed = true;
+                if (settings.rt_guardrail)
+                {
+                    float maxEdge = static_cast<float>(settings.max_patch_edge_rt_m);
+                    if (ImGui::DragFloat("RT max patch edge (m)", &maxEdge, 100.0f, 0.0f, 200000.0f, "%.0f"))
                     {
-                        planets->set_earth_debug_tint_patches_by_lod(tint);
+                        settings.max_patch_edge_rt_m = static_cast<double>(std::max(0.0f, maxEdge));
+                        changed = true;
                     }
 
-	                int maxLevel = static_cast<int>(settings.max_level);
-	                if (ImGui::SliderInt("Max LOD level", &maxLevel, 0, 20))
-	                {
-	                    settings.max_level = static_cast<uint32_t>(std::max(0, maxLevel));
-	                    changed = true;
-	                }
+                    float maxAlt = static_cast<float>(settings.rt_guardrail_max_altitude_m);
+                    if (ImGui::DragFloat("RT max altitude (m)", &maxAlt, 1000.0f, 0.0f, 2.0e6f, "%.0f"))
+                    {
+                        settings.rt_guardrail_max_altitude_m = static_cast<double>(std::max(0.0f, maxAlt));
+                        changed = true;
+                    }
+                }
 
-	                if (ImGui::SliderFloat("Target SSE (px)", &settings.target_sse_px, 4.0f, 128.0f, "%.1f"))
-	                {
-	                    settings.target_sse_px = std::max(settings.target_sse_px, 0.1f);
-	                    changed = true;
-	                }
+                if (changed)
+                {
+                    planets->set_earth_quadtree_settings(settings);
+                }
 
-	                int maxPatches = static_cast<int>(settings.max_patches_visible);
-	                if (ImGui::SliderInt("Max visible patches", &maxPatches, 64, 20000))
-	                {
-	                    settings.max_patches_visible = static_cast<uint32_t>(std::max(6, maxPatches));
-	                    changed = true;
-	                }
-
-	                int createBudget = static_cast<int>(planets->earth_patch_create_budget_per_frame());
-	                if (ImGui::SliderInt("Patch create budget/frame", &createBudget, 0, 512))
-	                {
-	                    planets->set_earth_patch_create_budget_per_frame(static_cast<uint32_t>(std::max(0, createBudget)));
-	                }
-
-		                float createBudgetMs = planets->earth_patch_create_budget_ms();
-		                if (ImGui::DragFloat("Patch create budget (ms)", &createBudgetMs, 0.25f, 0.0f, 50.0f, "%.2f"))
-		                {
-		                    planets->set_earth_patch_create_budget_ms(std::max(0.0f, createBudgetMs));
-		                }
-
-		                int patchRes = static_cast<int>(planets->earth_patch_resolution());
-		                if (ImGui::SliderInt("Patch resolution (verts/edge)", &patchRes, 2, 129))
-		                {
-		                    planets->set_earth_patch_resolution(static_cast<uint32_t>(std::max(2, patchRes)));
-		                }
-
-		                int cacheMax = static_cast<int>(planets->earth_patch_cache_max());
-		                if (ImGui::SliderInt("Patch cache max", &cacheMax, 0, 50000))
-		                {
-		                    planets->set_earth_patch_cache_max(static_cast<uint32_t>(std::max(0, cacheMax)));
-		                }
-
-	                if (ImGui::Checkbox("Frustum cull", &settings.frustum_cull)) changed = true;
-	                if (ImGui::Checkbox("Horizon cull", &settings.horizon_cull)) changed = true;
-
-	                if (ImGui::Checkbox("RT guardrail (LOD floor)", &settings.rt_guardrail)) changed = true;
-	                if (settings.rt_guardrail)
-	                {
-	                    float maxEdge = static_cast<float>(settings.max_patch_edge_rt_m);
-	                    if (ImGui::DragFloat("RT max patch edge (m)", &maxEdge, 100.0f, 0.0f, 200000.0f, "%.0f"))
-	                    {
-	                        settings.max_patch_edge_rt_m = static_cast<double>(std::max(0.0f, maxEdge));
-	                        changed = true;
-	                    }
-
-	                    float maxAlt = static_cast<float>(settings.rt_guardrail_max_altitude_m);
-	                    if (ImGui::DragFloat("RT max altitude (m)", &maxAlt, 1000.0f, 0.0f, 2.0e6f, "%.0f"))
-	                    {
-	                        settings.rt_guardrail_max_altitude_m = static_cast<double>(std::max(0.0f, maxAlt));
-	                        changed = true;
-	                    }
-	                }
-
-	                if (changed)
-	                {
-	                    planets->set_earth_quadtree_settings(settings);
-	                }
-
-	                const PlanetSystem::EarthDebugStats &s = planets->earth_debug_stats();
-	                ImGui::Separator();
-	                ImGui::Text("Visible patches: %u  (est. tris: %u)", s.visible_patches, s.estimated_triangles);
-	                ImGui::Text("Cache size: %u  (created this frame: %u)", s.patch_cache_size, s.created_patches);
-	                ImGui::Text("Quadtree: max level used %u | visited %u | culled %u | budget-limited %u",
-	                            s.quadtree.max_level_used,
-	                            s.quadtree.nodes_visited,
-	                            s.quadtree.nodes_culled,
-	                            s.quadtree.splits_budget_limited);
-	                ImGui::Text("CPU ms: quadtree %.2f | create %.2f | emit %.2f | total %.2f",
-	                            s.ms_quadtree, s.ms_patch_create, s.ms_emit, s.ms_total);
-	            }
-	        }
-
-        if (moon)
-        {
-            bool vis = moon->visible;
-            if (ImGui::Checkbox("Render Moon", &vis))
-            {
-                moon->visible = vis;
+                const PlanetSystem::EarthDebugStats &s = planets->earth_debug_stats();
+                ImGui::Separator();
+                ImGui::Text("Visible patches: %u  (est. tris: %u)", s.visible_patches, s.estimated_triangles);
+                ImGui::Text("Cache size: %u  (created this frame: %u)", s.patch_cache_size, s.created_patches);
+                ImGui::Text("Quadtree: max level used %u | visited %u | culled %u | budget-limited %u",
+                            s.quadtree.max_level_used,
+                            s.quadtree.nodes_visited,
+                            s.quadtree.nodes_culled,
+                            s.quadtree.splits_budget_limited);
+                ImGui::Text("CPU ms: quadtree %.2f | create %.2f | emit %.2f | total %.2f",
+                            s.ms_quadtree, s.ms_patch_create, s.ms_emit, s.ms_total);
             }
-            ImGui::SameLine();
-            ImGui::Text("(R=%.1f km)", moon->radius_m / 1000.0);
+        }
+        else
+        {
+            ImGui::TextUnformatted("No terrain planet active");
         }
 
         ImGui::Separator();
         if (ImGui::CollapsingHeader("Planet Tools", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            bool auto_defaults = planets->auto_create_defaults();
-            if (ImGui::Checkbox("Auto-create default Earth/Moon", &auto_defaults))
-            {
-                planets->set_auto_create_defaults(auto_defaults);
-            }
-
             if (ImGui::Button("Clear all planets"))
             {
                 planets->clear_planets(true);
             }
 
             static int selected_planet = 0;
+            static std::string edit_target_name;
+            static bool edit_visible = true;
+            static bool edit_terrain = false;
+            static double edit_center[3] = {0.0, 0.0, 0.0};
+            static double edit_radius_km = 1.0;
+
             const auto &bodies = planets->bodies();
             if (selected_planet < 0) selected_planet = 0;
             if (!bodies.empty() && selected_planet >= static_cast<int>(bodies.size()))
@@ -2473,13 +2439,72 @@ namespace
             if (!bodies.empty())
             {
                 const PlanetSystem::PlanetBody &b = bodies[static_cast<size_t>(selected_planet)];
+                if (edit_target_name != b.name)
+                {
+                    edit_target_name = b.name;
+                    edit_visible = b.visible;
+                    edit_terrain = b.terrain;
+                    edit_center[0] = b.center_world.x;
+                    edit_center[1] = b.center_world.y;
+                    edit_center[2] = b.center_world.z;
+                    edit_radius_km = b.radius_m / 1000.0;
+                }
+
                 ImGui::Text("Selected: %s", b.name.c_str());
-                ImGui::Text("Center (world m): %.3f, %.3f, %.3f", b.center_world.x, b.center_world.y, b.center_world.z);
-                ImGui::Text("Radius: %.3f km", b.radius_m / 1000.0);
+
+                if (ImGui::Checkbox("Visible##selected", &edit_visible))
+                {
+                    planets->set_planet_visible(edit_target_name, edit_visible);
+                }
+                if (ImGui::Checkbox("Terrain##selected", &edit_terrain))
+                {
+                    planets->set_planet_terrain(edit_target_name, edit_terrain);
+                }
+
+                if (ImGui::InputScalarN("Center (world m)##selected", ImGuiDataType_Double, edit_center, 3, nullptr, nullptr, "%.3f"))
+                {
+                    planets->set_planet_center(edit_target_name, WorldVec3(edit_center[0], edit_center[1], edit_center[2]));
+                }
+                if (ImGui::DragScalar("Radius (km)##selected", ImGuiDataType_Double, &edit_radius_km, 10.0f, nullptr, nullptr, "%.3f"))
+                {
+                    planets->set_planet_radius(edit_target_name, std::max(1.0, edit_radius_km * 1000.0));
+                }
+
+                const double dist = glm::length(cam_world - b.center_world);
+                const double alt_m = dist - b.radius_m;
+                ImGui::Text("Altitude above %s: %.3f km", b.name.c_str(), alt_m / 1000.0);
+
+                if (ImGui::Button("Look at##selected"))
+                {
+                    look_at_world(scene->getMainCamera(), b.center_world);
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Teleport: 10000 km above##selected"))
+                {
+                    scene->getMainCamera().position_world =
+                        b.center_world + WorldVec3(0.0, 0.0, b.radius_m + 1.0e7);
+                    look_at_world(scene->getMainCamera(), b.center_world);
+                }
+
+                if (ImGui::Button("Teleport: 1000 km orbit##selected"))
+                {
+                    scene->getMainCamera().position_world =
+                        b.center_world + WorldVec3(0.0, 0.0, b.radius_m + 1.0e6);
+                    look_at_world(scene->getMainCamera(), b.center_world);
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Teleport: 10 km above##selected"))
+                {
+                    scene->getMainCamera().position_world =
+                        b.center_world + WorldVec3(0.0, 0.0, b.radius_m + 1.0e4);
+                    look_at_world(scene->getMainCamera(), b.center_world);
+                }
 
                 if (ImGui::Button("Destroy selected"))
                 {
-                    planets->destroy_planet(b.name);
+                    planets->destroy_planet(edit_target_name);
+                    edit_target_name.clear();
+                    selected_planet = 0;
                 }
             }
 
@@ -2517,6 +2542,40 @@ namespace
                 info.sectors = static_cast<uint32_t>(std::max(3, new_sectors));
                 info.stacks = static_cast<uint32_t>(std::max(2, new_stacks));
                 planets->create_mesh_planet(info);
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Create terrain planet");
+            ImGui::TextUnformatted("Note: only one terrain planet is active at a time.");
+
+            static char terr_name[64] = "Earth2";
+            static double terr_center[3] = {0.0, 0.0, 0.0};
+            static double terr_radius_km = 6378.137;
+            static float terr_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+            static float terr_metallic = 0.0f;
+            static float terr_roughness = 1.0f;
+            static char terr_albedo_dir[256] = "planets/earth/albedo/L0";
+
+            ImGui::InputText("Name##terrain_create", terr_name, IM_ARRAYSIZE(terr_name));
+            ImGui::InputScalarN("Center (world m)##terrain_create", ImGuiDataType_Double, terr_center, 3, nullptr, nullptr, "%.3f");
+            ImGui::DragScalar("Radius (km)##terrain_create", ImGuiDataType_Double, &terr_radius_km, 10.0f, nullptr, nullptr, "%.3f");
+            ImGui::ColorEdit4("Base color##terrain_create", terr_color);
+            ImGui::DragFloat("Metallic##terrain_create", &terr_metallic, 0.01f, 0.0f, 1.0f, "%.2f");
+            ImGui::DragFloat("Roughness##terrain_create", &terr_roughness, 0.01f, 0.0f, 1.0f, "%.2f");
+            ImGui::InputText("Albedo dir##terrain_create", terr_albedo_dir, IM_ARRAYSIZE(terr_albedo_dir));
+
+            if (ImGui::Button("Create##terrain_create"))
+            {
+                PlanetSystem::TerrainPlanetCreateInfo info{};
+                info.name = terr_name;
+                info.center_world = WorldVec3(terr_center[0], terr_center[1], terr_center[2]);
+                info.radius_m = std::max(1.0, terr_radius_km * 1000.0);
+                info.visible = true;
+                info.base_color = glm::vec4(terr_color[0], terr_color[1], terr_color[2], terr_color[3]);
+                info.metallic = std::clamp(terr_metallic, 0.0f, 1.0f);
+                info.roughness = std::clamp(terr_roughness, 0.0f, 1.0f);
+                info.albedo_dir = terr_albedo_dir;
+                planets->create_terrain_planet(info);
             }
         }
     }

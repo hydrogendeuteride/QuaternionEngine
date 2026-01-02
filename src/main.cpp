@@ -33,9 +33,33 @@ public:
             api.load_global_ibl(ibl);
         }
 
-        // Planet demo defaults (Milestone A): start outside Earth and speed up the free camera.
+        // Planet demo: Earth terrain + Moon sphere (real scale, meters).
         {
             constexpr double kEarthRadiusM = 6378137.0;
+            constexpr double kMoonRadiusM = 1737400.0;
+            constexpr double kMoonDistanceM = 384400000.0;
+
+            GameAPI::PlanetTerrain earth{};
+            earth.name = "Earth";
+            earth.center = glm::dvec3(0.0, 0.0, 0.0);
+            earth.radius_m = kEarthRadiusM;
+            earth.visible = true;
+            earth.base_color = glm::vec4(1.0f);
+            earth.metallic = 0.0f;
+            earth.roughness = 1.0f;
+            earth.albedo_dir = "planets/earth/albedo/L0";
+            api.add_planet_terrain(earth);
+
+            GameAPI::PlanetSphere moon{};
+            moon.name = "Moon";
+            moon.center = glm::dvec3(kMoonDistanceM, 0.0, 0.0);
+            moon.radius_m = kMoonRadiusM;
+            moon.visible = true;
+            moon.base_color = glm::vec4(0.72f, 0.72f, 0.75f, 1.0f);
+            moon.metallic = 0.0f;
+            moon.roughness = 1.0f;
+            api.add_planet_sphere(moon);
+
             GameAPI::FreeCameraSettings free = api.get_free_camera_settings();
             free.moveSpeed = 20000.0f;
             api.set_free_camera_settings(free);

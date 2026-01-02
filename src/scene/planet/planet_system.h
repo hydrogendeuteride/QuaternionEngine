@@ -39,6 +39,23 @@ public:
         uint32_t stacks = 24;
     };
 
+    struct TerrainPlanetCreateInfo
+    {
+        std::string name;
+        WorldVec3 center_world{0.0, 0.0, 0.0};
+        double radius_m = 1.0;
+        bool visible = true;
+
+        // Simple PBR constants (uses engine default white/flat/black textures).
+        glm::vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
+        float metallic = 0.0f;
+        float roughness = 1.0f;
+
+        // Optional terrain texture root (relative to assets/). If empty, terrain
+        // uses fallback textures.
+        std::string albedo_dir;
+    };
+
     struct EarthDebugStats
     {
         planet::PlanetQuadtree::Stats quadtree{};
@@ -63,6 +80,15 @@ public:
         // Otherwise, it is rendered as a regular mesh instance (sphere mesh etc.).
         bool terrain = false;
 
+        // Shared PBR constants (used for mesh planets and terrain patch constants).
+        glm::vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
+        float metallic = 0.0f;
+        float roughness = 1.0f;
+
+        // Terrain-only: cube-face texture root for albedo, relative to assets/.
+        // Expected files: {px,nx,py,ny,pz,nz}.ktx2 (legacy names used by current asset pack).
+        std::string terrain_albedo_dir;
+
         std::shared_ptr<MeshAsset> mesh;
         std::shared_ptr<GLTFMaterial> material;
     };
@@ -80,13 +106,15 @@ public:
 
     // Runtime planet management
     // - Planets are identified by 'name' (must be unique).
-    // - By default, Earth+Moon are auto-created on first use when no bodies exist.
     PlanetBody *create_mesh_planet(const MeshPlanetCreateInfo &info);
+    PlanetBody *create_terrain_planet(const TerrainPlanetCreateInfo &info);
     bool destroy_planet(std::string_view name);
     void clear_planets(bool destroy_mesh_assets = true);
 
-    bool auto_create_defaults() const { return _auto_create_defaults; }
-    void set_auto_create_defaults(bool enabled) { _auto_create_defaults = enabled; }
+    bool set_planet_center(std::string_view name, const WorldVec3 &center_world);
+    bool set_planet_radius(std::string_view name, double radius_m);
+    bool set_planet_visible(std::string_view name, bool visible);
+    bool set_planet_terrain(std::string_view name, bool terrain);
 
     const planet::PlanetQuadtree::Settings &earth_quadtree_settings() const { return _earth_quadtree_settings; }
     void set_earth_quadtree_settings(const planet::PlanetQuadtree::Settings &settings) { _earth_quadtree_settings = settings; }
@@ -131,7 +159,6 @@ private:
         std::list<uint32_t>::iterator lru_it{};
     };
 
-    void ensure_bodies_created();
     PlanetBody *find_terrain_body();
     const PlanetBody *find_terrain_body() const;
     EarthPatch *find_earth_patch(const planet::PatchKey &key);
@@ -140,14 +167,13 @@ private:
                                           uint32_t frame_index);
     void ensure_earth_patch_index_buffer();
     void ensure_earth_patch_material_layout();
-    void ensure_earth_patch_material_constants_buffer();
+    void ensure_earth_patch_material_constants_buffer(const PlanetBody &earth);
     void ensure_earth_face_materials(const PlanetBody &earth);
     void clear_earth_patch_cache();
     void trim_earth_patch_cache();
 
     EngineContext *_context = nullptr;
     bool _enabled = true;
-    bool _auto_create_defaults = true;
     std::vector<PlanetBody> _bodies;
 
     // Earth cube-sphere quadtree
@@ -166,6 +192,10 @@ private:
     DescriptorAllocatorGrowable _earth_patch_material_allocator{};
     bool _earth_patch_material_allocator_initialized = false;
     AllocatedBuffer _earth_patch_material_constants_buffer{};
+    glm::vec4 _earth_patch_bound_base_color{1.0f, 1.0f, 1.0f, 1.0f};
+    float _earth_patch_bound_metallic = 0.0f;
+    float _earth_patch_bound_roughness = 1.0f;
+    std::string _earth_patch_bound_albedo_dir;
     std::array<MaterialInstance, 6> _earth_face_materials{};
 
     uint32_t _earth_patch_frame_stamp = 0;
