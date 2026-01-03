@@ -76,10 +76,9 @@ void FreeCameraMode::process_input(SceneManager & /*scene*/,
             float dx = e.mouse_delta.x * _settings.look_sensitivity;
             float dy = e.mouse_delta.y * _settings.look_sensitivity;
 
-            // Mouse right (xrel > 0) turns view right with -Z-forward: yaw around the
-            // camera's local +Y (up) axis, so yaw remains intuitive when rolled.
-            glm::vec3 up = glm::rotate(camera.orientation, glm::vec3{0.f, 1.f, 0.f});
-            glm::quat yaw_rotation = glm::angleAxis(dx, glm::normalize(up));
+            // Yaw around world +Y to keep the horizon stable. Yawing around the camera's
+            // local up (which is tilted when pitched) can introduce unintended roll.
+            glm::quat yaw_rotation = glm::angleAxis(dx, glm::vec3{0.f, 1.f, 0.f});
             camera.orientation = glm::normalize(yaw_rotation * camera.orientation);
 
             // Mouse up (yrel < 0) looks up with -Z-forward: negative dy.
