@@ -41,7 +41,11 @@ namespace
         glm::vec3 localOrigin = glm::vec3(invM * glm::vec4(rayOrigin, 1.0f));
         glm::vec3 localDir = glm::vec3(invM * glm::vec4(rayDir, 0.0f));
 
-        if (glm::length2(localDir) < 1e-8f)
+        // Note: localDir length depends on object scale. Large objects (planets)
+        // can shrink the direction vector after inverse-transform. Only reject
+        // truly degenerate (zero/NaN) directions.
+        const float localDirLen2 = glm::dot(localDir, localDir);
+        if (!(localDirLen2 > 0.0f))
         {
             return false;
         }
@@ -170,7 +174,9 @@ namespace
         glm::mat4 invM = glm::inverse(worldTransform);
         glm::vec3 localOrigin = glm::vec3(invM * glm::vec4(rayOrigin, 1.0f));
         glm::vec3 localDir = glm::vec3(invM * glm::vec4(rayDir, 0.0f));
-        if (glm::length2(localDir) < 1e-8f)
+        // See intersect_ray_box() note about object scale and inverse-transformed directions.
+        const float localDirLen2 = glm::dot(localDir, localDir);
+        if (!(localDirLen2 > 0.0f))
         {
             return false;
         }
@@ -663,4 +669,3 @@ void SceneManager::selectRect(const glm::vec2 &p0, const glm::vec2 &p1, std::vec
     testList(mainDrawContext.OpaqueSurfaces);
     testList(mainDrawContext.TransparentSurfaces);
 }
-
