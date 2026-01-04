@@ -6,6 +6,7 @@
 #include <scene/camera/mode_free.h>
 #include <scene/camera/mode_orbit.h>
 #include <scene/camera.h>
+#include <scene/planet/planet_system.h>
 #include <scene/vk_scene.h>
 
 #include <core/input/input_system.h>
@@ -95,6 +96,14 @@ bool CameraRig::resolve_target(SceneManager &scene,
             glm::vec3 s{};
             if (!scene.getMeshInstanceTRSWorld(target.name, t, r, s))
             {
+                if (PlanetSystem *planets = scene.get_planet_system())
+                {
+                    if (PlanetSystem::PlanetBody *body = planets->find_body_by_name(target.name))
+                    {
+                        out_position_world = body->center_world;
+                        return true;
+                    }
+                }
                 return false;
             }
             out_position_world = t;

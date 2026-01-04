@@ -118,7 +118,11 @@ public:
 
     const planet::PlanetQuadtree::Settings &earth_quadtree_settings() const { return _earth_quadtree_settings; }
     void set_earth_quadtree_settings(const planet::PlanetQuadtree::Settings &settings) { _earth_quadtree_settings = settings; }
-    const EarthDebugStats &earth_debug_stats() const { return _earth_debug_stats; }
+
+    // Terrain debug stats for a specific planet name (returns empty stats if not found).
+    const EarthDebugStats &terrain_debug_stats(std::string_view name) const;
+    // Back-compat: returns debug stats for the first terrain planet, if any.
+    const EarthDebugStats &earth_debug_stats() const;
 
     uint32_t earth_patch_create_budget_per_frame() const { return _earth_patch_create_budget_per_frame; }
     void set_earth_patch_create_budget_per_frame(uint32_t budget) { _earth_patch_create_budget_per_frame = budget; }
@@ -136,16 +140,19 @@ public:
     void set_earth_debug_tint_patches_by_lod(bool enabled);
 
 private:
-    enum class EarthPatchState : uint8_t
+    PlanetBody *find_terrain_body();
+    const PlanetBody *find_terrain_body() const;
+
+    enum class TerrainPatchState : uint8_t
     {
         Allocating = 0,
         Ready = 1,
     };
 
-    struct EarthPatch
+    struct TerrainPatch
     {
         planet::PatchKey key{};
-        EarthPatchState state = EarthPatchState::Allocating;
+        TerrainPatchState state = TerrainPatchState::Allocating;
 
         AllocatedBuffer vertex_buffer{};
         VkDeviceAddress vertex_buffer_address = 0;
@@ -159,31 +166,52 @@ private:
         std::list<uint32_t>::iterator lru_it{};
     };
 
-    PlanetBody *find_terrain_body();
-    const PlanetBody *find_terrain_body() const;
-    EarthPatch *find_earth_patch(const planet::PatchKey &key);
-    EarthPatch *get_or_create_earth_patch(const PlanetBody &earth,
-                                          const planet::PatchKey &key,
-                                          uint32_t frame_index);
+    struct TerrainState
+    {
+        planet::PlanetQuadtree quadtree{};
+        EarthDebugStats debug_stats{};
+
+        std::unordered_map<planet::PatchKey, uint32_t, planet::PatchKeyHash> patch_lookup;
+        std::vector<TerrainPatch> patches;
+        std::vector<uint32_t> patch_free;
+        std::list<uint32_t> patch_lru;
+
+        AllocatedBuffer material_constants_buffer{};
+        glm::vec4 bound_base_color{1.0f, 1.0f, 1.0f, 1.0f};
+        float bound_metallic = 0.0f;
+        float bound_roughness = 1.0f;
+        std::string bound_albedo_dir;
+        std::array<MaterialInstance, 6> face_materials{};
+
+        uint32_t patch_frame_stamp = 0;
+        bool patch_cache_dirty = false;
+    };
+
+    TerrainState *get_or_create_terrain_state(std::string_view name);
+    TerrainState *find_terrain_state(std::string_view name);
+    const TerrainState *find_terrain_state(std::string_view name) const;
+
+    TerrainPatch *find_terrain_patch(TerrainState &state, const planet::PatchKey &key);
+    TerrainPatch *get_or_create_terrain_patch(TerrainState &state,
+                                              const PlanetBody &body,
+                                              const planet::PatchKey &key,
+                                              uint32_t frame_index);
     void ensure_earth_patch_index_buffer();
     void ensure_earth_patch_material_layout();
-    void ensure_earth_patch_material_constants_buffer(const PlanetBody &earth);
-    void ensure_earth_face_materials(const PlanetBody &earth);
-    void clear_earth_patch_cache();
-    void trim_earth_patch_cache();
+    void ensure_terrain_material_constants_buffer(TerrainState &state, const PlanetBody &body);
+    void ensure_terrain_face_materials(TerrainState &state, const PlanetBody &body);
+    void clear_terrain_patch_cache(TerrainState &state);
+    void trim_terrain_patch_cache(TerrainState &state);
+    void clear_all_terrain_patch_caches();
+    void clear_terrain_materials(TerrainState &state);
 
     EngineContext *_context = nullptr;
     bool _enabled = true;
     std::vector<PlanetBody> _bodies;
 
-    // Earth cube-sphere quadtree
-    planet::PlanetQuadtree _earth_quadtree{};
     planet::PlanetQuadtree::Settings _earth_quadtree_settings{};
-    EarthDebugStats _earth_debug_stats{};
-    std::unordered_map<planet::PatchKey, uint32_t, planet::PatchKeyHash> _earth_patch_lookup;
-    std::vector<EarthPatch> _earth_patches;
-    std::vector<uint32_t> _earth_patch_free;
-    std::list<uint32_t> _earth_patch_lru;
+    std::unordered_map<std::string, std::unique_ptr<TerrainState>> _terrain_states;
+    EarthDebugStats _empty_debug_stats{};
     AllocatedBuffer _earth_patch_index_buffer{};
     uint32_t _earth_patch_index_count = 0;
     uint32_t _earth_patch_index_resolution = 0;
@@ -191,14 +219,6 @@ private:
     VkDescriptorSetLayout _earth_patch_material_layout = VK_NULL_HANDLE;
     DescriptorAllocatorGrowable _earth_patch_material_allocator{};
     bool _earth_patch_material_allocator_initialized = false;
-    AllocatedBuffer _earth_patch_material_constants_buffer{};
-    glm::vec4 _earth_patch_bound_base_color{1.0f, 1.0f, 1.0f, 1.0f};
-    float _earth_patch_bound_metallic = 0.0f;
-    float _earth_patch_bound_roughness = 1.0f;
-    std::string _earth_patch_bound_albedo_dir;
-    std::array<MaterialInstance, 6> _earth_face_materials{};
-
-    uint32_t _earth_patch_frame_stamp = 0;
     uint32_t _earth_patch_resolution = 33;
     uint32_t _earth_patch_create_budget_per_frame = 16;
     float _earth_patch_create_budget_ms = 2.0f;

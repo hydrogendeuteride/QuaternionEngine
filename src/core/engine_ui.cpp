@@ -850,8 +850,7 @@ namespace
                 {
                     if (PlanetSystem::PlanetBody *body = planets->find_body_by_name(pick.ownerName))
                     {
-                        target.type = CameraTargetType::WorldPoint;
-                        target.world_point = body->center_world;
+                        target.type = CameraTargetType::MeshInstance;
                         target.name = body->name;
                     }
                     else
@@ -2113,7 +2112,8 @@ namespace
         {
             None,
             MeshInstance,
-            GLTFInstance
+            GLTFInstance,
+            Planet
         };
         GizmoTarget target = GizmoTarget::None;
 
@@ -2123,6 +2123,24 @@ namespace
             {
                 target = GizmoTarget::MeshInstance;
                 ImGui::Text("Editing mesh instance: %s", pick->ownerName.c_str());
+            }
+            else if (PlanetSystem *planets = sceneMgr->get_planet_system())
+            {
+                PlanetSystem::PlanetBody *body = planets->find_body_by_name(pick->ownerName);
+                if (body)
+                {
+                    glm::vec3 tLocal = world_to_local(body->center_world, sceneMgr->get_world_origin());
+                    targetTransform = make_trs_matrix(tLocal,
+                                                      glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                                                      glm::vec3(1.0f));
+                    target = GizmoTarget::Planet;
+                    ImGui::Text("Editing planet: %s", pick->ownerName.c_str());
+                    ImGui::Text("Radius: %.3f km", body->radius_m / 1000.0);
+                    if (op == ImGuizmo::ROTATE)
+                    {
+                        ImGui::TextUnformatted("Note: planet rotation is not supported (use Translate/Scale).");
+                    }
+                }
             }
         }
         else if (pick->ownerType == RenderObject::OwnerType::GLTFInstance)
@@ -2223,6 +2241,42 @@ namespace
                 case GizmoTarget::GLTFInstance:
                     sceneMgr->setGLTFInstanceTransformLocal(pick->ownerName, targetTransform);
                     break;
+                case GizmoTarget::Planet:
+                {
+                    PlanetSystem *planets = sceneMgr->get_planet_system();
+                    if (!planets)
+                    {
+                        break;
+                    }
+
+                    PlanetSystem::PlanetBody *body = planets->find_body_by_name(pick->ownerName);
+                    if (!body)
+                    {
+                        break;
+                    }
+
+                    glm::vec3 tLocal{};
+                    glm::quat r{};
+                    glm::vec3 s{};
+                    decompose_trs_matrix(targetTransform, tLocal, r, s);
+
+                    if (op == ImGuizmo::TRANSLATE)
+                    {
+                        planets->set_planet_center(pick->ownerName, local_to_world(tLocal, sceneMgr->get_world_origin()));
+                    }
+                    else if (op == ImGuizmo::SCALE)
+                    {
+                        const double scale =
+                            (static_cast<double>(std::abs(s.x)) +
+                             static_cast<double>(std::abs(s.y)) +
+                             static_cast<double>(std::abs(s.z))) / 3.0;
+                        if (std::isfinite(scale) && scale > 0.0)
+                        {
+                            planets->set_planet_radius(pick->ownerName, body->radius_m * scale);
+                        }
+                    }
+                    break;
+                }
                 default:
                     break;
             }
@@ -2380,7 +2434,7 @@ namespace
                     planets->set_earth_quadtree_settings(settings);
                 }
 
-                const PlanetSystem::EarthDebugStats &s = planets->earth_debug_stats();
+                const PlanetSystem::EarthDebugStats &s = planets->terrain_debug_stats(terrain_body->name);
                 ImGui::Separator();
                 ImGui::Text("Visible patches: %u  (est. tris: %u)", s.visible_patches, s.estimated_triangles);
                 ImGui::Text("Cache size: %u  (created this frame: %u)", s.patch_cache_size, s.created_patches);
@@ -2546,7 +2600,6 @@ namespace
 
             ImGui::Separator();
             ImGui::TextUnformatted("Create terrain planet");
-            ImGui::TextUnformatted("Note: only one terrain planet is active at a time.");
 
             static char terr_name[64] = "Earth2";
             static double terr_center[3] = {0.0, 0.0, 0.0};

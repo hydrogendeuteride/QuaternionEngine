@@ -72,22 +72,20 @@ void FreeCameraMode::process_input(SceneManager & /*scene*/,
         }
         else if (e.type == InputEvent::Type::MouseMove && _rmb_down)
         {
-            // Convert mouse motion to incremental yaw/pitch angles.
             float dx = e.mouse_delta.x * _settings.look_sensitivity;
             float dy = e.mouse_delta.y * _settings.look_sensitivity;
 
-            // Yaw around world +Y to keep the horizon stable. Yawing around the camera's
-            // local up (which is tilted when pitched) can introduce unintended roll.
-            glm::quat yaw_rotation = glm::angleAxis(dx, glm::vec3{0.f, 1.f, 0.f});
-            camera.orientation = glm::normalize(yaw_rotation * camera.orientation);
+            // 6DOF: yaw around camera's local up (in world space)
+            glm::vec3 up = glm::rotate(camera.orientation, glm::vec3{0.f, 1.f, 0.f});
+            glm::quat qYaw = glm::angleAxis(dx, glm::normalize(up));
+            camera.orientation = glm::normalize(qYaw * camera.orientation);
 
-            // Mouse up (yrel < 0) looks up with -Z-forward: negative dy.
-            float pitch_delta = -dy;
-            // Pitch around the camera's local +X (right) axis (after yaw is applied).
+            // pitch around camera's local right (after yaw applied)
             glm::vec3 right = glm::rotate(camera.orientation, glm::vec3{1.f, 0.f, 0.f});
-            glm::quat pitch_rotation = glm::angleAxis(pitch_delta, glm::normalize(right));
-            camera.orientation = glm::normalize(pitch_rotation * camera.orientation);
+            glm::quat qPitch = glm::angleAxis(-dy, glm::normalize(right));
+            camera.orientation = glm::normalize(qPitch * camera.orientation);
         }
+
         else if (e.type == InputEvent::Type::MouseWheel)
         {
             const float steps = e.wheel_delta.y; // positive = wheel up
@@ -141,7 +139,7 @@ void FreeCameraMode::update(SceneManager & /*scene*/, Camera &camera, float dt)
     {
         glm::vec3 local_delta = _velocity * (_settings.move_speed * dt);
         glm::mat4 camera_rotation = camera.getRotationMatrix();
-        glm::vec3 world_delta = glm::vec3(camera_rotation * glm::vec4(local_delta, 0.0f));
+        glm::vec3 world_delta = glm::rotate(camera.orientation, local_delta);
         camera.position_world += glm::dvec3(world_delta);
     }
 }

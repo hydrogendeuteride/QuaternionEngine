@@ -2027,9 +2027,8 @@ bool Engine::set_camera_target_from_last_pick()
         {
             if (PlanetSystem::PlanetBody *body = planets->find_body_by_name(pick.ownerName))
             {
-                t.type = ::CameraTargetType::WorldPoint;
+                t.type = ::CameraTargetType::MeshInstance;
                 t.name = body->name;
-                t.world_point = body->center_world;
             }
             else
             {

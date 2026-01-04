@@ -5,98 +5,12 @@
 #include "core/device/images.h"
 #include "core/device/swapchain.h"
 #include "render/graph/graph.h"
-#include "scene/planet/planet_system.h"
 
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_vulkan.h"
 
 #include <algorithm>
 #include <cmath>
-
-namespace
-{
-    bool try_orbit_camera_to_planet(EngineContext *context, const PickingSystem::PickInfo &pick)
-    {
-        if (!context || !context->scene)
-        {
-            return false;
-        }
-
-        if (pick.ownerType != RenderObject::OwnerType::MeshInstance)
-        {
-            return false;
-        }
-
-        SceneManager &scene = *context->scene;
-
-        // If this is a real dynamic MeshInstance, leave it alone (user might want
-        // to orbit other things separately).
-        {
-            WorldVec3 t{};
-            glm::quat r{};
-            glm::vec3 s{};
-            if (scene.getMeshInstanceTRSWorld(pick.ownerName, t, r, s))
-            {
-                return false;
-            }
-        }
-
-        PlanetSystem *planets = scene.get_planet_system();
-        if (!planets || !planets->enabled())
-        {
-            return false;
-        }
-
-        PlanetSystem::PlanetBody *body = planets->find_body_by_name(pick.ownerName);
-        if (!body || !body->visible)
-        {
-            return false;
-        }
-
-        CameraRig &rig = scene.getCameraRig();
-        Camera &cam = scene.getMainCamera();
-
-        CameraTarget target{};
-        target.type = CameraTargetType::WorldPoint;
-        target.name = body->name;
-        target.world_point = body->center_world;
-
-        rig.orbit_settings().target = target;
-        rig.follow_settings().target = target;
-        rig.chase_settings().target = target;
-
-        rig.set_mode(CameraMode::Orbit, scene, cam);
-
-        const WorldVec3 to_cam = cam.position_world - body->center_world;
-        double dist = glm::length(to_cam);
-
-        // If we're inside the planet (or very close), pop out to a sane viewing altitude.
-        // Clamp altitude to [10 km, 1000 km] and scale with body radius.
-        const double min_alt_m = std::clamp(body->radius_m * 0.05, 1.0e4, 1.0e6);
-        const double min_dist = body->radius_m + min_alt_m;
-
-        if (!std::isfinite(dist) || dist < min_dist)
-        {
-            dist = min_dist;
-        }
-
-        glm::dvec3 dir = glm::dvec3(to_cam);
-        if (glm::dot(dir, dir) < 1e-12)
-        {
-            dir = glm::dvec3(0.0, 0.0, 1.0);
-        }
-        else
-        {
-            dir = glm::normalize(dir);
-        }
-
-        OrbitCameraSettings &orbit = rig.orbit_settings();
-        orbit.distance = std::clamp(dist, OrbitCameraSettings::kMinDistance, OrbitCameraSettings::kMaxDistance);
-        orbit.yaw = static_cast<float>(std::atan2(dir.x, dir.z));
-        orbit.pitch = static_cast<float>(std::asin(std::clamp(-dir.y, -1.0, 1.0)));
-        return true;
-    }
-} // namespace
 
 void PickingSystem::init(EngineContext *context)
 {
@@ -207,7 +121,6 @@ void PickingSystem::process_event(const SDL_Event &event, bool ui_want_capture_m
                 {
                     set_pick_from_hit(hit_object, hit_pos, _last_pick);
                     _last_pick_object_id = hit_object.objectID;
-                    try_orbit_camera_to_planet(_context, _last_pick);
                 }
                 else
                 {
@@ -310,7 +223,6 @@ void PickingSystem::begin_frame()
             glm::vec3 fallback_local = glm::vec3(picked.transform[3]);
             WorldVec3 fallback_pos = local_to_world(fallback_local, _context->scene->get_world_origin());
             set_pick_from_hit(picked, fallback_pos, _last_pick);
-            try_orbit_camera_to_planet(_context, _last_pick);
         }
         else
         {

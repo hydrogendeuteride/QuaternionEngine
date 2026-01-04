@@ -105,7 +105,6 @@ struct PlanetSphere
 };
 
 // Procedural planet terrain (cube-sphere quadtree patches) parameters.
-// Note: only one terrain planet can be active at a time in the current implementation.
 struct PlanetTerrain
 {
     std::string name;
