@@ -48,6 +48,8 @@ public:
             earth.metallic = 0.0f;
             earth.roughness = 1.0f;
             earth.albedo_dir = "planets/earth/albedo/L0";
+            earth.height_dir = "planets/earth/height/L0";
+            earth.height_max_m = 6400.0;
             api.add_planet_terrain(earth);
 
             GameAPI::PlanetSphere moon{};

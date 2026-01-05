@@ -119,6 +119,12 @@ struct PlanetTerrain
     // Optional terrain texture root relative to assets/ (e.g. "planets/earth/albedo/L0").
     // Expected files: {px,nx,py,ny,pz,nz}.ktx2
     std::string albedo_dir;
+
+    // Optional height map root relative to assets/ (e.g. "planets/earth/height/L0").
+    // Expected files: {px,nx,py,ny,pz,nz}.ktx2 (BC4/R8, linear). If empty, no displacement.
+    std::string height_dir;
+    // Height map range in meters for [0..1] texel values.
+    double height_max_m{6400.0};
 };
 
 struct PlanetInfo

@@ -69,6 +69,7 @@ namespace planet
 
         void update(const WorldVec3 &body_center_world,
                     double radius_m,
+                    double max_height_m,
                     const WorldVec3 &camera_world,
                     const WorldVec3 &origin_world,
                     const GPUSceneData &scene_data,

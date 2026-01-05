@@ -19,6 +19,7 @@ namespace planet
         void compute_patch_visibility_terms(const PatchKey &key,
                                             const glm::dvec3 &patch_center_dir,
                                             double radius_m,
+                                            double max_height_m,
                                             double &out_cos_patch_radius,
                                             double &out_sin_patch_radius,
                                             double &out_bound_radius_m)
@@ -55,7 +56,7 @@ namespace planet
 
             out_cos_patch_radius = cos_a;
             out_sin_patch_radius = sin_a;
-            out_bound_radius_m = glm::max(1.0, chord_r + skirt_depth);
+            out_bound_radius_m = glm::max(1.0, chord_r + skirt_depth + glm::max(0.0, max_height_m));
         }
 
         bool is_patch_visible_horizon(const WorldVec3 &body_center_world,
@@ -130,12 +131,13 @@ namespace planet
     } // namespace
 
     void PlanetQuadtree::update(const WorldVec3 &body_center_world,
-                                double radius_m,
-                                const WorldVec3 &camera_world,
-                                const WorldVec3 &origin_world,
-                                const GPUSceneData &scene_data,
-                                VkExtent2D logical_extent,
-                                uint32_t patch_resolution)
+                    double radius_m,
+                    double max_height_m,
+                    const WorldVec3 &camera_world,
+                    const WorldVec3 &origin_world,
+                    const GPUSceneData &scene_data,
+                    VkExtent2D logical_extent,
+                    uint32_t patch_resolution)
     {
         _visible_leaves.clear();
         _stats = {};
@@ -192,6 +194,9 @@ namespace planet
         push_root(CubeFace::NegX);
         push_root(CubeFace::PosX);
 
+        const double height_guard = glm::max(0.0, max_height_m);
+        const double radius_for_horizon = radius_m + height_guard;
+
         while (!stack.empty())
         {
             Node n = stack.back();
@@ -208,13 +213,13 @@ namespace planet
             double patch_bound_r_m = 1.0;
             if (_settings.horizon_cull || _settings.frustum_cull)
             {
-                compute_patch_visibility_terms(k, patch_dir, radius_m, cos_patch_radius, sin_patch_radius, patch_bound_r_m);
+                compute_patch_visibility_terms(k, patch_dir, radius_m, height_guard, cos_patch_radius, sin_patch_radius, patch_bound_r_m);
             }
 
             if (_settings.horizon_cull)
             {
                 if (!is_patch_visible_horizon(body_center_world,
-                                              radius_m,
+                                              radius_for_horizon,
                                               camera_world,
                                               patch_dir,
                                               cos_patch_radius,

@@ -22,6 +22,22 @@ namespace planet
         NegZ = 5,
     };
 
+    // Returns a short name for the cube face (e.g., "px", "nx", "py", ...).
+    // Useful for constructing file paths like "{dir}/px.ktx2".
+    inline const char *cube_face_name(CubeFace face)
+    {
+        switch (face)
+        {
+            case CubeFace::PosX: return "px";
+            case CubeFace::NegX: return "nx";
+            case CubeFace::PosY: return "py";
+            case CubeFace::NegY: return "ny";
+            case CubeFace::PosZ: return "pz";
+            case CubeFace::NegZ: return "nz";
+        }
+        return "px";
+    }
+
     // u,v are in [-1,+1] on the chosen face. Convention:
     // - u increases to the right
     // - v increases downward (image space)

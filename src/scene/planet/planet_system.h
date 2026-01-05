@@ -2,6 +2,7 @@
 
 #include <core/world.h>
 #include <core/descriptor/descriptors.h>
+#include <scene/planet/planet_heightmap.h>
 #include <scene/planet/planet_quadtree.h>
 
 #include <cstdint>
@@ -54,6 +55,12 @@ public:
         // Optional terrain texture root (relative to assets/). If empty, terrain
         // uses fallback textures.
         std::string albedo_dir;
+
+        // Optional height map root (relative to assets/). If empty, terrain has no displacement.
+        // Expected files: {px,nx,py,ny,pz,nz}.ktx2 (BC4/R8, linear).
+        std::string height_dir;
+        // Height map range in meters for [0..1] texel values.
+        double height_max_m = 6400.0;
     };
 
     struct EarthDebugStats
@@ -88,6 +95,11 @@ public:
         // Terrain-only: cube-face texture root for albedo, relative to assets/.
         // Expected files: {px,nx,py,ny,pz,nz}.ktx2 (legacy names used by current asset pack).
         std::string terrain_albedo_dir;
+
+        // Terrain-only: cube-face texture root for height, relative to assets/.
+        // Expected files: {px,nx,py,ny,pz,nz}.ktx2 (BC4/R8, linear).
+        std::string terrain_height_dir;
+        double terrain_height_max_m = 0.0;
 
         std::shared_ptr<MeshAsset> mesh;
         std::shared_ptr<GLTFMaterial> material;
@@ -181,6 +193,9 @@ private:
         float bound_metallic = 0.0f;
         float bound_roughness = 1.0f;
         std::string bound_albedo_dir;
+        std::string bound_height_dir;
+        double bound_height_max_m = 0.0;
+        std::array<planet::HeightFace, 6> height_faces{};
         std::array<MaterialInstance, 6> face_materials{};
 
         uint32_t patch_frame_stamp = 0;
@@ -200,6 +215,7 @@ private:
     void ensure_earth_patch_material_layout();
     void ensure_terrain_material_constants_buffer(TerrainState &state, const PlanetBody &body);
     void ensure_terrain_face_materials(TerrainState &state, const PlanetBody &body);
+    void ensure_terrain_height_maps(TerrainState &state, const PlanetBody &body);
     void clear_terrain_patch_cache(TerrainState &state);
     void trim_terrain_patch_cache(TerrainState &state);
     void clear_all_terrain_patch_caches();

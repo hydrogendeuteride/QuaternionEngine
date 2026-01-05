@@ -9,6 +9,7 @@
 #include <render/primitives.h>
 #include <core/pipeline/sampler.h>
 #include <scene/planet/cubesphere.h>
+#include <scene/planet/planet_heightmap.h>
 #include <scene/tangent_space.h>
 #include <scene/vk_scene.h>
 
@@ -68,6 +69,95 @@ namespace
         const float g = 0.35f + 0.65f * std::sin(t + 2.1f);
         const float b = 0.35f + 0.65f * std::sin(t + 4.2f);
         return glm::vec4(r, g, b, 1.0f);
+    }
+
+    void recompute_patch_normals(std::vector<Vertex> &vertices, uint32_t resolution)
+    {
+        const uint32_t res = std::max(2u, resolution);
+        const uint32_t base_count = res * res;
+        if (vertices.size() < base_count)
+        {
+            return;
+        }
+
+        thread_local std::vector<glm::vec3> scratch_normals;
+        scratch_normals.resize(static_cast<size_t>(base_count));
+
+        for (uint32_t j = 0; j < res; ++j)
+        {
+            const uint32_t ju = (j > 0u) ? (j - 1u) : j;
+            const uint32_t jd = (j + 1u < res) ? (j + 1u) : j;
+
+            for (uint32_t i = 0; i < res; ++i)
+            {
+                const uint32_t il = (i > 0u) ? (i - 1u) : i;
+                const uint32_t ir = (i + 1u < res) ? (i + 1u) : i;
+
+                const uint32_t idx = j * res + i;
+                const glm::vec3 pL = vertices[j * res + il].position;
+                const glm::vec3 pR = vertices[j * res + ir].position;
+                const glm::vec3 pU = vertices[ju * res + i].position;
+                const glm::vec3 pD = vertices[jd * res + i].position;
+
+                const glm::vec3 dx = pR - pL;
+                const glm::vec3 dy = pD - pU;
+                glm::vec3 n = glm::cross(dy, dx);
+                const float len2 = glm::dot(n, n);
+                if (len2 > 1e-12f)
+                {
+                    n *= (1.0f / std::sqrt(len2));
+                }
+                else
+                {
+                    n = vertices[idx].normal;
+                }
+
+                // Ensure outward orientation.
+                if (glm::dot(n, vertices[idx].normal) < 0.0f)
+                {
+                    n = -n;
+                }
+
+                scratch_normals[idx] = n;
+            }
+        }
+
+        for (uint32_t idx = 0; idx < base_count; ++idx)
+        {
+            vertices[idx].normal = scratch_normals[idx];
+        }
+
+        const uint32_t skirt_count = 4u * res;
+        if (vertices.size() < base_count + skirt_count)
+        {
+            return;
+        }
+
+        const uint32_t top_skirt_start = base_count + 0u * res;
+        const uint32_t right_skirt_start = base_count + 1u * res;
+        const uint32_t bottom_skirt_start = base_count + 2u * res;
+        const uint32_t left_skirt_start = base_count + 3u * res;
+
+        // Top edge (j=0)
+        for (uint32_t i = 0; i < res; ++i)
+        {
+            vertices[top_skirt_start + i].normal = vertices[0u * res + i].normal;
+        }
+        // Right edge (i=res-1)
+        for (uint32_t j = 0; j < res; ++j)
+        {
+            vertices[right_skirt_start + j].normal = vertices[j * res + (res - 1u)].normal;
+        }
+        // Bottom edge (j=res-1)
+        for (uint32_t i = 0; i < res; ++i)
+        {
+            vertices[bottom_skirt_start + i].normal = vertices[(res - 1u) * res + i].normal;
+        }
+        // Left edge (i=0)
+        for (uint32_t j = 0; j < res; ++j)
+        {
+            vertices[left_skirt_start + j].normal = vertices[j * res + 0u].normal;
+        }
     }
 } // namespace
 
@@ -292,6 +382,8 @@ PlanetSystem::PlanetBody *PlanetSystem::create_terrain_planet(const TerrainPlane
     body.metallic = info.metallic;
     body.roughness = info.roughness;
     body.terrain_albedo_dir = info.albedo_dir;
+    body.terrain_height_dir = info.height_dir;
+    body.terrain_height_max_m = (!info.height_dir.empty()) ? std::max(0.0, info.height_max_m) : 0.0;
 
     if (_context && _context->assets)
     {
@@ -809,19 +901,6 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state, const Plan
         state.bound_albedo_dir = desired_albedo_dir;
     }
 
-    auto face_legacy = [](planet::CubeFace f) -> const char * {
-        switch (f)
-        {
-            case planet::CubeFace::PosX: return "px";
-            case planet::CubeFace::NegX: return "nx";
-            case planet::CubeFace::PosY: return "py";
-            case planet::CubeFace::NegY: return "ny";
-            case planet::CubeFace::PosZ: return "pz";
-            case planet::CubeFace::NegZ: return "nz";
-        }
-        return "px";
-    };
-
     for (size_t face_index = 0; face_index < state.face_materials.size(); ++face_index)
     {
         MaterialInstance &mat = state.face_materials[face_index];
@@ -869,7 +948,7 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state, const Plan
             if (textures && tileSampler != VK_NULL_HANDLE && !desired_albedo_dir.empty())
             {
                 const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
-                const std::string rel = fmt::format("{}/{}.ktx2", desired_albedo_dir, face_legacy(face));
+                const std::string rel = fmt::format("{}/{}.ktx2", desired_albedo_dir, planet::cube_face_name(face));
 
                 TextureCache::TextureKey tk{};
                 tk.kind = TextureCache::TextureKey::SourceKind::FilePath;
@@ -898,7 +977,7 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state, const Plan
             if (!desired_albedo_dir.empty())
             {
                 const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
-                const std::string rel = fmt::format("{}/{}.ktx2", desired_albedo_dir, face_legacy(face));
+                const std::string rel = fmt::format("{}/{}.ktx2", desired_albedo_dir, planet::cube_face_name(face));
 
                 TextureCache::TextureKey tk{};
                 tk.kind = TextureCache::TextureKey::SourceKind::FilePath;
@@ -909,6 +988,67 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state, const Plan
                 TextureCache::TextureHandle h = textures->request(tk, tileSampler);
                 textures->watchBinding(h, mat.materialSet, 1u, tileSampler, checker);
             }
+        }
+    }
+}
+
+void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetBody &body)
+{
+    if (!_context || !_context->assets)
+    {
+        return;
+    }
+
+    const std::string desired_dir = body.terrain_height_dir;
+    const double desired_max_m = body.terrain_height_max_m;
+    const bool changed =
+        desired_dir != state.bound_height_dir ||
+        desired_max_m != state.bound_height_max_m;
+
+    if (!changed)
+    {
+        return;
+    }
+
+    // Height affects vertex positions/normals; regenerate patch meshes if parameters change.
+    clear_terrain_patch_cache(state);
+    state.patch_cache_dirty = false;
+
+    state.bound_height_dir = desired_dir;
+    state.bound_height_max_m = desired_max_m;
+    for (planet::HeightFace &f : state.height_faces)
+    {
+        f = {};
+    }
+
+    if (desired_dir.empty() || !(desired_max_m > 0.0))
+    {
+        return;
+    }
+
+    AssetManager *assets = _context->assets;
+    bool ok = true;
+    for (size_t face_index = 0; face_index < state.height_faces.size(); ++face_index)
+    {
+        const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
+        const std::string rel = fmt::format("{}/{}.ktx2", desired_dir, planet::cube_face_name(face));
+        const std::string abs = assets->assetPath(rel);
+
+        planet::HeightFace face_data{};
+        if (!planet::load_heightmap_bc4(abs, face_data))
+        {
+            fmt::println("[PlanetSystem] Failed to load height face '{}'", abs);
+            ok = false;
+            break;
+        }
+        state.height_faces[face_index] = std::move(face_data);
+    }
+
+    if (!ok)
+    {
+        for (planet::HeightFace &f : state.height_faces)
+        {
+            f = {};
         }
     }
 }
@@ -963,6 +1103,27 @@ PlanetSystem::TerrainPatch *PlanetSystem::get_or_create_terrain_patch(TerrainSta
     if (scratch_vertices.empty())
     {
         return nullptr;
+    }
+
+    if (body.terrain_height_max_m > 0.0)
+    {
+        const uint32_t face_index = static_cast<uint32_t>(key.face);
+        if (face_index < state.height_faces.size())
+        {
+            const planet::HeightFace &height_face = state.height_faces[face_index];
+            if (height_face.width > 0 && height_face.height > 0 && !height_face.texels.empty())
+            {
+                const float scale = static_cast<float>(body.terrain_height_max_m);
+                for (Vertex &v : scratch_vertices)
+                {
+                    const float h01 = planet::sample_height(height_face, v.uv_x, v.uv_y);
+                    const float h_m = h01 * scale;
+                    v.position += v.normal * h_m;
+                }
+
+                recompute_patch_normals(scratch_vertices, safe_res);
+            }
+        }
     }
 
     const PatchBoundsData bounds = compute_patch_bounds(scratch_vertices);
@@ -1144,9 +1305,12 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
 
             state->quadtree.set_settings(_earth_quadtree_settings);
 
+            ensure_terrain_height_maps(*state, body);
+
             const Clock::time_point t_q0 = Clock::now();
             state->quadtree.update(body.center_world,
                                    body.radius_m,
+                                   body.terrain_height_max_m,
                                    cam_world,
                                    origin_world,
                                    scene.getSceneData(),
