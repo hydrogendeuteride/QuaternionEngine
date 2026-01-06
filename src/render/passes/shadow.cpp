@@ -113,6 +113,12 @@ void ShadowPass::register_graph(RenderGraph *graph, std::span<RGImageHandle> cas
                     {
                         for (const auto &r : v)
                         {
+                            // Planet terrain patches (and similar procedural draws) intentionally skip RT/mesh metadata;
+                            // don't render them into shadow maps for now.
+                            if (!r.sourceMesh)
+                            {
+                                continue;
+                            }
                             if (r.indexBuffer) indexSet.insert(r.indexBuffer);
                             if (r.vertexBuffer) vertexSet.insert(r.vertexBuffer);
                         }
@@ -195,6 +201,10 @@ void ShadowPass::draw_shadow(VkCommandBuffer cmd,
     VkBuffer lastIndexBuffer = VK_NULL_HANDLE;
     for (const auto &r : dc.OpaqueSurfaces)
     {
+        if (!r.sourceMesh)
+        {
+            continue;
+        }
         if (r.indexBuffer != lastIndexBuffer)
         {
             lastIndexBuffer = r.indexBuffer;

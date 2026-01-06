@@ -1256,11 +1256,22 @@ void VulkanEngine::draw()
             {
                 background->register_graph(_renderGraph.get(), hDraw, hDepth);
             }
-            if (_context->shadowSettings.enabled && _context->shadowSettings.mode != 2u)
+            bool needShadowMaps = _context->shadowSettings.enabled && (_context->shadowSettings.mode != 2u);
+            if (_context->shadowSettings.enabled && _context->shadowSettings.mode == 2u)
+            {
+                // RT-only shadows normally skip raster shadow map rendering.
+                // When a planet surface is close enough to fall inside clipmap cascades, we render
+                // shadow maps so nearby objects can cast onto the planet without planet TLAS BVHs.
+                needShadowMaps = _sceneManager && (_sceneManager->getSceneData().rtParams.z > 0.5f);
+            }
+            if (needShadowMaps)
             {
                 if (auto *shadow = _renderPassManager->getPass<ShadowPass>())
                 {
-                    shadow->register_graph(_renderGraph.get(), std::span<RGImageHandle>(hShadowCascades.data(), hShadowCascades.size()), shadowExtent);
+                    const uint32_t cascadeCount = static_cast<uint32_t>(hShadowCascades.size());
+                    shadow->register_graph(_renderGraph.get(),
+                                           std::span<RGImageHandle>(hShadowCascades.data(), cascadeCount),
+                                           shadowExtent);
                 }
             }
             if (auto *geometry = _renderPassManager->getPass<GeometryPass>())

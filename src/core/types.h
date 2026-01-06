@@ -146,6 +146,7 @@ struct GPUSceneData {
     glm::uvec4 rtOptions;
     // rtParams.x = N·L threshold for hybrid shadows
     // rtParams.y = shadows enabled flag (1.0 = on, 0.0 = off)
+    // rtParams.z = planet receiver clipmap shadow maps enabled flag (RT-only mode)
     glm::vec4  rtParams;
 
     GPUPunctualLight punctualLights[kMaxPunctualLights];

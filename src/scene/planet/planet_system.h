@@ -67,6 +67,7 @@ public:
     {
         planet::PlanetQuadtree::Stats quadtree{};
         uint32_t visible_patches = 0;
+        uint32_t rendered_patches = 0;
         uint32_t created_patches = 0;
         uint32_t patch_cache_size = 0;
         uint32_t estimated_triangles = 0;

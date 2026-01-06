@@ -2436,7 +2436,10 @@ namespace
 
                 const PlanetSystem::EarthDebugStats &s = planets->terrain_debug_stats(terrain_body->name);
                 ImGui::Separator();
-                ImGui::Text("Visible patches: %u  (est. tris: %u)", s.visible_patches, s.estimated_triangles);
+                ImGui::Text("Visible patches: %u  (rendered: %u | est. tris: %u)",
+                            s.visible_patches,
+                            s.rendered_patches,
+                            s.estimated_triangles);
                 ImGui::Text("Cache size: %u  (created this frame: %u)", s.patch_cache_size, s.created_patches);
                 ImGui::Text("Quadtree: max level used %u | visited %u | culled %u | budget-limited %u",
                             s.quadtree.max_level_used,

@@ -71,7 +71,11 @@ void main() {
         Nw = normalize(T * Nm.x + B * Nm.y + N * Nm.z);
     }
 
-    outPos = vec4(inWorldPos, 1.0);
+    // outPos.w is used as a "valid pixel" marker by downstream passes.
+    // Keep 0.0 reserved for background/no-geometry, and encode small flags above 1.0.
+    // Convention: materialData.extra[2].y > 0 => planet-style shadowing override.
+    float gbuffer_flags = materialData.extra[2].y;
+    outPos = vec4(inWorldPos, 1.0 + clamp(gbuffer_flags, 0.0, 1.0));
     outNorm = vec4(Nw, roughness);
     outAlbedo = vec4(albedo, metallic);
     // Extra G-buffer: x = AO, yzw = emissive

@@ -228,7 +228,7 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
     return visibility;
 }
 
-float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
+float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L, bool forceClipmapShadows)
 {
     // Early out when shadows are globally disabled.
     if (sceneData.rtParams.y <= 0.0)
@@ -238,8 +238,23 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
 
     vec3 wp = worldPos + N * SHADOW_NORMAL_OFFSET * (0.5 + 0.5 * (1.0 - max(dot(N, L), 0.0)));
 
-    // RT-only mode: cast a ray and skip clipmap sampling entirely
-    if (sceneData.rtOptions.z == 2u) {
+    // RT-only mode: by default cast a ray and skip clipmap sampling entirely.
+    // Some materials (e.g. planet terrain) opt into clipmap sampling to get stable
+    // near-range shadows without requiring planet geometry in the TLAS.
+    if (sceneData.rtOptions.z == 2u)
+    {
+        if (forceClipmapShadows)
+        {
+            CascadeMix cm = computeCascadeMix(wp);
+            float v0 = sampleCascadeShadow(cm.i0, wp, N, L);
+            if (cm.w1 <= 0.0)
+            {
+                return v0;
+            }
+            float v1 = sampleCascadeShadow(cm.i1, wp, N, L);
+            return mix(v0, v1, clamp(cm.w1, 0.0, 1.0));
+        }
+
         #ifdef GL_EXT_ray_query
         float farR = max(max(sceneData.cascadeSplitsView.x, sceneData.cascadeSplitsView.y),
         max(sceneData.cascadeSplitsView.z, sceneData.cascadeSplitsView.w));
@@ -253,7 +268,7 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
         return hit ? 0.0 : 1.0;
         #else
         // Fallback to clipmap PCF if ray query is not available at compile time
-        ;
+        return sampleCascadeShadow(0u, wp, N, L);
         #endif
     }
 
@@ -325,6 +340,7 @@ void main(){
     }
 
     vec3 pos = posSample.xyz;
+    bool forceClipmapShadows = (posSample.w > 1.5) && (sceneData.rtParams.z > 0.5);
     vec4 normalSample = texture(normalTex, inUV);
     vec3 N = normalize(normalSample.xyz);
     float roughness = clamp(normalSample.w, 0.04, 1.0);
@@ -342,7 +358,7 @@ void main(){
 
     // Directional sun term using evaluate_brdf + cascaded shadowing
     vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);
-    float sunVis = calcShadowVisibility(pos, N, Lsun);
+    float sunVis = calcShadowVisibility(pos, N, Lsun, forceClipmapShadows);
     vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
     vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * sunVis;
 

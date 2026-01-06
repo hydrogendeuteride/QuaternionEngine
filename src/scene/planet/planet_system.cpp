@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <unordered_set>
 
 #include "device.h"
 
@@ -59,6 +60,11 @@ namespace
         GLTFMetallic_Roughness::MaterialConstants c{};
         c.colorFactors = base_color;
         c.metal_rough_factors = glm::vec4(metallic, roughness, 0.0f, 0.0f);
+        // Mark planet materials so the deferred lighting pass can apply a special
+        // shadowing path when RT-only shadows are enabled (avoid relying on TLAS
+        // intersections with planet geometry).
+        // Convention: extra[2].y > 0 => "force clipmap (shadow map) receiver"
+        c.extra[2].y = 1.0f;
         return c;
     }
 
@@ -1393,10 +1399,145 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 ms_patch_create += std::chrono::duration<double, std::milli>(t_c1 - t_c0).count();
             }
 
-            std::vector<uint32_t> ready_patch_indices;
-            ready_patch_indices.reserve(state->quadtree.visible_leaves().size());
+            auto is_patch_ready = [&](const planet::PatchKey &k) -> bool
+            {
+                TerrainPatch *p = find_terrain_patch(*state, k);
+                if (!p)
+                {
+                    return false;
+                }
 
-            for (const planet::PatchKey &k : state->quadtree.visible_leaves())
+                if (p->state != TerrainPatchState::Ready ||
+                    p->vertex_buffer.buffer == VK_NULL_HANDLE ||
+                    p->vertex_buffer_address == 0)
+                {
+                    return false;
+                }
+
+                return true;
+            };
+
+            // Compute a "render cut" that never renders holes: if a desired leaf patch isn't ready yet,
+            // fall back to the nearest ready ancestor patch.
+            auto compute_render_cut = [&](const std::vector<planet::PatchKey> &desired_leaves)
+                -> std::vector<planet::PatchKey>
+            {
+                std::vector<planet::PatchKey> render_keys;
+                if (desired_leaves.empty())
+                {
+                    return render_keys;
+                }
+
+                std::unordered_set<planet::PatchKey, planet::PatchKeyHash> leaf_set;
+                leaf_set.reserve(desired_leaves.size() * 2u);
+
+                std::unordered_map<planet::PatchKey, uint8_t, planet::PatchKeyHash> child_masks;
+                child_masks.reserve(desired_leaves.size() * 2u);
+
+                for (const planet::PatchKey &leaf : desired_leaves)
+                {
+                    leaf_set.insert(leaf);
+
+                    planet::PatchKey child = leaf;
+                    while (child.level > 0u)
+                    {
+                        const planet::PatchKey parent{child.face, child.level - 1u, child.x >> 1u, child.y >> 1u};
+                        const uint32_t child_idx = (child.x & 1u) | ((child.y & 1u) << 1u);
+                        child_masks[parent] |= static_cast<uint8_t>(1u << child_idx);
+                        child = parent;
+                    }
+                }
+
+                render_keys.reserve(desired_leaves.size());
+
+                auto traverse = [&](auto &&self, const planet::PatchKey &k) -> bool
+                {
+                    if (leaf_set.contains(k))
+                    {
+                        if (is_patch_ready(k))
+                        {
+                            render_keys.push_back(k);
+                            return true;
+                        }
+                        return false;
+                    }
+
+                    auto it = child_masks.find(k);
+                    if (it == child_masks.end() || it->second == 0u)
+                    {
+                        return true;
+                    }
+
+                    const size_t checkpoint = render_keys.size();
+                    bool ok = true;
+                    const uint8_t mask = it->second;
+
+                    for (uint32_t cy = 0; cy < 2u; ++cy)
+                    {
+                        for (uint32_t cx = 0; cx < 2u; ++cx)
+                        {
+                            const uint32_t child_idx = cx + cy * 2u;
+                            if ((mask & static_cast<uint8_t>(1u << child_idx)) == 0u)
+                            {
+                                continue;
+                            }
+
+                            const planet::PatchKey child{
+                                k.face,
+                                k.level + 1u,
+                                k.x * 2u + cx,
+                                k.y * 2u + cy,
+                            };
+                            if (!self(self, child))
+                            {
+                                ok = false;
+                            }
+                        }
+                    }
+
+                    if (ok)
+                    {
+                        return true;
+                    }
+
+                    // One or more desired children are missing; fall back to this node to avoid
+                    // rendering holes when patch creation can't keep up.
+                    render_keys.resize(checkpoint);
+                    if (is_patch_ready(k))
+                    {
+                        render_keys.push_back(k);
+                        return true;
+                    }
+                    return false;
+                };
+
+                // Roots in deterministic +X,-X,+Y,-Y,+Z,-Z order.
+                const std::array<planet::CubeFace, 6> faces{
+                    planet::CubeFace::PosX,
+                    planet::CubeFace::NegX,
+                    planet::CubeFace::PosY,
+                    planet::CubeFace::NegY,
+                    planet::CubeFace::PosZ,
+                    planet::CubeFace::NegZ,
+                };
+
+                for (planet::CubeFace face : faces)
+                {
+                    const planet::PatchKey root{face, 0u, 0u, 0u};
+                    if (leaf_set.contains(root) || child_masks.find(root) != child_masks.end())
+                    {
+                        traverse(traverse, root);
+                    }
+                }
+
+                return render_keys;
+            };
+
+            std::vector<uint32_t> ready_patch_indices;
+            const std::vector<planet::PatchKey> render_keys = compute_render_cut(state->quadtree.visible_leaves());
+            ready_patch_indices.reserve(render_keys.size());
+
+            for (const planet::PatchKey &k : render_keys)
             {
                 TerrainPatch *patch = find_terrain_patch(*state, k);
                 if (!patch)
@@ -1482,6 +1623,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             state->debug_stats = {};
             state->debug_stats.quadtree = state->quadtree.stats();
             state->debug_stats.visible_patches = visible_patches;
+            state->debug_stats.rendered_patches = static_cast<uint32_t>(ready_patch_indices.size());
             state->debug_stats.created_patches = created_patches;
             state->debug_stats.patch_cache_size = static_cast<uint32_t>(state->patch_lookup.size());
             state->debug_stats.estimated_triangles = estimated_tris;

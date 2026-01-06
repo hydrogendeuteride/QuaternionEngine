@@ -13,11 +13,9 @@
 #include "glm/gtx/norm.inl"
 #include "glm/gtx/compatibility.hpp"
 #include <algorithm>
-#include <limits>
 #include <cmath>
 
 #include "core/frame/resources.h"
-#include "core/config.h"
 #include <fmt/core.h>
 
 SceneManager::SceneManager() = default;
@@ -427,9 +425,68 @@ void SceneManager::update_scene()
         const uint32_t reflMode = _context->reflectionMode;
         // rtOptions.x = RT shadows enabled, y = cascade mask, z = shadow mode, w = reflection mode (SSR/RT)
         sceneData.rtOptions = glm::uvec4(rtEnabled, ss.hybridRayCascadesMask, ss.mode, reflMode);
+
+        // Planet receiver shadow-maps (RT-only mode): enable shadow map rendering/sampling only when a
+        // visible planet surface point near the camera falls inside at least one shadow cascade.
+        float planetReceiverShadowMaps = 0.0f;
+        if (ss.enabled && ss.mode == 2u && _planetSystem && _planetSystem->enabled())
+        {
+            const WorldVec3 camW = mainCamera.position_world;
+            const WorldVec3 originW = _origin_world;
+
+            auto point_in_any_cascade = [&](const glm::vec3 &pLocal) -> bool
+            {
+                for (int ci = 0; ci < kShadowCascadeCount; ++ci)
+                {
+                    const glm::vec4 clip = sceneData.lightViewProjCascades[ci] * glm::vec4(pLocal, 1.0f);
+                    const float w = clip.w;
+                    if (std::abs(w) < 1.0e-6f)
+                    {
+                        continue;
+                    }
+                    const glm::vec3 ndc = glm::vec3(clip) * (1.0f / w);
+                    if (std::abs(ndc.x) <= 1.0f && std::abs(ndc.y) <= 1.0f && ndc.z >= 0.0f && ndc.z <= 1.0f)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            };
+
+            for (const PlanetSystem::PlanetBody &b : _planetSystem->bodies())
+            {
+                if (!b.visible || b.radius_m <= 0.0)
+                {
+                    continue;
+                }
+
+                const WorldVec3 toCam = camW - b.center_world;
+                const double dist2 = glm::dot(toCam, toCam);
+                if (!(dist2 > 1.0e-16))
+                {
+                    continue;
+                }
+
+                const double dist = std::sqrt(dist2);
+                const WorldVec3 dir = toCam * (1.0 / dist);
+                const WorldVec3 surfaceW = b.center_world + dir * b.radius_m;
+                const glm::vec3 surfaceLocal = world_to_local(surfaceW, originW);
+
+                if (point_in_any_cascade(surfaceLocal))
+                {
+                    planetReceiverShadowMaps = 1.0f;
+                    break;
+                }
+            }
+        }
+
         // rtParams.x = N·L threshold for hybrid shadows
         // rtParams.y = shadows enabled flag (1.0 = on, 0.0 = off)
-        sceneData.rtParams  = glm::vec4(ss.hybridRayNoLThreshold, ss.enabled ? 1.0f : 0.0f, 0.0f, 0.0f);
+        // rtParams.z = planet receiver clipmap shadow maps enabled flag (RT-only mode)
+        sceneData.rtParams  = glm::vec4(ss.hybridRayNoLThreshold,
+                                        ss.enabled ? 1.0f : 0.0f,
+                                        planetReceiverShadowMaps,
+                                        0.0f);
     }
 
     if (_planetSystem)
@@ -437,7 +494,6 @@ void SceneManager::update_scene()
         _planetSystem->update_and_emit(*this, mainDrawContext);
     }
 
-    // Fill punctual lights into GPUSceneData
     const uint32_t lightCount = static_cast<uint32_t>(std::min(pointLights.size(), static_cast<size_t>(kMaxPunctualLights)));
     for (uint32_t i = 0; i < lightCount; ++i)
     {
@@ -452,7 +508,6 @@ void SceneManager::update_scene()
         sceneData.punctualLights[i].color_intensity = glm::vec4(0.0f);
     }
 
-    // Fill spot lights into GPUSceneData
     const uint32_t spotCount = static_cast<uint32_t>(std::min(spotLights.size(), static_cast<size_t>(kMaxSpotLights)));
     for (uint32_t i = 0; i < spotCount; ++i)
     {
@@ -504,7 +559,6 @@ void SceneManager::loadScene(const std::string &name, std::shared_ptr<LoadedGLTF
     }
     loadedScenes[name] = scene;
 
-    // Initialize default animation state for this named scene (play first clip if present).
     if (scene && !scene->animations.empty())
     {
         LoadedGLTF::AnimationState st{};

@@ -38,6 +38,7 @@ layout(set = 0, binding = 0) uniform  SceneData{
     uvec4 rtOptions;
     // rtParams.x = N·L threshold for hybrid shadows
     // rtParams.y = shadows enabled flag (1.0 = on, 0.0 = off)
+    // rtParams.z = planet receiver clipmap shadow maps enabled flag (RT-only mode)
     vec4  rtParams;
 
     GPUPunctualLight punctualLights[MAX_PUNCTUAL_LIGHTS];
@@ -54,6 +55,12 @@ layout(set = 1, binding = 0) uniform GLTFMaterialData{
     vec4 extra[14];
 
 } materialData;
+// Convention (selected fields used by engine shaders):
+// - extra[0].x: normalScale (0 disables normal mapping)
+// - extra[0].y: occlusionStrength (0..1), extra[0].z: hasAO (1/0)
+// - extra[1].rgb: emissiveFactor
+// - extra[2].x: alphaCutoff (>0 enables alpha test for MASK materials)
+// - extra[2].y: gbuffer flags (planet-style: >0 => force clipmap receiver shadows in RT-only)
 
 layout(set = 1, binding = 1) uniform sampler2D colorTex;
 layout(set = 1, binding = 2) uniform sampler2D metalRoughTex;
