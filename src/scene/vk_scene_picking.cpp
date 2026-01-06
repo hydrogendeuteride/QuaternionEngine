@@ -4,6 +4,7 @@
 #include "core/device/images.h"
 #include "core/context.h"
 #include "mesh_bvh.h"
+#include "scene/planet/planet_system.h"
 
 #include "glm/gtx/transform.hpp"
 #include <glm/gtc/matrix_transform.hpp>
@@ -490,6 +491,65 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
     // Reset debug info for this pick.
     pickingDebug = {};
 
+    PlanetSystem *planets = get_planet_system();
+    auto intersect_terrain_planet_sphere = [&](const RenderObject &obj, glm::vec3 &outHitPos) -> bool
+    {
+        if (!planets)
+        {
+            return false;
+        }
+
+        // Terrain patches are emitted as MeshInstance-owned RenderObjects but don't have a MeshAsset.
+        // CPU picking against their AABBs can return points that are noticeably above/below the base
+        // sphere (hundreds of meters at Earth scale). When terrain displacement is disabled, use an
+        // analytic ray/sphere intersection against the planet base radius for a stable result.
+        if (obj.ownerType != RenderObject::OwnerType::MeshInstance ||
+            obj.ownerName.empty() ||
+            obj.sourceMesh != nullptr)
+        {
+            return false;
+        }
+
+        PlanetSystem::PlanetBody *body = planets->find_body_by_name(obj.ownerName);
+        if (!body || !body->terrain || !(body->terrain_height_max_m <= 0.0))
+        {
+            return false;
+        }
+
+        const glm::dvec3 ro = glm::dvec3(rayOrigin);
+        const glm::dvec3 rd = glm::dvec3(rayDir);
+        const glm::dvec3 center_local = body->center_world - _origin_world;
+        const double r = std::max(0.0, body->radius_m);
+        if (!(r > 0.0))
+        {
+            return false;
+        }
+
+        const glm::dvec3 oc = ro - center_local;
+        const double b = glm::dot(oc, rd);
+        const double c = glm::dot(oc, oc) - r * r;
+        const double disc = b * b - c;
+        if (!(disc >= 0.0))
+        {
+            return false;
+        }
+
+        const double s = std::sqrt(disc);
+        const double t0 = -b - s;
+        const double t1 = -b + s;
+        const double t = (t0 >= 0.0) ? t0 : t1;
+        if (!(t >= 0.0))
+        {
+            return false;
+        }
+
+        const glm::dvec3 hit = ro + rd * t;
+        outHitPos = glm::vec3(static_cast<float>(hit.x),
+                              static_cast<float>(hit.y),
+                              static_cast<float>(hit.z));
+        return true;
+    };
+
     auto testList = [&](const std::vector<RenderObject> &list)
     {
         for (const RenderObject &obj: list)
@@ -497,7 +557,10 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
             glm::vec3 hitPos{};
             BoundsHitDebug localDebug{};
             MeshBVHPickHit localMeshHit{};
-            if (!intersect_ray_bounds(rayOrigin, rayDir, obj, hitPos, &localDebug, &localMeshHit))
+            const bool hit =
+                intersect_terrain_planet_sphere(obj, hitPos) ||
+                intersect_ray_bounds(rayOrigin, rayDir, obj, hitPos, &localDebug, &localMeshHit);
+            if (!hit)
             {
                 continue;
             }

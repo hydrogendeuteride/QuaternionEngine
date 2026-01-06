@@ -106,6 +106,12 @@ public:
     void process_input(InputSystem &input, bool ui_capture_keyboard, bool ui_capture_mouse);
     void update(SceneManager &scene, Camera &camera, float dt);
 
+    bool terrain_surface_clamp_enabled() const { return _terrain_surface_clamp_enabled; }
+    void set_terrain_surface_clamp_enabled(bool enabled) { _terrain_surface_clamp_enabled = enabled; }
+
+    double terrain_surface_clearance_m() const { return _terrain_surface_clearance_m; }
+    void set_terrain_surface_clearance_m(double clearance_m) { _terrain_surface_clearance_m = std::max(0.0, clearance_m); }
+
     bool resolve_target(SceneManager &scene,
                         const CameraTarget &target,
                         WorldVec3 &out_position_world,
@@ -124,4 +130,9 @@ private:
     FollowCameraSettings _follow{};
     ChaseCameraSettings _chase{};
     FixedCameraSettings _fixed{};
+
+    // Prevent the camera from going below terrain when terrain planets are active.
+    // Clearance is measured along the radial direction (meters) and can be set to 0.
+    bool _terrain_surface_clamp_enabled = false;
+    double _terrain_surface_clearance_m = 0.1;
 };

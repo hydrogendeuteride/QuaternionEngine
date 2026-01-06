@@ -153,10 +153,12 @@ namespace planet
         }
 
         const bool rt_shadows_enabled = (scene_data.rtOptions.x != 0u) && (scene_data.rtOptions.z != 0u);
-        const double cam_alt_m = glm::max(0.0, glm::length(camera_world - body_center_world) - radius_m);
+        const double cam_alt_m = glm::length(camera_world - body_center_world) - radius_m;
+        const bool camera_outside = (cam_alt_m >= 0.0);
         const bool rt_guardrail_active =
             _settings.rt_guardrail &&
             rt_shadows_enabled &&
+            camera_outside &&
             (_settings.max_patch_edge_rt_m > 0.0) &&
             (cam_alt_m <= _settings.rt_guardrail_max_altitude_m);
 

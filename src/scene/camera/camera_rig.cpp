@@ -11,6 +11,9 @@
 
 #include <core/input/input_system.h>
 
+#include <algorithm>
+#include <cmath>
+
 namespace
 {
     std::unique_ptr<ICameraMode> make_mode(CameraMode mode,
@@ -28,6 +31,51 @@ namespace
             case CameraMode::Chase: return std::make_unique<ChaseCameraMode>(chase_settings);
             case CameraMode::Fixed: return std::make_unique<FixedCameraMode>(fixed_settings);
             default: return std::make_unique<FreeCameraMode>(free_settings);
+        }
+    }
+
+    void clamp_camera_above_terrain(SceneManager &scene, Camera &camera, double surface_clearance_m)
+    {
+        PlanetSystem *planets = scene.get_planet_system();
+        if (!planets || !planets->enabled())
+        {
+            return;
+        }
+
+        const double clearance_m = std::max(0.0, surface_clearance_m);
+
+        const PlanetSystem::PlanetBody *best_body = nullptr;
+        WorldVec3 best_dir{0.0, 0.0, 1.0};
+        double best_min_dist = 0.0;
+        double best_penetration = 0.0;
+
+        for (const PlanetSystem::PlanetBody &body : planets->bodies())
+        {
+            if (!body.visible || !body.terrain || !(body.radius_m > 0.0))
+            {
+                continue;
+            }
+
+            const WorldVec3 to_cam = camera.position_world - body.center_world;
+            const double dist2 = glm::dot(to_cam, to_cam);
+            const double dist = (dist2 > 0.0) ? std::sqrt(dist2) : 0.0;
+            const WorldVec3 dir = (dist > 1.0e-12) ? (to_cam * (1.0 / dist)) : WorldVec3(0.0, 0.0, 1.0);
+
+            const double displacement_m = planets->sample_terrain_displacement_m(body, dir);
+            const double min_dist = body.radius_m + displacement_m + clearance_m;
+            const double penetration = min_dist - dist;
+            if (penetration > best_penetration)
+            {
+                best_penetration = penetration;
+                best_body = &body;
+                best_dir = dir;
+                best_min_dist = min_dist;
+            }
+        }
+
+        if (best_body && best_penetration > 0.0)
+        {
+            camera.position_world = best_body->center_world + best_dir * best_min_dist;
         }
     }
 } // namespace
@@ -74,6 +122,11 @@ void CameraRig::update(SceneManager &scene, Camera &camera, float dt)
     if (_mode_impl)
     {
         _mode_impl->update(scene, camera, dt);
+    }
+
+    if (_terrain_surface_clamp_enabled)
+    {
+        clamp_camera_above_terrain(scene, camera, _terrain_surface_clearance_m);
     }
 }
 

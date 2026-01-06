@@ -43,6 +43,14 @@ namespace planet
     // - v increases downward (image space)
     glm::dvec3 cubesphere_unit_direction(CubeFace face, double u, double v);
 
+    // Map a direction to a cube face and face UVs in [0..1] range.
+    // Convention matches cubesphere_unit_direction(): u increases right, v increases down.
+    // Returns false if dir is degenerate.
+    bool cubesphere_direction_to_face_uv(const glm::dvec3 &dir,
+                                         CubeFace &out_face,
+                                         double &out_u01,
+                                         double &out_v01);
+
     // Tile bounds on a face in cube-face parametric space:
     // u,v in [-1,+1], where [0..1] maps to [-1..+1].
     void cubesphere_tile_uv_bounds(uint32_t level, uint32_t x, uint32_t y,

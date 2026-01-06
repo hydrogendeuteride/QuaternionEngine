@@ -285,6 +285,43 @@ PlanetSystem::PlanetBody *PlanetSystem::find_body_by_name(std::string_view name)
     return it != _bodies.end() ? &(*it) : nullptr;
 }
 
+double PlanetSystem::sample_terrain_displacement_m(const PlanetBody &body, const glm::dvec3 &dir_from_center) const
+{
+    if (!body.terrain || !(body.terrain_height_max_m > 0.0))
+    {
+        return 0.0;
+    }
+
+    const TerrainState *state = find_terrain_state(body.name);
+    if (!state)
+    {
+        return 0.0;
+    }
+
+    planet::CubeFace face = planet::CubeFace::PosX;
+    double u01 = 0.0;
+    double v01 = 0.0;
+    if (!planet::cubesphere_direction_to_face_uv(dir_from_center, face, u01, v01))
+    {
+        return 0.0;
+    }
+
+    const uint32_t face_index = static_cast<uint32_t>(face);
+    if (face_index >= state->height_faces.size())
+    {
+        return 0.0;
+    }
+
+    const planet::HeightFace &height_face = state->height_faces[face_index];
+    if (height_face.width == 0 || height_face.height == 0 || height_face.texels.empty())
+    {
+        return 0.0;
+    }
+
+    const float h01 = planet::sample_height(height_face, static_cast<float>(u01), static_cast<float>(v01));
+    return static_cast<double>(h01) * body.terrain_height_max_m;
+}
+
 const PlanetSystem::EarthDebugStats &PlanetSystem::terrain_debug_stats(std::string_view name) const
 {
     const TerrainState *state = find_terrain_state(name);
@@ -1011,30 +1048,53 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
         desired_dir != state.bound_height_dir ||
         desired_max_m != state.bound_height_max_m;
 
-    if (!changed)
+    const bool want_height = !desired_dir.empty() && (desired_max_m > 0.0);
+    const bool have_height = [&]() -> bool
+    {
+        for (const planet::HeightFace &f : state.height_faces)
+        {
+            if (f.width == 0 || f.height == 0 || f.texels.empty())
+            {
+                return false;
+            }
+        }
+        return true;
+    }();
+
+    const bool needs_load = changed || (want_height && !have_height);
+    if (!needs_load)
     {
         return;
     }
 
-    // Height affects vertex positions/normals; regenerate patch meshes if parameters change.
-    clear_terrain_patch_cache(state);
-    state.patch_cache_dirty = false;
-
-    state.bound_height_dir = desired_dir;
-    state.bound_height_max_m = desired_max_m;
-    for (planet::HeightFace &f : state.height_faces)
+    if (changed)
     {
-        f = {};
+        // Height affects vertex positions/normals; regenerate patch meshes if parameters change.
+        clear_terrain_patch_cache(state);
+        state.patch_cache_dirty = false;
+
+        state.bound_height_dir = desired_dir;
+        state.bound_height_max_m = desired_max_m;
+        for (planet::HeightFace &f : state.height_faces)
+        {
+            f = {};
+        }
     }
 
-    if (desired_dir.empty() || !(desired_max_m > 0.0))
+    if (!want_height)
     {
+        // Height disabled; ensure faces are cleared.
+        for (planet::HeightFace &f : state.height_faces)
+        {
+            f = {};
+        }
         return;
     }
 
     AssetManager *assets = _context->assets;
+    std::array<planet::HeightFace, 6> loaded_faces{};
     bool ok = true;
-    for (size_t face_index = 0; face_index < state.height_faces.size(); ++face_index)
+    for (size_t face_index = 0; face_index < loaded_faces.size(); ++face_index)
     {
         const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
         const std::string rel = fmt::format("{}/{}.ktx2", desired_dir, planet::cube_face_name(face));
@@ -1047,15 +1107,23 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
             ok = false;
             break;
         }
-        state.height_faces[face_index] = std::move(face_data);
+        loaded_faces[face_index] = std::move(face_data);
     }
 
     if (!ok)
     {
-        for (planet::HeightFace &f : state.height_faces)
-        {
-            f = {};
-        }
+        // If this was a retry (parameters didn't change), keep existing geometry and retry later.
+        // If parameters changed, we already cleared meshes/faces above.
+        return;
+    }
+
+    state.height_faces = std::move(loaded_faces);
+
+    if (!changed)
+    {
+        // Recovered height data after a previous failure; regenerate meshes so displacement applies.
+        clear_terrain_patch_cache(state);
+        state.patch_cache_dirty = false;
     }
 }
 

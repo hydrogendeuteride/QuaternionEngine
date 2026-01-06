@@ -48,7 +48,7 @@ namespace planet
             bool horizon_cull = true;
 
             // RT stability guardrail (only applied near-surface).
-            bool rt_guardrail = true;
+            bool rt_guardrail = false;  //ALWAYS DISABLE IT
             double max_patch_edge_rt_m = 5000.0;
             double rt_guardrail_max_altitude_m = 200000.0;
         };

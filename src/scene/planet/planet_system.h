@@ -117,6 +117,10 @@ public:
     PlanetBody *find_body_by_name(std::string_view name);
     const std::vector<PlanetBody> &bodies() const { return _bodies; }
 
+    // Returns the terrain displacement height (meters) at the given direction from the planet center.
+    // If height mapping is disabled/unavailable, returns 0.
+    double sample_terrain_displacement_m(const PlanetBody &body, const glm::dvec3 &dir_from_center) const;
+
     // Runtime planet management
     // - Planets are identified by 'name' (must be unique).
     PlanetBody *create_mesh_planet(const MeshPlanetCreateInfo &info);

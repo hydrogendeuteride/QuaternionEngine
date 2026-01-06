@@ -827,6 +827,20 @@ namespace
         ImGui::Text("Origin (world): (%.3f, %.3f, %.3f)", origin.x, origin.y, origin.z);
         ImGui::Text("Camera (local): (%.3f, %.3f, %.3f)", camLocal.x, camLocal.y, camLocal.z);
 
+        bool terrain_clamp_enabled = rig.terrain_surface_clamp_enabled();
+        if (ImGui::Checkbox("Clamp camera above terrain", &terrain_clamp_enabled))
+        {
+            rig.set_terrain_surface_clamp_enabled(terrain_clamp_enabled);
+        }
+
+        ImGui::BeginDisabled(!terrain_clamp_enabled);
+        double terrain_clearance_m = rig.terrain_surface_clearance_m();
+        if (ImGui::InputDouble("Terrain surface clearance (m)", &terrain_clearance_m, 0.05, 0.5, "%.3f"))
+        {
+            rig.set_terrain_surface_clearance_m(terrain_clearance_m);
+        }
+        ImGui::EndDisabled();
+
         auto target_from_last_pick = [&](CameraTarget &target) -> bool {
             PickingSystem *picking = eng->picking();
             if (!picking) return false;

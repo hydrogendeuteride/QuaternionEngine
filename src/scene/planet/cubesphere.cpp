@@ -30,6 +30,81 @@ namespace planet
         return d * (1.0 / std::sqrt(len2));
     }
 
+    bool cubesphere_direction_to_face_uv(const glm::dvec3 &dir,
+                                         CubeFace &out_face,
+                                         double &out_u01,
+                                         double &out_v01)
+    {
+        glm::dvec3 d = dir;
+        const double len2 = glm::dot(d, d);
+        if (!(len2 > 0.0))
+        {
+            return false;
+        }
+        d *= (1.0 / std::sqrt(len2));
+
+        const double ax = std::abs(d.x);
+        const double ay = std::abs(d.y);
+        const double az = std::abs(d.z);
+
+        double u = 0.0;
+        double v = 0.0;
+        double ma = 1.0;
+
+        if (ax >= ay && ax >= az)
+        {
+            ma = ax;
+            if (d.x >= 0.0)
+            {
+                out_face = CubeFace::PosX;
+                u = -d.z / ma;
+                v = -d.y / ma;
+            }
+            else
+            {
+                out_face = CubeFace::NegX;
+                u = d.z / ma;
+                v = -d.y / ma;
+            }
+        }
+        else if (ay >= ax && ay >= az)
+        {
+            ma = ay;
+            if (d.y >= 0.0)
+            {
+                out_face = CubeFace::PosY;
+                u = d.x / ma;
+                v = d.z / ma;
+            }
+            else
+            {
+                out_face = CubeFace::NegY;
+                u = d.x / ma;
+                v = -d.z / ma;
+            }
+        }
+        else
+        {
+            ma = az;
+            if (d.z >= 0.0)
+            {
+                out_face = CubeFace::PosZ;
+                u = d.x / ma;
+                v = -d.y / ma;
+            }
+            else
+            {
+                out_face = CubeFace::NegZ;
+                u = -d.x / ma;
+                v = -d.y / ma;
+            }
+        }
+
+        out_u01 = glm::clamp((u + 1.0) * 0.5, 0.0, 1.0);
+        out_v01 = glm::clamp((v + 1.0) * 0.5, 0.0, 1.0);
+        return true;
+    }
+
     void cubesphere_tile_uv_bounds(uint32_t level, uint32_t x, uint32_t y,
                                    double &out_u0, double &out_u1,
                                    double &out_v0, double &out_v1)
