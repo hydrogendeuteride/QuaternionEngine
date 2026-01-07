@@ -1598,6 +1598,73 @@ namespace
         }
 
         ImGui::Separator();
+        ImGui::TextUnformatted("Atmosphere");
+        bool atmEnabled = ctx->enableAtmosphere;
+        if (ImGui::Checkbox("Enable Atmosphere Scattering", &atmEnabled))
+        {
+            ctx->enableAtmosphere = atmEnabled;
+        }
+
+        AtmosphereSettings &atm = ctx->atmosphere;
+        if (ImGui::BeginCombo("Planet", atm.bodyName.empty() ? "Auto (closest)" : atm.bodyName.c_str()))
+        {
+            const bool autoSelected = atm.bodyName.empty();
+            if (ImGui::Selectable("Auto (closest)", autoSelected))
+            {
+                atm.bodyName.clear();
+            }
+
+            if (ctx->scene)
+            {
+                if (PlanetSystem *planets = ctx->scene->get_planet_system())
+                {
+                    for (const PlanetSystem::PlanetBody &b : planets->bodies())
+                    {
+                        const bool selected = (!atm.bodyName.empty() && atm.bodyName == b.name);
+                        if (ImGui::Selectable(b.name.c_str(), selected))
+                        {
+                            atm.bodyName = b.name;
+                        }
+                    }
+                }
+            }
+
+            ImGui::EndCombo();
+        }
+
+        if (ImGui::Button("Reset Earth Params"))
+        {
+            std::string keepName = atm.bodyName;
+            atm = AtmosphereSettings{};
+            atm.bodyName = std::move(keepName);
+        }
+
+        float atmHeightKm = atm.atmosphereHeightM / 1000.0f;
+        float HrKm = atm.rayleighScaleHeightM / 1000.0f;
+        float HmKm = atm.mieScaleHeightM / 1000.0f;
+
+        if (ImGui::SliderFloat("Atmosphere Height (km)", &atmHeightKm, 1.0f, 200.0f, "%.2f"))
+        {
+            atm.atmosphereHeightM = std::max(0.0f, atmHeightKm * 1000.0f);
+        }
+        if (ImGui::SliderFloat("Rayleigh Scale Height (km)", &HrKm, 1.0f, 20.0f, "%.2f"))
+        {
+            atm.rayleighScaleHeightM = std::max(1.0f, HrKm * 1000.0f);
+        }
+        if (ImGui::SliderFloat("Mie Scale Height (km)", &HmKm, 0.1f, 10.0f, "%.2f"))
+        {
+            atm.mieScaleHeightM = std::max(1.0f, HmKm * 1000.0f);
+        }
+
+        ImGui::SliderFloat("Mie g", &atm.mieG, -0.2f, 0.99f, "%.3f");
+        ImGui::SliderFloat("Intensity", &atm.intensity, 0.0f, 4.0f, "%.2f");
+        ImGui::SliderFloat("Sun Disk", &atm.sunDiskIntensity, 0.0f, 10.0f, "%.2f");
+        ImGui::SliderFloat("Jitter", &atm.jitterStrength, 0.0f, 1.0f, "%.2f");
+        ImGui::SliderFloat("Planet Snap (m)", &atm.planetSurfaceSnapM, 0.0f, 2000.0f, "%.1f");
+        ImGui::SliderInt("View Steps", &atm.viewSteps, 4, 64);
+        ImGui::SliderInt("Light Steps", &atm.lightSteps, 2, 32);
+
+        ImGui::Separator();
         if (auto *tm = eng->_renderPassManager ? eng->_renderPassManager->getPass<TonemapPass>() : nullptr)
         {
             float exp = tm->exposure();

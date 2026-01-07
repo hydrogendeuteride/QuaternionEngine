@@ -6,6 +6,7 @@
 #include "passes/lighting.h"
 #include "passes/ssr.h"
 #include "passes/clouds.h"
+#include "passes/atmosphere.h"
 #include "passes/particles.h"
 #include "passes/fxaa.h"
 #include "passes/debug_draw.h"
@@ -43,6 +44,11 @@ void RenderPassManager::init(EngineContext *context)
     auto cloudPass = std::make_unique<CloudPass>();
     cloudPass->init(context);
     addPass(std::move(cloudPass));
+
+    // Single-scattering atmosphere post-process (HDR, before transparents/tonemap).
+    auto atmospherePass = std::make_unique<AtmospherePass>();
+    atmospherePass->init(context);
+    addPass(std::move(atmospherePass));
 
     // GPU particle system (compute update + render)
     auto particlePass = std::make_unique<ParticlePass>();

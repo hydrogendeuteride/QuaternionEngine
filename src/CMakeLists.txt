@@ -87,6 +87,8 @@ add_executable (vulkan_engine
   render/passes/ssr.cpp
   render/passes/clouds.h
   render/passes/clouds.cpp
+  render/passes/atmosphere.h
+  render/passes/atmosphere.cpp
   render/passes/particles.h
   render/passes/particles.cpp
   render/passes/transparent.h

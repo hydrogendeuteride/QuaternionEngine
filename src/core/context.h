@@ -118,6 +118,43 @@ struct VoxelVolumeSettings
     float emissionStrength = 0.0f;
 };
 
+struct AtmosphereSettings
+{
+    // If non-empty, selects the named PlanetSystem body for atmosphere rendering.
+    // If empty, the renderer picks the closest visible planet to the camera.
+    std::string bodyName{};
+
+    // Atmosphere height above planet radius (meters).
+    float atmosphereHeightM = 80000.0f;
+
+    // Scale heights (meters) for exponential density.
+    float rayleighScaleHeightM = 8000.0f;
+    float mieScaleHeightM = 1200.0f;
+
+    // Scattering coefficients (1/m). Earth-ish defaults.
+    glm::vec3 rayleighScattering = glm::vec3(5.802e-6f, 13.558e-6f, 33.1e-6f);
+    glm::vec3 mieScattering = glm::vec3(21.0e-6f);
+
+    // Henyey-Greenstein phase g (forward scattering).
+    float mieG = 0.76f;
+
+    // Artistic controls.
+    float intensity = 1.0f;
+    float sunDiskIntensity = 1.0f;
+
+    // Sampling jitter (0 = off; 1 = full per-pixel jitter). Disabling reduces noise but may introduce banding.
+    float jitterStrength = 0.0f;
+
+    // When clamping the raymarch to the visible surface, snap planet pixels to the analytic planet sphere
+    // if the GBuffer surface is within this distance (meters) to reduce cube-sphere patch faceting artifacts.
+    // Set to 0 to disable snapping.
+    float planetSurfaceSnapM = 200.0f;
+
+    // Integration quality/performance tradeoff.
+    int viewSteps = 16;
+    int lightSteps = 8;
+};
+
 class EngineContext
 {
 public:
@@ -166,6 +203,9 @@ public:
 
     bool enableVolumetrics = false;              // optional voxel volumetrics toggle (cloud/smoke/flame)
     std::array<VoxelVolumeSettings, MAX_VOXEL_VOLUMES> voxelVolumes{};
+
+    bool enableAtmosphere = false;               // optional atmosphere scattering toggle
+    AtmosphereSettings atmosphere{};
 
     // Ray tracing manager (optional, nullptr if unsupported)
     RayTracingManager* ray = nullptr;

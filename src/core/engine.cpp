@@ -47,6 +47,7 @@
 #include "render/passes/imgui_pass.h"
 #include "render/passes/lighting.h"
 #include "render/passes/clouds.h"
+#include "render/passes/atmosphere.h"
 #include "render/passes/particles.h"
 #include "render/passes/transparent.h"
 #include "render/passes/fxaa.h"
@@ -1326,6 +1327,15 @@ void VulkanEngine::draw()
                 if (auto *clouds = _renderPassManager->getPass<CloudPass>())
                 {
                     hdrTarget = clouds->register_graph(_renderGraph.get(), hdrTarget, hGBufferPosition);
+                }
+            }
+
+            // Optional atmosphere scattering pass: reads hdrTarget + gbufferPosition and outputs a new HDR target.
+            if (_context && _context->enableAtmosphere)
+            {
+                if (auto *atmosphere = _renderPassManager->getPass<AtmospherePass>())
+                {
+                    hdrTarget = atmosphere->register_graph(_renderGraph.get(), hdrTarget, hGBufferPosition);
                 }
             }
 
