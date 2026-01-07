@@ -17,9 +17,10 @@ Current structure:
 - FXAA
 - Bloom
 - Floating origin with double precision coordinate system
-- [ ] Planet Rendering
+- Planet Rendering, LOD Terrain system
 
 Work-In-Progress
+- Planet atmosphere rendering
 
 ## Build prequsites
 - ktx software with libraries

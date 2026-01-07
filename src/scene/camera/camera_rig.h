@@ -46,7 +46,7 @@ struct FreeCameraSettings
 struct OrbitCameraSettings
 {
     static constexpr double kMinDistance = 0.2;
-    static constexpr double kMaxDistance = 1.0e12;
+    static constexpr double kMaxDistance = 1.0e16;
 
     CameraTarget target{};
     double distance{10.0};

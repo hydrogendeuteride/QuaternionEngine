@@ -105,7 +105,7 @@ void FreeCameraMode::process_input(SceneManager & /*scene*/,
             {
                 // Exponential scale for pleasant feel
                 float factor = std::pow(1.15f, steps);
-                _settings.move_speed = std::clamp(_settings.move_speed * factor, 0.06f, 300.0f);
+                _settings.move_speed = std::clamp(_settings.move_speed * factor, 0.06f, 300000000.0f);
             }
         }
     }
