@@ -116,9 +116,26 @@ void main()
                     if (ray_sphere_intersect(camPos, rd, center, planetRadius, tP0, tP1))
                     {
                         float tSphere = (tP0 > 0.0) ? tP0 : tP1;
-                        if (tSphere > 0.0 && tSurf <= tSphere && tSurf > tSphere - snapM)
+                        if (tSphere > 0.0)
                         {
-                            tSurf = tSphere;
+                            // Compare in radial space (more stable than t-space at grazing angles).
+                            float rSurf = length(posSample.xyz - center);
+
+                            // Cube-sphere patches (and LOD skirts) are planar and sit inside the analytic sphere.
+                            // If we clamp to the rasterized surface, the atmosphere raymarch length varies per-triangle,
+                            // revealing mesh grids and LOD "rings". Clamp inward deviations to the analytic sphere.
+                            if (rSurf < planetRadius)
+                            {
+                                tSurf = min(tSurf, tSphere);
+                            }
+
+                            // Optional: if the surface is close to the analytic sphere, snap to it to remove subtle
+                            // LOD stepping. Large deviations (mountains) remain unaffected.
+                            float radialErr = abs(rSurf - planetRadius);
+                            if (radialErr <= snapM)
+                            {
+                                tSurf = tSphere;
+                            }
                         }
                     }
                 }
@@ -215,7 +232,9 @@ void main()
 
     // Simple sun disk.
     float sunDisk = max(pc.beta_mie.w, 0.0);
-    if (sunDisk > 0.0)
+    bool isSky = (posSample.w <= 0.0);
+
+    if (sunDisk > 0.0 && isSky)
     {
         float sunTerm = pow(max(cosTheta, 0.0), 2048.0);
         outRgb += sunCol * (sunDisk * sunTerm) * transmittance;
