@@ -36,6 +36,13 @@ void SamplerManager::init(DeviceManager *deviceManager)
     clampEdge.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     vkCreateSampler(_deviceManager->device(), &clampEdge, nullptr, &_linearClampEdge);
 
+    // Nearest clamp-to-edge (useful for LUTs / non-filterable formats)
+    VkSamplerCreateInfo clampEdgeNearest = clampEdge;
+    clampEdgeNearest.magFilter = VK_FILTER_NEAREST;
+    clampEdgeNearest.minFilter = VK_FILTER_NEAREST;
+    clampEdgeNearest.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    vkCreateSampler(_deviceManager->device(), &clampEdgeNearest, nullptr, &_nearestClampEdge);
+
     // Shadow linear clamp sampler (border=white)
     VkSamplerCreateInfo sh = sampl;
     sh.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
@@ -72,5 +79,10 @@ void SamplerManager::cleanup()
     {
         vkDestroySampler(_deviceManager->device(), _linearClampEdge, nullptr);
         _linearClampEdge = VK_NULL_HANDLE;
+    }
+    if (_nearestClampEdge)
+    {
+        vkDestroySampler(_deviceManager->device(), _nearestClampEdge, nullptr);
+        _nearestClampEdge = VK_NULL_HANDLE;
     }
 }

@@ -24,6 +24,9 @@
 
 namespace
 {
+    constexpr uint32_t k_transmittance_lut_width = 256;
+    constexpr uint32_t k_transmittance_lut_height = 64;
+
     struct AtmospherePush
     {
         glm::vec4 planet_center_radius; // xyz: planet center (local), w: planet radius (m)
@@ -33,6 +36,15 @@ namespace
         glm::vec4 jitter_params;        // x: jitter strength (0..1), yzw: reserved
         glm::ivec4 misc;                // x: view steps, y: light steps, z/w: reserved
     };
+
+    struct AtmosphereLutPush
+    {
+        glm::vec4 radii_heights; // x: planet radius (m), y: atmosphere radius (m), z: rayleigh H (m), w: mie H (m)
+        glm::ivec4 misc;         // x: integration steps, yzw: reserved
+    };
+
+    static_assert(sizeof(AtmospherePush) % 16 == 0);
+    static_assert(sizeof(AtmosphereLutPush) % 16 == 0);
 
     static bool vec3_finite(const glm::vec3 &v)
     {
@@ -113,11 +125,12 @@ void AtmospherePass::init(EngineContext *context)
 
     VkDevice device = _context->getDevice()->device();
 
-    // Set 1 layout: HDR input + gbuffer position.
+    // Set 1 layout: HDR input + gbuffer position + transmittance LUT.
     {
         DescriptorLayoutBuilder builder;
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // hdrInput
         builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // posTex
+        builder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // transmittanceLut
         _inputSetLayout = builder.build(
             device,
             VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -154,10 +167,27 @@ void AtmospherePass::init(EngineContext *context)
     };
 
     _context->pipelines->createGraphicsPipeline("atmosphere", info);
+
+    // Transmittance / optical-depth LUT compute pipeline (used to remove per-pixel sun raymarch).
+    {
+        ComputePipelineCreateInfo ci{};
+        ci.shaderPath = _context->getAssets()->shaderPath("atmosphere_transmittance_lut.comp.spv");
+        ci.descriptorTypes = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE};
+        ci.pushConstantSize = sizeof(AtmosphereLutPush);
+        ci.pushConstantStages = VK_SHADER_STAGE_COMPUTE_BIT;
+        _context->pipelines->createComputePipeline("atmosphere.transmittance_lut", ci);
+        _context->pipelines->createComputeInstance("atmosphere.transmittance_lut", "atmosphere.transmittance_lut");
+    }
 }
 
 void AtmospherePass::cleanup()
 {
+    if (_context && _context->pipelines)
+    {
+        _context->pipelines->destroyComputeInstance("atmosphere.transmittance_lut");
+        _context->pipelines->destroyComputePipeline("atmosphere.transmittance_lut");
+    }
+
     if (_context && _context->getDevice() && _inputSetLayout)
     {
         vkDestroyDescriptorSetLayout(_context->getDevice()->device(), _inputSetLayout, nullptr);
@@ -181,9 +211,70 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
         return hdrInput;
     }
 
+    // Transmittance / optical-depth LUT (Rayleigh + Mie), written by a small compute pass.
+    RGImageDesc lutDesc{};
+    lutDesc.name = "atmosphere.lut.transmittance";
+    lutDesc.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    lutDesc.extent = VkExtent2D{k_transmittance_lut_width, k_transmittance_lut_height};
+    lutDesc.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    RGImageHandle transmittanceLut = graph->create_image(lutDesc);
+
+    graph->add_pass(
+        "AtmosphereLUT.Transmittance",
+        RGPassType::Compute,
+        [transmittanceLut](RGPassBuilder &builder, EngineContext *)
+        {
+            builder.write(transmittanceLut, RGImageUsage::ComputeWrite);
+        },
+        [this, transmittanceLut](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *ctx)
+        {
+            EngineContext *ctxLocal = ctx ? ctx : _context;
+            if (!ctxLocal || !ctxLocal->pipelines)
+            {
+                return;
+            }
+
+            VkImageView lutView = res.image_view(transmittanceLut);
+            if (lutView == VK_NULL_HANDLE)
+            {
+                return;
+            }
+
+            ctxLocal->pipelines->setComputeInstanceStorageImage("atmosphere.transmittance_lut", 0, lutView);
+
+            // Resolve active planet radius for LUT parameterization.
+            glm::vec3 planet_center_local{0.0f, 0.0f, 0.0f};
+            float planet_radius_m = 0.0f;
+            if (ctxLocal->scene)
+            {
+                if (PlanetSystem *planets = ctxLocal->scene->get_planet_system(); planets && planets->enabled())
+                {
+                    (void)find_atmosphere_body(*ctxLocal, *ctxLocal->scene, *planets, planet_center_local, planet_radius_m);
+                }
+            }
+
+            const AtmosphereSettings &s = ctxLocal->atmosphere;
+            float atm_height = std::max(0.0f, s.atmosphereHeightM);
+            float atm_radius = (planet_radius_m > 0.0f && atm_height > 0.0f) ? (planet_radius_m + atm_height) : 0.0f;
+            float Hr = std::max(1.0f, s.rayleighScaleHeightM);
+            float Hm = std::max(1.0f, s.mieScaleHeightM);
+
+            int lutSteps = std::clamp(s.lightSteps, 2, 256);
+
+            AtmosphereLutPush pc{};
+            pc.radii_heights = glm::vec4(planet_radius_m, atm_radius, Hr, Hm);
+            pc.misc = glm::ivec4(lutSteps, 0, 0, 0);
+
+            ComputeDispatchInfo di = ComputeManager::createDispatch2D(k_transmittance_lut_width, k_transmittance_lut_height);
+            di.pushConstants = &pc;
+            di.pushConstantSize = sizeof(pc);
+
+            ctxLocal->pipelines->dispatchComputeInstance(cmd, "atmosphere.transmittance_lut", di);
+        });
+
     RGImageDesc desc{};
     desc.name = "hdr.atmosphere";
-    desc.format = (_context && _context->getSwapchain()) ? _context->getSwapchain()->drawImage().imageFormat : VK_FORMAT_R16G16B16A16_SFLOAT;
+    desc.format = (_context && _context->getSwapchain()) ? _context->getSwapchain()->drawImage().imageFormat : VK_FORMAT_R32G32B32A32_SFLOAT;
     desc.extent = _context->getDrawExtent();
     desc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     RGImageHandle hdrOutput = graph->create_image(desc);
@@ -191,15 +282,16 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
     graph->add_pass(
         "Atmosphere",
         RGPassType::Graphics,
-        [hdrInput, gbufPos, hdrOutput](RGPassBuilder &builder, EngineContext *)
+        [hdrInput, gbufPos, hdrOutput, transmittanceLut](RGPassBuilder &builder, EngineContext *)
         {
             builder.read(hdrInput, RGImageUsage::SampledFragment);
             builder.read(gbufPos, RGImageUsage::SampledFragment);
+            builder.read(transmittanceLut, RGImageUsage::SampledFragment);
             builder.write_color(hdrOutput, false /*load*/);
         },
-        [this, hdrInput, gbufPos](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *ctx)
+        [this, hdrInput, gbufPos, transmittanceLut](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *ctx)
         {
-            draw_atmosphere(cmd, ctx, res, hdrInput, gbufPos);
+            draw_atmosphere(cmd, ctx, res, hdrInput, gbufPos, transmittanceLut);
         });
 
     return hdrOutput;
@@ -209,7 +301,8 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
                                      EngineContext *context,
                                      const RGPassResources &resources,
                                      RGImageHandle hdrInput,
-                                     RGImageHandle gbufPos)
+                                     RGImageHandle gbufPos,
+                                     RGImageHandle transmittanceLut)
 {
     EngineContext *ctxLocal = context ? context : _context;
     if (!ctxLocal || !ctxLocal->currentFrame) return;
@@ -222,7 +315,8 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
 
     VkImageView hdrView = resources.image_view(hdrInput);
     VkImageView posView = resources.image_view(gbufPos);
-    if (hdrView == VK_NULL_HANDLE || posView == VK_NULL_HANDLE) return;
+    VkImageView lutView = resources.image_view(transmittanceLut);
+    if (hdrView == VK_NULL_HANDLE || posView == VK_NULL_HANDLE || lutView == VK_NULL_HANDLE) return;
 
     // Global scene UBO (set = 0).
     AllocatedBuffer gpuSceneDataBuffer = resourceManager->create_buffer(
@@ -255,6 +349,8 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.write_image(1, posView, ctxLocal->getSamplers()->defaultNearest(),
                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.write_image(2, lutView, ctxLocal->getSamplers()->nearestClampEdge(),
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.update_set(deviceManager->device(), inputSet);
     }
 
@@ -277,7 +373,7 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
     const AtmosphereSettings &s = ctxLocal->atmosphere;
 
     float atm_height = std::max(0.0f, s.atmosphereHeightM);
-    float atm_radius = (planet_radius_m > 0.0f) ? (planet_radius_m + atm_height) : 0.0f;
+    float atm_radius = (planet_radius_m > 0.0f && atm_height > 0.0f) ? (planet_radius_m + atm_height) : 0.0f;
 
     float Hr = std::max(1.0f, s.rayleighScaleHeightM);
     float Hm = std::max(1.0f, s.mieScaleHeightM);

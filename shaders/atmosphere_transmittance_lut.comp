@@ -1,0 +1,107 @@
+#version 460
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Stores optical depth (Rayleigh, Mie) from a point at radius r to the top of
+// the atmosphere along a direction defined by mu = cos(theta), where theta is
+// the angle between the direction and the local up vector.
+//
+// Output:
+//   R: rayleigh optical depth (meters)
+//   G: mie optical depth (meters)
+//   B/A: unused
+layout(rgba32f, set = 0, binding = 0) uniform image2D out_lut;
+
+layout(push_constant) uniform AtmosphereLutPush
+{
+    vec4 radii_heights; // x: planet radius (m), y: atmosphere radius (m), z: rayleigh H (m), w: mie H (m)
+    ivec4 misc;         // x: integration steps, yzw: reserved
+} pc;
+
+bool ray_sphere_intersect(float r, float mu, float radius, out float t0, out float t1)
+{
+    // Origin is at (0,0,r); direction has dot(origin, dir) = r*mu.
+    // Solve: |o + t d|^2 = radius^2.
+    float disc = r * r * (mu * mu - 1.0) + radius * radius;
+    if (disc < 0.0)
+    {
+        t0 = 0.0;
+        t1 = 0.0;
+        return false;
+    }
+    float s = sqrt(disc);
+    t0 = -r * mu - s;
+    t1 = -r * mu + s;
+    return true;
+}
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(out_lut);
+    if (coord.x >= size.x || coord.y >= size.y)
+    {
+        return;
+    }
+
+    float planetRadius = pc.radii_heights.x;
+    float atmRadius = pc.radii_heights.y;
+    float Hr = max(pc.radii_heights.z, 1.0);
+    float Hm = max(pc.radii_heights.w, 1.0);
+    int steps = max(pc.misc.x, 1);
+
+    if (planetRadius <= 0.0 || atmRadius <= planetRadius)
+    {
+        imageStore(out_lut, coord, vec4(0.0));
+        return;
+    }
+
+    vec2 uv = (vec2(coord) + vec2(0.5)) / vec2(size);
+    float mu = uv.x * 2.0 - 1.0;
+    float r = mix(planetRadius, atmRadius, uv.y);
+
+    float tAtm0, tAtm1;
+    if (!ray_sphere_intersect(r, mu, atmRadius, tAtm0, tAtm1) || tAtm1 <= 0.0)
+    {
+        imageStore(out_lut, coord, vec4(0.0));
+        return;
+    }
+
+    float tEnd = tAtm1;
+
+    // If the ray hits the planet before exiting the atmosphere, treat as fully occluded.
+    float tP0, tP1;
+    if (ray_sphere_intersect(r, mu, planetRadius, tP0, tP1))
+    {
+        // If the intersection is in front of the origin (t1 > 0), the ray enters
+        // the planet (or starts on the surface heading inward), so sunlight is blocked.
+        // Note: for a surface point with an outward ray, t1 == 0 and we do not occlude.
+        if (tP1 > 0.0 && tP0 < tEnd)
+        {
+            const float MAX_OD = 1.0e9;
+            imageStore(out_lut, coord, vec4(MAX_OD, MAX_OD, 0.0, 0.0));
+            return;
+        }
+    }
+
+    float dt = tEnd / float(steps);
+    float odR = 0.0;
+    float odM = 0.0;
+
+    for (int i = 0; i < steps; ++i)
+    {
+        float t = (float(i) + 0.5) * dt;
+        float r2 = r * r + t * t + 2.0 * r * mu * t;
+        float rp = sqrt(max(r2, 0.0));
+
+        float height = max(rp - planetRadius, 0.0);
+        odR += exp(-height / Hr) * dt;
+        odM += exp(-height / Hm) * dt;
+    }
+
+    const float MAX_OD = 1.0e9;
+    odR = min(odR, MAX_OD);
+    odM = min(odM, MAX_OD);
+
+    imageStore(out_lut, coord, vec4(odR, odM, 0.0, 0.0));
+}

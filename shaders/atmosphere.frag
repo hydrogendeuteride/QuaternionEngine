@@ -9,6 +9,7 @@ layout(location = 0) out vec4 outColor;
 // Set 1: inputs
 layout(set = 1, binding = 0) uniform sampler2D hdrInput;
 layout(set = 1, binding = 1) uniform sampler2D posTex;
+layout(set = 1, binding = 2) uniform sampler2D transmittanceLut;
 
 layout(push_constant) uniform AtmospherePush
 {
@@ -75,7 +76,7 @@ void main()
     vec3 betaM = max(pc.beta_mie.rgb, vec3(0.0));
     float intensity = max(pc.beta_rayleigh.w, 0.0);
 
-    if (planetRadius <= 0.0 || atmRadius <= 0.0 || intensity <= 0.0 || all(equal(betaR + betaM, vec3(0.0))))
+    if (planetRadius <= 0.0 || atmRadius <= planetRadius || intensity <= 0.0 || all(equal(betaR + betaM, vec3(0.0))))
     {
         outColor = vec4(baseColor, 1.0);
         return;
@@ -152,7 +153,6 @@ void main()
     }
 
     int viewSteps = clamp(pc.misc.x, 4, 64);
-    int lightSteps = clamp(pc.misc.y, 2, 32);
 
     float dt = (tEnd - tStart) / float(viewSteps);
     float jitterStrength = clamp(pc.jitter_params.x, 0.0, 1.0);
@@ -186,45 +186,28 @@ void main()
         odR += densR * dt;
         odM += densM * dt;
 
-        // Sun ray integration from this sample point to top of atmosphere.
-        float tL0, tL1;
-        if (!ray_sphere_intersect(p, sunDir, center, atmRadius, tL0, tL1) || tL1 <= 0.0)
-        {
-            continue;
-        }
-        float dtL = tL1 / float(lightSteps);
-
-        float odRL = 0.0;
-        float odML = 0.0;
-
-        // Shadow: if the sun ray hits the planet, this sample is in shadow (no direct sun).
+        // Planet shadow: if the sun ray hits the planet, this sample is in shadow (no direct sun).
         float tp0, tp1;
-        bool shadowed = false;
         if (ray_sphere_intersect(p, sunDir, center, planetRadius, tp0, tp1))
         {
-            shadowed = (tp1 > 0.0);
-        }
-
-        if (!shadowed)
-        {
-            float tl = 0.0;
-            for (int j = 0; j < lightSteps; ++j)
+            if (tp1 > 0.0)
             {
-                vec3 lp = p + sunDir * (tl + 0.5 * dtL);
-                float lh = length(lp - center) - planetRadius;
-                lh = max(lh, 0.0);
-
-                odRL += exp(-lh / Hr) * dtL;
-                odML += exp(-lh / Hm) * dtL;
-
-                tl += dtL;
+                continue;
             }
-
-            vec3 tau = betaR * (odR + odRL) + betaM * (odM + odML);
-            vec3 atten = exp(-tau);
-            vec3 scatter = atten * (densR * betaR * phaseR + densM * betaM * phaseM) * dt;
-            scatterSum += scatter;
         }
+
+        // Sun transmittance (optical depth) lookup: removes per-pixel sun raymarch.
+        vec3 radial = p - center;
+        float r = max(length(radial), planetRadius);
+        float muS = dot(radial / r, sunDir);
+        float u = clamp(muS * 0.5 + 0.5, 0.0, 1.0);
+        float v = clamp((r - planetRadius) / (atmRadius - planetRadius), 0.0, 1.0);
+        vec2 odSun = texture(transmittanceLut, vec2(u, v)).rg;
+
+        vec3 tau = betaR * (odR + odSun.x) + betaM * (odM + odSun.y);
+        vec3 atten = exp(-tau);
+        vec3 scatter = atten * (densR * betaR * phaseR + densM * betaM * phaseM) * dt;
+        scatterSum += scatter;
     }
 
     vec3 transmittance = exp(-(betaR * odR + betaM * odM));

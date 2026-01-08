@@ -28,12 +28,12 @@ private:
                          EngineContext *context,
                          const RGPassResources &resources,
                          RGImageHandle hdrInput,
-                         RGImageHandle gbufPos);
+                         RGImageHandle gbufPos,
+                         RGImageHandle transmittanceLut);
 
     EngineContext *_context = nullptr;
-    VkDescriptorSetLayout _inputSetLayout = VK_NULL_HANDLE; // set=1: hdr input + gbuffer position
+    VkDescriptorSetLayout _inputSetLayout = VK_NULL_HANDLE; // set=1: hdr input + gbuffer position + transmittance LUT
 
     VkPipeline _pipeline = VK_NULL_HANDLE;
     VkPipelineLayout _pipelineLayout = VK_NULL_HANDLE;
 };
-
