@@ -1297,6 +1297,11 @@ namespace
         ImGui::EndDisabled();
 
         ImGui::Separator();
+        ImGui::TextUnformatted("Analytic Planet Shadow");
+        ImGui::SliderFloat("Sun angular radius (deg)", &ss.planetSunAngularRadiusDeg, 0.0f, 2.0f, "%.3f");
+        ImGui::TextWrapped("Soft penumbra for planet->scene directional shadows. Set to 0 for a hard edge.");
+
+        ImGui::Separator();
         ImGui::TextWrapped(
             "Clipmap only: raster PCF+RPDB. Clipmap+RT: PCF assisted by ray query at low N·L. RT only: skip shadow maps and use ray tests only.");
     }

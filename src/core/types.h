@@ -147,11 +147,19 @@ struct GPUSceneData {
     // rtParams.x = N·L threshold for hybrid shadows
     // rtParams.y = shadows enabled flag (1.0 = on, 0.0 = off)
     // rtParams.z = planet receiver clipmap shadow maps enabled flag (RT-only mode)
+    // rtParams.w = sun angular radius (radians) for analytic planet shadow penumbra
     glm::vec4  rtParams;
 
     GPUPunctualLight punctualLights[kMaxPunctualLights];
     GPUSpotLight spotLights[kMaxSpotLights];
+    // lightCounts.x = point light count
+    // lightCounts.y = spot light count
+    // lightCounts.z = planet occluder count (analytic directional sun shadow)
     glm::uvec4 lightCounts;
+
+    // Analytic planet shadow occluders (max 4):
+    // xyz = center in render-local space, w = radius in meters.
+    glm::vec4 planetOccluders[4];
 };
 
 enum class MaterialPass :uint8_t {

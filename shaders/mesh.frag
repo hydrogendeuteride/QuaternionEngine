@@ -4,6 +4,7 @@
 #include "input_structures.glsl"
 #include "ibl_common.glsl"
 #include "lighting_common.glsl"
+#include "planet_shadow.glsl"
 
 layout (location = 0) in vec3 inNormal;
 layout (location = 1) in vec3 inColor;
@@ -65,8 +66,15 @@ void main()
 
     // Directional sun term (no shadows in forward path)
     vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);
+    float sunVis = 1.0;
+    if (sceneData.rtParams.y > 0.0)
+    {
+        // Use a small receiver offset to reduce precision issues near the boundary.
+        vec3 wp = inWorldPos + N * 0.0025;
+        sunVis = planet_analytic_shadow_visibility(wp, Lsun);
+    }
     vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
-    vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a;
+    vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * sunVis;
 
     // Punctual point lights
     uint pointCount = sceneData.lightCounts.x;

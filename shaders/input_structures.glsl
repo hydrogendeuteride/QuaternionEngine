@@ -1,5 +1,7 @@
 // Maximum number of shadow cascades supported in shaders
 #define MAX_CASCADES 4
+// Maximum number of analytic planet occluders for directional sun shadows
+#define MAX_PLANET_OCCLUDERS 4
 // Maximum number of punctual (point) lights
 #define MAX_PUNCTUAL_LIGHTS 64
 // Maximum number of spot lights
@@ -39,13 +41,19 @@ layout(set = 0, binding = 0) uniform  SceneData{
     // rtParams.x = N·L threshold for hybrid shadows
     // rtParams.y = shadows enabled flag (1.0 = on, 0.0 = off)
     // rtParams.z = planet receiver clipmap shadow maps enabled flag (RT-only mode)
+    // rtParams.w = sun angular radius (radians) for analytic planet shadow penumbra
     vec4  rtParams;
 
     GPUPunctualLight punctualLights[MAX_PUNCTUAL_LIGHTS];
     GPUSpotLight spotLights[MAX_SPOT_LIGHTS];
     // lightCounts.x = point light count
     // lightCounts.y = spot light count
+    // lightCounts.z = planet occluder count (analytic directional sun shadow)
     uvec4 lightCounts;
+
+    // Analytic planet shadow occluders (max 4):
+    // planetOccluders[i].xyz = center in render-local space, w = radius in meters.
+    vec4 planetOccluders[MAX_PLANET_OCCLUDERS];
 } sceneData;
 
 layout(set = 1, binding = 0) uniform GLTFMaterialData{

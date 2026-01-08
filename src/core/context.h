@@ -45,6 +45,11 @@ struct ShadowSettings
     bool hybridRayQueryEnabled = false;   // derived convenience: (mode != 0)
     uint32_t hybridRayCascadesMask = 0b1110; // bit i => cascade i uses ray query assist (default: 1..3)
     float hybridRayNoLThreshold = 0.25f;  // trigger when N·L below this (mode==1)
+
+    // Analytic planet shadow penumbra control for the directional sun.
+    // This is treated as the sun's angular radius (half-angle) in degrees.
+    // Set to 0 for a hard edge.
+    float planetSunAngularRadiusDeg = 0.27f;
 };
 
 struct CloudSettings

@@ -483,10 +483,11 @@ void SceneManager::update_scene()
         // rtParams.x = N·L threshold for hybrid shadows
         // rtParams.y = shadows enabled flag (1.0 = on, 0.0 = off)
         // rtParams.z = planet receiver clipmap shadow maps enabled flag (RT-only mode)
+        // rtParams.w = sun angular radius (radians) for analytic planet shadow penumbra
         sceneData.rtParams  = glm::vec4(ss.hybridRayNoLThreshold,
                                         ss.enabled ? 1.0f : 0.0f,
                                         planetReceiverShadowMaps,
-                                        0.0f);
+                                        glm::radians(std::max(0.0f, ss.planetSunAngularRadiusDeg)));
     }
 
     if (_planetSystem)
@@ -544,7 +545,56 @@ void SceneManager::update_scene()
         sceneData.spotLights[i].cone = glm::vec4(0.0f);
     }
 
-    sceneData.lightCounts = glm::uvec4(lightCount, spotCount, 0u, 0u);
+    // Populate analytic planet shadow occluders (up to 4 planets with largest angular size from the camera).
+    uint32_t planetOccluderCount = 0;
+    for (int i = 0; i < 4; ++i)
+    {
+        sceneData.planetOccluders[i] = glm::vec4(0.0f);
+    }
+
+    if (_planetSystem && _planetSystem->enabled())
+    {
+        struct PlanetCandidate
+        {
+            const PlanetSystem::PlanetBody *body = nullptr;
+            double score = 0.0; // radius / distance
+        };
+
+        std::vector<PlanetCandidate> candidates;
+        candidates.reserve(_planetSystem->bodies().size());
+
+        for (const PlanetSystem::PlanetBody &b : _planetSystem->bodies())
+        {
+            if (!b.visible || !(b.radius_m > 0.0))
+            {
+                continue;
+            }
+
+            const WorldVec3 toCam = mainCamera.position_world - b.center_world;
+            const double dist2 = glm::dot(toCam, toCam);
+            const double dist = (dist2 > 1.0e-16) ? std::sqrt(dist2) : 0.0;
+            const double score = (dist > 0.0) ? (b.radius_m / dist) : 1.0e30;
+
+            candidates.push_back(PlanetCandidate{&b, score});
+        }
+
+        std::sort(candidates.begin(), candidates.end(),
+                  [](const PlanetCandidate &a, const PlanetCandidate &b)
+                  {
+                      return a.score > b.score;
+                  });
+
+        planetOccluderCount = static_cast<uint32_t>(std::min<size_t>(4, candidates.size()));
+        for (uint32_t i = 0; i < planetOccluderCount; ++i)
+        {
+            const PlanetSystem::PlanetBody &b = *candidates[i].body;
+            const glm::vec3 centerLocal = world_to_local(b.center_world, _origin_world);
+            const float radiusM = static_cast<float>(std::max(0.0, b.radius_m));
+            sceneData.planetOccluders[i] = glm::vec4(centerLocal, radiusM);
+        }
+    }
+
+    sceneData.lightCounts = glm::uvec4(lightCount, spotCount, planetOccluderCount, 0u);
 
     auto end = std::chrono::system_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);

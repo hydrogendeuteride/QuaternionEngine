@@ -3,6 +3,7 @@
 #include "input_structures.glsl"
 #include "ibl_common.glsl"
 #include "lighting_common.glsl"
+#include "planet_shadow.glsl"
 
 layout(location=0) in vec2 inUV;
 layout(location=0) out vec4 outColor;
@@ -209,14 +210,20 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
     }
 
     vec3 wp = worldPos + N * SHADOW_NORMAL_OFFSET * (0.5 + 0.5 * (1.0 - max(dot(N, L), 0.0)));
+    float planetVis = planet_analytic_shadow_visibility(wp, L);
+    if (planetVis <= 0.0)
+    {
+        return 0.0;
+    }
 
     CascadeMix cm = computeCascadeMix(wp);
     float v0 = sampleCascadeShadow(cm.i0, wp, N, L);
     if (cm.w1 <= 0.0)
-    return v0;
+    return min(planetVis, v0);
 
     float v1 = sampleCascadeShadow(cm.i1, wp, N, L);
-    return mix(v0, v1, clamp(cm.w1, 0.0, 1.0));
+    float vis = mix(v0, v1, clamp(cm.w1, 0.0, 1.0));
+    return min(planetVis, vis);
 }
 
 void main(){
