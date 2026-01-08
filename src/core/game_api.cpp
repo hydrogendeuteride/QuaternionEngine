@@ -939,6 +939,8 @@ bool Engine::add_planet_terrain(const PlanetTerrain &planet)
     info.albedo_dir = planet.albedo_dir;
     info.height_dir = planet.height_dir;
     info.height_max_m = planet.height_max_m;
+    info.emission_dir = planet.emission_dir;
+    info.emission_factor = planet.emission_factor;
 
     return planets->create_terrain_planet(info) != nullptr;
 }

@@ -252,6 +252,15 @@ void main(){
 
     // Directional sun term using evaluate_brdf + cascaded shadowing
     vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);
+
+    // Planet night emission: only show emission on the dark side of planet surfaces
+    bool isPlanet = (posSample.w > 1.5);
+    if (isPlanet)
+    {
+        float NdotL = max(dot(N, Lsun), 0.0);
+        float nightFactor = 1.0 - smoothstep(0.0, 0.15, NdotL);
+        emissive *= nightFactor;
+    }
     float sunVis = calcShadowVisibility(pos, N, Lsun);
     vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
     vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * sunVis;

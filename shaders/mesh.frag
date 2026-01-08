@@ -120,6 +120,16 @@ void main()
     {
         vec3 emissiveSample = texture(emissiveTex, inUV).rgb;
         emissive = emissiveSample * emissiveFactor;
+
+        // Planet night emission: only show emission on the dark side of planet surfaces
+        // Convention: extra[2].y > 0 => planet material
+        bool isPlanet = (materialData.extra[2].y > 0.0);
+        if (isPlanet)
+        {
+            float NdotL = max(dot(N, Lsun), 0.0);
+            float nightFactor = 1.0 - smoothstep(0.0, 0.15, NdotL);
+            emissive *= nightFactor;
+        }
     }
 
     vec3 indirect = diffIBL + specIBL;

@@ -50,6 +50,8 @@ public:
             earth.albedo_dir = "planets/earth/albedo/L0";
             earth.height_dir = "planets/earth/height/L0";
             earth.height_max_m = 6400.0;
+            earth.emission_dir = "planets/earth/emission/L0";
+            earth.emission_factor = glm::vec3(1.0f, 1.0f, 1.0f);
             api.add_planet_terrain(earth);
 
             GameAPI::PlanetSphere moon{};

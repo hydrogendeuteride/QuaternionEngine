@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <span>
 #include <unordered_set>
 
 #include "device.h"
@@ -55,11 +57,14 @@ namespace
     GLTFMetallic_Roughness::MaterialConstants make_planet_constants(
         const glm::vec4 &base_color = glm::vec4(1.0f),
         float metallic = 0.0f,
-        float roughness = 1.0f)
+        float roughness = 1.0f,
+        const glm::vec3 &emission_factor = glm::vec3(0.0f))
     {
         GLTFMetallic_Roughness::MaterialConstants c{};
         c.colorFactors = base_color;
         c.metal_rough_factors = glm::vec4(metallic, roughness, 0.0f, 0.0f);
+        // extra[1].rgb = emissive factor (sampled in mesh.frag)
+        c.extra[1] = glm::vec4(emission_factor, 0.0f);
         // Mark planet materials so the deferred lighting pass can apply a special
         // shadowing path when RT-only shadows are enabled (avoid relying on TLAS
         // intersections with planet geometry).
@@ -400,7 +405,10 @@ PlanetSystem::PlanetBody *PlanetSystem::create_mesh_planet(const MeshPlanetCreat
                                 static_cast<int>(std::max(2u, info.stacks)));
         geom::generate_tangents(verts, inds);
 
-        body.mesh = assets->createMesh(asset_name, verts, inds, body.material);
+        body.mesh = assets->createMesh(asset_name,
+                                       std::span<Vertex>(verts),
+                                       std::span<uint32_t>(inds),
+                                       body.material);
     }
 
     _bodies.push_back(std::move(body));
@@ -427,6 +435,8 @@ PlanetSystem::PlanetBody *PlanetSystem::create_terrain_planet(const TerrainPlane
     body.terrain_albedo_dir = info.albedo_dir;
     body.terrain_height_dir = info.height_dir;
     body.terrain_height_max_m = (!info.height_dir.empty()) ? std::max(0.0, info.height_max_m) : 0.0;
+    body.terrain_emission_dir = info.emission_dir;
+    body.emission_factor = info.emission_factor;
 
     if (_context && _context->assets)
     {
@@ -434,7 +444,7 @@ PlanetSystem::PlanetBody *PlanetSystem::create_terrain_planet(const TerrainPlane
 
         const std::string asset_name = fmt::format("Planet_{}_TerrainMaterial", info.name);
         const GLTFMetallic_Roughness::MaterialConstants mc =
-            make_planet_constants(info.base_color, info.metallic, info.roughness);
+            make_planet_constants(info.base_color, info.metallic, info.roughness, info.emission_factor);
         body.material = assets->createMaterialFromConstants(asset_name, mc, MaterialPass::MainColor);
     }
 
@@ -816,14 +826,15 @@ void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
         const bool same_constants =
             state.bound_base_color == body.base_color &&
             state.bound_metallic == body.metallic &&
-            state.bound_roughness == body.roughness;
+            state.bound_roughness == body.roughness &&
+            state.bound_emission_factor == body.emission_factor;
         if (same_constants)
         {
             return;
         }
 
         const GLTFMetallic_Roughness::MaterialConstants constants =
-            make_planet_constants(body.base_color, body.metallic, body.roughness);
+            make_planet_constants(body.base_color, body.metallic, body.roughness, body.emission_factor);
 
         VmaAllocationInfo allocInfo{};
         vmaGetAllocationInfo(device->allocator(), state.material_constants_buffer.allocation, &allocInfo);
@@ -839,6 +850,7 @@ void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
             state.bound_base_color = body.base_color;
             state.bound_metallic = body.metallic;
             state.bound_roughness = body.roughness;
+            state.bound_emission_factor = body.emission_factor;
         }
         return;
     }
@@ -856,7 +868,7 @@ void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
     }
 
     const GLTFMetallic_Roughness::MaterialConstants constants =
-        make_planet_constants(body.base_color, body.metallic, body.roughness);
+        make_planet_constants(body.base_color, body.metallic, body.roughness, body.emission_factor);
 
     state.material_constants_buffer =
         rm->create_buffer(sizeof(GLTFMetallic_Roughness::MaterialConstants),
@@ -879,6 +891,7 @@ void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
         state.bound_base_color = body.base_color;
         state.bound_metallic = body.metallic;
         state.bound_roughness = body.roughness;
+        state.bound_emission_factor = body.emission_factor;
     }
 }
 
@@ -944,6 +957,13 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state, const Plan
         state.bound_albedo_dir = desired_albedo_dir;
     }
 
+    const std::string desired_emission_dir = body.terrain_emission_dir;
+    const bool emission_dir_changed = desired_emission_dir != state.bound_emission_dir;
+    if (emission_dir_changed)
+    {
+        state.bound_emission_dir = desired_emission_dir;
+    }
+
     for (size_t face_index = 0; face_index < state.face_materials.size(); ++face_index)
     {
         MaterialInstance &mat = state.face_materials[face_index];
@@ -1002,22 +1022,56 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state, const Plan
                 TextureCache::TextureHandle h = textures->request(tk, tileSampler);
                 textures->watchBinding(h, mat.materialSet, 1u, tileSampler, checker);
             }
+
+            // Emission texture binding (binding 5)
+            if (textures && tileSampler != VK_NULL_HANDLE && !desired_emission_dir.empty())
+            {
+                const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
+                // Try .ktx2 first, then .png
+                std::string rel = fmt::format("{}/{}.ktx2", desired_emission_dir, planet::cube_face_name(face));
+                std::string abs_path = assets->assetPath(rel);
+                if (!std::filesystem::exists(abs_path))
+                {
+                    rel = fmt::format("{}/{}.png", desired_emission_dir, planet::cube_face_name(face));
+                    abs_path = assets->assetPath(rel);
+                }
+
+                TextureCache::TextureKey tk{};
+                tk.kind = TextureCache::TextureKey::SourceKind::FilePath;
+                tk.path = abs_path;
+                tk.srgb = true;
+                tk.mipmapped = true;
+
+                TextureCache::TextureHandle h = textures->request(tk, tileSampler);
+                textures->watchBinding(h, mat.materialSet, 5u, tileSampler, black);
+            }
         }
-        else if (albedo_dir_changed && textures && tileSampler != VK_NULL_HANDLE)
+        else if ((albedo_dir_changed || emission_dir_changed) && textures && tileSampler != VK_NULL_HANDLE)
         {
-            // Rebind the per-face albedo tile for the currently active terrain body.
+            // Rebind the per-face textures for the currently active terrain body.
             textures->unwatchSet(mat.materialSet);
 
-            // Reset binding to a fallback until the new tile becomes resident.
+            // Reset bindings to fallbacks until new tiles become resident.
             DescriptorWriter writer;
-            writer.write_image(1,
-                               checker,
-                               tileSampler,
-                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            if (albedo_dir_changed)
+            {
+                writer.write_image(1,
+                                   checker,
+                                   tileSampler,
+                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            }
+            if (emission_dir_changed)
+            {
+                writer.write_image(5,
+                                   black,
+                                   tileSampler,
+                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            }
             writer.update_set(device->device(), mat.materialSet);
 
-            if (!desired_albedo_dir.empty())
+            if (albedo_dir_changed && !desired_albedo_dir.empty())
             {
                 const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
                 const std::string rel = fmt::format("{}/{}.ktx2", desired_albedo_dir, planet::cube_face_name(face));
@@ -1030,6 +1084,28 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state, const Plan
 
                 TextureCache::TextureHandle h = textures->request(tk, tileSampler);
                 textures->watchBinding(h, mat.materialSet, 1u, tileSampler, checker);
+            }
+
+            if (emission_dir_changed && !desired_emission_dir.empty())
+            {
+                const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
+                // Try .ktx2 first, then .png
+                std::string rel = fmt::format("{}/{}.ktx2", desired_emission_dir, planet::cube_face_name(face));
+                std::string abs_path = assets->assetPath(rel);
+                if (!std::filesystem::exists(abs_path))
+                {
+                    rel = fmt::format("{}/{}.png", desired_emission_dir, planet::cube_face_name(face));
+                    abs_path = assets->assetPath(rel);
+                }
+
+                TextureCache::TextureKey tk{};
+                tk.kind = TextureCache::TextureKey::SourceKind::FilePath;
+                tk.path = abs_path;
+                tk.srgb = true;
+                tk.mipmapped = true;
+
+                TextureCache::TextureHandle h = textures->request(tk, tileSampler);
+                textures->watchBinding(h, mat.materialSet, 5u, tileSampler, black);
             }
         }
     }

@@ -61,6 +61,12 @@ public:
         std::string height_dir;
         // Height map range in meters for [0..1] texel values.
         double height_max_m = 6400.0;
+
+        // Optional emission texture root (relative to assets/). If empty, no emission.
+        // Expected files: {px,nx,py,ny,pz,nz}.ktx2 or .png (sRGB).
+        std::string emission_dir;
+        // Emission intensity multiplier (vec3 factor applied to texture RGB).
+        glm::vec3 emission_factor{0.0f, 0.0f, 0.0f};
     };
 
     struct EarthDebugStats
@@ -101,6 +107,12 @@ public:
         // Expected files: {px,nx,py,ny,pz,nz}.ktx2 (BC4/R8, linear).
         std::string terrain_height_dir;
         double terrain_height_max_m = 0.0;
+
+        // Terrain-only: cube-face texture root for emission, relative to assets/.
+        // Expected files: {px,nx,py,ny,pz,nz}.ktx2 or .png (sRGB).
+        std::string terrain_emission_dir;
+        // Emission intensity multiplier (vec3 factor applied to texture RGB).
+        glm::vec3 emission_factor{0.0f, 0.0f, 0.0f};
 
         std::shared_ptr<MeshAsset> mesh;
         std::shared_ptr<GLTFMaterial> material;
@@ -197,8 +209,10 @@ private:
         glm::vec4 bound_base_color{1.0f, 1.0f, 1.0f, 1.0f};
         float bound_metallic = 0.0f;
         float bound_roughness = 1.0f;
+        glm::vec3 bound_emission_factor{0.0f, 0.0f, 0.0f};
         std::string bound_albedo_dir;
         std::string bound_height_dir;
+        std::string bound_emission_dir;
         double bound_height_max_m = 0.0;
         std::array<planet::HeightFace, 6> height_faces{};
         std::array<MaterialInstance, 6> face_materials{};

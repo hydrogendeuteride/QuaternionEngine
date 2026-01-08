@@ -125,6 +125,12 @@ struct PlanetTerrain
     std::string height_dir;
     // Height map range in meters for [0..1] texel values.
     double height_max_m{6400.0};
+
+    // Optional emission texture root relative to assets/ (e.g. "planets/earth/emission/L0").
+    // Expected files: {px,nx,py,ny,pz,nz}.ktx2 or .png (sRGB). If empty, no emission.
+    std::string emission_dir;
+    // Emission intensity multiplier (vec3 factor applied to texture RGB).
+    glm::vec3 emission_factor{0.0f, 0.0f, 0.0f};
 };
 
 struct PlanetInfo
