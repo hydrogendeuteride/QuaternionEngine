@@ -20,7 +20,7 @@ Current structure:
 - Planet Rendering, LOD Terrain system, atmosphere
 
 Work-In-Progress
-- Sun, planet emission
+- Sun
 
 ## Build prequsites
 - ktx software with libraries

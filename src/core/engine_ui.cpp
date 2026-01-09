@@ -17,6 +17,7 @@
 #include "render/primitives.h"
 #include "vk_mem_alloc.h"
 #include "render/passes/tonemap.h"
+#include "render/passes/auto_exposure.h"
 #include "render/passes/fxaa.h"
 #include "render/passes/background.h"
 #include "render/passes/particles.h"
@@ -1672,9 +1673,62 @@ namespace
         ImGui::Separator();
         if (auto *tm = eng->_renderPassManager ? eng->_renderPassManager->getPass<TonemapPass>() : nullptr)
         {
+            AutoExposurePass *ae = eng->_renderPassManager->getPass<AutoExposurePass>();
+            bool autoExpEnabled = (ae != nullptr) ? ae->enabled() : false;
+            if (ae)
+            {
+                if (ImGui::Checkbox("Auto Exposure", &autoExpEnabled))
+                {
+                    ae->set_enabled(autoExpEnabled, tm->exposure());
+                }
+                if (autoExpEnabled)
+                {
+                    float comp = ae->compensation();
+                    if (ImGui::SliderFloat("Exposure Compensation", &comp, 0.05f, 8.0f, "%.3f"))
+                    {
+                        ae->set_compensation(comp);
+                    }
+                    float key = ae->key_value();
+                    if (ImGui::SliderFloat("Key (middle grey)", &key, 0.02f, 0.5f, "%.3f"))
+                    {
+                        ae->set_key_value(key);
+                    }
+                    float minExp = ae->min_exposure();
+                    if (ImGui::SliderFloat("Min Exposure", &minExp, 0.01f, 8.0f, "%.3f"))
+                    {
+                        ae->set_min_exposure(minExp);
+                    }
+                    float maxExp = ae->max_exposure();
+                    if (ImGui::SliderFloat("Max Exposure", &maxExp, 0.01f, 16.0f, "%.3f"))
+                    {
+                        ae->set_max_exposure(maxExp);
+                    }
+                    float speedUp = ae->speed_up();
+                    if (ImGui::SliderFloat("Speed Up", &speedUp, 0.0f, 10.0f, "%.2f"))
+                    {
+                        ae->set_speed_up(speedUp);
+                    }
+                    float speedDown = ae->speed_down();
+                    if (ImGui::SliderFloat("Speed Down", &speedDown, 0.0f, 10.0f, "%.2f"))
+                    {
+                        ae->set_speed_down(speedDown);
+                    }
+
+                    ImGui::Text("Lavg %.4f", ae->last_luminance());
+                    ImGui::Text("Exposure %.3f (target %.3f)", ae->exposure(), ae->target_exposure());
+                }
+            }
+
             float exp = tm->exposure();
             int mode = tm->mode();
-            if (ImGui::SliderFloat("Exposure", &exp, 0.05f, 8.0f)) { tm->setExposure(exp); }
+            if (!autoExpEnabled)
+            {
+                if (ImGui::SliderFloat("Exposure", &exp, 0.05f, 8.0f)) { tm->setExposure(exp); }
+            }
+            else
+            {
+                ImGui::Text("Exposure (auto) %.3f", exp);
+            }
             ImGui::TextUnformatted("Operator");
             ImGui::SameLine();
             if (ImGui::RadioButton("Reinhard", mode == 0))

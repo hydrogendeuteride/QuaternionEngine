@@ -12,6 +12,7 @@
 #include "passes/debug_draw.h"
 #include "passes/transparent.h"
 #include "passes/tonemap.h"
+#include "passes/auto_exposure.h"
 #include "passes/shadow.h"
 
 void RenderPassManager::init(EngineContext *context)
@@ -67,6 +68,10 @@ void RenderPassManager::init(EngineContext *context)
     auto transparentPass = std::make_unique<TransparentPass>();
     transparentPass->init(context);
     addPass(std::move(transparentPass));
+
+    auto autoExposurePass = std::make_unique<AutoExposurePass>();
+    autoExposurePass->init(context);
+    addPass(std::move(autoExposurePass));
 
     auto tonemapPass = std::make_unique<TonemapPass>();
     tonemapPass->init(context);

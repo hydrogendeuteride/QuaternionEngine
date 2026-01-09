@@ -52,6 +52,7 @@
 #include "render/passes/transparent.h"
 #include "render/passes/fxaa.h"
 #include "render/passes/tonemap.h"
+#include "render/passes/auto_exposure.h"
 #include "render/passes/debug_draw.h"
 #include "render/passes/shadow.h"
 #include "scene/mesh_bvh.h"
@@ -1051,6 +1052,20 @@ void VulkanEngine::draw()
 
     _sceneManager->update_scene();
 
+    // Auto exposure readback: resolve last luminance for this frame slot now that the GPU is idle.
+    // This drives TonemapPass exposure for the current frame.
+    if (_renderPassManager)
+    {
+        if (auto *tm = _renderPassManager->getPass<TonemapPass>())
+        {
+            if (auto *ae = _renderPassManager->getPass<AutoExposurePass>())
+            {
+                const float dt = _sceneManager ? _sceneManager->getDeltaTime() : 0.0f;
+                ae->begin_frame(static_cast<uint32_t>(_frameNumber % FRAME_OVERLAP), dt, *tm);
+            }
+        }
+    }
+
     if (_debugDraw && _sceneManager)
     {
         _debugDraw->begin_frame(_sceneManager->getDeltaTime());
@@ -1347,6 +1362,11 @@ void VulkanEngine::draw()
             if (auto *transparent = _renderPassManager->getPass<TransparentPass>())
             {
                 transparent->register_graph(_renderGraph.get(), hdrTarget, hDepth);
+            }
+
+            if (auto *autoExposure = _renderPassManager->getPass<AutoExposurePass>())
+            {
+                autoExposure->register_graph(_renderGraph.get(), hdrTarget);
             }
             imguiPass = _renderPassManager->getImGuiPass();
 

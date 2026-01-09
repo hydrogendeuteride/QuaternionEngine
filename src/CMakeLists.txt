@@ -95,6 +95,8 @@ add_executable (vulkan_engine
   render/passes/transparent.cpp
   render/passes/imgui_pass.h
   render/passes/imgui_pass.cpp
+  render/passes/auto_exposure.h
+  render/passes/auto_exposure.cpp
   render/passes/tonemap.h
   render/passes/tonemap.cpp
   render/passes/debug_draw.h

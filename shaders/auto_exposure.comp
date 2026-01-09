@@ -1,0 +1,59 @@
+#version 450
+
+// Simple log-average luminance meter for auto-exposure.
+// Samples the HDR buffer on a fixed 16x16 grid and writes:
+//  - x: avg log2 luminance
+//  - y: avg luminance (exp2(avg_log2))
+//  - z: valid flag (1.0)
+//  - w: reserved
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) uniform sampler2D uHdr;
+
+layout(std430, set = 0, binding = 1) buffer OutBuffer
+{
+    vec4 data;
+} out_buf;
+
+shared float s_sum[256];
+
+float luminance(vec3 c)
+{
+    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+
+void main()
+{
+    // Normalized sample location based on the local invocation.
+    vec2 grid = vec2(16.0, 16.0);
+    vec2 uv = (vec2(gl_LocalInvocationID.xy) + vec2(0.5)) / grid;
+
+    vec3 hdr = texture(uHdr, uv).rgb;
+
+    const float eps = 1.0e-4;
+    float lum = max(luminance(hdr), eps);
+    float log2_lum = log2(lum);
+
+    uint idx = gl_LocalInvocationID.y * 16u + gl_LocalInvocationID.x;
+    s_sum[idx] = log2_lum;
+    barrier();
+
+    // Parallel reduction (sum) over 256 samples.
+    for (uint stride = 128u; stride > 0u; stride >>= 1u)
+    {
+        if (idx < stride)
+        {
+            s_sum[idx] += s_sum[idx + stride];
+        }
+        barrier();
+    }
+
+    if (idx == 0u)
+    {
+        float avg_log2 = s_sum[0] / 256.0;
+        float avg_lum = exp2(avg_log2);
+        out_buf.data = vec4(avg_log2, avg_lum, 1.0, 0.0);
+    }
+}
+
