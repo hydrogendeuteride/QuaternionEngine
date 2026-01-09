@@ -1665,6 +1665,19 @@ namespace
         ImGui::SliderFloat("Mie g", &atm.mieG, -0.2f, 0.99f, "%.3f");
         ImGui::SliderFloat("Intensity", &atm.intensity, 0.0f, 4.0f, "%.2f");
         ImGui::SliderFloat("Sun Disk", &atm.sunDiskIntensity, 0.0f, 10.0f, "%.2f");
+        ImGui::SliderFloat("Sun Halo", &atm.sunHaloIntensity, 0.0f, 4.0f, "%.2f");
+        ImGui::SliderFloat("Halo Radius (deg)", &atm.sunHaloRadiusDeg, 0.0f, 20.0f, "%.2f");
+        ImGui::SliderFloat("Sun Starburst", &atm.sunStarburstIntensity, 0.0f, 4.0f, "%.2f");
+        ImGui::SliderFloat("Starburst Radius (deg)", &atm.sunStarburstRadiusDeg, 0.0f, 30.0f, "%.2f");
+        int spikes = std::clamp(atm.sunStarburstSpikes, 2, 64);
+        if (ImGui::SliderInt("Starburst Spikes", &spikes, 2, 32))
+        {
+            // Keep it even by default to produce a symmetrical ray pattern.
+            spikes = std::max(2, spikes);
+            spikes &= ~1;
+            atm.sunStarburstSpikes = spikes;
+        }
+        ImGui::SliderFloat("Starburst Sharpness", &atm.sunStarburstSharpness, 1.0f, 64.0f, "%.1f");
         ImGui::SliderFloat("Jitter", &atm.jitterStrength, 0.0f, 1.0f, "%.2f");
         ImGui::SliderFloat("Planet Snap (m)", &atm.planetSurfaceSnapM, 0.0f, 2000.0f, "%.1f");
         ImGui::SliderInt("View Steps", &atm.viewSteps, 4, 64);

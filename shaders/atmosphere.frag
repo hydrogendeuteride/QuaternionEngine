@@ -13,20 +13,20 @@ layout(set = 1, binding = 2) uniform sampler2D transmittanceLut;
 
 layout(push_constant) uniform AtmospherePush
 {
-    vec4 planet_center_radius; // xyz: planet center (local), w: planet radius (m)
-    vec4 atmosphere_params;    // x: atmosphere radius (m), y: rayleigh H (m), z: mie H (m), w: mie g
-    vec4 beta_rayleigh;        // rgb: betaR (1/m), w: intensity
-    vec4 beta_mie;             // rgb: betaM (1/m), w: sun disk intensity
-    vec4 jitter_params;        // x: jitter strength (0..1), y: planet snap (m), zw: reserved
-    ivec4 misc;                // x: view steps, y: light steps
+    vec4 planet_center_radius;// xyz: planet center (local), w: planet radius (m)
+    vec4 atmosphere_params;// x: atmosphere radius (m), y: rayleigh H (m), z: mie H (m), w: mie g
+    vec4 beta_rayleigh;// rgb: betaR (1/m), w: intensity
+    vec4 beta_mie;// rgb: betaM (1/m), w: sun disk intensity
+    vec4 jitter_params;// x: jitter strength (0..1), y: planet snap (m), zw: reserved
+    ivec4 misc;// x: view steps, y: light steps
 } pc;
 
 const float PI = 3.14159265359;
 
 vec3 getCameraWorldPosition()
 {
-    mat3 rotT = mat3(sceneData.view); // R^T
-    mat3 rot  = transpose(rotT);      // R
+    mat3 rotT = mat3(sceneData.view);// R^T
+    mat3 rot  = transpose(rotT);// R
     vec3 T    = sceneData.view[3].xyz;
     return -rot * T;
 }
@@ -212,16 +212,6 @@ void main()
 
     vec3 transmittance = exp(-(betaR * odR + betaM * odM));
     vec3 outRgb = baseColor * transmittance + scatterSum * (sunCol * intensity);
-
-    // Simple sun disk.
-    float sunDisk = max(pc.beta_mie.w, 0.0);
-    bool isSky = (posSample.w <= 0.0);
-
-    if (sunDisk > 0.0 && isSky)
-    {
-        float sunTerm = pow(max(cosTheta, 0.0), 2048.0);
-        outRgb += sunCol * (sunDisk * sunTerm) * transmittance;
-    }
 
     outColor = vec4(outRgb, 1.0);
 }

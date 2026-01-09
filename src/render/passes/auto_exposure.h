@@ -82,7 +82,7 @@ private:
     float _key_value = 0.18f;
     float _compensation = 1.0f;
     float _min_exposure = 0.05f;
-    float _max_exposure = 8.0f;
+    float _max_exposure = 2.0f;
     float _speed_up = 4.0f;   // 1/sec
     float _speed_down = 1.0f; // 1/sec
 

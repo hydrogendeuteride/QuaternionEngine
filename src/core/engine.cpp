@@ -48,6 +48,7 @@
 #include "render/passes/lighting.h"
 #include "render/passes/clouds.h"
 #include "render/passes/atmosphere.h"
+#include "render/passes/sun_disk.h"
 #include "render/passes/particles.h"
 #include "render/passes/transparent.h"
 #include "render/passes/fxaa.h"
@@ -1271,6 +1272,10 @@ void VulkanEngine::draw()
             if (auto *background = _renderPassManager->getPass<BackgroundPass>())
             {
                 background->register_graph(_renderGraph.get(), hDraw, hDepth);
+            }
+            if (auto *sunDisk = _renderPassManager->getPass<SunDiskPass>())
+            {
+                sunDisk->register_graph(_renderGraph.get(), hDraw);
             }
             bool needShadowMaps = _context->shadowSettings.enabled && (_context->shadowSettings.mode != 2u);
             if (_context->shadowSettings.enabled && _context->shadowSettings.mode == 2u)

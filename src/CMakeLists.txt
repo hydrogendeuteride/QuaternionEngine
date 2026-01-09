@@ -75,6 +75,8 @@ add_executable (vulkan_engine
   # render passes
   render/passes/background.h
   render/passes/background.cpp
+  render/passes/sun_disk.h
+  render/passes/sun_disk.cpp
   render/passes/geometry.h
   render/passes/geometry.cpp
   render/passes/lighting.h

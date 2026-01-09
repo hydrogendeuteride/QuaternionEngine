@@ -1,6 +1,7 @@
 #include "renderpass.h"
 
 #include "passes/background.h"
+#include "passes/sun_disk.h"
 #include "passes/geometry.h"
 #include "passes/imgui_pass.h"
 #include "passes/lighting.h"
@@ -22,6 +23,11 @@ void RenderPassManager::init(EngineContext *context)
     auto backgroundPass = std::make_unique<BackgroundPass>();
     backgroundPass->init(context);
     addPass(std::move(backgroundPass));
+
+    // Analytic sun disk over background (works in space, independent of atmosphere pass).
+    auto sunDiskPass = std::make_unique<SunDiskPass>();
+    sunDiskPass->init(context);
+    addPass(std::move(sunDiskPass));
 
     // Shadow map pass comes early in the frame
     auto shadowPass = std::make_unique<ShadowPass>();

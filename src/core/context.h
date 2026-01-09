@@ -147,6 +147,15 @@ struct AtmosphereSettings
     float intensity = 1.0f;
     float sunDiskIntensity = 1.0f;
 
+    // Sun glare controls (applied by SunDiskPass; independent of atmosphere scattering).
+    // Set intensities to 0 to disable the respective component.
+    float sunHaloIntensity = 0.0f;
+    float sunHaloRadiusDeg = 2.0f;
+    float sunStarburstIntensity = 0.0f;
+    float sunStarburstRadiusDeg = 6.0f;
+    int sunStarburstSpikes = 8;       // number of rays (recommended even)
+    float sunStarburstSharpness = 12.0f;
+
     // Sampling jitter (0 = off; 1 = full per-pixel jitter). Disabling reduces noise but may introduce banding.
     float jitterStrength = 0.0f;
 
