@@ -18,9 +18,9 @@ Current structure:
 - Bloom
 - Floating origin with double precision coordinate system
 - Planet Rendering, LOD Terrain system, atmosphere
+- Sun
 
 Work-In-Progress
-- Sun
 
 ## Build prequsites
 - ktx software with libraries

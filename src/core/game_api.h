@@ -142,6 +142,82 @@ struct PlanetInfo
     bool terrain{false};
 };
 
+// Atmosphere scattering settings
+struct AtmosphereSettings
+{
+    // If non-empty, selects the named PlanetSystem body for atmosphere rendering.
+    // If empty, the renderer picks the closest visible planet to the camera.
+    std::string bodyName{};
+
+    // Atmosphere height above planet radius (meters).
+    float atmosphereHeightM{80000.0f};
+
+    // Scale heights (meters) for exponential density.
+    float rayleighScaleHeightM{8000.0f};
+    float mieScaleHeightM{1200.0f};
+
+    // Scattering coefficients (1/m). Earth-ish defaults.
+    glm::vec3 rayleighScattering{5.802e-6f, 13.558e-6f, 33.1e-6f};
+    glm::vec3 mieScattering{21.0e-6f};
+
+    // Henyey-Greenstein phase g (forward scattering).
+    float mieG{0.76f};
+
+    // Artistic controls.
+    float intensity{1.0f};
+    float sunDiskIntensity{1.0f};
+
+    // Sun glare controls (applied by SunDiskPass; independent of atmosphere scattering).
+    float sunHaloIntensity{0.0f};
+    float sunHaloRadiusDeg{2.0f};
+    float sunStarburstIntensity{0.0f};
+    float sunStarburstRadiusDeg{6.0f};
+    int sunStarburstSpikes{8};
+    float sunStarburstSharpness{12.0f};
+
+    // Sampling jitter (0 = off; 1 = full per-pixel jitter).
+    float jitterStrength{0.0f};
+
+    // Snap planet pixels to the analytic planet sphere within this distance (meters).
+    float planetSurfaceSnapM{200.0f};
+
+    // Integration quality/performance tradeoff.
+    int viewSteps{16};
+    int lightSteps{8};
+};
+
+// Planet quadtree (terrain LOD) settings
+struct PlanetQuadtreeSettings
+{
+    uint32_t maxLevel{14};
+    float targetScreenSpaceError{32.0f};
+    uint32_t maxPatchesVisible{8192};
+    bool frustumCull{true};
+    bool horizonCull{true};
+};
+
+// Planet terrain debug statistics (read-only)
+struct PlanetTerrainStats
+{
+    uint32_t visiblePatches{0};
+    uint32_t renderedPatches{0};
+    uint32_t createdPatches{0};
+    uint32_t patchCacheSize{0};
+    uint32_t estimatedTriangles{0};
+    uint32_t maxLevelUsed{0};
+    float msQuadtree{0.0f};
+    float msPatchCreate{0.0f};
+    float msTotal{0.0f};
+};
+
+// Sun shadow penumbra settings
+struct SunShadowSettings
+{
+    // Sun angular radius (half-angle) in degrees for soft planet shadows.
+    // Set to 0 for a hard edge. Default ~0.27 deg (real sun).
+    float angularRadiusDeg{0.27f};
+};
+
 // Material description for textured primitives
 struct PrimitiveMaterial
 {
@@ -641,6 +717,55 @@ public:
     bool set_planet_radius(const std::string &name, double radius_m);
     bool set_planet_visible(const std::string &name, bool visible);
     bool set_planet_terrain(const std::string &name, bool terrain);
+
+    // Planet system global enable/disable.
+    void set_planet_system_enabled(bool enabled);
+    bool get_planet_system_enabled() const;
+
+    // Planet terrain LOD (quadtree) settings.
+    void set_planet_quadtree_settings(const PlanetQuadtreeSettings &settings);
+    PlanetQuadtreeSettings get_planet_quadtree_settings() const;
+
+    // Planet terrain patch budget/resolution settings.
+    void set_planet_patch_create_budget(uint32_t patchesPerFrame);
+    uint32_t get_planet_patch_create_budget() const;
+    void set_planet_patch_create_budget_ms(float budgetMs);
+    float get_planet_patch_create_budget_ms() const;
+    void set_planet_patch_resolution(uint32_t resolution);
+    uint32_t get_planet_patch_resolution() const;
+    void set_planet_patch_cache_max(uint32_t maxPatches);
+    uint32_t get_planet_patch_cache_max() const;
+
+    // Planet terrain debug.
+    void set_planet_debug_tint_by_lod(bool enabled);
+    bool get_planet_debug_tint_by_lod() const;
+    PlanetTerrainStats get_planet_terrain_stats(const std::string &name = {}) const;
+
+    // Sample terrain height at a given direction from planet center (returns meters above base radius).
+    double sample_planet_terrain_height(const std::string &name, const glm::dvec3 &dirFromCenter) const;
+
+    // ------------------------------------------------------------------------
+    // Atmosphere
+    // ------------------------------------------------------------------------
+
+    // Enable/disable atmosphere scattering pass.
+    void set_atmosphere_enabled(bool enabled);
+    bool get_atmosphere_enabled() const;
+
+    // Get/set atmosphere settings.
+    void set_atmosphere_settings(const AtmosphereSettings &settings);
+    AtmosphereSettings get_atmosphere_settings() const;
+
+    // Reset atmosphere to Earth-like defaults.
+    void reset_atmosphere_to_earth();
+
+    // ------------------------------------------------------------------------
+    // Sun Shadow (Penumbra)
+    // ------------------------------------------------------------------------
+
+    // Sun angular radius for soft planet->scene shadows.
+    void set_sun_shadow_settings(const SunShadowSettings &settings);
+    SunShadowSettings get_sun_shadow_settings() const;
 
     // ------------------------------------------------------------------------
     // Animation

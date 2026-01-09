@@ -20,7 +20,16 @@ add_executable (vulkan_engine
   core/debug_draw/debug_draw.h
   core/debug_draw/debug_draw.cpp
   core/game_api.h
-  core/game_api.cpp
+  core/game_api/game_api.cpp
+  core/game_api/game_api_textures.cpp
+  core/game_api/game_api_scene.cpp
+  core/game_api/game_api_planets.cpp
+  core/game_api/game_api_lighting.cpp
+  core/game_api/game_api_camera.cpp
+  core/game_api/game_api_postfx.cpp
+  core/game_api/game_api_particles.cpp
+  core/game_api/game_api_volumetrics.cpp
+  core/game_api/game_api_debug.cpp
   # core/device
   core/device/device.h
   core/device/device.cpp
