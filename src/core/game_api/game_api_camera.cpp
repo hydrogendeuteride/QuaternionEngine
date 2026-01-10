@@ -476,4 +476,28 @@ bool Engine::set_camera_target_from_last_pick()
     return true;
 }
 
+// ----------------------------------------------------------------------------
+// Orbit Camera Reference Up Vector
+// ----------------------------------------------------------------------------
+
+void Engine::align_orbit_camera_up_to_target()
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return;
+    }
+
+    _engine->_sceneManager->getCameraRig().align_orbit_up_to_target();
+}
+
+void Engine::set_orbit_camera_reference_up(const glm::vec3& up)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return;
+    }
+
+    _engine->_sceneManager->getCameraRig().set_orbit_reference_up(up);
+}
+
 } // namespace GameAPI

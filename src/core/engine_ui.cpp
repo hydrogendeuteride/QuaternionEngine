@@ -759,7 +759,8 @@ namespace
     static void ui_overview(VulkanEngine *eng)
     {
         if (!eng) return;
-        ImGui::Text("frametime %.2f ms", eng->stats.frametime);
+        float fps = (eng->stats.frametime > 0.0f) ? (1000.0f / eng->stats.frametime) : 0.0f;
+        ImGui::Text("frametime %.2f ms (%.1f FPS)", eng->stats.frametime, fps);
         ImGui::Text("draw time %.2f ms", eng->stats.mesh_draw_time);
         ImGui::Text("update time %.2f ms", eng->_sceneManager->stats.scene_update_time);
         ImGui::Text("triangles %i", eng->stats.triangle_count);
@@ -978,6 +979,23 @@ namespace
                 s.pitch = glm::radians(pitchDeg);
             }
             ImGui::InputFloat("Look sensitivity##orbit", &s.look_sensitivity);
+
+            ImGui::Separator();
+            ImGui::Text("Reference Up Vector");
+            ImGui::InputFloat3("Up##orbit_up", &s.reference_up.x);
+            if (ImGui::Button("Normalize Up"))
+            {
+                rig.set_orbit_reference_up(s.reference_up);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Reset to World Y"))
+            {
+                rig.set_orbit_reference_up(glm::vec3(0.0f, 1.0f, 0.0f));
+            }
+            if (ImGui::Button("Align Up to Target"))
+            {
+                rig.align_orbit_up_to_target();
+            }
         }
 
         // Follow

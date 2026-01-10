@@ -356,20 +356,24 @@ void SceneManager::update_scene()
     // The region center is snapped to the light-space texel grid for stability.
     static const float kAheadBlend[kShadowCascadeCount] = {0.2f, 0.5f, 0.75f, 1.0f};
     {
-        const glm::mat4 invView = glm::inverse(view);
-        const glm::vec3 camPos = glm::vec3(invView[3]);
-        const glm::vec3 camFwd  = -glm::vec3(invView[2]);
+        const glm::vec3 camPos = _camera_position_local;
+        const glm::mat4 camRot = mainCamera.getRotationMatrix();
+        const glm::vec3 camFwd = -glm::vec3(camRot[2]); // -Z axis in world/local space
 
         glm::vec3 L = glm::normalize(-glm::vec3(sceneData.sunlightDirection));
         if (glm::length(L) < 1e-5f) L = glm::vec3(0.0f, -1.0f, 0.0f);
         const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-        glm::vec3 right = glm::cross(L, worldUp);
+        const glm::vec3 refUp = (std::abs(glm::dot(L, worldUp)) > 0.99f)
+                                    ? glm::vec3(0.0f, 0.0f, 1.0f)
+                                    : worldUp;
+        glm::vec3 right = glm::cross(L, refUp);
         if (glm::length2(right) < 1e-6f) right = glm::vec3(1, 0, 0);
         right = glm::normalize(right);
         glm::vec3 up = glm::normalize(glm::cross(right, L));
 
         auto level_radius = [](int level) {
-            return kShadowClipBaseRadius * powf(2.0f, float(level));
+            // exact power-of-two scaling (reduces drift vs powf)
+            return std::ldexp(kShadowClipBaseRadius, level);
         };
 
         sceneData.cascadeSplitsView = glm::vec4(
@@ -380,22 +384,27 @@ void SceneManager::update_scene()
             const float radius = level_radius(ci);
             const float cover = radius * kShadowCascadeRadiusScale + kShadowCascadeRadiusMargin;
 
-            const float ahead = radius * 0.5;
+            const float ahead = radius * 0.5f;
             const float fu = glm::dot(camFwd, right);
             const float fv = glm::dot(camFwd, up);
 
-            const glm::vec3 aheadXY = right * (fu * ahead) + up * (fv * ahead);
+            // Bias the clipmap slightly forward in the camera's view direction to spend more
+            // resolution where we can actually see. The bias is applied in the light XY plane.
+            const glm::vec3 aheadXY = (right * fu + up * fv) * (ahead * kAheadBlend[ci]);
 
-            const float u = glm::dot(camPos + aheadXY, right) + fu * ahead;
-            const float v = glm::dot(camPos + aheadXY, up) + fv * ahead;
+            // Target center before stabilization
+            const glm::vec3 centerTarget = camPos + aheadXY;
+            const float u = glm::dot(centerTarget, right);
+            const float v = glm::dot(centerTarget, up);
 
             const float texel = (2.0f * cover) / float(kShadowMapResolution);
-            const float uSnapped = floorf(u / texel) * texel;
-            const float vSnapped = floorf(v / texel) * texel;
+            // Snap the center in light-space to texel increments for stable shadows (reduced shimmering).
+            const float uSnapped = std::round(u / texel) * texel;
+            const float vSnapped = std::round(v / texel) * texel;
             const float du = uSnapped - u;
             const float dv = vSnapped - v;
 
-            const glm::vec3 center = camPos + aheadXY * kAheadBlend[ci] + right * du + up * dv;
+            const glm::vec3 center = centerTarget + right * du + up * dv;
 
             const float pullback = glm::max(kShadowClipPullbackMin, cover * kShadowClipPullbackFactor);
             const glm::vec3 eye = center - L * pullback;
@@ -404,6 +413,10 @@ void SceneManager::update_scene()
             const float zNear = 0.2f;
             const float zFar = pullback + cover * kShadowClipForwardFactor + kShadowClipZPadding;
 
+            // Note: shadow maps intentionally use the same "forward" 0..1 depth mapping
+            // as glm::orthoRH_ZO, paired with a GREATER depth test to keep the farthest
+            // depth along the light ray (which corresponds to the closest occluder to the sun
+            // for our light view setup).
             const glm::mat4 P = glm::orthoRH_ZO(-cover, cover, -cover, cover, zNear, zFar);
             const glm::mat4 lightVP = P * V;
 

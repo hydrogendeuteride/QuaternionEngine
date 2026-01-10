@@ -12,6 +12,81 @@
 #include <algorithm>
 #include <cmath>
 
+namespace
+{
+    bool is_finite_vec3(const glm::vec3 &v)
+    {
+        return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+    }
+
+    glm::vec3 safe_normalize(const glm::vec3 &v, const glm::vec3 &fallback)
+    {
+        if (!is_finite_vec3(v))
+        {
+            return glm::normalize(fallback);
+        }
+
+        const float len2 = glm::dot(v, v);
+        if (!std::isfinite(len2) || len2 < 1.0e-12f)
+        {
+            return glm::normalize(fallback);
+        }
+
+        return v * (1.0f / std::sqrt(len2));
+    }
+
+    void build_orbit_plane_basis(const glm::vec3 &reference_up, glm::vec3 &out_forward_base, glm::vec3 &out_right_base)
+    {
+        const glm::vec3 up = safe_normalize(reference_up, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        const glm::vec3 forward_ref =
+            (std::abs(glm::dot(up, glm::vec3(0.0f, 0.0f, 1.0f))) < 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f)
+                                                                         : glm::vec3(1.0f, 0.0f, 0.0f);
+
+        // Project the reference forward onto the plane perpendicular to up.
+        glm::vec3 forward = forward_ref - glm::dot(forward_ref, up) * up;
+        forward = safe_normalize(forward, glm::vec3(0.0f, 0.0f, 1.0f));
+
+        glm::vec3 right = glm::cross(up, forward);
+        right = safe_normalize(right, glm::vec3(1.0f, 0.0f, 0.0f));
+
+        // Re-orthonormalize to remove drift from fallback paths.
+        forward = glm::normalize(glm::cross(right, up));
+
+        out_forward_base = forward;
+        out_right_base = right;
+    }
+
+    glm::quat orientation_from_backward_and_up(const glm::vec3 &backward_world, const glm::vec3 &reference_up)
+    {
+        const glm::vec3 z = safe_normalize(backward_world, glm::vec3(0.0f, 0.0f, 1.0f)); // camera local +Z in world
+        glm::vec3 up = safe_normalize(reference_up, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        glm::vec3 x = glm::cross(up, z);
+        float x_len2 = glm::dot(x, x);
+        if (!std::isfinite(x_len2) || x_len2 < 1.0e-10f)
+        {
+            // Fallback if reference_up is nearly parallel to backward.
+            const glm::vec3 alt_up = (std::abs(z.y) < 0.99f) ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+            x = glm::cross(alt_up, z);
+            x_len2 = glm::dot(x, x);
+        }
+
+        if (!std::isfinite(x_len2) || x_len2 < 1.0e-10f)
+        {
+            x = glm::vec3(1.0f, 0.0f, 0.0f);
+        }
+        else
+        {
+            x *= (1.0f / std::sqrt(x_len2));
+        }
+
+        const glm::vec3 y = glm::cross(z, x);
+        const glm::mat3 R(x, y, z);
+        return glm::normalize(glm::quat_cast(R));
+    }
+} // namespace
+
 OrbitCameraMode::OrbitCameraMode(OrbitCameraSettings &settings)
     : _settings(settings)
 {
@@ -46,8 +121,28 @@ void OrbitCameraMode::on_activate(SceneManager &scene, Camera &camera)
     _settings.distance = dist;
 
     glm::vec3 dir = glm::normalize(glm::vec3(to_cam / dist)); // target -> camera
-    _settings.yaw = std::atan2(dir.x, dir.z);
-    _settings.pitch = std::asin(std::clamp(-dir.y, -1.0f, 1.0f));
+
+    // Compute yaw and pitch relative to the reference up vector.
+    const glm::vec3 up = safe_normalize(_settings.reference_up, glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::vec3 forward_base{};
+    glm::vec3 right_base{};
+    build_orbit_plane_basis(up, forward_base, right_base);
+
+    // Project dir onto the plane perpendicular to up to get yaw
+    glm::vec3 dir_proj = dir - glm::dot(dir, up) * up;
+    float proj_len = glm::length(dir_proj);
+    if (proj_len > 0.001f)
+    {
+        dir_proj = dir_proj / proj_len;
+        _settings.yaw = std::atan2(glm::dot(dir_proj, right_base), glm::dot(dir_proj, forward_base));
+    }
+    else
+    {
+        _settings.yaw = 0.0f;
+    }
+
+    // Pitch is the angle from the horizontal plane (perpendicular to up)
+    _settings.pitch = std::asin(std::clamp(-glm::dot(dir, up), -1.0f, 1.0f));
 }
 
 void OrbitCameraMode::process_input(SceneManager & /*scene*/,
@@ -139,27 +234,22 @@ void OrbitCameraMode::update(SceneManager &scene, Camera &camera, float /*dt*/)
                              glm::half_pi<float>() - 0.01f);
     _settings.yaw = yaw;
     _settings.pitch = pitch;
-    double dist = std::max(OrbitCameraSettings::kMinDistance, _settings.distance);
+    double dist = std::clamp(_settings.distance, OrbitCameraSettings::kMinDistance, OrbitCameraSettings::kMaxDistance);
 
-    glm::quat yaw_q = glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f));
-    glm::vec3 right = glm::rotate(yaw_q, glm::vec3(1.0f, 0.0f, 0.0f));
-    glm::quat pitch_q = glm::angleAxis(pitch, right);
-    glm::quat orbit_q = glm::normalize(pitch_q * yaw_q);
+    // Build orbit frame based on reference up vector.
+    const glm::vec3 up = safe_normalize(_settings.reference_up, glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::vec3 forward_base{};
+    glm::vec3 right_base{};
+    build_orbit_plane_basis(up, forward_base, right_base);
 
-    // Place the camera on its local +Z axis relative to the target so the camera's
-    // -Z forward axis points toward the target.
-    const double yaw_d = static_cast<double>(yaw);
-    const double pitch_d = static_cast<double>(pitch);
-    const double cos_pitch = std::cos(pitch_d);
-    const double sin_pitch = std::sin(pitch_d);
-    const double sin_yaw = std::sin(yaw_d);
-    const double cos_yaw = std::cos(yaw_d);
+    // Yaw rotates around reference up, pitch rotates around the yawed right axis.
+    const glm::quat yaw_q = glm::angleAxis(yaw, up);
+    const glm::vec3 forward_yawed = glm::rotate(yaw_q, forward_base);
+    const glm::vec3 right = glm::rotate(yaw_q, right_base);
+    const glm::quat pitch_q = glm::angleAxis(pitch, right);
 
-    const glm::dvec3 dir_target_to_camera(
-        sin_yaw * cos_pitch,
-        -sin_pitch,
-        cos_yaw * cos_pitch);
+    const glm::vec3 backward_world = glm::normalize(glm::rotate(pitch_q, forward_yawed)); // target -> camera
 
-    camera.position_world = target_pos + dir_target_to_camera * dist;
-    camera.orientation = orbit_q;
+    camera.position_world = target_pos + glm::dvec3(backward_world) * dist;
+    camera.orientation = orientation_from_backward_and_up(backward_world, up);
 }

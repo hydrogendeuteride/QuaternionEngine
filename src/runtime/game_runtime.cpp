@@ -230,6 +230,9 @@ namespace GameRuntime
 
             // --- Draw ---
             _renderer->draw();
+
+            // --- Update frame stats ---
+            _renderer->stats.frametime = _time.delta_time() * 1000.0f; // convert seconds to ms
         }
 
         // Call game shutdown

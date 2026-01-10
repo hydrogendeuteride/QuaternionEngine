@@ -29,7 +29,7 @@ public:
             ibl.diffuseCube = renderer->_assetManager->assetPath("ibl/starmap.ktx2"); // fallback: reuse specular for diffuse
             ibl.brdfLut = renderer->_assetManager->assetPath("ibl/brdf_lut.ktx2");
             // Optional dedicated background texture (2D equirect); if omitted, background falls back to specularCube.
-            ibl.background = renderer->_assetManager->assetPath("ibl/starmap.KTX2");
+            ibl.background = renderer->_assetManager->assetPath("ibl/darkstar.ktx2");
             api.load_global_ibl(ibl);
         }
 

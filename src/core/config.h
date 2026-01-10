@@ -47,21 +47,21 @@ inline constexpr float kShadowClipBaseRadius = 20.0f;
 // pullback = max(kShadowClipPullbackMin, cover * kShadowClipPullbackFactor)
 inline constexpr float kShadowClipPullbackFactor = 1.2f;   // fraction of XY half-size behind center
 inline constexpr float kShadowClipForwardFactor  = 1.2f;   // fraction of XY half-size in front of center for zFar
-inline constexpr float kShadowClipPullbackMin    = 20.0f;   // lower bound on pullback so near levels don’t collapse
+inline constexpr float kShadowClipPullbackMin    = 10.0f;   // lower bound on pullback so near levels don’t collapse
 // Additional Z padding for the orthographic frustum along light direction
-inline constexpr float kShadowClipZPadding = 20.0f;
+inline constexpr float kShadowClipZPadding = 10.0f;
 
 // Shadow quality & filtering
 // Soft cross-fade band between cascades in light-space NDC (0..1)
 inline constexpr float kShadowBorderSmoothNDC = 0.08f;
 // Base PCF radius in texels for cascade 0; higher cascades scale up slightly
-inline constexpr float kShadowPCFBaseRadius   = 1.35f;
+inline constexpr float kShadowPCFBaseRadius   = 1.15f;
 // Additional radius added by the farthest cascade (0..+)
 inline constexpr float kShadowPCFCascadeGain  = 2.0f;
 
 // Raster depth-bias parameters for shadow map rendering (tuned conservatively)
-inline constexpr float kShadowDepthBiasConstant = 1.25f;
-inline constexpr float kShadowDepthBiasSlope    = 1.5f;
+inline constexpr float kShadowDepthBiasConstant = 1.15f;
+inline constexpr float kShadowDepthBiasSlope    = 1.2f;
 
 // Texture streaming / VRAM budget configuration
 // Fraction of total device-local VRAM reserved for streamed textures.

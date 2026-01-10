@@ -189,3 +189,55 @@ void CameraRig::recreate_mode(SceneManager &scene, Camera &camera)
         _mode_impl->on_activate(scene, camera);
     }
 }
+
+void CameraRig::align_orbit_up_to_target()
+{
+    if (!_scene)
+    {
+        return;
+    }
+
+    WorldVec3 target_pos{};
+    glm::quat target_rot{};
+    if (!resolve_target(*_scene, _orbit.target, target_pos, target_rot))
+    {
+        return;
+    }
+
+    // Extract the local up vector (Y axis) from the target's rotation
+    const glm::vec3 up = target_rot * glm::vec3(0.0f, 1.0f, 0.0f);
+    const float len2 = glm::dot(up, up);
+    if (std::isfinite(len2) && len2 > 1.0e-12f)
+    {
+        _orbit.reference_up = up * (1.0f / std::sqrt(len2));
+    }
+    else
+    {
+        _orbit.reference_up = glm::vec3(0.0f, 1.0f, 0.0f);
+    }
+
+    // Re-activate the mode to recompute yaw/pitch in the new frame
+    if (_mode == CameraMode::Orbit && _mode_impl && _camera)
+    {
+        _mode_impl->on_activate(*_scene, *_camera);
+    }
+}
+
+void CameraRig::set_orbit_reference_up(const glm::vec3 &up)
+{
+    const float len2 = glm::dot(up, up);
+    if (std::isfinite(len2) && len2 > 1.0e-12f)
+    {
+        _orbit.reference_up = up * (1.0f / std::sqrt(len2));
+    }
+    else
+    {
+        _orbit.reference_up = glm::vec3(0.0f, 1.0f, 0.0f);
+    }
+
+    // Re-activate the mode to recompute yaw/pitch in the new frame
+    if (_mode == CameraMode::Orbit && _mode_impl && _scene && _camera)
+    {
+        _mode_impl->on_activate(*_scene, *_camera);
+    }
+}

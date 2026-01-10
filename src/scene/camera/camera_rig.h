@@ -53,6 +53,7 @@ struct OrbitCameraSettings
     float yaw{0.0f};             // radians
     float pitch{0.0f};           // radians
     float look_sensitivity{0.0020f};
+    glm::vec3 reference_up{0.0f, 1.0f, 0.0f}; // up vector for orbit frame
 };
 
 struct FollowCameraSettings
@@ -116,6 +117,9 @@ public:
                         const CameraTarget &target,
                         WorldVec3 &out_position_world,
                         glm::quat &out_rotation) const;
+
+    void align_orbit_up_to_target();
+    void set_orbit_reference_up(const glm::vec3 &up);
 
 private:
     void recreate_mode(SceneManager &scene, Camera &camera);

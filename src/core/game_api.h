@@ -928,6 +928,12 @@ public:
     // Convenience: set Orbit/Follow/Chase target from the engine's last pick.
     bool set_camera_target_from_last_pick();
 
+    // Align orbit camera's reference up vector to the target's local up (Y axis).
+    void align_orbit_camera_up_to_target();
+
+    // Set orbit camera's reference up vector explicitly.
+    void set_orbit_camera_reference_up(const glm::vec3& up);
+
     // ------------------------------------------------------------------------
     // Rendering
     // ------------------------------------------------------------------------
