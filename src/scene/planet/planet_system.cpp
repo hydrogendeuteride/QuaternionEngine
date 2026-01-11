@@ -1023,7 +1023,6 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state, const Plan
                 textures->watchBinding(h, mat.materialSet, 1u, tileSampler, checker);
             }
 
-            // Emission texture binding (binding 5)
             if (textures && tileSampler != VK_NULL_HANDLE && !desired_emission_dir.empty())
             {
                 const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
@@ -1048,10 +1047,8 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state, const Plan
         }
         else if ((albedo_dir_changed || emission_dir_changed) && textures && tileSampler != VK_NULL_HANDLE)
         {
-            // Rebind the per-face textures for the currently active terrain body.
             textures->unwatchSet(mat.materialSet);
 
-            // Reset bindings to fallbacks until new tiles become resident.
             DescriptorWriter writer;
             if (albedo_dir_changed)
             {
@@ -1158,7 +1155,6 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
 
     if (!want_height)
     {
-        // Height disabled; ensure faces are cleared.
         for (planet::HeightFace &f: state.height_faces)
         {
             f = {};
@@ -1373,12 +1369,10 @@ void PlanetSystem::trim_terrain_patch_cache(TerrainState &state)
         TerrainPatch &p = state.patches[idx];
         if (p.last_used_frame == now)
         {
-            // Keep all patches referenced this frame.
             state.patch_lru.splice(state.patch_lru.begin(), state.patch_lru, p.lru_it);
             continue;
         }
 
-        // Made progress: we found an evictable patch.
         guard = 0;
 
         state.patch_lru.erase(p.lru_it);
@@ -1505,7 +1499,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
 
             const Clock::time_point t_emit0 = Clock::now();
 
-            // Patch creation priority: create higher-LOD (smaller) patches first so we fill
+            // Patch creation priority: create higher-LOD (smaller) patches first so we fill -> much better at rendering thousands of it
             // near-camera terrain before spending budget on far patches.
             std::vector<planet::PatchKey> create_queue = state->quadtree.visible_leaves();
             std::sort(create_queue.begin(), create_queue.end(),
@@ -1558,7 +1552,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 return true;
             };
 
-            // Compute a "render cut" that never renders holes: if a desired leaf patch isn't ready yet,
+            // Compute a render cut that never renders holes: if a desired leaf patch isn't ready yet,
             // fall back to the nearest ready ancestor patch.
             auto compute_render_cut = [&](const std::vector<planet::PatchKey> &desired_leaves)
                 -> std::vector<planet::PatchKey> {
@@ -1639,8 +1633,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                         return true;
                     }
 
-                    // One or more desired children are missing; fall back to this node to avoid
-                    // rendering holes when patch creation can't keep up.
+                    // One or more desired children are missing-> fall back to this node to avoid
                     render_keys.resize(checkpoint);
                     if (is_patch_ready(k))
                     {
@@ -1774,7 +1767,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
         }
     }
 
-    // Other bodies (moon etc.): regular mesh instances.
+    // Other bodies (moon): regular mesh instances.
     for (size_t body_index = 0; body_index < _bodies.size(); ++body_index)
     {
         PlanetBody &b = _bodies[body_index];
