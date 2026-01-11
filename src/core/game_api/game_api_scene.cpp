@@ -313,6 +313,27 @@ bool Engine::set_instance_animation_loop(const std::string& instanceName, bool l
            : false;
 }
 
+bool Engine::set_instance_animation_speed(const std::string& instanceName, float speed)
+{
+    return _engine->_sceneManager
+           ? _engine->_sceneManager->setGLTFInstanceAnimationSpeed(instanceName, speed)
+           : false;
+}
+
+bool Engine::transition_instance_animation(const std::string& instanceName, int animationIndex, float blendDurationSeconds, bool resetTime)
+{
+    return _engine->_sceneManager
+           ? _engine->_sceneManager->transitionGLTFInstanceAnimation(instanceName, animationIndex, blendDurationSeconds, resetTime)
+           : false;
+}
+
+bool Engine::transition_instance_animation(const std::string& instanceName, const std::string& animationName, float blendDurationSeconds, bool resetTime)
+{
+    return _engine->_sceneManager
+           ? _engine->_sceneManager->transitionGLTFInstanceAnimation(instanceName, animationName, blendDurationSeconds, resetTime)
+           : false;
+}
+
 bool Engine::set_instance_node_offset(const std::string& instanceName, const std::string& nodeName, const glm::mat4& offset)
 {
     return _engine->_sceneManager

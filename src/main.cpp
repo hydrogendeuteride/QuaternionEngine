@@ -1,10 +1,8 @@
-// Main entry point for Vulkan Engine
-//
-// Two modes are available:
+// Two modes available:
 // 1. Legacy mode: Uses VulkanEngine::run() directly (simple, no game separation)
 // 2. GameRuntime mode: Uses GameRuntime for clean game/engine separation
 //
-// Set USE_GAME_RUNTIME to 1 to enable GameRuntime with example callbacks.
+// Set USE_GAME_RUNTIME to 1
 
 #define USE_GAME_RUNTIME 1
 
@@ -14,7 +12,6 @@
 #include "runtime/game_runtime.h"
 #include <glm/gtx/transform.hpp>
 
-// Example game implementation using IGameCallbacks
 class ExampleGame : public GameRuntime::IGameCallbacks
 {
 public:
@@ -26,14 +23,12 @@ public:
         {
             GameAPI::IBLPaths ibl{};
             ibl.specularCube = renderer->_assetManager->assetPath("ibl/starmap.ktx2");
-            ibl.diffuseCube = renderer->_assetManager->assetPath("ibl/starmap.ktx2"); // fallback: reuse specular for diffuse
+            ibl.diffuseCube = renderer->_assetManager->assetPath("ibl/starmap.ktx2");
             ibl.brdfLut = renderer->_assetManager->assetPath("ibl/brdf_lut.ktx2");
-            // Optional dedicated background texture (2D equirect); if omitted, background falls back to specularCube.
             ibl.background = renderer->_assetManager->assetPath("ibl/darkstar.ktx2");
             api.load_global_ibl(ibl);
         }
 
-        // Planet demo: Earth terrain + Moon sphere (real scale, meters).
         {
             constexpr double kEarthRadiusM = 6378137.0;
             constexpr double kMoonRadiusM = 1737400.0;
@@ -72,37 +67,27 @@ public:
             api.camera_look_at(glm::dvec3(0.0, 0.0, 0.0));
         }
 
-        // Load a glTF model asynchronously
         // api.add_gltf_instance_async("example_model", "models/example.gltf",
         //     GameAPI::Transform{.position = {0, 0, 0}});
 
-        // Spawn a primitive
         // api.add_primitive_instance("test_cube", GameAPI::PrimitiveType::Cube,
         //     GameAPI::Transform{.position = {2, 0, 0}});
 
-        // Set up camera
         // api.set_camera_position({0, 5, -10});
         // api.set_camera_rotation({-20, 0, 0});
     }
 
     void on_update(float dt) override
     {
-        // Called every frame with variable delta time
-        // Use for rendering-dependent logic, input handling, camera control
         _elapsed += dt;
     }
 
     void on_fixed_update(float fixed_dt) override
     {
-        // Called at fixed intervals (default: 60Hz)
-        // Use for physics updates, AI tick, game state simulation
-        // Example: Apply physics forces, update AI state machines
     }
 
     void on_shutdown() override
     {
-        // Called before engine shutdown
-        // Use for cleanup, saving game state, etc.
     }
 
 private:
@@ -119,14 +104,13 @@ int main(int argc, char* argv[])
     engine.init();
 
 #if USE_GAME_RUNTIME
-    // GameRuntime mode: clean separation between engine and game logic
     {
         GameRuntime::Runtime runtime(&engine);
         ExampleGame game;
         runtime.run(&game);
     }
 #else
-    // Legacy mode: simple direct engine loop
+    // Legacy
     engine.run();
 #endif
 

@@ -169,10 +169,16 @@ public:
     bool setSceneAnimation(const std::string &sceneName, int animationIndex, bool resetTime = true);
     bool setSceneAnimation(const std::string &sceneName, const std::string &animationName, bool resetTime = true);
     bool setSceneAnimationLoop(const std::string &sceneName, bool loop);
+    bool setSceneAnimationSpeed(const std::string &sceneName, float speed);
+    bool transitionSceneAnimation(const std::string &sceneName, int animationIndex, float blendDurationSeconds, bool resetTime = true);
+    bool transitionSceneAnimation(const std::string &sceneName, const std::string &animationName, float blendDurationSeconds, bool resetTime = true);
 
     bool setGLTFInstanceAnimation(const std::string &instanceName, int animationIndex, bool resetTime = true);
     bool setGLTFInstanceAnimation(const std::string &instanceName, const std::string &animationName, bool resetTime = true);
     bool setGLTFInstanceAnimationLoop(const std::string &instanceName, bool loop);
+    bool setGLTFInstanceAnimationSpeed(const std::string &instanceName, float speed);
+    bool transitionGLTFInstanceAnimation(const std::string &instanceName, int animationIndex, float blendDurationSeconds, bool resetTime = true);
+    bool transitionGLTFInstanceAnimation(const std::string &instanceName, const std::string &animationName, float blendDurationSeconds, bool resetTime = true);
 
     struct PointLight
     {

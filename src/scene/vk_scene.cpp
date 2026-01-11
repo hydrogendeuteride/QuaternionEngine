@@ -1053,6 +1053,45 @@ bool SceneManager::setSceneAnimationLoop(const std::string &sceneName, bool loop
     return true;
 }
 
+bool SceneManager::setSceneAnimationSpeed(const std::string &sceneName, float speed)
+{
+    auto it = loadedScenes.find(sceneName);
+    if (it == loadedScenes.end() || !it->second)
+    {
+        return false;
+    }
+
+    auto &animState = sceneAnimations[sceneName];
+    animState.playbackSpeed = speed;
+    return true;
+}
+
+bool SceneManager::transitionSceneAnimation(const std::string &sceneName, int animationIndex, float blendDurationSeconds, bool resetTime)
+{
+    auto it = loadedScenes.find(sceneName);
+    if (it == loadedScenes.end() || !it->second)
+    {
+        return false;
+    }
+
+    auto &animState = sceneAnimations[sceneName];
+    it->second->transitionAnimation(animState, animationIndex, blendDurationSeconds, resetTime);
+    return true;
+}
+
+bool SceneManager::transitionSceneAnimation(const std::string &sceneName, const std::string &animationName, float blendDurationSeconds, bool resetTime)
+{
+    auto it = loadedScenes.find(sceneName);
+    if (it == loadedScenes.end() || !it->second)
+    {
+        return false;
+    }
+
+    auto &animState = sceneAnimations[sceneName];
+    it->second->transitionAnimation(animState, animationName, blendDurationSeconds, resetTime);
+    return true;
+}
+
 bool SceneManager::setGLTFInstanceAnimation(const std::string &instanceName, int animationIndex, bool resetTime)
 {
     auto it = dynamicGLTFInstances.find(instanceName);
@@ -1088,6 +1127,44 @@ bool SceneManager::setGLTFInstanceAnimationLoop(const std::string &instanceName,
     }
 
     it->second.animation.animationLoop = loop;
+    return true;
+}
+
+bool SceneManager::setGLTFInstanceAnimationSpeed(const std::string &instanceName, float speed)
+{
+    auto it = dynamicGLTFInstances.find(instanceName);
+    if (it == dynamicGLTFInstances.end() || !it->second.scene)
+    {
+        return false;
+    }
+
+    it->second.animation.playbackSpeed = speed;
+    return true;
+}
+
+bool SceneManager::transitionGLTFInstanceAnimation(const std::string &instanceName, int animationIndex, float blendDurationSeconds, bool resetTime)
+{
+    auto it = dynamicGLTFInstances.find(instanceName);
+    if (it == dynamicGLTFInstances.end() || !it->second.scene)
+    {
+        return false;
+    }
+
+    LoadedGLTF::AnimationState &animState = it->second.animation;
+    it->second.scene->transitionAnimation(animState, animationIndex, blendDurationSeconds, resetTime);
+    return true;
+}
+
+bool SceneManager::transitionGLTFInstanceAnimation(const std::string &instanceName, const std::string &animationName, float blendDurationSeconds, bool resetTime)
+{
+    auto it = dynamicGLTFInstances.find(instanceName);
+    if (it == dynamicGLTFInstances.end() || !it->second.scene)
+    {
+        return false;
+    }
+
+    LoadedGLTF::AnimationState &animState = it->second.animation;
+    it->second.scene->transitionAnimation(animState, animationName, blendDurationSeconds, resetTime);
     return true;
 }
 

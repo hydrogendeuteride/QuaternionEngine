@@ -7,6 +7,7 @@
 
 #include "core/descriptor/descriptors.h"
 #include <unordered_map>
+#include <unordered_set>
 #include <filesystem>
 #include <functional>
 
@@ -110,6 +111,21 @@ struct LoadedGLTF : public IRenderable
         int activeAnimation = -1;
         float animationTime = 0.f;
         bool animationLoop = true;
+
+        // Playback speed multiplier (1.0 = realtime). Negative plays backwards.
+        float playbackSpeed = 1.0f;
+
+        // Optional cross-fade from a previous animation into activeAnimation.
+        bool blending = false;
+        int blendFromAnimation = -1;
+        float blendFromTime = 0.0f;
+        bool blendFromLoop = true;
+        float blendTime = 0.0f;
+        float blendDuration = 0.0f;
+
+        // Internal: tracks which nodes were modified by the last update so they
+        // can be restored to bind pose when switching clips.
+        std::unordered_set<Node *> touchedNodes;
     };
 
     std::vector<Animation> animations;
@@ -123,6 +139,8 @@ struct LoadedGLTF : public IRenderable
     std::shared_ptr<Node> getNode(const std::string &name);
     void setActiveAnimation(AnimationState &state, int index, bool resetTime = true);
     void setActiveAnimation(AnimationState &state, const std::string &name, bool resetTime = true);
+    void transitionAnimation(AnimationState &state, int index, float blendDurationSeconds, bool resetTime = true);
+    void transitionAnimation(AnimationState &state, const std::string &name, float blendDurationSeconds, bool resetTime = true);
 
     ~LoadedGLTF()
     {
@@ -137,7 +155,22 @@ struct LoadedGLTF : public IRenderable
     virtual void Draw(const glm::mat4 &topMatrix, DrawContext &ctx);
 
 private:
+    struct RestNodeTransform
+    {
+        glm::mat4 localMatrix{1.0f};
+        glm::vec3 translation{0.0f, 0.0f, 0.0f};
+        glm::vec3 scale{1.0f, 1.0f, 1.0f};
+        glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+        bool hasTRS{false};
+    };
+
+    void ensureRestTransformsCached();
+    void restoreNodeToRest(Node &node) const;
+
     void clearAll();
+
+    bool _restTransformsCached = false;
+    std::unordered_map<Node *, RestNodeTransform> _restTransforms;
 };
 
 std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,

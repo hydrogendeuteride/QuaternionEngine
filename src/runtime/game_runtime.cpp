@@ -31,8 +31,7 @@ namespace GameRuntime
 
     void Runtime::sync_physics_to_render()
     {
-        // TODO: When physics integration is added, sync physics body transforms
-        // to their corresponding render instances here.
+        // TODO: physics integration
         // For each physics body with a render instance:
         //   glm::mat4 transform;
         //   _physics->get_body_transform(bodyId, transform);
@@ -49,7 +48,6 @@ namespace GameRuntime
         auto &cam = _renderer->_sceneManager->getMainCamera();
         glm::vec3 pos = _renderer->_sceneManager->get_camera_local_position();
 
-        // Calculate forward and up from camera orientation quaternion
         glm::vec3 forward = glm::normalize(cam.orientation * glm::vec3(0.0f, 0.0f, -1.0f));
         glm::vec3 up = glm::normalize(cam.orientation * glm::vec3(0.0f, 1.0f, 0.0f));
 
@@ -65,13 +63,11 @@ namespace GameRuntime
 
         _quit_requested = false;
 
-        // Call game initialization
         game->on_init(*this);
 
-        // Main game loop
         while (!_quit_requested)
         {
-            // --- Begin frame: time, input ---
+            // --- Begin frame: time, input --- //
             _time.begin_frame();
 
             InputSystem *input = _renderer->input();
@@ -94,11 +90,11 @@ namespace GameRuntime
                 }
             }
 
-            // --- Process UI and input capture ---
+            // --- Process UI and input capture --- //
             const bool ui_capture_mouse = _renderer->ui() && _renderer->ui()->want_capture_mouse();
             const bool ui_capture_keyboard = _renderer->ui() && _renderer->ui()->want_capture_keyboard();
 
-            // Dispatch native events to UI and picking
+            // Native events to UI and picking
             if (input)
             {
                 struct DispatchCtx
@@ -125,20 +121,20 @@ namespace GameRuntime
                 }, &ctx);
             }
 
-            // --- Camera input (if not captured by UI) ---
+            // --- Camera input (if not captured by UI) --- //
             if (_renderer->_sceneManager && input)
             {
                 _renderer->_sceneManager->getCameraRig().process_input(*input, ui_capture_keyboard, ui_capture_mouse);
             }
 
-            // --- Throttle when minimized ---
+            // --- Throttle when minimized --- //
             if (_renderer->freeze_rendering)
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 continue;
             }
 
-            // --- Handle resize ---
+            // --- Handle resize --- //
             if (_renderer->resize_requested)
             {
                 if (_renderer->_swapchainManager)
@@ -152,7 +148,7 @@ namespace GameRuntime
                 }
             }
 
-            // --- Fixed update loop (physics) ---
+            // --- Fixed update loop --- //
             while (_time.consume_fixed_step())
             {
                 game->on_fixed_update(_time.fixed_delta_time());
@@ -163,20 +159,20 @@ namespace GameRuntime
                 }
             }
 
-            // --- Sync physics transforms to render ---
+            // --- Sync physics transforms to render --- //
             sync_physics_to_render();
 
-            // --- Variable update ---
+            // --- Variable update --- //
             game->on_update(_time.delta_time());
 
-            // --- Audio listener update ---
+            // --- Audio listener update --- //
             update_audio_listener();
             if (_audio)
             {
                 _audio->update();
             }
 
-            // --- Wait for GPU and prepare frame ---
+            // --- Wait for GPU and prepare frame --- //
             VK_CHECK(vkWaitForFences(_renderer->_deviceManager->device(), 1,
                 &_renderer->get_current_frame()._renderFence, true, 1000000000));
 
@@ -213,7 +209,7 @@ namespace GameRuntime
                 }
             }
 
-            // --- Flush per-frame resources ---
+            // --- Flush per-frame resources --- ///
             _renderer->get_current_frame()._deletionQueue.flush();
             if (_renderer->_renderGraph)
             {
@@ -221,18 +217,18 @@ namespace GameRuntime
             }
             _renderer->get_current_frame()._frameDescriptors.clear_pools(_renderer->_deviceManager->device());
 
-            // --- ImGui ---
+            // --- ImGui --- //
             if (_renderer->ui())
             {
                 _renderer->ui()->begin_frame();
                 _renderer->ui()->end_frame();
             }
 
-            // --- Draw ---
+            // --- Draw --- //
             _renderer->draw();
 
-            // --- Update frame stats ---
-            _renderer->stats.frametime = _time.delta_time() * 1000.0f; // convert seconds to ms
+            // --- Update frame stats --- //
+            _renderer->stats.frametime = _time.delta_time() * 1000.0f;
         }
 
         // Call game shutdown

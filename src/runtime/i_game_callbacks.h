@@ -1,8 +1,6 @@
 #pragma once
 
 // IGameCallbacks: Interface for game logic callbacks
-// Implement this interface and pass to GameRuntime::run() to receive game loop events.
-
 namespace GameRuntime
 {
 
@@ -13,22 +11,19 @@ class IGameCallbacks
 public:
     virtual ~IGameCallbacks() = default;
 
-    // Called once after runtime initialization, before the first update.
-    // Use this to load initial assets, spawn entities, set up the camera, etc.
+    // called once after runtime initialization before the first update.
+    // load initial assets, spawn entities, set up the camera, etc.
     virtual void on_init(Runtime& runtime) = 0;
 
-    // Called every frame with variable delta time.
-    // Use for rendering-dependent logic, input handling, camera control, etc.
-    // @param dt: Frame delta time in seconds (clamped to 0.0-0.1)
+    // called every frame with variable delta time.
+    // rendering dependent logic, input handling, camera control
     virtual void on_update(float dt) = 0;
 
-    // Called at fixed intervals for physics/simulation.
-    // Use for physics updates, AI tick, game state simulation, etc.
-    // @param fixed_dt: Fixed delta time in seconds (typically 1/60)
+    // called at fixed intervals for physics, simulation.
+    // physics update, AI tick, game state simulation
     virtual void on_fixed_update(float fixed_dt) = 0;
 
-    // Called once before shutdown.
-    // Use for cleanup, saving state, etc.
+    // called once before shutdown
     virtual void on_shutdown() = 0;
 };
 

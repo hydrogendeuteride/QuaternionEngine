@@ -64,7 +64,6 @@
 #include "core/assets/texture_cache.h"
 #include "core/assets/ibl_manager.h"
 
-// ImGui debug UI (tabs, inspectors, etc.) is implemented in core/vk_engine_ui.cpp.
 void vk_engine_draw_debug_ui(VulkanEngine *eng);
 
 VulkanEngine *loadedEngine = nullptr;

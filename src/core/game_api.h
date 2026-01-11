@@ -780,6 +780,13 @@ public:
     // Set animation looping for a glTF instance
     bool set_instance_animation_loop(const std::string& instanceName, bool loop);
 
+    // Playback speed multiplier for a glTF instance (1.0 = realtime).
+    bool set_instance_animation_speed(const std::string& instanceName, float speed);
+
+    // Cross-fade transition to a new animation for a glTF instance.
+    bool transition_instance_animation(const std::string& instanceName, int animationIndex, float blendDurationSeconds, bool resetTime = true);
+    bool transition_instance_animation(const std::string& instanceName, const std::string& animationName, float blendDurationSeconds, bool resetTime = true);
+
     // Per-node transform offset (local space, layered on animation)
     bool set_instance_node_offset(const std::string& instanceName, const std::string& nodeName, const glm::mat4& offset);
     bool clear_instance_node_offset(const std::string& instanceName, const std::string& nodeName);
