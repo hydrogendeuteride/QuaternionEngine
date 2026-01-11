@@ -1,7 +1,7 @@
 # QuaternionEngine
 Multipurpose Vulkan render engine specialized for physics simulation and solar system visualization
 
-![](vk.png)
+![](gallery/vk2.png)
 
 ## Introduction
 Work-In-Progress Vulkan render engine
@@ -17,7 +17,7 @@ Current structure:
 - FXAA
 - Bloom
 - Floating origin with double precision coordinate system
-- Planet Rendering, LOD Terrain system, atmosphere
+- Planet Rendering, Cubesphere-quadtree LOD Terrain system, Rayleigh-Mie scattering atmosphere
 - Sun
 
 Work-In-Progress
@@ -27,3 +27,8 @@ Work-In-Progress
 
 ## Build prequsites
 - ktx software with libraries
+
+## Gallery
+![](gallery/vk.png)
+![](gallery/vk3.png)
+![](gallery/vk4.png)

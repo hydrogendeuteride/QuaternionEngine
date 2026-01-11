@@ -84,10 +84,12 @@ public:
 
     void on_fixed_update(float fixed_dt) override
     {
+
     }
 
     void on_shutdown() override
     {
+
     }
 
 private:
