@@ -1,3 +1,5 @@
+// For transparent. Also can be used for normal meshes
+
 #version 450
 
 #extension GL_GOOGLE_include_directive : require
@@ -76,7 +78,7 @@ void main()
     vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
     vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * sunVis;
 
-    // Punctual point lights
+    //point lights
     uint pointCount = sceneData.lightCounts.x;
     for (uint i = 0u; i < pointCount; ++i)
     {

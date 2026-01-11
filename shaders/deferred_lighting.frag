@@ -1,3 +1,5 @@
+//Why RT: Because CSM is shit
+
 #version 460
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_ray_query : require
@@ -15,6 +17,7 @@ layout(set=1, binding=2) uniform sampler2D albedoTex;
 layout(set=1, binding=3) uniform sampler2D extraTex;
 layout(set=2, binding=0) uniform sampler2D shadowTex[4];
 // TLAS for ray query (optional, guarded by sceneData.rtOptions.x)
+
 #ifdef GL_EXT_ray_query
 layout(set=0, binding=1) uniform accelerationStructureEXT topLevelAS;
 #endif
@@ -23,7 +26,7 @@ layout(set=0, binding=1) uniform accelerationStructureEXT topLevelAS;
 // Border smoothing width in light-space NDC (0..1). Larger = wider cross-fade.
 const float SHADOW_BORDER_SMOOTH_NDC = 0.08;
 // Base PCF radius in texels for cascade 0; higher cascades scale this up slightly.
-const float SHADOW_PCF_BASE_RADIUS = 1.35;
+const float SHADOW_PCF_BASE_RADIUS = 1.15;
 // Additional per-cascade radius scale for coarser cascades (0..1 factor added across levels)
 const float SHADOW_PCF_CASCADE_GAIN = 2.0;// extra radius at far end
 // Receiver normal-based offset to reduce acne (in world units)
@@ -41,8 +44,7 @@ const float SHADOW_RAY_ORIGIN_BIAS = 0.01;// world units
 float world_pos_ulp(vec3 p)
 {
     float m = max(max(abs(p.x), abs(p.y)), abs(p.z));
-    // For IEEE-754 float, relative precision is ~2^-23 (~1.192e-7). Clamp to a
-    // small baseline to avoid tiny values near the origin.
+    // For IEEE-754 float, relative precision is ~2^-23 (~1.192e-7). Clamp to a small baseline to avoid tiny values near the origin.
     return max(1e-4, m * 1.1920929e-7);
 }
 
@@ -231,7 +233,7 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
 
 float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L, bool forceClipmapShadows)
 {
-    // Early out when shadows are globally disabled.
+    // Early out: shadows are globally disabled.
     if (sceneData.rtParams.y <= 0.0)
     {
         return 1.0;
@@ -378,7 +380,9 @@ void main(){
     vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
     vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * sunVis;
 
-    // Punctual point lights
+
+    // ---------------------------- //
+    // point light
     uint pointCount = sceneData.lightCounts.x;
     for (uint i = 0u; i < pointCount; ++i)
     {
@@ -421,7 +425,8 @@ void main(){
         direct += contrib;
     }
 
-    // Spot lights
+    // ------------------------------ //
+    // spot light
     uint spotCount = sceneData.lightCounts.y;
     for (uint i = 0u; i < spotCount; ++i)
     {

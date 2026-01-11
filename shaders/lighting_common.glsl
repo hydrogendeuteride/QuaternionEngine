@@ -50,7 +50,7 @@ vec3 evaluate_brdf(vec3 N, vec3 V, vec3 L, vec3 albedo, float roughness, float m
     float NdotV = max(dot(N, V), 0.0);
     float NdotL = max(dot(N, L), 0.0);
     // Avoid undefined half-vector when V and L are opposite (normalize(0) => NaN),
-    // which can manifest as single-pixel "fireflies" on smooth surfaces.
+    // which can manifest as single-pixel fireflies on smooth surfaces.
     if (NdotL <= 0.0 || NdotV <= 0.0)
     {
         return vec3(0.0);

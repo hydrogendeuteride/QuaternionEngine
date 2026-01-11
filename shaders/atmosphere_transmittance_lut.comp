@@ -75,7 +75,6 @@ void main()
     {
         // If the intersection is in front of the origin (t1 > 0), the ray enters
         // the planet (or starts on the surface heading inward), so sunlight is blocked.
-        // Note: for a surface point with an outward ray, t1 == 0 and we do not occlude.
         if (tP1 > 0.0 && tP0 < tEnd)
         {
             const float MAX_OD = 1.0e9;

@@ -45,7 +45,6 @@ void main()
         return;
     }
 
-    // Simple 5-tap cross blur when we detect an edge.
     vec3 avg = (cM + cN + cS + cE + cW) * 0.2;
     outColor = vec4(avg, 1.0);
 }
