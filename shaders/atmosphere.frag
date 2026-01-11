@@ -6,7 +6,6 @@
 layout(location = 0) in vec2 inUV;
 layout(location = 0) out vec4 outColor;
 
-// Set 1: inputs
 layout(set = 1, binding = 0) uniform sampler2D hdrInput;
 layout(set = 1, binding = 1) uniform sampler2D posTex;
 layout(set = 1, binding = 2) uniform sampler2D transmittanceLut;
@@ -84,7 +83,7 @@ void main()
 
     vec3 camPos = getCameraWorldPosition();
 
-    // Reconstruct a world-space ray for this pixel (Vulkan depth range 0..1).
+    // Reconstruct a world-space ray for this pixel [0~1].
     vec2 ndc = inUV * 2.0 - 1.0;
     vec3 viewDir = normalize(vec3(ndc.x / sceneData.proj[0][0], ndc.y / sceneData.proj[1][1], -1.0));
     vec3 rd = transpose(mat3(sceneData.view)) * viewDir;
@@ -123,15 +122,14 @@ void main()
                             float rSurf = length(posSample.xyz - center);
 
                             // Cube-sphere patches (and LOD skirts) are planar and sit inside the analytic sphere.
-                            // If we clamp to the rasterized surface, the atmosphere raymarch length varies per-triangle,
-                            // revealing mesh grids and LOD "rings". Clamp inward deviations to the analytic sphere.
+                            // When just using planet patch to make it: grid/ring shaped atmosphere appears
+                            // Because of cracks between each patches and  skirts.
                             if (rSurf < planetRadius)
                             {
                                 tSurf = min(tSurf, tSphere);
                             }
 
-                            // Optional: if the surface is close to the analytic sphere, snap to it to remove subtle
-                            // LOD stepping. Large deviations (mountains) remain unaffected.
+                            // LOD stepping. Large deviations remain unaffected.
                             float radialErr = abs(rSurf - planetRadius);
                             if (radialErr <= snapM)
                             {
@@ -186,7 +184,7 @@ void main()
         odR += densR * dt;
         odM += densM * dt;
 
-        // Planet shadow: if the sun ray hits the planet, this sample is in shadow (no direct sun).
+        // Planet shadow: if the sun ray hits the planet, this sample is in shadow.
         float tp0, tp1;
         if (ray_sphere_intersect(p, sunDir, center, planetRadius, tp0, tp1))
         {

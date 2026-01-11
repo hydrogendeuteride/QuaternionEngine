@@ -28,7 +28,7 @@ const float SHADOW_RPDB_SCALE = 1.0;
 // Minimum clamp to keep a tiny bias even on perpendicular receivers
 const float SHADOW_MIN_BIAS = 1e-5;
 
-vec3 getCameraWorldPosition()
+vec3 getCameraWorldPosition() // Because I'm not clever enough to add cmaera position...
 {
     // view = [ R^T  -R^T*C ]
     //        [ 0       1   ]

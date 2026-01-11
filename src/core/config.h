@@ -1,6 +1,5 @@
 #pragma once
 
-// Centralized engine configuration flags
 #ifdef NDEBUG
 inline constexpr bool kUseValidationLayers = false;
 #else
@@ -39,7 +38,7 @@ inline constexpr float kShadowMapResolution = 2048.0f;
 // Extra XY expansion for cascade footprint (safety against FOV/aspect changes)
 inline constexpr float kShadowCascadeRadiusScale = 1.1f;
 // Additive XY margin in world units beyond the scaled half-size
-inline constexpr float kShadowCascadeRadiusMargin = 10.0f;
+inline constexpr float kShadowCascadeRadiusMargin = 5.0f;
 // Clipmap shadow configuration (used when cascades operate in clipmap mode)
 // Base coverage radius of level 0 around the camera (world units). Each level doubles the radius.
 inline constexpr float kShadowClipBaseRadius = 20.0f;
@@ -47,7 +46,7 @@ inline constexpr float kShadowClipBaseRadius = 20.0f;
 // pullback = max(kShadowClipPullbackMin, cover * kShadowClipPullbackFactor)
 inline constexpr float kShadowClipPullbackFactor = 1.2f;   // fraction of XY half-size behind center
 inline constexpr float kShadowClipForwardFactor  = 1.2f;   // fraction of XY half-size in front of center for zFar
-inline constexpr float kShadowClipPullbackMin    = 10.0f;   // lower bound on pullback so near levels don’t collapse
+inline constexpr float kShadowClipPullbackMin    = 5.0f;   // lower bound on pullback so near levels don’t collapse
 // Additional Z padding for the orthographic frustum along light direction
 inline constexpr float kShadowClipZPadding = 10.0f;
 

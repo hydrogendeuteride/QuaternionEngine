@@ -6,13 +6,12 @@
 layout(location = 0) in vec2 inUV;
 layout(location = 0) out vec4 outColor;
 
-// Set 1: SSR inputs
 layout(set = 1, binding = 0) uniform sampler2D hdrColor;
 layout(set = 1, binding = 1) uniform sampler2D posTex;
 layout(set = 1, binding = 2) uniform sampler2D normalTex;
 layout(set = 1, binding = 3) uniform sampler2D albedoTex;
 
-vec3 getCameraWorldPosition()
+vec3 getCameraWorldPosition() // Because I'm not clever enough to add cmaera position...
 {
     mat3 rotT = mat3(sceneData.view);      // R^T
     mat3 rot  = transpose(rotT);           // R

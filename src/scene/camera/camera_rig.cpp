@@ -216,7 +216,6 @@ void CameraRig::align_orbit_up_to_target()
         _orbit.reference_up = glm::vec3(0.0f, 1.0f, 0.0f);
     }
 
-    // Re-activate the mode to recompute yaw/pitch in the new frame
     if (_mode == CameraMode::Orbit && _mode_impl && _camera)
     {
         _mode_impl->on_activate(*_scene, *_camera);
@@ -235,7 +234,6 @@ void CameraRig::set_orbit_reference_up(const glm::vec3 &up)
         _orbit.reference_up = glm::vec3(0.0f, 1.0f, 0.0f);
     }
 
-    // Re-activate the mode to recompute yaw/pitch in the new frame
     if (_mode == CameraMode::Orbit && _mode_impl && _scene && _camera)
     {
         _mode_impl->on_activate(*_scene, *_camera);

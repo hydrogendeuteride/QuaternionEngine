@@ -1,8 +1,5 @@
 #pragma once
 
-// GameAPI: High-level interface for game development
-// Wraps VulkanEngine internals and exposes clean, game-friendly functions.
-
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <string>

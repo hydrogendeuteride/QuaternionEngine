@@ -44,7 +44,8 @@ namespace
 void AutoExposurePass::init(EngineContext *context)
 {
     _context = context;
-    if (!_context || !_context->pipelines || !_context->getAssets() || !_context->getResources() || !_context->getDevice())
+    if (!_context || !_context->pipelines || !_context->getAssets() || !_context->getResources() || !_context->
+        getDevice())
     {
         return;
     }
@@ -100,7 +101,7 @@ void AutoExposurePass::cleanup()
 
     if (_context && _context->getResources())
     {
-        for (auto &b : _readback_buffers)
+        for (auto &b: _readback_buffers)
         {
             if (b.buffer != VK_NULL_HANDLE)
             {
@@ -204,22 +205,20 @@ void AutoExposurePass::register_graph(RenderGraph *graph, RGImageHandle hdrInput
     graph->add_pass(
         "AutoExposure",
         RGPassType::Compute,
-        [hdrInput, out_buf, buf_name](RGPassBuilder &builder, EngineContext *)
-        {
+        [hdrInput, out_buf, buf_name](RGPassBuilder &builder, EngineContext *) {
             builder.read(hdrInput, RGImageUsage::SampledCompute);
             builder.write_buffer(out_buf, RGBufferUsage::StorageReadWrite, k_readback_size, buf_name.c_str());
         },
-        [this, hdrInput, slot](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *ctx)
-        {
+        [this, hdrInput, slot](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *ctx) {
             dispatch_measure(cmd, ctx, res, hdrInput, slot);
         });
 }
 
 void AutoExposurePass::dispatch_measure(VkCommandBuffer cmd,
-                                       EngineContext *ctx,
-                                       const RGPassResources &res,
-                                       RGImageHandle hdrInput,
-                                       uint32_t frame_slot)
+                                        EngineContext *ctx,
+                                        const RGPassResources &res,
+                                        RGImageHandle hdrInput,
+                                        uint32_t frame_slot)
 {
     EngineContext *ctxLocal = ctx ? ctx : _context;
     if (!ctxLocal || !ctxLocal->pipelines || !ctxLocal->getSamplers()) return;

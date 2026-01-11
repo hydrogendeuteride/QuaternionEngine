@@ -19,10 +19,8 @@ vec3 reinhard(vec3 x)
     return x / (1.0 + x);
 }
 
-// Narkowicz ACES approximation
 vec3 aces_tonemap(vec3 x)
 {
-    // https://64.github.io/tonemapping/
     const float a = 2.51;
     const float b = 0.03;
     const float c = 2.43;
@@ -36,7 +34,6 @@ void accum_bloom(vec3 c, float kernel_weight, inout vec3 bloom, inout float weig
     float bright = max(max(c.r, c.g), c.b) - pc.bloomThreshold;
     bright = max(bright, 0.0);
 
-    // Match the old behavior: only normalize over samples that pass the threshold.
     float contribute = step(1e-5, bright);
 
     bloom += c * bright * kernel_weight;
@@ -47,18 +44,15 @@ void main()
 {
     vec3 hdr = texture(uHdr, inUV).rgb;
 
-    // Simple bloom in HDR space: approximate a 5x5 Gaussian blur using 9 bilinear samples (vs. 25 taps).
     if (pc.bloomEnabled != 0 && pc.bloomIntensity > 0.0)
     {
         vec2 texel = 1.0 / vec2(textureSize(uHdr, 0));
-        vec2 d = texel * 1.2; // Combines 1- and 2-texel taps via linear filtering (4:1 weight).
+        vec2 d = texel * 1.2;
 
         vec3 bloom = vec3(0.0);
         float wsum = 0.0;
 
-        // 1D weights [1 4 6 4 1] collapsed to 3 linear samples => weights [5 6 5]
-        // 2D separable => center 36, axis 30, corners 25 (sum 256).
-        accum_bloom(hdr, 36.0, bloom, wsum); // reuse center sample
+        accum_bloom(hdr, 36.0, bloom, wsum);
 
         accum_bloom(texture(uHdr, clamp(inUV + vec2( d.x, 0.0), vec2(0.0), vec2(1.0))).rgb, 30.0, bloom, wsum);
         accum_bloom(texture(uHdr, clamp(inUV + vec2(-d.x, 0.0), vec2(0.0), vec2(1.0))).rgb, 30.0, bloom, wsum);
@@ -77,7 +71,6 @@ void main()
         }
     }
 
-    // Simple exposure
     float exposure = max(pc.exposure, 0.0001);
     vec3 mapped = hdr * exposure;
 

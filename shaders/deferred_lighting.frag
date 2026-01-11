@@ -56,7 +56,7 @@ float shadow_ray_tmin(vec3 p)
     return max(SHADOW_RAY_TMIN, world_pos_ulp(p) * 16.0);
 }
 
-vec3 getCameraWorldPosition()
+vec3 getCameraWorldPosition()   // Because I'm not clever enough to add cmaera position...
 {
     // view = [ R^T  -R^T*C ]
     //        [ 0       1   ]

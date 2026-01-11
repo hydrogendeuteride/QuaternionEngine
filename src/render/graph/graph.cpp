@@ -33,20 +33,20 @@ void RenderGraph::init(EngineContext *ctx)
 
 void RenderGraph::clear()
 {
-    _passes.clear();
-    _resources.reset();
+	_passes.clear();
+	_resources.reset();
 }
 
 void RenderGraph::shutdown()
 {
-    // If a timestamp pool exists, ensure the GPU is not using it and destroy it.
-    if (_timestampPool != VK_NULL_HANDLE && _context && _context->getDevice())
-    {
-        // Be conservative here: make sure the graphics queue is idle before destroying.
-        vkQueueWaitIdle(_context->getDevice()->graphicsQueue());
-        vkDestroyQueryPool(_context->getDevice()->device(), _timestampPool, nullptr);
-        _timestampPool = VK_NULL_HANDLE;
-    }
+	// If a timestamp pool exists, ensure the GPU is not using it and destroy it.
+	if (_timestampPool != VK_NULL_HANDLE && _context && _context->getDevice())
+	{
+		// Be conservative here: make sure the graphics queue is idle before destroying.
+		vkQueueWaitIdle(_context->getDevice()->graphicsQueue());
+		vkDestroyQueryPool(_context->getDevice()->device(), _timestampPool, nullptr);
+		_timestampPool = VK_NULL_HANDLE;
+	}
 }
 
 RGImageHandle RenderGraph::import_image(const RGImportedImageDesc &desc)
@@ -64,14 +64,14 @@ RGImageHandle RenderGraph::create_image(const RGImageDesc &desc)
 	return _resources.add_transient(desc);
 }
 
-RGImageHandle RenderGraph::create_depth_image(const char* name, VkExtent2D extent, VkFormat format)
+RGImageHandle RenderGraph::create_depth_image(const char *name, VkExtent2D extent, VkFormat format)
 {
-    RGImageDesc d{};
-    d.name = name ? name : "depth.transient";
-    d.format = format;
-    d.extent = extent;
-    d.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    return create_image(d);
+	RGImageDesc d{};
+	d.name = name ? name : "depth.transient";
+	d.format = format;
+	d.extent = extent;
+	d.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	return create_image(d);
 }
 
 RGBufferHandle RenderGraph::create_buffer(const RGBufferDesc &desc)
@@ -122,83 +122,83 @@ void RenderGraph::add_pass(const char *name, RGPassType type, RecordCallback rec
 
 bool RenderGraph::compile()
 {
-    if (!_context) return false;
+	if (!_context) return false;
 
-    // --- Build dependency graph (topological sort) from declared reads/writes ---
-    const int n = static_cast<int>(_passes.size());
-    if (n <= 1)
-    {
-        // trivial order; still compute barriers below
-    }
-    else
-    {
-        std::vector<std::unordered_set<int> > adjSet(n);
-        std::vector<int> indeg(n, 0);
+	// --- Build dependency graph (topological sort) from declared reads/writes ---
+	const int n = static_cast<int>(_passes.size());
+	if (n <= 1)
+	{
+		// trivial order; still compute barriers below
+	}
+	else
+	{
+		std::vector<std::unordered_set<int> > adjSet(n);
+		std::vector<int> indeg(n, 0);
 
-        auto add_edge = [&](int u, int v) {
-            if (u == v) return;
-            if (u < 0 || v < 0 || u >= n || v >= n) return;
-            if (adjSet[u].insert(v).second) indeg[v]++;
-        };
+		auto add_edge = [&](int u, int v) {
+			if (u == v) return;
+			if (u < 0 || v < 0 || u >= n || v >= n) return;
+			if (adjSet[u].insert(v).second) indeg[v]++;
+		};
 
-        std::unordered_map<uint32_t, int> lastWriterImage;
-        std::unordered_map<uint32_t, std::vector<int> > lastReadersImage;
-        std::unordered_map<uint32_t, int> lastWriterBuffer;
-        std::unordered_map<uint32_t, std::vector<int> > lastReadersBuffer;
+		std::unordered_map<uint32_t, int> lastWriterImage;
+		std::unordered_map<uint32_t, std::vector<int> > lastReadersImage;
+		std::unordered_map<uint32_t, int> lastWriterBuffer;
+		std::unordered_map<uint32_t, std::vector<int> > lastReadersBuffer;
 
-        for (int i = 0; i < n; ++i)
-        {
-            const auto &p = _passes[i];
-            if (!p.enabled) continue;
+		for (int i = 0; i < n; ++i)
+		{
+			const auto &p = _passes[i];
+			if (!p.enabled) continue;
 
-            // Image reads
-            for (const auto &r: p.imageReads)
-            {
-                if (!r.image.valid()) continue;
-                auto it = lastWriterImage.find(r.image.id);
-                if (it != lastWriterImage.end()) add_edge(it->second, i);
-                lastReadersImage[r.image.id].push_back(i);
-            }
+			// Image reads
+			for (const auto &r: p.imageReads)
+			{
+				if (!r.image.valid()) continue;
+				auto it = lastWriterImage.find(r.image.id);
+				if (it != lastWriterImage.end()) add_edge(it->second, i);
+				lastReadersImage[r.image.id].push_back(i);
+			}
 
 			// Image writes
-            for (const auto &w: p.imageWrites)
-            {
-                if (!w.image.valid()) continue;
-                auto itW = lastWriterImage.find(w.image.id);
-                if (itW != lastWriterImage.end()) add_edge(itW->second, i); // WAW
-                auto itR = lastReadersImage.find(w.image.id);
-                if (itR != lastReadersImage.end())
-                {
-                    for (int rIdx: itR->second) add_edge(rIdx, i); // WAR
-                    itR->second.clear();
-                }
-                lastWriterImage[w.image.id] = i;
-            }
+			for (const auto &w: p.imageWrites)
+			{
+				if (!w.image.valid()) continue;
+				auto itW = lastWriterImage.find(w.image.id);
+				if (itW != lastWriterImage.end()) add_edge(itW->second, i); // WAW
+				auto itR = lastReadersImage.find(w.image.id);
+				if (itR != lastReadersImage.end())
+				{
+					for (int rIdx: itR->second) add_edge(rIdx, i); // WAR
+					itR->second.clear();
+				}
+				lastWriterImage[w.image.id] = i;
+			}
 
-            // Buffer reads
-            for (const auto &r: p.bufferReads)
-            {
-                if (!r.buffer.valid()) continue;
-                auto it = lastWriterBuffer.find(r.buffer.id);
-                if (it != lastWriterBuffer.end()) add_edge(it->second, i);
-                lastReadersBuffer[r.buffer.id].push_back(i);
-            }
+			// Buffer reads
+			for (const auto &r: p.bufferReads)
+			{
+				if (!r.buffer.valid()) continue;
+				auto it = lastWriterBuffer.find(r.buffer.id);
+				if (it != lastWriterBuffer.end()) add_edge(it->second, i);
+				lastReadersBuffer[r.buffer.id].push_back(i);
+			}
 
-            // Buffer writes
-            for (const auto &w: p.bufferWrites)
-            {
-                if (!w.buffer.valid()) continue;
-                auto itW = lastWriterBuffer.find(w.buffer.id);
-                if (itW != lastWriterBuffer.end()) add_edge(itW->second, i); // WAW
-                auto itR = lastReadersBuffer.find(w.buffer.id);
-                if (itR != lastReadersBuffer.end())
-                {
-                    for (int rIdx: itR->second) add_edge(rIdx, i); // WAR
-                    itR->second.clear();
-                }
-                lastWriterBuffer[w.buffer.id] = i;
-            }
-        }
+			// Buffer writes
+			for (const auto &w: p.bufferWrites)
+			{
+				if (!w.buffer.valid()) continue;
+				auto itW = lastWriterBuffer.find(w.buffer.id);
+				if (itW != lastWriterBuffer.end()) add_edge(itW->second, i); // WAW
+				auto itR = lastReadersBuffer.find(w.buffer.id);
+				if (itR != lastReadersBuffer.end())
+				{
+					for (int rIdx: itR->second) add_edge(rIdx, i); // WAR
+					itR->second.clear();
+				}
+				lastWriterBuffer[w.buffer.id] = i;
+			}
+		}
 
 		// Kahn's algorithm
 		std::queue<int> q;
@@ -230,72 +230,72 @@ bool RenderGraph::compile()
 		}
 	}
 
-	    struct ImageState
-	    {
-	        VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
-	        // Accumulate read stages/accesses since last barrier or write.
-	        VkPipelineStageFlags2 readStage = VK_PIPELINE_STAGE_2_NONE;
-	        VkAccessFlags2 readAccess = 0;
-	        // Track last write since last barrier.
-	        VkPipelineStageFlags2 writeStage = VK_PIPELINE_STAGE_2_NONE;
-	        VkAccessFlags2 writeAccess = 0;
-	    };
-	
-		struct BufferState
+	struct ImageState
+	{
+		VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+		// Accumulate read stages/accesses since last barrier or write.
+		VkPipelineStageFlags2 readStage = VK_PIPELINE_STAGE_2_NONE;
+		VkAccessFlags2 readAccess = 0;
+		// Track last write since last barrier.
+		VkPipelineStageFlags2 writeStage = VK_PIPELINE_STAGE_2_NONE;
+		VkAccessFlags2 writeAccess = 0;
+	};
+
+	struct BufferState
+	{
+		VkPipelineStageFlags2 readStage = VK_PIPELINE_STAGE_2_NONE;
+		VkAccessFlags2 readAccess = 0;
+		VkPipelineStageFlags2 writeStage = VK_PIPELINE_STAGE_2_NONE;
+		VkAccessFlags2 writeAccess = 0;
+	};
+
+	auto access_has_write = [](VkAccessFlags2 access) -> bool {
+		constexpr VkAccessFlags2 WRITE_MASK =
+				VK_ACCESS_2_TRANSFER_WRITE_BIT |
+				VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT |
+				VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+				VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+				VK_ACCESS_2_HOST_WRITE_BIT |
+				VK_ACCESS_2_MEMORY_WRITE_BIT;
+		return (access & WRITE_MASK) != 0;
+	};
+
+	auto is_depth_format = [](VkFormat format) {
+		switch (format)
 		{
-			VkPipelineStageFlags2 readStage = VK_PIPELINE_STAGE_2_NONE;
-			VkAccessFlags2 readAccess = 0;
-			VkPipelineStageFlags2 writeStage = VK_PIPELINE_STAGE_2_NONE;
-			VkAccessFlags2 writeAccess = 0;
-		};
+			case VK_FORMAT_D16_UNORM:
+			case VK_FORMAT_D16_UNORM_S8_UINT:
+			case VK_FORMAT_D24_UNORM_S8_UINT:
+			case VK_FORMAT_D32_SFLOAT:
+			case VK_FORMAT_D32_SFLOAT_S8_UINT:
+				return true;
+			default:
+				return false;
+		}
+	};
 
-	    auto access_has_write = [](VkAccessFlags2 access) -> bool {
-	        constexpr VkAccessFlags2 WRITE_MASK =
-	                VK_ACCESS_2_TRANSFER_WRITE_BIT |
-	                VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT |
-	                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
-	                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-	                VK_ACCESS_2_HOST_WRITE_BIT |
-	                VK_ACCESS_2_MEMORY_WRITE_BIT;
-	        return (access & WRITE_MASK) != 0;
-	    };
-
-    auto is_depth_format = [](VkFormat format) {
-        switch (format)
-        {
-            case VK_FORMAT_D16_UNORM:
-            case VK_FORMAT_D16_UNORM_S8_UINT:
-            case VK_FORMAT_D24_UNORM_S8_UINT:
-            case VK_FORMAT_D32_SFLOAT:
-            case VK_FORMAT_D32_SFLOAT_S8_UINT:
-                return true;
-            default:
-                return false;
-        }
-    };
-
-    auto usage_requires_flag = [](RGImageUsage usage) -> VkImageUsageFlags {
-        switch (usage)
-        {
-            case RGImageUsage::SampledFragment:
-            case RGImageUsage::SampledCompute:
-                return VK_IMAGE_USAGE_SAMPLED_BIT;
-            case RGImageUsage::TransferSrc:
-                return VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-            case RGImageUsage::TransferDst:
-                return VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-            case RGImageUsage::ColorAttachment:
-                return VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-            case RGImageUsage::DepthAttachment:
-                return VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-            case RGImageUsage::ComputeWrite:
-                return VK_IMAGE_USAGE_STORAGE_BIT;
-            case RGImageUsage::Present:
-                return 0; // swapchain image
-            default:
-                return 0;
-        }
-    };
+	auto usage_requires_flag = [](RGImageUsage usage) -> VkImageUsageFlags {
+		switch (usage)
+		{
+			case RGImageUsage::SampledFragment:
+			case RGImageUsage::SampledCompute:
+				return VK_IMAGE_USAGE_SAMPLED_BIT;
+			case RGImageUsage::TransferSrc:
+				return VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+			case RGImageUsage::TransferDst:
+				return VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+			case RGImageUsage::ColorAttachment:
+				return VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+			case RGImageUsage::DepthAttachment:
+				return VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+			case RGImageUsage::ComputeWrite:
+				return VK_IMAGE_USAGE_STORAGE_BIT;
+			case RGImageUsage::Present:
+				return 0; // swapchain image
+			default:
+				return 0;
+		}
+	};
 
 	struct ImageUsageInfo
 	{
@@ -304,11 +304,11 @@ bool RenderGraph::compile()
 		VkImageLayout layout;
 	};
 
-    struct BufferUsageInfo
-    {
-        VkPipelineStageFlags2 stage;
-        VkAccessFlags2 access;
-    };
+	struct BufferUsageInfo
+	{
+		VkPipelineStageFlags2 stage;
+		VkAccessFlags2 access;
+	};
 
 	auto usage_info_image = [](RGImageUsage usage) {
 		ImageUsageInfo info{};
@@ -364,10 +364,10 @@ bool RenderGraph::compile()
 		return info;
 	};
 
-    auto usage_info_buffer = [](RGBufferUsage usage) {
-        BufferUsageInfo info{};
-        switch (usage)
-        {
+	auto usage_info_buffer = [](RGBufferUsage usage) {
+		BufferUsageInfo info{};
+		switch (usage)
+		{
 			case RGBufferUsage::TransferSrc:
 				info.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
 				info.access = VK_ACCESS_2_TRANSFER_READ_BIT;
@@ -402,90 +402,90 @@ bool RenderGraph::compile()
 				info.stage = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
 				info.access = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
 				break;
-            default:
-                info.stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-                info.access = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
-                break;
-        }
-        return info;
-    };
+			default:
+				info.stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+				info.access = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+				break;
+		}
+		return info;
+	};
 
-    auto buffer_usage_requires_flag = [](RGBufferUsage usage) -> VkBufferUsageFlags {
-        switch (usage)
-        {
-            case RGBufferUsage::TransferSrc: return VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-            case RGBufferUsage::TransferDst: return VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-            case RGBufferUsage::VertexRead:  return VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-            case RGBufferUsage::IndexRead:   return VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-            case RGBufferUsage::UniformRead: return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-            case RGBufferUsage::StorageRead:
-            case RGBufferUsage::StorageReadWrite: return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-            case RGBufferUsage::IndirectArgs: return VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-            default: return 0;
-        }
-    };
+	auto buffer_usage_requires_flag = [](RGBufferUsage usage) -> VkBufferUsageFlags {
+		switch (usage)
+		{
+			case RGBufferUsage::TransferSrc: return VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+			case RGBufferUsage::TransferDst: return VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+			case RGBufferUsage::VertexRead: return VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+			case RGBufferUsage::IndexRead: return VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+			case RGBufferUsage::UniformRead: return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+			case RGBufferUsage::StorageRead:
+			case RGBufferUsage::StorageReadWrite: return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+			case RGBufferUsage::IndirectArgs: return VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+			default: return 0;
+		}
+	};
 
-	    const size_t imageCount = _resources.image_count();
-	    const size_t bufferCount = _resources.buffer_count();
-	    std::vector<ImageState> imageStates(imageCount);
-	    std::vector<BufferState> bufferStates(bufferCount);
+	const size_t imageCount = _resources.image_count();
+	const size_t bufferCount = _resources.buffer_count();
+	std::vector<ImageState> imageStates(imageCount);
+	std::vector<BufferState> bufferStates(bufferCount);
 
-	    // Seed initial states from imported/transient records. If an imported image has a known
-	    // starting layout but no stage/access, be conservative and assume an unknown prior write.
-	    for (size_t i = 0; i < imageCount; ++i)
-	    {
-	        const RGImageRecord *rec = _resources.get_image(RGImageHandle{static_cast<uint32_t>(i)});
-	        if (!rec) continue;
-	        imageStates[i].layout = rec->initialLayout;
-	        if (rec->initialLayout == VK_IMAGE_LAYOUT_UNDEFINED) continue;
-	
-	        VkPipelineStageFlags2 st = rec->initialStage;
-	        VkAccessFlags2 ac = rec->initialAccess;
-	        if (st == VK_PIPELINE_STAGE_2_NONE && ac == 0)
-	        {
-	            st = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-	            ac = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
-	        }
-	        if (access_has_write(ac))
-	        {
-	            imageStates[i].writeStage = st;
-	            imageStates[i].writeAccess = ac;
-	        }
-	        else if (ac != 0)
-	        {
-	            imageStates[i].readStage = st;
-	            imageStates[i].readAccess = ac;
-	        }
-	    }
+	// Seed initial states from imported/transient records. If an imported image has a known
+	// starting layout but no stage/access, be conservative and assume an unknown prior write.
+	for (size_t i = 0; i < imageCount; ++i)
+	{
+		const RGImageRecord *rec = _resources.get_image(RGImageHandle{static_cast<uint32_t>(i)});
+		if (!rec) continue;
+		imageStates[i].layout = rec->initialLayout;
+		if (rec->initialLayout == VK_IMAGE_LAYOUT_UNDEFINED) continue;
 
-	    for (size_t i = 0; i < bufferCount; ++i)
-	    {
-	        const RGBufferRecord *rec = _resources.get_buffer(RGBufferHandle{static_cast<uint32_t>(i)});
-	        if (!rec) continue;
-	        VkPipelineStageFlags2 st = rec->initialStage;
-	        VkAccessFlags2 ac = rec->initialAccess;
-	        if (st == VK_PIPELINE_STAGE_2_NONE) st = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-	        if (access_has_write(ac))
-	        {
-	            bufferStates[i].writeStage = st;
-	            bufferStates[i].writeAccess = ac;
-	        }
-	        else if (ac != 0)
-	        {
-	            bufferStates[i].readStage = st;
-	            bufferStates[i].readAccess = ac;
-	        }
-	    }
+		VkPipelineStageFlags2 st = rec->initialStage;
+		VkAccessFlags2 ac = rec->initialAccess;
+		if (st == VK_PIPELINE_STAGE_2_NONE && ac == 0)
+		{
+			st = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+			ac = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+		}
+		if (access_has_write(ac))
+		{
+			imageStates[i].writeStage = st;
+			imageStates[i].writeAccess = ac;
+		}
+		else if (ac != 0)
+		{
+			imageStates[i].readStage = st;
+			imageStates[i].readAccess = ac;
+		}
+	}
 
-    // Track first/last use for lifetime diagnostics and future aliasing
-    std::vector<int> imageFirst(imageCount, -1), imageLast(imageCount, -1);
-    std::vector<int> bufferFirst(bufferCount, -1), bufferLast(bufferCount, -1);
+	for (size_t i = 0; i < bufferCount; ++i)
+	{
+		const RGBufferRecord *rec = _resources.get_buffer(RGBufferHandle{static_cast<uint32_t>(i)});
+		if (!rec) continue;
+		VkPipelineStageFlags2 st = rec->initialStage;
+		VkAccessFlags2 ac = rec->initialAccess;
+		if (st == VK_PIPELINE_STAGE_2_NONE) st = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+		if (access_has_write(ac))
+		{
+			bufferStates[i].writeStage = st;
+			bufferStates[i].writeAccess = ac;
+		}
+		else if (ac != 0)
+		{
+			bufferStates[i].readStage = st;
+			bufferStates[i].readAccess = ac;
+		}
+	}
 
-    for (auto &pass: _passes)
-    {
-        pass.preImageBarriers.clear();
-        pass.preBufferBarriers.clear();
-        if (!pass.enabled) { continue; }
+	// Track first/last use for lifetime diagnostics and future aliasing
+	std::vector<int> imageFirst(imageCount, -1), imageLast(imageCount, -1);
+	std::vector<int> bufferFirst(bufferCount, -1), bufferLast(bufferCount, -1);
+
+	for (auto &pass: _passes)
+	{
+		pass.preImageBarriers.clear();
+		pass.preBufferBarriers.clear();
+		if (!pass.enabled) { continue; }
 
 		struct DesiredImageAccess
 		{
@@ -501,13 +501,13 @@ bool RenderGraph::compile()
 			{
 				case RGImageUsage::DepthAttachment: return 30;
 				case RGImageUsage::ColorAttachment: return 25;
-				case RGImageUsage::ComputeWrite:    return 20;
-				case RGImageUsage::TransferDst:     return 15;
-				case RGImageUsage::TransferSrc:     return 10;
-				case RGImageUsage::Present:         return 5;
-				case RGImageUsage::SampledCompute:  return 1;
+				case RGImageUsage::ComputeWrite: return 20;
+				case RGImageUsage::TransferDst: return 15;
+				case RGImageUsage::TransferSrc: return 10;
+				case RGImageUsage::Present: return 5;
+				case RGImageUsage::SampledCompute: return 1;
 				case RGImageUsage::SampledFragment: return 1;
-				default:                            return 0;
+				default: return 0;
 			}
 		};
 
@@ -537,7 +537,7 @@ bool RenderGraph::compile()
 				if (!d.warnedLayoutMismatch)
 				{
 					fmt::println("[RG][Warn] Pass '{}' declares multiple layouts for image id {} ({} vs {}).",
-					             pass.name, id, (int)d.info.layout, (int)u.layout);
+					             pass.name, id, (int) d.info.layout, (int) u.layout);
 					d.warnedLayoutMismatch = true;
 				}
 			}
@@ -550,149 +550,150 @@ bool RenderGraph::compile()
 			}
 		};
 
-        for (const auto &access: pass.imageReads)
-        {
-            if (!access.image.valid()) continue;
-            merge_desired_image(access.image.id, access.usage);
-            if (access.image.id < imageCount)
-            {
-                if (imageFirst[access.image.id] == -1) imageFirst[access.image.id] = (int)(&pass - _passes.data());
-                imageLast[access.image.id] = (int)(&pass - _passes.data());
-            }
-        }
-        for (const auto &access: pass.imageWrites)
-        {
-            if (!access.image.valid()) continue;
-            merge_desired_image(access.image.id, access.usage);
-            if (access.image.id < imageCount)
-            {
-                if (imageFirst[access.image.id] == -1) imageFirst[access.image.id] = (int)(&pass - _passes.data());
-                imageLast[access.image.id] = (int)(&pass - _passes.data());
-            }
-        }
+		for (const auto &access: pass.imageReads)
+		{
+			if (!access.image.valid()) continue;
+			merge_desired_image(access.image.id, access.usage);
+			if (access.image.id < imageCount)
+			{
+				if (imageFirst[access.image.id] == -1) imageFirst[access.image.id] = (int) (&pass - _passes.data());
+				imageLast[access.image.id] = (int) (&pass - _passes.data());
+			}
+		}
+		for (const auto &access: pass.imageWrites)
+		{
+			if (!access.image.valid()) continue;
+			merge_desired_image(access.image.id, access.usage);
+			if (access.image.id < imageCount)
+			{
+				if (imageFirst[access.image.id] == -1) imageFirst[access.image.id] = (int) (&pass - _passes.data());
+				imageLast[access.image.id] = (int) (&pass - _passes.data());
+			}
+		}
 
-        // Validation: basic layout/format/usage checks for images used by this pass
-        // Also build barriers
-        for (const auto &[id, d]: desiredImages)
-        {
-            if (id >= imageCount) continue;
+		// Validation: basic layout/format/usage checks for images used by this pass
+		// Also build barriers
+		for (const auto &[id, d]: desiredImages)
+		{
+			if (id >= imageCount) continue;
 
-            const RGImageUsage usage = d.canonical;
-            const ImageUsageInfo desired = d.info;
+			const RGImageUsage usage = d.canonical;
+			const ImageUsageInfo desired = d.info;
 
-            ImageState &state = imageStates[id];
-            const VkImageLayout prevLayout = state.layout;
-            const bool layoutChange = prevLayout != desired.layout;
-            const bool desiredWrite = access_has_write(desired.access);
-            const bool prevHasWrite = state.writeAccess != 0;
-            const bool prevHasReads = state.readAccess != 0;
+			ImageState &state = imageStates[id];
+			const VkImageLayout prevLayout = state.layout;
+			const bool layoutChange = prevLayout != desired.layout;
+			const bool desiredWrite = access_has_write(desired.access);
+			const bool prevHasWrite = state.writeAccess != 0;
+			const bool prevHasReads = state.readAccess != 0;
 
-            // Hazards requiring a barrier:
-            //  - Any layout change
-            //  - Any prior write before a new read or write (RAW/WAW)
-            //  - Prior reads before a new write (WAR)
-            bool needBarrier = layoutChange || prevHasWrite || (prevHasReads && desiredWrite);
+			// Hazards requiring a barrier:
+			//  - Any layout change
+			//  - Any prior write before a new read or write (RAW/WAW)
+			//  - Prior reads before a new write (WAR)
+			bool needBarrier = layoutChange || prevHasWrite || (prevHasReads && desiredWrite);
 
-            if (needBarrier)
-            {
-                VkPipelineStageFlags2 srcStage = VK_PIPELINE_STAGE_2_NONE;
-                VkAccessFlags2 srcAccess = 0;
-                if (prevHasWrite)
-                {
-                    srcStage = state.writeStage;
-                    srcAccess = state.writeAccess;
-                }
-                else if (prevHasReads)
-                {
-                    srcStage = state.readStage;
-                    srcAccess = state.readAccess;
-                }
-                else if (prevLayout == VK_IMAGE_LAYOUT_UNDEFINED)
-                {
-                    srcStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-                    srcAccess = 0;
-                }
-                else
-                {
-                    // Known layout but unknown access; be conservative.
-                    srcStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-                    srcAccess = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
-                }
-                if (srcStage == VK_PIPELINE_STAGE_2_NONE) srcStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+			if (needBarrier)
+			{
+				VkPipelineStageFlags2 srcStage = VK_PIPELINE_STAGE_2_NONE;
+				VkAccessFlags2 srcAccess = 0;
+				if (prevHasWrite)
+				{
+					srcStage = state.writeStage;
+					srcAccess = state.writeAccess;
+				}
+				else if (prevHasReads)
+				{
+					srcStage = state.readStage;
+					srcAccess = state.readAccess;
+				}
+				else if (prevLayout == VK_IMAGE_LAYOUT_UNDEFINED)
+				{
+					srcStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+					srcAccess = 0;
+				}
+				else
+				{
+					// Known layout but unknown access; be conservative.
+					srcStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+					srcAccess = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+				}
+				if (srcStage == VK_PIPELINE_STAGE_2_NONE) srcStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
 
-                VkImageMemoryBarrier2 barrier{.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-                barrier.srcStageMask = srcStage;
-                barrier.srcAccessMask = srcAccess;
-                barrier.dstStageMask = desired.stage;
-                barrier.dstAccessMask = desired.access;
-                barrier.oldLayout = prevLayout;
-                barrier.newLayout = desired.layout;
-                barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				VkImageMemoryBarrier2 barrier{.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+				barrier.srcStageMask = srcStage;
+				barrier.srcAccessMask = srcAccess;
+				barrier.dstStageMask = desired.stage;
+				barrier.dstAccessMask = desired.access;
+				barrier.oldLayout = prevLayout;
+				barrier.newLayout = desired.layout;
+				barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
-                const RGImageRecord *rec = _resources.get_image(RGImageHandle{id});
-                barrier.image = rec ? rec->image : VK_NULL_HANDLE;
+				const RGImageRecord *rec = _resources.get_image(RGImageHandle{id});
+				barrier.image = rec ? rec->image : VK_NULL_HANDLE;
 
-                VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-                if (d.hasDepthUsage || (rec && is_depth_format(rec->format)))
-                {
-                    aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-                }
-                barrier.subresourceRange = vkinit::image_subresource_range(aspect);
-                pass.preImageBarriers.push_back(barrier);
+				VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+				if (d.hasDepthUsage || (rec && is_depth_format(rec->format)))
+				{
+					aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+				}
+				barrier.subresourceRange = vkinit::image_subresource_range(aspect);
+				pass.preImageBarriers.push_back(barrier);
 
-                // Validation messages (debug-only style):
-                if (rec)
-                {
-                    // Color attachments should not be depth formats and vice versa
-                    if (usage == RGImageUsage::ColorAttachment && is_depth_format(rec->format))
-                    {
-                        fmt::println("[RG][Warn] Pass '{}' binds depth-format image '{}' as color attachment.",
-                                     pass.name, rec->name);
-                    }
-                    if (usage == RGImageUsage::DepthAttachment && !is_depth_format(rec->format))
-                    {
-                        fmt::println("[RG][Warn] Pass '{}' binds non-depth image '{}' as depth attachment.",
-                                     pass.name, rec->name);
-                    }
-                    // Usage flag sanity for transients we created
-                    if (!rec->imported)
-                    {
-                        VkImageUsageFlags need = usage_requires_flag(usage);
-                        if ((need & rec->creationUsage) != need)
-                        {
-                            fmt::println("[RG][Warn] Image '{}' used as '{}' but created without needed usage flags (0x{:x}).",
-                                         rec->name, (int)usage, (unsigned)need);
-                        }
-                    }
-                }
-            }
+				// Validation messages (debug-only style):
+				if (rec)
+				{
+					// Color attachments should not be depth formats and vice versa
+					if (usage == RGImageUsage::ColorAttachment && is_depth_format(rec->format))
+					{
+						fmt::println("[RG][Warn] Pass '{}' binds depth-format image '{}' as color attachment.",
+						             pass.name, rec->name);
+					}
+					if (usage == RGImageUsage::DepthAttachment && !is_depth_format(rec->format))
+					{
+						fmt::println("[RG][Warn] Pass '{}' binds non-depth image '{}' as depth attachment.",
+						             pass.name, rec->name);
+					}
+					// Usage flag sanity for transients we created
+					if (!rec->imported)
+					{
+						VkImageUsageFlags need = usage_requires_flag(usage);
+						if ((need & rec->creationUsage) != need)
+						{
+							fmt::println(
+								"[RG][Warn] Image '{}' used as '{}' but created without needed usage flags (0x{:x}).",
+								rec->name, (int) usage, (unsigned) need);
+						}
+					}
+				}
+			}
 
-            if (needBarrier)
-            {
-                state.readStage = VK_PIPELINE_STAGE_2_NONE;
-                state.readAccess = 0;
-                state.writeStage = VK_PIPELINE_STAGE_2_NONE;
-                state.writeAccess = 0;
-            }
-            state.layout = desired.layout;
-            if (desiredWrite)
-            {
-                state.readStage = VK_PIPELINE_STAGE_2_NONE;
-                state.readAccess = 0;
-                state.writeStage = desired.stage;
-                state.writeAccess = desired.access;
-            }
-            else
-            {
-                state.writeStage = VK_PIPELINE_STAGE_2_NONE;
-                state.writeAccess = 0;
-                state.readStage |= desired.stage;
-                state.readAccess |= desired.access;
-            }
-        }
+			if (needBarrier)
+			{
+				state.readStage = VK_PIPELINE_STAGE_2_NONE;
+				state.readAccess = 0;
+				state.writeStage = VK_PIPELINE_STAGE_2_NONE;
+				state.writeAccess = 0;
+			}
+			state.layout = desired.layout;
+			if (desiredWrite)
+			{
+				state.readStage = VK_PIPELINE_STAGE_2_NONE;
+				state.readAccess = 0;
+				state.writeStage = desired.stage;
+				state.writeAccess = desired.access;
+			}
+			else
+			{
+				state.writeStage = VK_PIPELINE_STAGE_2_NONE;
+				state.writeAccess = 0;
+				state.readStage |= desired.stage;
+				state.readAccess |= desired.access;
+			}
+		}
 
-        if (bufferCount == 0) continue;
+		if (bufferCount == 0) continue;
 
 		struct DesiredBufferAccess
 		{
@@ -704,15 +705,15 @@ bool RenderGraph::compile()
 		auto buffer_usage_priority = [](RGBufferUsage usage) -> int {
 			switch (usage)
 			{
-				case RGBufferUsage::TransferDst:        return 30;
-				case RGBufferUsage::TransferSrc:        return 25;
-				case RGBufferUsage::StorageReadWrite:   return 20;
-				case RGBufferUsage::StorageRead:        return 15;
-				case RGBufferUsage::IndirectArgs:       return 10;
-				case RGBufferUsage::VertexRead:         return 5;
-				case RGBufferUsage::IndexRead:          return 5;
-				case RGBufferUsage::UniformRead:        return 1;
-				default:                                return 0;
+				case RGBufferUsage::TransferDst: return 30;
+				case RGBufferUsage::TransferSrc: return 25;
+				case RGBufferUsage::StorageReadWrite: return 20;
+				case RGBufferUsage::StorageRead: return 15;
+				case RGBufferUsage::IndirectArgs: return 10;
+				case RGBufferUsage::VertexRead: return 5;
+				case RGBufferUsage::IndexRead: return 5;
+				case RGBufferUsage::UniformRead: return 1;
+				default: return 0;
 			}
 		};
 
@@ -737,267 +738,271 @@ bool RenderGraph::compile()
 			}
 		};
 
-        for (const auto &access: pass.bufferReads)
-        {
-            if (!access.buffer.valid()) continue;
-            merge_desired_buffer(access.buffer.id, access.usage);
-            if (access.buffer.id < bufferCount)
-            {
-                if (bufferFirst[access.buffer.id] == -1) bufferFirst[access.buffer.id] = (int)(&pass - _passes.data());
-                bufferLast[access.buffer.id] = (int)(&pass - _passes.data());
-            }
-        }
-        for (const auto &access: pass.bufferWrites)
-        {
-            if (!access.buffer.valid()) continue;
-            merge_desired_buffer(access.buffer.id, access.usage);
-            if (access.buffer.id < bufferCount)
-            {
-                if (bufferFirst[access.buffer.id] == -1) bufferFirst[access.buffer.id] = (int)(&pass - _passes.data());
-                bufferLast[access.buffer.id] = (int)(&pass - _passes.data());
-            }
-        }
-
-        for (const auto &[id, d]: desiredBuffers)
-        {
-            if (id >= bufferCount) continue;
-
-            const RGBufferUsage usage = d.canonical;
-            const BufferUsageInfo desired = d.info;
-
-            BufferState &state = bufferStates[id];
-            const bool desiredWrite = access_has_write(desired.access);
-            const bool prevHasWrite = state.writeAccess != 0;
-            const bool prevHasReads = state.readAccess != 0;
-
-            // Hazards requiring a barrier:
-            //  - Any prior write before a new read or write (RAW/WAW)
-            //  - Prior reads before a new write (WAR)
-            bool needBarrier = prevHasWrite || (prevHasReads && desiredWrite);
-
-            if (needBarrier)
-            {
-                VkPipelineStageFlags2 srcStage = VK_PIPELINE_STAGE_2_NONE;
-                VkAccessFlags2 srcAccess = 0;
-                if (prevHasWrite)
-                {
-                    srcStage = state.writeStage;
-                    srcAccess = state.writeAccess;
-                }
-                else if (prevHasReads)
-                {
-                    srcStage = state.readStage;
-                    srcAccess = state.readAccess;
-                }
-                if (srcStage == VK_PIPELINE_STAGE_2_NONE) srcStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-
-                VkBufferMemoryBarrier2 barrier{.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2};
-                barrier.srcStageMask = srcStage;
-                barrier.srcAccessMask = srcAccess;
-                barrier.dstStageMask = desired.stage;
-                barrier.dstAccessMask = desired.access;
-                barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-                const RGBufferRecord *rec = _resources.get_buffer(RGBufferHandle{id});
-                barrier.buffer = rec ? rec->buffer : VK_NULL_HANDLE;
-                barrier.offset = 0;
-                // For imported buffers we don't always know the exact VkBuffer size, so use WHOLE_SIZE
-                // to avoid violating VUID-VkBufferMemoryBarrier2-size-01189. For transient buffers
-                // created by the graph, we track the exact size.
-                if (rec && !rec->imported && rec->size > 0)
-                {
-                    barrier.size = rec->size;
-                }
-                else
-                {
-                    barrier.size = VK_WHOLE_SIZE;
-                }
-                pass.preBufferBarriers.push_back(barrier);
-
-                if (rec && !rec->imported)
-                {
-                    VkBufferUsageFlags need = buffer_usage_requires_flag(usage);
-                    if ((need & rec->usage) != need)
-                    {
-                        fmt::println("[RG][Warn] Buffer '{}' used as '{}' but created without needed usage flags (0x{:x}).",
-                                     rec->name, (int)usage, (unsigned)need);
-                    }
-                }
-            }
-
-            if (needBarrier)
-            {
-                state.readStage = VK_PIPELINE_STAGE_2_NONE;
-                state.readAccess = 0;
-                state.writeStage = VK_PIPELINE_STAGE_2_NONE;
-                state.writeAccess = 0;
-            }
-            if (desiredWrite)
-            {
-                state.readStage = VK_PIPELINE_STAGE_2_NONE;
-                state.readAccess = 0;
-                state.writeStage = desired.stage;
-                state.writeAccess = desired.access;
-            }
-            else
-            {
-                state.writeStage = VK_PIPELINE_STAGE_2_NONE;
-                state.writeAccess = 0;
-                state.readStage |= desired.stage;
-                state.readAccess |= desired.access;
-            }
+		for (const auto &access: pass.bufferReads)
+		{
+			if (!access.buffer.valid()) continue;
+			merge_desired_buffer(access.buffer.id, access.usage);
+			if (access.buffer.id < bufferCount)
+			{
+				if (bufferFirst[access.buffer.id] == -1) bufferFirst[access.buffer.id] = (int) (&pass - _passes.data());
+				bufferLast[access.buffer.id] = (int) (&pass - _passes.data());
+			}
+		}
+		for (const auto &access: pass.bufferWrites)
+		{
+			if (!access.buffer.valid()) continue;
+			merge_desired_buffer(access.buffer.id, access.usage);
+			if (access.buffer.id < bufferCount)
+			{
+				if (bufferFirst[access.buffer.id] == -1) bufferFirst[access.buffer.id] = (int) (&pass - _passes.data());
+				bufferLast[access.buffer.id] = (int) (&pass - _passes.data());
 			}
 		}
 
-        // Store lifetimes into records for diagnostics/aliasing
-        for (size_t i = 0; i < imageCount; ++i)
-        {
-            if (auto *rec = _resources.get_image(RGImageHandle{static_cast<uint32_t>(i)}))
-            {
-                rec->firstUse = imageFirst[i];
-                rec->lastUse = imageLast[i];
-            }
-        }
-        for (size_t i = 0; i < bufferCount; ++i)
-        {
-            if (auto *rec = _resources.get_buffer(RGBufferHandle{static_cast<uint32_t>(i)}))
-            {
-                rec->firstUse = bufferFirst[i];
-                rec->lastUse = bufferLast[i];
-            }
-        }
+		for (const auto &[id, d]: desiredBuffers)
+		{
+			if (id >= bufferCount) continue;
 
-        return true;
+			const RGBufferUsage usage = d.canonical;
+			const BufferUsageInfo desired = d.info;
+
+			BufferState &state = bufferStates[id];
+			const bool desiredWrite = access_has_write(desired.access);
+			const bool prevHasWrite = state.writeAccess != 0;
+			const bool prevHasReads = state.readAccess != 0;
+
+			// Hazards requiring a barrier:
+			//  - Any prior write before a new read or write (RAW/WAW)
+			//  - Prior reads before a new write (WAR)
+			bool needBarrier = prevHasWrite || (prevHasReads && desiredWrite);
+
+			if (needBarrier)
+			{
+				VkPipelineStageFlags2 srcStage = VK_PIPELINE_STAGE_2_NONE;
+				VkAccessFlags2 srcAccess = 0;
+				if (prevHasWrite)
+				{
+					srcStage = state.writeStage;
+					srcAccess = state.writeAccess;
+				}
+				else if (prevHasReads)
+				{
+					srcStage = state.readStage;
+					srcAccess = state.readAccess;
+				}
+				if (srcStage == VK_PIPELINE_STAGE_2_NONE) srcStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+
+				VkBufferMemoryBarrier2 barrier{.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2};
+				barrier.srcStageMask = srcStage;
+				barrier.srcAccessMask = srcAccess;
+				barrier.dstStageMask = desired.stage;
+				barrier.dstAccessMask = desired.access;
+				barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+				const RGBufferRecord *rec = _resources.get_buffer(RGBufferHandle{id});
+				barrier.buffer = rec ? rec->buffer : VK_NULL_HANDLE;
+				barrier.offset = 0;
+				// For imported buffers we don't always know the exact VkBuffer size, so use WHOLE_SIZE
+				// to avoid violating VUID-VkBufferMemoryBarrier2-size-01189. For transient buffers
+				// created by the graph, we track the exact size.
+				if (rec && !rec->imported && rec->size > 0)
+				{
+					barrier.size = rec->size;
+				}
+				else
+				{
+					barrier.size = VK_WHOLE_SIZE;
+				}
+				pass.preBufferBarriers.push_back(barrier);
+
+				if (rec && !rec->imported)
+				{
+					VkBufferUsageFlags need = buffer_usage_requires_flag(usage);
+					if ((need & rec->usage) != need)
+					{
+						fmt::println(
+							"[RG][Warn] Buffer '{}' used as '{}' but created without needed usage flags (0x{:x}).",
+							rec->name, (int) usage, (unsigned) need);
+					}
+				}
+			}
+
+			if (needBarrier)
+			{
+				state.readStage = VK_PIPELINE_STAGE_2_NONE;
+				state.readAccess = 0;
+				state.writeStage = VK_PIPELINE_STAGE_2_NONE;
+				state.writeAccess = 0;
+			}
+			if (desiredWrite)
+			{
+				state.readStage = VK_PIPELINE_STAGE_2_NONE;
+				state.readAccess = 0;
+				state.writeStage = desired.stage;
+				state.writeAccess = desired.access;
+			}
+			else
+			{
+				state.writeStage = VK_PIPELINE_STAGE_2_NONE;
+				state.writeAccess = 0;
+				state.readStage |= desired.stage;
+				state.readAccess |= desired.access;
+			}
+		}
+	}
+
+	// Store lifetimes into records for diagnostics/aliasing
+	for (size_t i = 0; i < imageCount; ++i)
+	{
+		if (auto *rec = _resources.get_image(RGImageHandle{static_cast<uint32_t>(i)}))
+		{
+			rec->firstUse = imageFirst[i];
+			rec->lastUse = imageLast[i];
+		}
+	}
+	for (size_t i = 0; i < bufferCount; ++i)
+	{
+		if (auto *rec = _resources.get_buffer(RGBufferHandle{static_cast<uint32_t>(i)}))
+		{
+			rec->firstUse = bufferFirst[i];
+			rec->lastUse = bufferLast[i];
+		}
+	}
+
+	return true;
 }
 
 void RenderGraph::execute(VkCommandBuffer cmd)
 {
-    // Create/reset timestamp query pool for this execution (2 queries per pass)
-    if (_timestampPool != VK_NULL_HANDLE)
-    {
-        vkDestroyQueryPool(_context->getDevice()->device(), _timestampPool, nullptr);
-        _timestampPool = VK_NULL_HANDLE;
-    }
-    const uint32_t queryCount = static_cast<uint32_t>(_passes.size() * 2);
-    if (queryCount > 0)
-    {
-        VkQueryPoolCreateInfo qpci{ .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
-        qpci.queryType = VK_QUERY_TYPE_TIMESTAMP;
-        qpci.queryCount = queryCount;
-        VK_CHECK(vkCreateQueryPool(_context->getDevice()->device(), &qpci, nullptr, &_timestampPool));
-        vkCmdResetQueryPool(cmd, _timestampPool, 0, queryCount);
-    }
+	// Create/reset timestamp query pool for this execution (2 queries per pass)
+	if (_timestampPool != VK_NULL_HANDLE)
+	{
+		vkDestroyQueryPool(_context->getDevice()->device(), _timestampPool, nullptr);
+		_timestampPool = VK_NULL_HANDLE;
+	}
+	const uint32_t queryCount = static_cast<uint32_t>(_passes.size() * 2);
+	if (queryCount > 0)
+	{
+		VkQueryPoolCreateInfo qpci{.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+		qpci.queryType = VK_QUERY_TYPE_TIMESTAMP;
+		qpci.queryCount = queryCount;
+		VK_CHECK(vkCreateQueryPool(_context->getDevice()->device(), &qpci, nullptr, &_timestampPool));
+		vkCmdResetQueryPool(cmd, _timestampPool, 0, queryCount);
+	}
 
-    _lastCpuMillis.assign(_passes.size(), -1.0f);
-    _wroteTimestamps.assign(_passes.size(), false);
+	_lastCpuMillis.assign(_passes.size(), -1.0f);
+	_wroteTimestamps.assign(_passes.size(), false);
 
-    for (size_t passIndex = 0; passIndex < _passes.size(); ++passIndex)
-    {
-        auto &p = _passes[passIndex];
-        if (!p.enabled) continue;
+	for (size_t passIndex = 0; passIndex < _passes.size(); ++passIndex)
+	{
+		auto &p = _passes[passIndex];
+		if (!p.enabled) continue;
 
-        // Debug label per pass
-        if (_context && _context->getDevice())
-        {
-            char labelName[128];
-            std::snprintf(labelName, sizeof(labelName), "RG: %s", p.name.c_str());
-            vkdebug::cmd_begin_label(_context->getDevice()->device(), cmd, labelName);
-        }
+		// Debug label per pass
+		if (_context && _context->getDevice())
+		{
+			char labelName[128];
+			std::snprintf(labelName, sizeof(labelName), "RG: %s", p.name.c_str());
+			vkdebug::cmd_begin_label(_context->getDevice()->device(), cmd, labelName);
+		}
 
-        if (!p.preImageBarriers.empty() || !p.preBufferBarriers.empty())
-        {
-            VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-            dep.imageMemoryBarrierCount = static_cast<uint32_t>(p.preImageBarriers.size());
-            dep.pImageMemoryBarriers = p.preImageBarriers.empty() ? nullptr : p.preImageBarriers.data();
-            dep.bufferMemoryBarrierCount = static_cast<uint32_t>(p.preBufferBarriers.size());
-            dep.pBufferMemoryBarriers = p.preBufferBarriers.empty() ? nullptr : p.preBufferBarriers.data();
-            vkCmdPipelineBarrier2(cmd, &dep);
-        }
+		if (!p.preImageBarriers.empty() || !p.preBufferBarriers.empty())
+		{
+			VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+			dep.imageMemoryBarrierCount = static_cast<uint32_t>(p.preImageBarriers.size());
+			dep.pImageMemoryBarriers = p.preImageBarriers.empty() ? nullptr : p.preImageBarriers.data();
+			dep.bufferMemoryBarrierCount = static_cast<uint32_t>(p.preBufferBarriers.size());
+			dep.pBufferMemoryBarriers = p.preBufferBarriers.empty() ? nullptr : p.preBufferBarriers.data();
+			vkCmdPipelineBarrier2(cmd, &dep);
+		}
 
-        // Timestamp begin and CPU start after barriers
-        if (_timestampPool != VK_NULL_HANDLE)
-        {
-            const uint32_t qidx = static_cast<uint32_t>(passIndex * 2 + 0);
-            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _timestampPool, qidx);
-        }
-        auto cpuStart = std::chrono::high_resolution_clock::now();
+		// Timestamp begin and CPU start after barriers
+		if (_timestampPool != VK_NULL_HANDLE)
+		{
+			const uint32_t qidx = static_cast<uint32_t>(passIndex * 2 + 0);
+			vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _timestampPool, qidx);
+		}
+		auto cpuStart = std::chrono::high_resolution_clock::now();
 
-        // Begin dynamic rendering if the pass declared attachments
-        bool doRendering = (!p.colorAttachments.empty() || p.hasDepth);
-        if (doRendering)
-        {
-            std::vector<VkRenderingAttachmentInfo> colorInfos;
-            colorInfos.reserve(p.colorAttachments.size());
-            VkRenderingAttachmentInfo depthInfo{};
-            bool hasDepth = false;
+		// Begin dynamic rendering if the pass declared attachments
+		bool doRendering = (!p.colorAttachments.empty() || p.hasDepth);
+		if (doRendering)
+		{
+			std::vector<VkRenderingAttachmentInfo> colorInfos;
+			colorInfos.reserve(p.colorAttachments.size());
+			VkRenderingAttachmentInfo depthInfo{};
+			bool hasDepth = false;
 
-            // Choose renderArea as the min of all attachment extents.
-            // Do not pre-clamp to drawExtent here: swapchain passes (ImGui, present)
-            // should be able to use the full window extent.
-            VkExtent2D chosenExtent{0, 0};
-            auto clamp_min = [](VkExtent2D a, VkExtent2D b) {
-                return VkExtent2D{std::min(a.width, b.width), std::min(a.height, b.height)};
-            };
-            auto set_or_clamp = [&](VkExtent2D e) {
-                if (chosenExtent.width == 0 || chosenExtent.height == 0) chosenExtent = e;
-                else chosenExtent = clamp_min(chosenExtent, e);
-            };
+			// Choose renderArea as the min of all attachment extents.
+			// Do not pre-clamp to drawExtent here: swapchain passes (ImGui, present)
+			// should be able to use the full window extent.
+			VkExtent2D chosenExtent{0, 0};
+			auto clamp_min = [](VkExtent2D a, VkExtent2D b) {
+				return VkExtent2D{std::min(a.width, b.width), std::min(a.height, b.height)};
+			};
+			auto set_or_clamp = [&](VkExtent2D e) {
+				if (chosenExtent.width == 0 || chosenExtent.height == 0) chosenExtent = e;
+				else chosenExtent = clamp_min(chosenExtent, e);
+			};
 
-            // Resolve color attachments
-            VkExtent2D firstColorExtent{0,0};
-            bool warnedExtentMismatch = false;
-            for (const auto &a: p.colorAttachments)
-            {
-                const RGImageRecord *rec = _resources.get_image(a.image);
-                if (!rec || rec->imageView == VK_NULL_HANDLE) continue;
-                VkClearValue *pClear = nullptr;
-                VkClearValue clear = a.clear;
-                if (a.clearOnLoad) pClear = &clear;
-                VkRenderingAttachmentInfo info = vkinit::attachment_info(rec->imageView, pClear,
-                                                                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-                if (!a.store) info.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                colorInfos.push_back(info);
-                if (rec->extent.width && rec->extent.height) set_or_clamp(rec->extent);
-                if (firstColorExtent.width == 0 && firstColorExtent.height == 0)
-                {
-                    firstColorExtent = rec->extent;
-                }
-                else if (!warnedExtentMismatch && (rec->extent.width != firstColorExtent.width || rec->extent.height != firstColorExtent.height))
-                {
-                    fmt::println("[RG][Warn] Pass '{}' has color attachments with mismatched extents ({}x{} vs {}x{}). Using min().",
-                                 p.name,
-                                 firstColorExtent.width, firstColorExtent.height,
-                                 rec->extent.width, rec->extent.height);
-                    warnedExtentMismatch = true;
-                }
-            }
+			// Resolve color attachments
+			VkExtent2D firstColorExtent{0, 0};
+			bool warnedExtentMismatch = false;
+			for (const auto &a: p.colorAttachments)
+			{
+				const RGImageRecord *rec = _resources.get_image(a.image);
+				if (!rec || rec->imageView == VK_NULL_HANDLE) continue;
+				VkClearValue *pClear = nullptr;
+				VkClearValue clear = a.clear;
+				if (a.clearOnLoad) pClear = &clear;
+				VkRenderingAttachmentInfo info = vkinit::attachment_info(rec->imageView, pClear,
+				                                                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+				if (!a.store) info.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+				colorInfos.push_back(info);
+				if (rec->extent.width && rec->extent.height) set_or_clamp(rec->extent);
+				if (firstColorExtent.width == 0 && firstColorExtent.height == 0)
+				{
+					firstColorExtent = rec->extent;
+				}
+				else if (!warnedExtentMismatch && (
+					         rec->extent.width != firstColorExtent.width || rec->extent.height != firstColorExtent.
+					         height))
+				{
+					fmt::println(
+						"[RG][Warn] Pass '{}' has color attachments with mismatched extents ({}x{} vs {}x{}). Using min().",
+						p.name,
+						firstColorExtent.width, firstColorExtent.height,
+						rec->extent.width, rec->extent.height);
+					warnedExtentMismatch = true;
+				}
+			}
 
-            if (p.hasDepth)
-            {
-                const RGImageRecord *rec = _resources.get_image(p.depthAttachment.image);
-                if (rec && rec->imageView != VK_NULL_HANDLE)
-                {
-                    depthInfo = vkinit::depth_attachment_info(rec->imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-                	if (p.depthAttachment.clearOnLoad)
-                	{
-                		depthInfo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                		depthInfo.clearValue = p.depthAttachment.clear;
-                	}
-                	else
-                	{
-                		depthInfo.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                	}
-                    if (!p.depthAttachment.store) depthInfo.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                    hasDepth = true;
-                    if (rec->extent.width && rec->extent.height) set_or_clamp(rec->extent);
-                }
-            }
+			if (p.hasDepth)
+			{
+				const RGImageRecord *rec = _resources.get_image(p.depthAttachment.image);
+				if (rec && rec->imageView != VK_NULL_HANDLE)
+				{
+					depthInfo = vkinit::depth_attachment_info(rec->imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+					if (p.depthAttachment.clearOnLoad)
+					{
+						depthInfo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+						depthInfo.clearValue = p.depthAttachment.clear;
+					}
+					else
+					{
+						depthInfo.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+					}
+					if (!p.depthAttachment.store) depthInfo.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+					hasDepth = true;
+					if (rec->extent.width && rec->extent.height) set_or_clamp(rec->extent);
+				}
+			}
 
-            if (chosenExtent.width == 0 || chosenExtent.height == 0)
-            {
-                chosenExtent = _context->getDrawExtent();
-            }
+			if (chosenExtent.width == 0 || chosenExtent.height == 0)
+			{
+				chosenExtent = _context->getDrawExtent();
+			}
 
 			VkRenderingInfo ri{};
 			ri.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -1008,8 +1013,8 @@ void RenderGraph::execute(VkCommandBuffer cmd)
 			ri.pDepthAttachment = hasDepth ? &depthInfo : nullptr;
 			ri.pStencilAttachment = nullptr;
 
-            vkCmdBeginRendering(cmd, &ri);
-        }
+			vkCmdBeginRendering(cmd, &ri);
+		}
 
 		if (p.record)
 		{
@@ -1017,26 +1022,26 @@ void RenderGraph::execute(VkCommandBuffer cmd)
 			p.record(cmd, res, _context);
 		}
 
-        if (doRendering)
-        {
-            vkCmdEndRendering(cmd);
-        }
+		if (doRendering)
+		{
+			vkCmdEndRendering(cmd);
+		}
 
-        // CPU end and timestamp end
-        auto cpuEnd = std::chrono::high_resolution_clock::now();
-        _lastCpuMillis[passIndex] = std::chrono::duration<float, std::milli>(cpuEnd - cpuStart).count();
-        if (_timestampPool != VK_NULL_HANDLE)
-        {
-            const uint32_t qidx = static_cast<uint32_t>(passIndex * 2 + 1);
-            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _timestampPool, qidx);
-            _wroteTimestamps[passIndex] = true;
-        }
+		// CPU end and timestamp end
+		auto cpuEnd = std::chrono::high_resolution_clock::now();
+		_lastCpuMillis[passIndex] = std::chrono::duration<float, std::milli>(cpuEnd - cpuStart).count();
+		if (_timestampPool != VK_NULL_HANDLE)
+		{
+			const uint32_t qidx = static_cast<uint32_t>(passIndex * 2 + 1);
+			vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _timestampPool, qidx);
+			_wroteTimestamps[passIndex] = true;
+		}
 
-        if (_context && _context->getDevice())
-        {
-            vkdebug::cmd_end_label(_context->getDevice()->device(), cmd);
-        }
-    }
+		if (_context && _context->getDevice())
+		{
+			vkdebug::cmd_end_label(_context->getDevice()->device(), cmd);
+		}
+	}
 }
 
 // --- Import helpers ---
@@ -1051,82 +1056,82 @@ void RenderGraph::add_present_chain(RGImageHandle sourceDraw,
 		RGPassType::Graphics,
 		[sourceDraw, targetSwapchain](RGPassBuilder &builder, EngineContext *) {
 			builder.read(sourceDraw, RGImageUsage::SampledFragment);
-            VkClearValue clear{};
-            clear.color = {{0.f, 0.f, 0.f, 1.f}};
+			VkClearValue clear{};
+			clear.color = {{0.f, 0.f, 0.f, 1.f}};
 			builder.write_color(targetSwapchain, true, clear);
 		},
 		[sourceDraw, targetSwapchain](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *ctx) {
-            if (!ctx || !ctx->currentFrame || !ctx->pipelines) return;
+			if (!ctx || !ctx->currentFrame || !ctx->pipelines) return;
 
-            VkImageView srcView = res.image_view(sourceDraw);
-            VkImageView dstView = res.image_view(targetSwapchain);
-            if (srcView == VK_NULL_HANDLE || dstView == VK_NULL_HANDLE) return;
+			VkImageView srcView = res.image_view(sourceDraw);
+			VkImageView dstView = res.image_view(targetSwapchain);
+			if (srcView == VK_NULL_HANDLE || dstView == VK_NULL_HANDLE) return;
 
-            VkPipeline pipeline = VK_NULL_HANDLE;
-            VkPipelineLayout layout = VK_NULL_HANDLE;
-            if (!ctx->pipelines->getGraphics("present_letterbox", pipeline, layout))
-            {
-                GraphicsPipelineCreateInfo info{};
-                info.vertexShaderPath = ctx->getAssets()->shaderPath("fullscreen.vert.spv");
-                info.fragmentShaderPath = ctx->getAssets()->shaderPath("present_letterbox.frag.spv");
-                info.setLayouts = { ctx->getDescriptorLayouts()->singleImageLayout() };
+			VkPipeline pipeline = VK_NULL_HANDLE;
+			VkPipelineLayout layout = VK_NULL_HANDLE;
+			if (!ctx->pipelines->getGraphics("present_letterbox", pipeline, layout))
+			{
+				GraphicsPipelineCreateInfo info{};
+				info.vertexShaderPath = ctx->getAssets()->shaderPath("fullscreen.vert.spv");
+				info.fragmentShaderPath = ctx->getAssets()->shaderPath("present_letterbox.frag.spv");
+				info.setLayouts = {ctx->getDescriptorLayouts()->singleImageLayout()};
 
-                VkPushConstantRange pcr{};
-                pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-                pcr.offset = 0;
-                pcr.size = sizeof(glm::vec4);
-                info.pushConstants = { pcr };
+				VkPushConstantRange pcr{};
+				pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+				pcr.offset = 0;
+				pcr.size = sizeof(glm::vec4);
+				info.pushConstants = {pcr};
 
-                VkFormat swapFmt = ctx->getSwapchain()->swapchainImageFormat();
-                info.configure = [swapFmt](PipelineBuilder &b) {
-                    b.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-                    b.set_polygon_mode(VK_POLYGON_MODE_FILL);
-                    b.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
-                    b.set_multisampling_none();
-                    b.disable_depthtest();
-                    b.disable_blending();
-                    b.set_color_attachment_format(swapFmt);
-                };
+				VkFormat swapFmt = ctx->getSwapchain()->swapchainImageFormat();
+				info.configure = [swapFmt](PipelineBuilder &b) {
+					b.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+					b.set_polygon_mode(VK_POLYGON_MODE_FILL);
+					b.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+					b.set_multisampling_none();
+					b.disable_depthtest();
+					b.disable_blending();
+					b.set_color_attachment_format(swapFmt);
+				};
 
-                if (!ctx->pipelines->createGraphicsPipeline("present_letterbox", info))
-                {
-                    return;
-                }
-                if (!ctx->pipelines->getGraphics("present_letterbox", pipeline, layout))
-                {
-                    return;
-                }
-            }
+				if (!ctx->pipelines->createGraphicsPipeline("present_letterbox", info))
+				{
+					return;
+				}
+				if (!ctx->pipelines->getGraphics("present_letterbox", pipeline, layout))
+				{
+					return;
+				}
+			}
 
-            VkDevice device = ctx->getDevice()->device();
-            VkDescriptorSetLayout setLayout = ctx->getDescriptorLayouts()->singleImageLayout();
-            VkDescriptorSet set = ctx->currentFrame->_frameDescriptors.allocate(device, setLayout);
-            DescriptorWriter writer;
-            writer.write_image(0, srcView, ctx->getSamplers()->defaultLinear(),
-                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-            writer.update_set(device, set);
+			VkDevice device = ctx->getDevice()->device();
+			VkDescriptorSetLayout setLayout = ctx->getDescriptorLayouts()->singleImageLayout();
+			VkDescriptorSet set = ctx->currentFrame->_frameDescriptors.allocate(device, setLayout);
+			DescriptorWriter writer;
+			writer.write_image(0, srcView, ctx->getSamplers()->defaultLinear(),
+			                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+			writer.update_set(device, set);
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &set, 0, nullptr);
+			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &set, 0, nullptr);
 
-            VkExtent2D srcSize = ctx->getDrawExtent();
-            VkExtent2D dstSize = ctx->getSwapchain()->swapchainExtent();
-            VkRect2D dstRect = vkutil::compute_letterbox_rect(srcSize, dstSize);
+			VkExtent2D srcSize = ctx->getDrawExtent();
+			VkExtent2D dstSize = ctx->getSwapchain()->swapchainExtent();
+			VkRect2D dstRect = vkutil::compute_letterbox_rect(srcSize, dstSize);
 
-            float minX = dstSize.width > 0 ? float(dstRect.offset.x) / float(dstSize.width) : 0.f;
-            float minY = dstSize.height > 0 ? float(dstRect.offset.y) / float(dstSize.height) : 0.f;
-            float sizeX = dstSize.width > 0 ? float(dstRect.extent.width) / float(dstSize.width) : 1.f;
-            float sizeY = dstSize.height > 0 ? float(dstRect.extent.height) / float(dstSize.height) : 1.f;
+			float minX = dstSize.width > 0 ? float(dstRect.offset.x) / float(dstSize.width) : 0.f;
+			float minY = dstSize.height > 0 ? float(dstRect.offset.y) / float(dstSize.height) : 0.f;
+			float sizeX = dstSize.width > 0 ? float(dstRect.extent.width) / float(dstSize.width) : 1.f;
+			float sizeY = dstSize.height > 0 ? float(dstRect.extent.height) / float(dstSize.height) : 1.f;
 
-            glm::vec4 pc{minX, minY, sizeX, sizeY};
-            vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(glm::vec4), &pc);
+			glm::vec4 pc{minX, minY, sizeX, sizeY};
+			vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(glm::vec4), &pc);
 
-            VkViewport vp{0.f, 0.f, float(dstSize.width), float(dstSize.height), 0.f, 1.f};
-            VkRect2D sc{{0, 0}, dstSize};
-            vkCmdSetViewport(cmd, 0, 1, &vp);
-            vkCmdSetScissor(cmd, 0, 1, &sc);
-            vkCmdDraw(cmd, 3, 1, 0, 0);
+			VkViewport vp{0.f, 0.f, float(dstSize.width), float(dstSize.height), 0.f, 1.f};
+			VkRect2D sc{{0, 0}, dstSize};
+			vkCmdSetViewport(cmd, 0, 1, &vp);
+			vkCmdSetScissor(cmd, 0, 1, &sc);
+			vkCmdDraw(cmd, 3, 1, 0, 0);
 		});
 
 	if (appendExtra)
@@ -1146,82 +1151,82 @@ void RenderGraph::add_present_chain(RGImageHandle sourceDraw,
 
 RGImageHandle RenderGraph::import_draw_image()
 {
-    RGImportedImageDesc d{};
-    d.name = "drawImage";
-    d.image = _context->getSwapchain()->drawImage().image;
-    d.imageView = _context->getSwapchain()->drawImage().imageView;
-    d.format = _context->getSwapchain()->drawImage().imageFormat;
-    d.extent = _context->getDrawExtent();
-    // Treat layout as unknown at frame start to force an explicit barrier
-    // into the first declared usage (compute write / color attach). This
-    // avoids mismatches when the previous frame ended in a different layout.
-    d.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    return import_image(d);
+	RGImportedImageDesc d{};
+	d.name = "drawImage";
+	d.image = _context->getSwapchain()->drawImage().image;
+	d.imageView = _context->getSwapchain()->drawImage().imageView;
+	d.format = _context->getSwapchain()->drawImage().imageFormat;
+	d.extent = _context->getDrawExtent();
+	// Treat layout as unknown at frame start to force an explicit barrier
+	// into the first declared usage (compute write / color attach). This
+	// avoids mismatches when the previous frame ended in a different layout.
+	d.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	return import_image(d);
 }
 
 // --- Debug helpers ---
 void RenderGraph::debug_get_passes(std::vector<RGDebugPassInfo> &out) const
 {
-    out.clear();
-    out.reserve(_passes.size());
-    for (const auto &p : _passes)
-    {
-        RGDebugPassInfo info{};
-        info.name = p.name;
-        info.type = p.type;
-        info.enabled = p.enabled;
-        info.imageReads = static_cast<uint32_t>(p.imageReads.size());
-        info.imageWrites = static_cast<uint32_t>(p.imageWrites.size());
-        info.bufferReads = static_cast<uint32_t>(p.bufferReads.size());
-        info.bufferWrites = static_cast<uint32_t>(p.bufferWrites.size());
-        info.colorAttachmentCount = static_cast<uint32_t>(p.colorAttachments.size());
-        info.hasDepth = p.hasDepth;
-        size_t idx = &p - _passes.data();
-        if (idx < _lastGpuMillis.size()) info.gpuMillis = _lastGpuMillis[idx];
-        if (idx < _lastCpuMillis.size()) info.cpuMillis = _lastCpuMillis[idx];
-        out.push_back(std::move(info));
-    }
+	out.clear();
+	out.reserve(_passes.size());
+	for (const auto &p: _passes)
+	{
+		RGDebugPassInfo info{};
+		info.name = p.name;
+		info.type = p.type;
+		info.enabled = p.enabled;
+		info.imageReads = static_cast<uint32_t>(p.imageReads.size());
+		info.imageWrites = static_cast<uint32_t>(p.imageWrites.size());
+		info.bufferReads = static_cast<uint32_t>(p.bufferReads.size());
+		info.bufferWrites = static_cast<uint32_t>(p.bufferWrites.size());
+		info.colorAttachmentCount = static_cast<uint32_t>(p.colorAttachments.size());
+		info.hasDepth = p.hasDepth;
+		size_t idx = &p - _passes.data();
+		if (idx < _lastGpuMillis.size()) info.gpuMillis = _lastGpuMillis[idx];
+		if (idx < _lastCpuMillis.size()) info.cpuMillis = _lastCpuMillis[idx];
+		out.push_back(std::move(info));
+	}
 }
 
 void RenderGraph::debug_get_images(std::vector<RGDebugImageInfo> &out) const
 {
-    out.clear();
-    out.reserve(_resources.image_count());
-    for (uint32_t i = 0; i < _resources.image_count(); ++i)
-    {
-        const RGImageRecord *rec = _resources.get_image(RGImageHandle{i});
-        if (!rec) continue;
-        RGDebugImageInfo info{};
-        info.id = i;
-        info.name = rec->name;
-        info.imported = rec->imported;
-        info.format = rec->format;
-        info.extent = rec->extent;
-        info.creationUsage = rec->creationUsage;
-        info.firstUse = rec->firstUse;
-        info.lastUse = rec->lastUse;
-        out.push_back(std::move(info));
-    }
+	out.clear();
+	out.reserve(_resources.image_count());
+	for (uint32_t i = 0; i < _resources.image_count(); ++i)
+	{
+		const RGImageRecord *rec = _resources.get_image(RGImageHandle{i});
+		if (!rec) continue;
+		RGDebugImageInfo info{};
+		info.id = i;
+		info.name = rec->name;
+		info.imported = rec->imported;
+		info.format = rec->format;
+		info.extent = rec->extent;
+		info.creationUsage = rec->creationUsage;
+		info.firstUse = rec->firstUse;
+		info.lastUse = rec->lastUse;
+		out.push_back(std::move(info));
+	}
 }
 
 void RenderGraph::debug_get_buffers(std::vector<RGDebugBufferInfo> &out) const
 {
-    out.clear();
-    out.reserve(_resources.buffer_count());
-    for (uint32_t i = 0; i < _resources.buffer_count(); ++i)
-    {
-        const RGBufferRecord *rec = _resources.get_buffer(RGBufferHandle{i});
-        if (!rec) continue;
-        RGDebugBufferInfo info{};
-        info.id = i;
-        info.name = rec->name;
-        info.imported = rec->imported;
-        info.size = rec->size;
-        info.usage = rec->usage;
-        info.firstUse = rec->firstUse;
-        info.lastUse = rec->lastUse;
-        out.push_back(std::move(info));
-    }
+	out.clear();
+	out.reserve(_resources.buffer_count());
+	for (uint32_t i = 0; i < _resources.buffer_count(); ++i)
+	{
+		const RGBufferRecord *rec = _resources.get_buffer(RGBufferHandle{i});
+		if (!rec) continue;
+		RGDebugBufferInfo info{};
+		info.id = i;
+		info.name = rec->name;
+		info.imported = rec->imported;
+		info.size = rec->size;
+		info.usage = rec->usage;
+		info.firstUse = rec->firstUse;
+		info.lastUse = rec->lastUse;
+		out.push_back(std::move(info));
+	}
 }
 
 RGImageHandle RenderGraph::import_depth_image()
@@ -1306,50 +1311,53 @@ RGImageHandle RenderGraph::import_swapchain_image(uint32_t index)
 	d.imageView = views[index];
 	d.format = _context->getSwapchain()->swapchainImageFormat();
 	d.extent = _context->getSwapchain()->swapchainExtent();
-    // Track actual layout across frames. After present, images are in PRESENT_SRC_KHR.
-    d.currentLayout = _context->getSwapchain()->swapchain_image_layout(index);
-    return import_image(d);
+	// Track actual layout across frames. After present, images are in PRESENT_SRC_KHR.
+	d.currentLayout = _context->getSwapchain()->swapchain_image_layout(index);
+	return import_image(d);
 }
 
 void RenderGraph::resolve_timings()
 {
-    if (_timestampPool == VK_NULL_HANDLE || _passes.empty())
-    {
-        _lastGpuMillis.assign(_passes.size(), -1.0f);
-        return;
-    }
+	if (_timestampPool == VK_NULL_HANDLE || _passes.empty())
+	{
+		_lastGpuMillis.assign(_passes.size(), -1.0f);
+		return;
+	}
 
-    const uint32_t queryCount = static_cast<uint32_t>(_passes.size() * 2);
-    std::vector<uint64_t> results(queryCount, 0);
-    VkResult r = vkGetQueryPoolResults(
-        _context->getDevice()->device(), _timestampPool,
-        0, queryCount,
-        sizeof(uint64_t) * results.size(), results.data(), sizeof(uint64_t),
-        VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-    // Convert ticks to ms
-    VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(_context->getDevice()->physicalDevice(), &props);
-    const double tickNs = props.limits.timestampPeriod;
+	const uint32_t queryCount = static_cast<uint32_t>(_passes.size() * 2);
+	std::vector<uint64_t> results(queryCount, 0);
+	VkResult r = vkGetQueryPoolResults(
+		_context->getDevice()->device(), _timestampPool,
+		0, queryCount,
+		sizeof(uint64_t) * results.size(), results.data(), sizeof(uint64_t),
+		VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+	VkPhysicalDeviceProperties props{};
+	vkGetPhysicalDeviceProperties(_context->getDevice()->physicalDevice(), &props);
+	const double tickNs = props.limits.timestampPeriod;
 
-    _lastGpuMillis.assign(_passes.size(), -1.0f);
-    for (size_t i = 0; i < _passes.size(); ++i)
-    {
-        if (!_wroteTimestamps.empty() && !_wroteTimestamps[i]) { _lastGpuMillis[i] = -1.0f; continue; }
-        const uint64_t t0 = results[i*2 + 0];
-        const uint64_t t1 = results[i*2 + 1];
-        if (t1 > t0)
-        {
-            double ns = double(t1 - t0) * tickNs;
-            _lastGpuMillis[i] = static_cast<float>(ns / 1.0e6);
-        }
-        else
-        {
-            _lastGpuMillis[i] = -1.0f;
-        }
-    }
+	_lastGpuMillis.assign(_passes.size(), -1.0f);
+	for (size_t i = 0; i < _passes.size(); ++i)
+	{
+		if (!_wroteTimestamps.empty() && !_wroteTimestamps[i])
+		{
+			_lastGpuMillis[i] = -1.0f;
+			continue;
+		}
+		const uint64_t t0 = results[i * 2 + 0];
+		const uint64_t t1 = results[i * 2 + 1];
+		if (t1 > t0)
+		{
+			double ns = double(t1 - t0) * tickNs;
+			_lastGpuMillis[i] = static_cast<float>(ns / 1.0e6);
+		}
+		else
+		{
+			_lastGpuMillis[i] = -1.0f;
+		}
+	}
 
-    // Ensure any pending work that might still reference the pool is complete
-    vkQueueWaitIdle(_context->getDevice()->graphicsQueue());
-    vkDestroyQueryPool(_context->getDevice()->device(), _timestampPool, nullptr);
-    _timestampPool = VK_NULL_HANDLE;
+	// Ensure any pending work that might still reference the pool is complete
+	vkQueueWaitIdle(_context->getDevice()->graphicsQueue());
+	vkDestroyQueryPool(_context->getDevice()->device(), _timestampPool, nullptr);
+	_timestampPool = VK_NULL_HANDLE;
 }

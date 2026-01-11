@@ -34,12 +34,12 @@ vec2 quad_corner(uint vidx)
 {
     // Two triangles (6 verts) in a unit quad centered at origin.
     const vec2 corners[6] = vec2[6](
-        vec2(-0.5, -0.5),
-        vec2( 0.5, -0.5),
-        vec2( 0.5,  0.5),
-        vec2(-0.5, -0.5),
-        vec2( 0.5,  0.5),
-        vec2(-0.5,  0.5)
+    vec2(-0.5, -0.5),
+    vec2(0.5, -0.5),
+    vec2(0.5, 0.5),
+    vec2(-0.5, -0.5),
+    vec2(0.5, 0.5),
+    vec2(-0.5, 0.5)
     );
     return corners[vidx % 6u];
 }
@@ -51,7 +51,7 @@ void main()
 
     float life = max(p.vel_life.w, 1e-6);
     float remaining = clamp(p.pos_age.w, 0.0, life);
-    float t = remaining / life; // remaining fraction
+    float t = remaining / life;// remaining fraction
 
     float fade_out = smoothstep(0.0, 0.15, t);
     float fade_in  = smoothstep(0.0, 0.05, 1.0 - t);

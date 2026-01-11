@@ -119,6 +119,7 @@ public:
     };
 
     void init(EngineContext *context);
+
     void cleanup();
 
     void update_and_emit(const SceneManager &scene, DrawContext &draw_context);
@@ -127,6 +128,7 @@ public:
     void set_enabled(bool enabled) { _enabled = enabled; }
 
     PlanetBody *find_body_by_name(std::string_view name);
+
     const std::vector<PlanetBody> &bodies() const { return _bodies; }
 
     // Returns the terrain displacement height (meters) at the given direction from the planet center.
@@ -136,20 +138,31 @@ public:
     // Runtime planet management
     // - Planets are identified by 'name' (must be unique).
     PlanetBody *create_mesh_planet(const MeshPlanetCreateInfo &info);
+
     PlanetBody *create_terrain_planet(const TerrainPlanetCreateInfo &info);
+
     bool destroy_planet(std::string_view name);
+
     void clear_planets(bool destroy_mesh_assets = true);
 
     bool set_planet_center(std::string_view name, const WorldVec3 &center_world);
+
     bool set_planet_radius(std::string_view name, double radius_m);
+
     bool set_planet_visible(std::string_view name, bool visible);
+
     bool set_planet_terrain(std::string_view name, bool terrain);
 
     const planet::PlanetQuadtree::Settings &earth_quadtree_settings() const { return _earth_quadtree_settings; }
-    void set_earth_quadtree_settings(const planet::PlanetQuadtree::Settings &settings) { _earth_quadtree_settings = settings; }
+
+    void set_earth_quadtree_settings(const planet::PlanetQuadtree::Settings &settings)
+    {
+        _earth_quadtree_settings = settings;
+    }
 
     // Terrain debug stats for a specific planet name (returns empty stats if not found).
     const EarthDebugStats &terrain_debug_stats(std::string_view name) const;
+
     // Back-compat: returns debug stats for the first terrain planet, if any.
     const EarthDebugStats &earth_debug_stats() const;
 
@@ -160,16 +173,19 @@ public:
     void set_earth_patch_create_budget_ms(float budget_ms) { _earth_patch_create_budget_ms = budget_ms; }
 
     uint32_t earth_patch_resolution() const { return _earth_patch_resolution; }
+
     void set_earth_patch_resolution(uint32_t resolution);
 
     uint32_t earth_patch_cache_max() const { return _earth_patch_cache_max; }
     void set_earth_patch_cache_max(uint32_t max_patches) { _earth_patch_cache_max = max_patches; }
 
     bool earth_debug_tint_patches_by_lod() const { return _earth_debug_tint_patches_by_lod; }
+
     void set_earth_debug_tint_patches_by_lod(bool enabled);
 
 private:
     PlanetBody *find_terrain_body();
+
     const PlanetBody *find_terrain_body() const;
 
     enum class TerrainPatchState : uint8_t
@@ -222,22 +238,34 @@ private:
     };
 
     TerrainState *get_or_create_terrain_state(std::string_view name);
+
     TerrainState *find_terrain_state(std::string_view name);
+
     const TerrainState *find_terrain_state(std::string_view name) const;
 
     TerrainPatch *find_terrain_patch(TerrainState &state, const planet::PatchKey &key);
+
     TerrainPatch *get_or_create_terrain_patch(TerrainState &state,
                                               const PlanetBody &body,
                                               const planet::PatchKey &key,
                                               uint32_t frame_index);
+
     void ensure_earth_patch_index_buffer();
+
     void ensure_earth_patch_material_layout();
+
     void ensure_terrain_material_constants_buffer(TerrainState &state, const PlanetBody &body);
+
     void ensure_terrain_face_materials(TerrainState &state, const PlanetBody &body);
+
     void ensure_terrain_height_maps(TerrainState &state, const PlanetBody &body);
+
     void clear_terrain_patch_cache(TerrainState &state);
+
     void trim_terrain_patch_cache(TerrainState &state);
+
     void clear_all_terrain_patch_caches();
+
     void clear_terrain_materials(TerrainState &state);
 
     EngineContext *_context = nullptr;
@@ -245,7 +273,7 @@ private:
     std::vector<PlanetBody> _bodies;
 
     planet::PlanetQuadtree::Settings _earth_quadtree_settings{};
-    std::unordered_map<std::string, std::unique_ptr<TerrainState>> _terrain_states;
+    std::unordered_map<std::string, std::unique_ptr<TerrainState> > _terrain_states;
     EarthDebugStats _empty_debug_stats{};
     AllocatedBuffer _earth_patch_index_buffer{};
     uint32_t _earth_patch_index_count = 0;

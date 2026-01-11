@@ -23,6 +23,7 @@ Current structure:
 Work-In-Progress
 - Physics engine integration (Jolt)
 - Celestial mechanics
+- ...AND making real game
 
 ## Build prequsites
 - ktx software with libraries

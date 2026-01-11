@@ -14,12 +14,18 @@ namespace planet
         glm::dvec3 d(0.0);
         switch (face)
         {
-            case CubeFace::PosX: d = glm::dvec3(1.0, -v, -u); break;
-            case CubeFace::NegX: d = glm::dvec3(-1.0, -v, u); break;
-            case CubeFace::PosY: d = glm::dvec3(u, 1.0, v); break;
-            case CubeFace::NegY: d = glm::dvec3(u, -1.0, -v); break;
-            case CubeFace::PosZ: d = glm::dvec3(u, -v, 1.0); break;
-            case CubeFace::NegZ: d = glm::dvec3(-u, -v, -1.0); break;
+            case CubeFace::PosX: d = glm::dvec3(1.0, -v, -u);
+                break;
+            case CubeFace::NegX: d = glm::dvec3(-1.0, -v, u);
+                break;
+            case CubeFace::PosY: d = glm::dvec3(u, 1.0, v);
+                break;
+            case CubeFace::NegY: d = glm::dvec3(u, -1.0, -v);
+                break;
+            case CubeFace::PosZ: d = glm::dvec3(u, -v, 1.0);
+                break;
+            case CubeFace::NegZ: d = glm::dvec3(-u, -v, -1.0);
+                break;
         }
 
         const double len2 = glm::dot(d, d);
@@ -168,7 +174,7 @@ namespace planet
         }
 
         const size_t grid_index_count =
-            static_cast<size_t>(resolution - 1u) * static_cast<size_t>(resolution - 1u) * 6u;
+                static_cast<size_t>(resolution - 1u) * static_cast<size_t>(resolution - 1u) * 6u;
         const size_t skirt_index_count = static_cast<size_t>(4u) * static_cast<size_t>(resolution - 1u) * 6u;
         out_indices.reserve(grid_index_count + skirt_index_count);
 
@@ -193,8 +199,7 @@ namespace planet
             }
         }
 
-        auto add_skirt_quads = [&](uint32_t base0, uint32_t base1, uint32_t skirt0, uint32_t skirt1)
-        {
+        auto add_skirt_quads = [&](uint32_t base0, uint32_t base1, uint32_t skirt0, uint32_t skirt1) {
             out_indices.push_back(base0);
             out_indices.push_back(base1);
             out_indices.push_back(skirt0);
@@ -308,8 +313,7 @@ namespace planet
             }
         }
 
-        auto add_skirt_vertex = [&](uint32_t base_index, uint32_t skirt_index)
-        {
+        auto add_skirt_vertex = [&](uint32_t base_index, uint32_t skirt_index) {
             const glm::vec3 n = out_vertices[base_index].normal;
             const glm::dvec3 unit_dir(static_cast<double>(n.x),
                                       static_cast<double>(n.y),
@@ -376,7 +380,7 @@ namespace planet
         }
 
         const glm::dvec3 patch_center_dir =
-            build_cubesphere_patch_vertices(out.vertices, radius_m, face, level, x, y, resolution, vertex_color);
+                build_cubesphere_patch_vertices(out.vertices, radius_m, face, level, x, y, resolution, vertex_color);
         build_cubesphere_patch_indices(out.indices, resolution);
 
         out.patch_center_world = center_world + patch_center_dir * radius_m;

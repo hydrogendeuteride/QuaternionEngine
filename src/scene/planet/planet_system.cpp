@@ -43,7 +43,7 @@ namespace
 
         glm::vec3 minpos = vertices[0].position;
         glm::vec3 maxpos = vertices[0].position;
-        for (const auto &v : vertices)
+        for (const auto &v: vertices)
         {
             minpos = glm::min(minpos, v.position);
             maxpos = glm::max(maxpos, v.position);
@@ -209,10 +209,10 @@ void PlanetSystem::cleanup()
     TextureCache *textures = _context->textures;
     if (textures)
     {
-        for (auto &kv : _terrain_states)
+        for (auto &kv: _terrain_states)
         {
             TerrainState &state = *kv.second;
-            for (MaterialInstance &mat : state.face_materials)
+            for (MaterialInstance &mat: state.face_materials)
             {
                 if (mat.materialSet != VK_NULL_HANDLE)
                 {
@@ -225,10 +225,10 @@ void PlanetSystem::cleanup()
     ResourceManager *rm = _context->getResources();
     if (rm)
     {
-        for (auto &kv : _terrain_states)
+        for (auto &kv: _terrain_states)
         {
             TerrainState &state = *kv.second;
-            for (TerrainPatch &p : state.patches)
+            for (TerrainPatch &p: state.patches)
             {
                 if (p.vertex_buffer.buffer != VK_NULL_HANDLE)
                 {
@@ -394,7 +394,7 @@ PlanetSystem::PlanetBody *PlanetSystem::create_mesh_planet(const MeshPlanetCreat
 
         const std::string asset_name = fmt::format("Planet_{}", info.name);
         const GLTFMetallic_Roughness::MaterialConstants mc =
-            make_planet_constants(info.base_color, info.metallic, info.roughness);
+                make_planet_constants(info.base_color, info.metallic, info.roughness);
 
         body.material = assets->createMaterialFromConstants(asset_name, mc, MaterialPass::MainColor);
 
@@ -444,7 +444,7 @@ PlanetSystem::PlanetBody *PlanetSystem::create_terrain_planet(const TerrainPlane
 
         const std::string asset_name = fmt::format("Planet_{}_TerrainMaterial", info.name);
         const GLTFMetallic_Roughness::MaterialConstants mc =
-            make_planet_constants(info.base_color, info.metallic, info.roughness, info.emission_factor);
+                make_planet_constants(info.base_color, info.metallic, info.roughness, info.emission_factor);
         body.material = assets->createMaterialFromConstants(asset_name, mc, MaterialPass::MainColor);
     }
 
@@ -513,7 +513,7 @@ void PlanetSystem::clear_planets(bool destroy_mesh_assets)
     if (destroy_mesh_assets && _context && _context->assets)
     {
         AssetManager *assets = _context->assets;
-        for (const PlanetBody &b : _bodies)
+        for (const PlanetBody &b: _bodies)
         {
             if (!b.mesh) continue;
             if (_context->currentFrame)
@@ -529,7 +529,7 @@ void PlanetSystem::clear_planets(bool destroy_mesh_assets)
 
     // Terrain patches can be very large; clear them even if we keep the
     // shared index/material resources around.
-    for (auto &kv : _terrain_states)
+    for (auto &kv: _terrain_states)
     {
         TerrainState &state = *kv.second;
         clear_terrain_patch_cache(state);
@@ -665,7 +665,7 @@ void PlanetSystem::clear_terrain_patch_cache(TerrainState &state)
 
     if (rm)
     {
-        for (TerrainPatch &p : state.patches)
+        for (TerrainPatch &p: state.patches)
         {
             if (p.vertex_buffer.buffer == VK_NULL_HANDLE)
             {
@@ -695,7 +695,7 @@ void PlanetSystem::clear_terrain_patch_cache(TerrainState &state)
 
 void PlanetSystem::clear_all_terrain_patch_caches()
 {
-    for (auto &kv : _terrain_states)
+    for (auto &kv: _terrain_states)
     {
         if (!kv.second)
         {
@@ -711,7 +711,7 @@ void PlanetSystem::clear_terrain_materials(TerrainState &state)
     if (_context && _context->textures)
     {
         TextureCache *textures = _context->textures;
-        for (MaterialInstance &mat : state.face_materials)
+        for (MaterialInstance &mat: state.face_materials)
         {
             if (mat.materialSet != VK_NULL_HANDLE)
             {
@@ -768,9 +768,9 @@ void PlanetSystem::ensure_earth_patch_index_buffer()
     planet::build_cubesphere_patch_indices(indices, _earth_patch_resolution);
     _earth_patch_index_count = static_cast<uint32_t>(indices.size());
     _earth_patch_index_buffer =
-        rm->upload_buffer(indices.data(),
-                          indices.size() * sizeof(uint32_t),
-                          VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+            rm->upload_buffer(indices.data(),
+                              indices.size() * sizeof(uint32_t),
+                              VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
     _earth_patch_index_resolution = _earth_patch_resolution;
@@ -824,17 +824,17 @@ void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
         }
 
         const bool same_constants =
-            state.bound_base_color == body.base_color &&
-            state.bound_metallic == body.metallic &&
-            state.bound_roughness == body.roughness &&
-            state.bound_emission_factor == body.emission_factor;
+                state.bound_base_color == body.base_color &&
+                state.bound_metallic == body.metallic &&
+                state.bound_roughness == body.roughness &&
+                state.bound_emission_factor == body.emission_factor;
         if (same_constants)
         {
             return;
         }
 
         const GLTFMetallic_Roughness::MaterialConstants constants =
-            make_planet_constants(body.base_color, body.metallic, body.roughness, body.emission_factor);
+                make_planet_constants(body.base_color, body.metallic, body.roughness, body.emission_factor);
 
         VmaAllocationInfo allocInfo{};
         vmaGetAllocationInfo(device->allocator(), state.material_constants_buffer.allocation, &allocInfo);
@@ -868,12 +868,12 @@ void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
     }
 
     const GLTFMetallic_Roughness::MaterialConstants constants =
-        make_planet_constants(body.base_color, body.metallic, body.roughness, body.emission_factor);
+            make_planet_constants(body.base_color, body.metallic, body.roughness, body.emission_factor);
 
     state.material_constants_buffer =
-        rm->create_buffer(sizeof(GLTFMetallic_Roughness::MaterialConstants),
-                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                          VMA_MEMORY_USAGE_CPU_TO_GPU);
+            rm->create_buffer(sizeof(GLTFMetallic_Roughness::MaterialConstants),
+                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                              VMA_MEMORY_USAGE_CPU_TO_GPU);
 
     if (state.material_constants_buffer.buffer == VK_NULL_HANDLE)
     {
@@ -1121,13 +1121,12 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
     const std::string desired_dir = body.terrain_height_dir;
     const double desired_max_m = body.terrain_height_max_m;
     const bool changed =
-        desired_dir != state.bound_height_dir ||
-        desired_max_m != state.bound_height_max_m;
+            desired_dir != state.bound_height_dir ||
+            desired_max_m != state.bound_height_max_m;
 
     const bool want_height = !desired_dir.empty() && (desired_max_m > 0.0);
-    const bool have_height = [&]() -> bool
-    {
-        for (const planet::HeightFace &f : state.height_faces)
+    const bool have_height = [&]() -> bool {
+        for (const planet::HeightFace &f: state.height_faces)
         {
             if (f.width == 0 || f.height == 0 || f.texels.empty())
             {
@@ -1151,7 +1150,7 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
 
         state.bound_height_dir = desired_dir;
         state.bound_height_max_m = desired_max_m;
-        for (planet::HeightFace &f : state.height_faces)
+        for (planet::HeightFace &f: state.height_faces)
         {
             f = {};
         }
@@ -1160,7 +1159,7 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
     if (!want_height)
     {
         // Height disabled; ensure faces are cleared.
-        for (planet::HeightFace &f : state.height_faces)
+        for (planet::HeightFace &f: state.height_faces)
         {
             f = {};
         }
@@ -1233,7 +1232,7 @@ PlanetSystem::TerrainPatch *PlanetSystem::get_or_create_terrain_patch(TerrainSta
     }
 
     const glm::vec4 vertex_color =
-        _earth_debug_tint_patches_by_lod ? debug_color_for_level(key.level) : glm::vec4(1.0f);
+            _earth_debug_tint_patches_by_lod ? debug_color_for_level(key.level) : glm::vec4(1.0f);
 
     thread_local std::vector<Vertex> scratch_vertices;
     const uint32_t safe_res = std::max(2u, _earth_patch_resolution);
@@ -1241,14 +1240,14 @@ PlanetSystem::TerrainPatch *PlanetSystem::get_or_create_terrain_patch(TerrainSta
         static_cast<size_t>(safe_res) * static_cast<size_t>(safe_res) +
         static_cast<size_t>(4u) * static_cast<size_t>(safe_res));
     const glm::dvec3 patch_center_dir =
-        planet::build_cubesphere_patch_vertices(scratch_vertices,
-                                                body.radius_m,
-                                                key.face,
-                                                key.level,
-                                                key.x,
-                                                key.y,
-                                                safe_res,
-                                                vertex_color);
+            planet::build_cubesphere_patch_vertices(scratch_vertices,
+                                                    body.radius_m,
+                                                    key.face,
+                                                    key.level,
+                                                    key.x,
+                                                    key.y,
+                                                    safe_res,
+                                                    vertex_color);
 
     if (scratch_vertices.empty())
     {
@@ -1264,7 +1263,7 @@ PlanetSystem::TerrainPatch *PlanetSystem::get_or_create_terrain_patch(TerrainSta
             if (height_face.width > 0 && height_face.height > 0 && !height_face.texels.empty())
             {
                 const float scale = static_cast<float>(body.terrain_height_max_m);
-                for (Vertex &v : scratch_vertices)
+                for (Vertex &v: scratch_vertices)
                 {
                     const float h01 = planet::sample_height(height_face, v.uv_x, v.uv_y);
                     const float h_m = h01 * scale;
@@ -1279,9 +1278,9 @@ PlanetSystem::TerrainPatch *PlanetSystem::get_or_create_terrain_patch(TerrainSta
     const PatchBoundsData bounds = compute_patch_bounds(scratch_vertices);
 
     AllocatedBuffer vb =
-        rm->upload_buffer(scratch_vertices.data(),
-                          scratch_vertices.size() * sizeof(Vertex),
-                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            rm->upload_buffer(scratch_vertices.data(),
+                              scratch_vertices.size() * sizeof(Vertex),
+                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
     if (vb.buffer == VK_NULL_HANDLE)
@@ -1432,7 +1431,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
 
         ensure_earth_patch_index_buffer();
 
-        for (PlanetBody &body : _bodies)
+        for (PlanetBody &body: _bodies)
         {
             if (!body.terrain || !body.visible || !body.material)
             {
@@ -1471,7 +1470,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             ensure_terrain_face_materials(*state, body);
             if (_context->textures)
             {
-                for (const MaterialInstance &mat : state->face_materials)
+                for (const MaterialInstance &mat: state->face_materials)
                 {
                     if (mat.materialSet != VK_NULL_HANDLE)
                     {
@@ -1481,16 +1480,16 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             }
 
             size_t desired_capacity =
-                static_cast<size_t>(state->patches.size()) +
-                static_cast<size_t>(_earth_patch_create_budget_per_frame) +
-                32u;
+                    static_cast<size_t>(state->patches.size()) +
+                    static_cast<size_t>(_earth_patch_create_budget_per_frame) +
+                    32u;
             if (_earth_patch_cache_max != 0)
             {
                 desired_capacity = std::max(
                     desired_capacity,
                     static_cast<size_t>(_earth_patch_cache_max) +
-                        static_cast<size_t>(_earth_patch_create_budget_per_frame) +
-                        32u);
+                    static_cast<size_t>(_earth_patch_create_budget_per_frame) +
+                    32u);
             }
             if (state->patches.capacity() < desired_capacity)
             {
@@ -1501,7 +1500,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             double ms_patch_create = 0.0;
             const uint32_t max_create = _earth_patch_create_budget_per_frame;
             const double max_create_ms =
-                (_earth_patch_create_budget_ms > 0.0f) ? static_cast<double>(_earth_patch_create_budget_ms) : 0.0;
+                    (_earth_patch_create_budget_ms > 0.0f) ? static_cast<double>(_earth_patch_create_budget_ms) : 0.0;
             const uint32_t frame_index = ++state->patch_frame_stamp;
 
             const Clock::time_point t_emit0 = Clock::now();
@@ -1510,15 +1509,14 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             // near-camera terrain before spending budget on far patches.
             std::vector<planet::PatchKey> create_queue = state->quadtree.visible_leaves();
             std::sort(create_queue.begin(), create_queue.end(),
-                      [](const planet::PatchKey &a, const planet::PatchKey &b)
-                      {
+                      [](const planet::PatchKey &a, const planet::PatchKey &b) {
                           if (a.level != b.level) return a.level > b.level;
                           if (a.face != b.face) return a.face < b.face;
                           if (a.x != b.x) return a.x < b.x;
                           return a.y < b.y;
                       });
 
-            for (const planet::PatchKey &k : create_queue)
+            for (const planet::PatchKey &k: create_queue)
             {
                 if (find_terrain_patch(*state, k))
                 {
@@ -1543,8 +1541,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 ms_patch_create += std::chrono::duration<double, std::milli>(t_c1 - t_c0).count();
             }
 
-            auto is_patch_ready = [&](const planet::PatchKey &k) -> bool
-            {
+            auto is_patch_ready = [&](const planet::PatchKey &k) -> bool {
                 TerrainPatch *p = find_terrain_patch(*state, k);
                 if (!p)
                 {
@@ -1564,8 +1561,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             // Compute a "render cut" that never renders holes: if a desired leaf patch isn't ready yet,
             // fall back to the nearest ready ancestor patch.
             auto compute_render_cut = [&](const std::vector<planet::PatchKey> &desired_leaves)
-                -> std::vector<planet::PatchKey>
-            {
+                -> std::vector<planet::PatchKey> {
                 std::vector<planet::PatchKey> render_keys;
                 if (desired_leaves.empty())
                 {
@@ -1578,7 +1574,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 std::unordered_map<planet::PatchKey, uint8_t, planet::PatchKeyHash> child_masks;
                 child_masks.reserve(desired_leaves.size() * 2u);
 
-                for (const planet::PatchKey &leaf : desired_leaves)
+                for (const planet::PatchKey &leaf: desired_leaves)
                 {
                     leaf_set.insert(leaf);
 
@@ -1594,8 +1590,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
 
                 render_keys.reserve(desired_leaves.size());
 
-                auto traverse = [&](auto &&self, const planet::PatchKey &k) -> bool
-                {
+                auto traverse = [&](auto &&self, const planet::PatchKey &k) -> bool {
                     if (leaf_set.contains(k))
                     {
                         if (is_patch_ready(k))
@@ -1665,7 +1660,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                     planet::CubeFace::NegZ,
                 };
 
-                for (planet::CubeFace face : faces)
+                for (planet::CubeFace face: faces)
                 {
                     const planet::PatchKey root{face, 0u, 0u, 0u};
                     if (leaf_set.contains(root) || child_masks.find(root) != child_masks.end())
@@ -1681,7 +1676,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             const std::vector<planet::PatchKey> render_keys = compute_render_cut(state->quadtree.visible_leaves());
             ready_patch_indices.reserve(render_keys.size());
 
-            for (const planet::PatchKey &k : render_keys)
+            for (const planet::PatchKey &k: render_keys)
             {
                 TerrainPatch *patch = find_terrain_patch(*state, k);
                 if (!patch)
@@ -1690,15 +1685,13 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 }
 
                 patch->last_used_frame = frame_index;
-                state->patch_lru.splice(state->patch_lru.begin(), state->patch_lru, patch->lru_it);
-
-                {
+                state->patch_lru.splice(state->patch_lru.begin(), state->patch_lru, patch->lru_it); {
                     const uint32_t idx = static_cast<uint32_t>(patch - state->patches.data());
                     ready_patch_indices.push_back(idx);
                 }
             }
 
-            for (uint32_t idx : ready_patch_indices)
+            for (uint32_t idx: ready_patch_indices)
             {
                 if (idx >= state->patches.size())
                 {
@@ -1727,7 +1720,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 }
 
                 const WorldVec3 patch_center_world =
-                    body.center_world + patch.patch_center_dir * body.radius_m;
+                        body.center_world + patch.patch_center_dir * body.radius_m;
                 const glm::vec3 patch_center_local = world_to_local(patch_center_world, origin_world);
                 const glm::mat4 transform = glm::translate(glm::mat4(1.0f), patch_center_local);
 
@@ -1771,11 +1764,13 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             state->debug_stats.created_patches = created_patches;
             state->debug_stats.patch_cache_size = static_cast<uint32_t>(state->patch_lookup.size());
             state->debug_stats.estimated_triangles = estimated_tris;
-            state->debug_stats.ms_quadtree = static_cast<float>(std::chrono::duration<double, std::milli>(t_q1 - t_q0).count());
+            state->debug_stats.ms_quadtree = static_cast<float>(std::chrono::duration<double, std::milli>(t_q1 - t_q0).
+                count());
             state->debug_stats.ms_patch_create = static_cast<float>(ms_patch_create);
             const double ms_emit_total = std::chrono::duration<double, std::milli>(t_emit1 - t_emit0).count();
             state->debug_stats.ms_emit = static_cast<float>(std::max(0.0, ms_emit_total - ms_patch_create));
-            state->debug_stats.ms_total = static_cast<float>(std::chrono::duration<double, std::milli>(Clock::now() - t0).count());
+            state->debug_stats.ms_total = static_cast<float>(std::chrono::duration<double, std::milli>(
+                Clock::now() - t0).count());
         }
     }
 
@@ -1801,7 +1796,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
         const glm::mat4 transform = make_trs_matrix(t_local, q, s);
 
         uint32_t surface_index = 0;
-        for (const GeoSurface &surf : b.mesh->surfaces)
+        for (const GeoSurface &surf: b.mesh->surfaces)
         {
             RenderObject obj{};
             obj.indexCount = surf.count;

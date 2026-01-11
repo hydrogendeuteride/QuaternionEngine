@@ -120,24 +120,24 @@ namespace planet
 
             // Clip volume in Vulkan (ZO): -w<=x<=w, -w<=y<=w, 0<=z<=w
             if (all_out([](const glm::vec4 &v) { return v.x < -v.w; })) return false; // left
-            if (all_out([](const glm::vec4 &v) { return v.x >  v.w; })) return false; // right
+            if (all_out([](const glm::vec4 &v) { return v.x > v.w; })) return false; // right
             if (all_out([](const glm::vec4 &v) { return v.y < -v.w; })) return false; // bottom
-            if (all_out([](const glm::vec4 &v) { return v.y >  v.w; })) return false; // top
-            if (all_out([](const glm::vec4 &v) { return v.z <  0.0f; })) return false; // near (ZO)
-            if (all_out([](const glm::vec4 &v) { return v.z >  v.w; })) return false; // far
+            if (all_out([](const glm::vec4 &v) { return v.y > v.w; })) return false; // top
+            if (all_out([](const glm::vec4 &v) { return v.z < 0.0f; })) return false; // near (ZO)
+            if (all_out([](const glm::vec4 &v) { return v.z > v.w; })) return false; // far
 
             return true;
         }
     } // namespace
 
     void PlanetQuadtree::update(const WorldVec3 &body_center_world,
-                    double radius_m,
-                    double max_height_m,
-                    const WorldVec3 &camera_world,
-                    const WorldVec3 &origin_world,
-                    const GPUSceneData &scene_data,
-                    VkExtent2D logical_extent,
-                    uint32_t patch_resolution)
+                                double radius_m,
+                                double max_height_m,
+                                const WorldVec3 &camera_world,
+                                const WorldVec3 &origin_world,
+                                const GPUSceneData &scene_data,
+                                VkExtent2D logical_extent,
+                                uint32_t patch_resolution)
     {
         _visible_leaves.clear();
         _stats = {};
@@ -156,11 +156,11 @@ namespace planet
         const double cam_alt_m = glm::length(camera_world - body_center_world) - radius_m;
         const bool camera_outside = (cam_alt_m >= 0.0);
         const bool rt_guardrail_active =
-            _settings.rt_guardrail &&
-            rt_shadows_enabled &&
-            camera_outside &&
-            (_settings.max_patch_edge_rt_m > 0.0) &&
-            (cam_alt_m <= _settings.rt_guardrail_max_altitude_m);
+                _settings.rt_guardrail &&
+                rt_shadows_enabled &&
+                camera_outside &&
+                (_settings.max_patch_edge_rt_m > 0.0) &&
+                (cam_alt_m <= _settings.rt_guardrail_max_altitude_m);
 
         const float proj_y = scene_data.proj[1][1];
         const float proj_scale = std::abs(proj_y) * (static_cast<float>(logical_extent.height) * 0.5f);
@@ -174,12 +174,11 @@ namespace planet
         stack.reserve(256);
 
         const size_t max_visible_leaves =
-            (_settings.max_patches_visible > 0u)
-                ? static_cast<size_t>(std::max(_settings.max_patches_visible, 6u))
-                : std::numeric_limits<size_t>::max();
+                (_settings.max_patches_visible > 0u)
+                    ? static_cast<size_t>(std::max(_settings.max_patches_visible, 6u))
+                    : std::numeric_limits<size_t>::max();
 
-        auto push_root = [&](CubeFace face)
-        {
+        auto push_root = [&](CubeFace face) {
             Node n{};
             n.key.face = face;
             n.key.level = 0;
@@ -215,7 +214,8 @@ namespace planet
             double patch_bound_r_m = 1.0;
             if (_settings.horizon_cull || _settings.frustum_cull)
             {
-                compute_patch_visibility_terms(k, patch_dir, radius_m, height_guard, cos_patch_radius, sin_patch_radius, patch_bound_r_m);
+                compute_patch_visibility_terms(k, patch_dir, radius_m, height_guard, cos_patch_radius, sin_patch_radius,
+                                               patch_bound_r_m);
             }
 
             if (_settings.horizon_cull)
@@ -233,7 +233,7 @@ namespace planet
             }
 
             const WorldVec3 patch_center_world =
-                body_center_world + patch_dir * radius_m;
+                    body_center_world + patch_dir * radius_m;
 
             if (_settings.frustum_cull)
             {
@@ -255,7 +255,8 @@ namespace planet
             const float sse_px = static_cast<float>((error_m / dist_m) * static_cast<double>(proj_scale));
 
             bool refine = (k.level < _settings.max_level) && (sse_px > _settings.target_sse_px);
-            if (!refine && rt_guardrail_active && (k.level < _settings.max_level) && (patch_edge_m > _settings.max_patch_edge_rt_m))
+            if (!refine && rt_guardrail_active && (k.level < _settings.max_level) && (
+                    patch_edge_m > _settings.max_patch_edge_rt_m))
             {
                 refine = true;
             }
@@ -295,8 +296,7 @@ namespace planet
         // Keep deterministic order for stability (optional).
         // DFS already stable; sort is useful when culling changes traversal.
         std::sort(_visible_leaves.begin(), _visible_leaves.end(),
-                  [](const PatchKey &a, const PatchKey &b)
-                  {
+                  [](const PatchKey &a, const PatchKey &b) {
                       if (a.face != b.face) return a.face < b.face;
                       if (a.level != b.level) return a.level < b.level;
                       if (a.x != b.x) return a.x < b.x;
