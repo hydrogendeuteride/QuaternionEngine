@@ -6,3 +6,7 @@
 /cmake-build-release_win
 *.spv
 /bin
+/cmake-build-debug-win-clang
+/cmake-build-release-win-clang
+/tmp
+/docs

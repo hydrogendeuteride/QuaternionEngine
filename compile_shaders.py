@@ -12,7 +12,6 @@ SHADER_EXTS = {
 PROFILE_FLAGS = {
     "Debug": ["-g"],
     "Release": ["-O"],
-    # Matches the old `compile_shaders.ps1` defaults (-O + -g).
     "RelWithDebInfo": ["-O", "-g"],
 }
 

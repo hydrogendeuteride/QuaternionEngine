@@ -21,6 +21,8 @@ Current structure:
 - Sun
 
 Work-In-Progress
+- Physics engine integration (Jolt)
+- Celestial mechanics
 
 ## Build prequsites
 - ktx software with libraries

@@ -6,8 +6,6 @@
 class RenderGraph;
 class RGPassResources;
 
-// Analytic sun disk drawn as a fullscreen additive pass over the background.
-// This is independent of atmosphere rendering and works in space.
 class SunDiskPass : public IRenderPass
 {
 public:

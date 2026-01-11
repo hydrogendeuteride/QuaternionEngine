@@ -1,5 +1,3 @@
-
-# Add source to this project's executable.
 add_executable (vulkan_engine
   main.cpp
   # core root
@@ -171,18 +169,18 @@ target_compile_definitions(vulkan_engine PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 # Compiler/OS-specific optimization flags
 # ==============================================================================
 
-# Detect clang-cl (Clang with MSVC frontend)
+# clang-cl
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
     set(USING_CLANG_CL TRUE)
 else()
     set(USING_CLANG_CL FALSE)
 endif()
 
-# --- Release build optimizations ---
+# build optim
 if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
 
     if (MSVC AND NOT USING_CLANG_CL)
-        # MSVC (cl.exe)
+        # MSVC
         target_compile_options(vulkan_engine PRIVATE
             /O2             # Maximum speed optimization
             /Ob2            # Inline expansion (any suitable)
@@ -282,7 +280,6 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 
 endif()
 
-# --- Platform-specific flags ---
 if (WIN32)
     target_compile_definitions(vulkan_engine PRIVATE
         WIN32_LEAN_AND_MEAN
@@ -292,12 +289,10 @@ if (WIN32)
 endif()
 
 if (UNIX AND NOT APPLE)
-    # Linux-specific
     target_link_libraries(vulkan_engine PRIVATE pthread dl)
 endif()
 
 if (APPLE)
-    # macOS-specific (if needed)
     target_compile_options(vulkan_engine PRIVATE
         -Wno-deprecated-declarations
     )
@@ -357,8 +352,6 @@ if(WIN32)
 endif()
 
 # KTX (libktx)
-# NOTE: Under WSL it's easy to accidentally pick up the Windows KTX package (ktx.dll),
-# which will configure but fail to link on Linux. Prefer the native library when needed.
 find_package(ktx CONFIG QUIET)
 
 set(_KTX_CMAKE_TARGET "")
