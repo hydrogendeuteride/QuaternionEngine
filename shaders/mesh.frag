@@ -16,7 +16,7 @@ layout (location = 4) in vec4 inTangent;
 
 layout (location = 0) out vec4 outFragColor;
 
-vec3 getCameraWorldPosition()
+vec3 getCameraWorldPosition() // Because I'm not clever enough to add cmaera position...
 {
     // view = [ R^T  -R^T*C ]
     //        [ 0       1   ]
