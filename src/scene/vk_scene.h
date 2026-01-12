@@ -162,6 +162,21 @@ public:
                                      const std::string &nodeName);
     void clearGLTFInstanceNodeOffsets(const std::string &instanceName);
 
+    // Returns a glTF node's world transform
+    // - World: uses the instance's stored world-space translation (float in the returned matrix).
+    // - Local: uses the render-local (floating-origin shifted) translation for better precision near the camera.
+    bool getGLTFInstanceNodeWorldTransform(const std::string &instanceName,
+                                          const std::string &nodeName,
+                                          glm::mat4 &outWorldTransform) const;
+    glm::mat4 getGLTFInstanceNodeWorldTransform(const std::string &instanceName,
+                                                const std::string &nodeName) const;
+
+    bool getGLTFInstanceNodeWorldTransformLocal(const std::string &instanceName,
+                                               const std::string &nodeName,
+                                               glm::mat4 &outWorldTransformLocal) const;
+    glm::mat4 getGLTFInstanceNodeWorldTransformLocal(const std::string &instanceName,
+                                                     const std::string &nodeName) const;
+
     // Animation control helpers (glTF)
     // Note: a LoadedGLTF may be shared by multiple instances; changing
     // the active animation on a scene or instance affects all users

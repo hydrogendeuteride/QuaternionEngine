@@ -18,6 +18,41 @@
 #include "core/frame/resources.h"
 #include <fmt/core.h>
 
+namespace
+{
+    glm::mat4 build_node_world_with_overrides(const Node *node,
+                                              const std::unordered_map<const Node*, glm::mat4> &overrides)
+    {
+        if (!node)
+        {
+            return glm::mat4(1.0f);
+        }
+
+        std::vector<const Node*> chain;
+        const Node *cur = node;
+        while (cur)
+        {
+            chain.push_back(cur);
+            std::shared_ptr<Node> parent = cur->parent.lock();
+            cur = parent ? parent.get() : nullptr;
+        }
+
+        glm::mat4 world(1.0f);
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it)
+        {
+            const Node *n = *it;
+            glm::mat4 local = n->localTransform;
+            auto ovIt = overrides.find(n);
+            if (ovIt != overrides.end())
+            {
+                local = local * ovIt->second;
+            }
+            world = world * local;
+        }
+        return world;
+    }
+}
+
 SceneManager::SceneManager() = default;
 
 SceneManager::~SceneManager()
@@ -842,6 +877,97 @@ std::shared_ptr<LoadedGLTF> SceneManager::getGLTFInstanceScene(const std::string
         return it->second.scene;
     }
     return nullptr;
+}
+
+bool SceneManager::getGLTFInstanceNodeWorldTransform(const std::string &instanceName,
+                                                     const std::string &nodeName,
+                                                     glm::mat4 &outWorldTransform) const
+{
+    auto it = dynamicGLTFInstances.find(instanceName);
+    if (it == dynamicGLTFInstances.end())
+    {
+        return false;
+    }
+
+    const GLTFInstance &inst = it->second;
+    if (!inst.scene)
+    {
+        return false;
+    }
+
+    auto nodePtr = inst.scene->getNode(nodeName);
+    if (!nodePtr)
+    {
+        return false;
+    }
+
+    glm::mat4 nodeWorld;
+    if (!inst.nodeLocalOverrides.empty())
+    {
+        nodeWorld = build_node_world_with_overrides(nodePtr.get(), inst.nodeLocalOverrides);
+    }
+    else
+    {
+        nodeWorld = nodePtr->worldTransform;
+    }
+
+    glm::mat4 instWorld = make_trs_matrix(glm::vec3(inst.translation_world), inst.rotation, inst.scale);
+    outWorldTransform = instWorld * nodeWorld;
+    return true;
+}
+
+glm::mat4 SceneManager::getGLTFInstanceNodeWorldTransform(const std::string &instanceName,
+                                                          const std::string &nodeName) const
+{
+    glm::mat4 world(1.0f);
+    (void)getGLTFInstanceNodeWorldTransform(instanceName, nodeName, world);
+    return world;
+}
+
+bool SceneManager::getGLTFInstanceNodeWorldTransformLocal(const std::string &instanceName,
+                                                          const std::string &nodeName,
+                                                          glm::mat4 &outWorldTransformLocal) const
+{
+    auto it = dynamicGLTFInstances.find(instanceName);
+    if (it == dynamicGLTFInstances.end())
+    {
+        return false;
+    }
+
+    const GLTFInstance &inst = it->second;
+    if (!inst.scene)
+    {
+        return false;
+    }
+
+    auto nodePtr = inst.scene->getNode(nodeName);
+    if (!nodePtr)
+    {
+        return false;
+    }
+
+    glm::mat4 nodeWorld;
+    if (!inst.nodeLocalOverrides.empty())
+    {
+        nodeWorld = build_node_world_with_overrides(nodePtr.get(), inst.nodeLocalOverrides);
+    }
+    else
+    {
+        nodeWorld = nodePtr->worldTransform;
+    }
+
+    glm::vec3 tLocal = world_to_local(inst.translation_world, _origin_world);
+    glm::mat4 instLocal = make_trs_matrix(tLocal, inst.rotation, inst.scale);
+    outWorldTransformLocal = instLocal * nodeWorld;
+    return true;
+}
+
+glm::mat4 SceneManager::getGLTFInstanceNodeWorldTransformLocal(const std::string &instanceName,
+                                                               const std::string &nodeName) const
+{
+    glm::mat4 worldLocal(1.0f);
+    (void)getGLTFInstanceNodeWorldTransformLocal(instanceName, nodeName, worldLocal);
+    return worldLocal;
 }
 
 bool SceneManager::getGLTFInstanceTransform(const std::string &name, glm::mat4 &outTransform)
