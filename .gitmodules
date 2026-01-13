@@ -8,3 +8,6 @@
 	path = third_party/SDL
 	url = https://github.com/libsdl-org/SDL.git
 	branch = release-2.32.x
+[submodule "third_party/JoltPhysics"]
+	path = third_party/JoltPhysics
+	url = https://github.com/jrouwe/JoltPhysics.git

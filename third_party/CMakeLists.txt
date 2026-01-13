@@ -8,6 +8,20 @@ add_subdirectory(fastgltf)
 add_subdirectory(fmt EXCLUDE_FROM_ALL)
 add_subdirectory(SDL EXCLUDE_FROM_ALL)
 
+if (VULKAN_ENGINE_USE_JOLT)
+  # Jolt's CMake options are unfortunately generic and live in the cache; set a couple
+  # of safe defaults for integration into this engine build.
+  set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "Disable Jolt warnings-as-errors in parent project" FORCE)
+  set(ENABLE_INSTALL OFF CACHE BOOL "Disable Jolt install rules in parent project" FORCE)
+  set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "Do not let Jolt override global CMAKE_CXX_FLAGS_*" FORCE)
+  set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "Use dynamic MSVC runtime (avoid /MT-/MD mismatches)" FORCE)
+  set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "Disable Jolt LTO/IPO in parent project (engine controls LTO)" FORCE)
+  set(CPP_RTTI_ENABLED ON CACHE BOOL "Enable RTTI (engine headers use dynamic_cast; required for linking)" FORCE)
+  set(DOUBLE_PRECISION ${VULKAN_ENGINE_JOLT_DOUBLE_PRECISION} CACHE BOOL "Build Jolt with double precision math" FORCE)
+
+  add_subdirectory(JoltPhysics/Build EXCLUDE_FROM_ALL)
+endif()
+
 target_sources(vkbootstrap PRIVATE 
   vkbootstrap/VkBootstrap.h
   vkbootstrap/VkBootstrap.cpp

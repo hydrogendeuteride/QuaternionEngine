@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.20)
 
 project(vulkan_engine LANGUAGES C CXX)
 
@@ -27,6 +27,9 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 # Third-party deps are vendored; keep builds offline-friendly by default.
 # BVH2's CMake enables tests by default, which would FetchContent googletest.
 set(BVH2_ENABLE_TESTS OFF CACHE BOOL "Disable BVH2 tests (offline builds)" FORCE)
+
+option(VULKAN_ENGINE_USE_JOLT "Build with Jolt Physics (vendored in third_party/JoltPhysics)" ON)
+option(VULKAN_ENGINE_JOLT_DOUBLE_PRECISION "Build Jolt with double precision math (JPH_DOUBLE_PRECISION)" OFF)
 
 add_subdirectory(third_party)
 
