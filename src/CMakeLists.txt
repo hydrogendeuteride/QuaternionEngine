@@ -160,6 +160,14 @@ add_executable (vulkan_engine
   runtime/time_manager.cpp
   runtime/game_runtime.h
   runtime/game_runtime.cpp
+  # physics
+  physics/collision_shape.h
+  physics/body_settings.h
+  physics/physics_body.h
+  physics/physics_body.cpp
+  physics/physics_world.h
+  physics/jolt/jolt_physics_world.h
+  physics/jolt/jolt_physics_world.cpp
 )
 
 set_property(TARGET vulkan_engine PROPERTY CXX_STANDARD 20)
@@ -314,6 +322,7 @@ target_include_directories(vulkan_engine PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/scene"
   "${CMAKE_CURRENT_SOURCE_DIR}/compute"
   "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+  "${CMAKE_CURRENT_SOURCE_DIR}/physics"
 )
 
 option(ENABLE_MIKKTS "Use MikkTSpace for tangent generation" ON)

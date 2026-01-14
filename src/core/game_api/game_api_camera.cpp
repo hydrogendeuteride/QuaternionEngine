@@ -9,6 +9,7 @@
 #include "scene/planet/planet_system.h"
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/norm.hpp>
+#include <cmath>
 
 namespace GameAPI
 {
@@ -111,26 +112,40 @@ void Engine::camera_look_at(const glm::vec3& target)
     if (!_engine->_sceneManager) return;
 
     Camera& cam = _engine->_sceneManager->getMainCamera();
-    glm::vec3 dir = glm::normalize(target - glm::vec3(cam.position_world));
+    glm::vec3 to_target = target - glm::vec3(cam.position_world);
+    if (!std::isfinite(to_target.x) || !std::isfinite(to_target.y) || !std::isfinite(to_target.z) || glm::length2(to_target) < 1.0e-12f)
+    {
+        return;
+    }
 
-    // For a -Z forward convention, build a quaternion that rotates -Z into dir.
-    // Use glm's lookAt-style helper via matrices, then convert to a quaternion.
+    glm::vec3 dir = glm::normalize(to_target);
+
     glm::vec3 up(0.0f, 1.0f, 0.0f);
     if (glm::length2(glm::cross(dir, up)) < 1e-6f)
     {
         up = glm::vec3(0.0f, 0.0f, 1.0f);
     }
 
-    glm::vec3 f = dir;
-    glm::vec3 r = glm::normalize(glm::cross(up, f));
-    glm::vec3 u = glm::cross(f, r);
+    const glm::vec3 forward = dir;
+    const glm::vec3 backward = -forward; // camera local +Z in world
+
+    glm::vec3 right = glm::cross(up, backward);
+    if (glm::length2(right) < 1.0e-12f)
+    {
+        // Fallback if up is still near-parallel (degenerate); pick an alternate up.
+        const glm::vec3 alt_up = (std::abs(backward.y) < 0.99f) ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+        right = glm::cross(alt_up, backward);
+    }
+    right = glm::normalize(right);
+
+    const glm::vec3 true_up = glm::cross(backward, right);
 
     glm::mat3 rot;
-    rot[0] = r;
-    rot[1] = u;
-    rot[2] = -f; // -Z forward
+    rot[0] = right;
+    rot[1] = true_up;
+    rot[2] = backward;
 
-    cam.orientation = glm::quat_cast(rot);
+    cam.orientation = glm::normalize(glm::quat_cast(rot));
 }
 
 void Engine::camera_look_at(const glm::dvec3& target)
@@ -138,26 +153,40 @@ void Engine::camera_look_at(const glm::dvec3& target)
     if (!_engine->_sceneManager) return;
 
     Camera& cam = _engine->_sceneManager->getMainCamera();
-    glm::dvec3 dirD = glm::normalize(target - cam.position_world);
+    glm::dvec3 to_target_d = target - cam.position_world;
+    if (!std::isfinite(to_target_d.x) || !std::isfinite(to_target_d.y) || !std::isfinite(to_target_d.z) || glm::dot(to_target_d, to_target_d) < 1.0e-24)
+    {
+        return;
+    }
+
+    glm::dvec3 dirD = glm::normalize(to_target_d);
     glm::vec3 dir = glm::normalize(glm::vec3(dirD));
 
-    // For a -Z forward convention, build a quaternion that rotates -Z into dir.
     glm::vec3 up(0.0f, 1.0f, 0.0f);
     if (glm::length2(glm::cross(dir, up)) < 1e-6f)
     {
         up = glm::vec3(0.0f, 0.0f, 1.0f);
     }
 
-    glm::vec3 f = dir;
-    glm::vec3 r = glm::normalize(glm::cross(up, f));
-    glm::vec3 u = glm::cross(f, r);
+    const glm::vec3 forward = dir;
+    const glm::vec3 backward = -forward;
+
+    glm::vec3 right = glm::cross(up, backward);
+    if (glm::length2(right) < 1.0e-12f)
+    {
+        const glm::vec3 alt_up = (std::abs(backward.y) < 0.99f) ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+        right = glm::cross(alt_up, backward);
+    }
+    right = glm::normalize(right);
+
+    const glm::vec3 true_up = glm::cross(backward, right);
 
     glm::mat3 rot;
-    rot[0] = r;
-    rot[1] = u;
-    rot[2] = -f; // -Z forward
+    rot[0] = right;
+    rot[1] = true_up;
+    rot[2] = backward;
 
-    cam.orientation = glm::quat_cast(rot);
+    cam.orientation = glm::normalize(glm::quat_cast(rot));
 }
 
 // ----------------------------------------------------------------------------
