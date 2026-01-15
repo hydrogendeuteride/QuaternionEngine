@@ -72,8 +72,17 @@ struct BodyTransform
 };
 
 // ============================================================================
-// Raycast result
+// Raycast options and results
 // ============================================================================
+
+struct RaycastOptions
+{
+    float max_distance = 1000.0f;
+    uint32_t layer_mask = 0xFFFFFFFF;  // All layers by default
+    BodyId ignore_body;                 // Optional body to ignore (e.g., the shooter)
+    bool include_sensors = false;       // Whether to detect sensor bodies
+    bool backface_culling = true;       // Ignore hits from inside shapes
+};
 
 struct RayHit
 {
@@ -82,6 +91,8 @@ struct RayHit
     glm::vec3 normal{0.0f, 1.0f, 0.0f};
     float distance{0.0f};
     BodyId body_id;
+    uint32_t sub_shape_id{0};           // For compound shapes
+    uint32_t layer{0};                   // Layer of the hit body
 };
 
 } // namespace Physics

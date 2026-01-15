@@ -29,15 +29,6 @@ namespace GameRuntime
         _audio = audio;
     }
 
-    void Runtime::sync_physics_to_render()
-    {
-        // TODO: physics integration
-        // For each physics body with a render instance:
-        //   glm::mat4 transform;
-        //   _physics->get_body_transform(bodyId, transform);
-        //   _api->set_mesh_instance_transform(instanceName, GameAPI::Transform::from_matrix(transform));
-    }
-
     void Runtime::update_audio_listener()
     {
         if (!_audio || !_renderer || !_renderer->_sceneManager)
@@ -158,9 +149,6 @@ namespace GameRuntime
                     _physics->step(_time.fixed_delta_time());
                 }
             }
-
-            // --- Sync physics transforms to render --- //
-            sync_physics_to_render();
 
             // --- Variable update --- //
             game->on_update(_time.delta_time());

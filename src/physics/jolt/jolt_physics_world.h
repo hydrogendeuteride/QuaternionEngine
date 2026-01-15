@@ -76,6 +76,7 @@ public:
     bool is_active(BodyId id) const override;
 
     RayHit raycast(const glm::vec3& origin, const glm::vec3& direction, float max_distance) const override;
+    RayHit raycast(const glm::vec3& origin, const glm::vec3& direction, const RaycastOptions& options) const override;
 
     void set_gravity(const glm::vec3& gravity) override;
     glm::vec3 get_gravity() const override;

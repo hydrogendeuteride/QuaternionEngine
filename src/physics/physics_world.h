@@ -77,7 +77,11 @@ public:
     // Raycasting
     // ========================================================================
 
+    // Simple raycast (legacy interface)
     virtual RayHit raycast(const glm::vec3& origin, const glm::vec3& direction, float max_distance) const = 0;
+
+    // Extended raycast with filtering options
+    virtual RayHit raycast(const glm::vec3& origin, const glm::vec3& direction, const RaycastOptions& options) const = 0;
 
     // ========================================================================
     // World settings

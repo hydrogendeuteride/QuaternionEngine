@@ -9,6 +9,7 @@
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 #include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
@@ -603,6 +604,13 @@ bool JoltPhysicsWorld::is_active(BodyId id) const
 
 RayHit JoltPhysicsWorld::raycast(const glm::vec3& origin, const glm::vec3& direction, float max_distance) const
 {
+    RaycastOptions options;
+    options.max_distance = max_distance;
+    return raycast(origin, direction, options);
+}
+
+RayHit JoltPhysicsWorld::raycast(const glm::vec3& origin, const glm::vec3& direction, const RaycastOptions& options) const
+{
     RayHit result;
 
     if (!_initialized)
@@ -616,13 +624,119 @@ RayHit JoltPhysicsWorld::raycast(const glm::vec3& origin, const glm::vec3& direc
 
     JPH::RRayCast ray(
         JPH::RVec3(origin.x, origin.y, origin.z),
-        JPH::Vec3(dir_norm.x, dir_norm.y, dir_norm.z) * max_distance);
+        JPH::Vec3(dir_norm.x, dir_norm.y, dir_norm.z) * options.max_distance);
+
+    class RaycastFilter : public JPH::BroadPhaseLayerFilter, public JPH::ObjectLayerFilter
+    {
+    public:
+        RaycastFilter(uint32_t layer_mask, BodyId ignore_body, bool include_sensors,
+                      const JPH::PhysicsSystem& physics_system)
+            : _layer_mask(layer_mask)
+            , _ignore_body(ignore_body)
+            , _include_sensors(include_sensors)
+            , _physics_system(physics_system)
+        {}
+
+        // BroadPhaseLayerFilter
+        bool ShouldCollide(JPH::BroadPhaseLayer layer) const override
+        {
+            // Always allow both moving and non-moving layers to be tested
+            return true;
+        }
+
+        // ObjectLayerFilter
+        bool ShouldCollide(JPH::ObjectLayer layer) const override
+        {
+            // Check if this layer is in the mask
+            return (_layer_mask & (1u << layer)) != 0;
+        }
+
+    private:
+        uint32_t _layer_mask;
+        BodyId _ignore_body;
+        bool _include_sensors;
+        const JPH::PhysicsSystem& _physics_system;
+    };
+
+    // Custom body filter for ignore_body and sensor filtering
+    class RaycastBodyFilter : public JPH::BodyFilter
+    {
+    public:
+        RaycastBodyFilter(BodyId ignore_body, bool include_sensors, const JPH::BodyLockInterface& lock_interface)
+            : _ignore_body(ignore_body)
+            , _include_sensors(include_sensors)
+            , _lock_interface(lock_interface)
+        {}
+
+        bool ShouldCollide(const JPH::BodyID& body_id) const override
+        {
+            // Check if this is the body to ignore
+            if (_ignore_body.is_valid() && body_id.GetIndexAndSequenceNumber() == _ignore_body.value)
+            {
+                return false;
+            }
+
+            // Check sensor filtering
+            if (!_include_sensors)
+            {
+                JPH::BodyLockRead lock(_lock_interface, body_id);
+                if (lock.Succeeded())
+                {
+                    const JPH::Body& body = lock.GetBody();
+                    if (body.IsSensor())
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        bool ShouldCollideLocked(const JPH::Body& body) const override
+        {
+            // Check if this is the body to ignore
+            if (_ignore_body.is_valid() && body.GetID().GetIndexAndSequenceNumber() == _ignore_body.value)
+            {
+                return false;
+            }
+
+            // Check sensor filtering
+            if (!_include_sensors && body.IsSensor())
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+    private:
+        BodyId _ignore_body;
+        bool _include_sensors;
+        const JPH::BodyLockInterface& _lock_interface;
+    };
+
+    RaycastFilter broad_phase_filter(options.layer_mask, options.ignore_body, options.include_sensors, _physics_system);
+    RaycastBodyFilter body_filter(options.ignore_body, options.include_sensors, _physics_system.GetBodyLockInterface());
+
+    JPH::RayCastSettings ray_settings;
+    ray_settings.mBackFaceModeTriangles = options.backface_culling
+        ? JPH::EBackFaceMode::IgnoreBackFaces
+        : JPH::EBackFaceMode::CollideWithBackFaces;
+    ray_settings.mBackFaceModeConvex = options.backface_culling
+        ? JPH::EBackFaceMode::IgnoreBackFaces
+        : JPH::EBackFaceMode::CollideWithBackFaces;
 
     JPH::RayCastResult hit;
-    if (_physics_system.GetNarrowPhaseQuery().CastRay(ray, hit))
+    JPH::ClosestHitCollisionCollector<JPH::CastRayCollector> collector;
+    _physics_system.GetNarrowPhaseQuery().CastRay(ray, ray_settings, collector, broad_phase_filter, broad_phase_filter, body_filter);
+
+    if (collector.HadHit())
     {
+        const JPH::RayCastResult& hit = collector.mHit;
+
         result.hit = true;
-        result.distance = hit.mFraction * max_distance;
+        result.distance = hit.mFraction * options.max_distance;
 
         JPH::RVec3 hp = ray.GetPointOnRay(hit.mFraction);
         result.position = glm::vec3(
@@ -630,8 +744,18 @@ RayHit JoltPhysicsWorld::raycast(const glm::vec3& origin, const glm::vec3& direc
             static_cast<float>(hp.GetY()),
             static_cast<float>(hp.GetZ()));
 
-        // TODO: Query actual hit normal from shape
-        result.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+        result.sub_shape_id = hit.mSubShapeID2.GetValue();
+
+        {
+            JPH::BodyLockRead lock(_physics_system.GetBodyLockInterface(), hit.mBodyID);
+            if (lock.Succeeded())
+            {
+                const JPH::Body& body = lock.GetBody();
+                const JPH::Vec3 n = body.GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, hp);
+                result.normal = glm::vec3(n.GetX(), n.GetY(), n.GetZ());
+                result.layer = body.GetObjectLayer();
+            }
+        }
         result.body_id = BodyId{hit.mBodyID.GetIndexAndSequenceNumber()};
     }
 

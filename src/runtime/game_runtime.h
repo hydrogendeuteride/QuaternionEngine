@@ -78,7 +78,6 @@ private:
     bool _quit_requested{false};
 
     // Internal helpers
-    void sync_physics_to_render();
     void update_audio_listener();
 };
 

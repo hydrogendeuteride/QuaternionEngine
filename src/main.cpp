@@ -74,7 +74,7 @@ public:
         _physics = std::make_unique<Physics::JoltPhysicsWorld>();
 
         _physics->create_body(Physics::BodySettings{}
-                                  .set_shape(Physics::CollisionShape::Box(50.0f, 1.0f, 50.0f))
+                                  .set_shape(Physics::CollisionShape::Box(25.0f, 1.0f, 25.0f))
                                   .set_position(0.0f, -1.0f, 0.0f)
                                   .set_static()
                                   .set_friction(0.8f));
