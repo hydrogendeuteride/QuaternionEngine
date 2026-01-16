@@ -3,147 +3,330 @@
 #include "body_settings.h"
 #include "physics_body.h"
 #include <memory>
+#include <vector>
+#include <functional>
 
 namespace Physics
 {
+    // ============================================================================
+    // PhysicsWorld: Abstract interface for physics simulation
+    // ============================================================================
 
-// ============================================================================
-// PhysicsWorld: Abstract interface for physics simulation
-// ============================================================================
-
-class PhysicsWorld
-{
-public:
-    virtual ~PhysicsWorld() = default;
-
-    // ========================================================================
-    // Simulation
-    // ========================================================================
-
-    virtual void step(float dt) = 0;
-
-    // ========================================================================
-    // Body creation / destruction
-    // ========================================================================
-
-    // Create a body with given settings, returns ID
-    virtual BodyId create_body(const BodySettings& settings) = 0;
-
-    // Destroy a body by ID
-    virtual void destroy_body(BodyId id) = 0;
-
-    // Create a body and return RAII handle (auto-destroys on scope exit)
-    BodyHandle create_body_handle(const BodySettings& settings)
+    class PhysicsWorld
     {
-        return BodyHandle(this, create_body(settings));
-    }
+    public:
+        struct BodyCallbacks;
 
-    // ========================================================================
-    // Body queries
-    // ========================================================================
+        virtual ~PhysicsWorld() = default;
 
-    virtual bool is_body_valid(BodyId id) const = 0;
+        // ========================================================================
+        // Simulation
+        // ========================================================================
 
-    virtual BodyTransform get_transform(BodyId id) const = 0;
-    virtual glm::vec3 get_position(BodyId id) const = 0;
-    virtual glm::quat get_rotation(BodyId id) const = 0;
-    virtual glm::mat4 get_transform_matrix(BodyId id) const = 0;
+        virtual void step(float dt) = 0;
 
-    virtual glm::vec3 get_linear_velocity(BodyId id) const = 0;
-    virtual glm::vec3 get_angular_velocity(BodyId id) const = 0;
+        // ========================================================================
+        // Body creation / destruction
+        // ========================================================================
 
-    // ========================================================================
-    // Body manipulation
-    // ========================================================================
+        // Create a body with given settings, returns ID
+        virtual BodyId create_body(const BodySettings &settings) = 0;
 
-    virtual void set_position(BodyId id, const glm::vec3& position) = 0;
-    virtual void set_rotation(BodyId id, const glm::quat& rotation) = 0;
-    virtual void set_transform(BodyId id, const glm::vec3& position, const glm::quat& rotation) = 0;
+        // Destroy a body by ID
+        virtual void destroy_body(BodyId id) = 0;
 
-    virtual void set_linear_velocity(BodyId id, const glm::vec3& velocity) = 0;
-    virtual void set_angular_velocity(BodyId id, const glm::vec3& velocity) = 0;
+        // Create a body and return RAII handle (auto-destroys on scope exit)
+        BodyHandle create_body_handle(const BodySettings &settings)
+        {
+            return BodyHandle(this, create_body(settings));
+        }
 
-    // Force application (for dynamic bodies)
-    virtual void add_force(BodyId id, const glm::vec3& force) = 0;
-    virtual void add_impulse(BodyId id, const glm::vec3& impulse) = 0;
-    virtual void add_torque(BodyId id, const glm::vec3& torque) = 0;
+        // ========================================================================
+        // Body queries
+        // ========================================================================
 
-    // Activation
-    virtual void activate(BodyId id) = 0;
-    virtual void deactivate(BodyId id) = 0;
-    virtual bool is_active(BodyId id) const = 0;
+        virtual bool is_body_valid(BodyId id) const = 0;
 
-    // ========================================================================
-    // Raycasting
-    // ========================================================================
+        virtual BodyTransform get_transform(BodyId id) const = 0;
 
-    // Simple raycast (legacy interface)
-    virtual RayHit raycast(const glm::vec3& origin, const glm::vec3& direction, float max_distance) const = 0;
+        virtual glm::vec3 get_position(BodyId id) const = 0;
 
-    // Extended raycast with filtering options
-    virtual RayHit raycast(const glm::vec3& origin, const glm::vec3& direction, const RaycastOptions& options) const = 0;
+        virtual glm::quat get_rotation(BodyId id) const = 0;
 
-    // ========================================================================
-    // World settings
-    // ========================================================================
+        virtual glm::mat4 get_transform_matrix(BodyId id) const = 0;
 
-    virtual void set_gravity(const glm::vec3& gravity) = 0;
-    virtual glm::vec3 get_gravity() const = 0;
-};
+        virtual glm::vec3 get_linear_velocity(BodyId id) const = 0;
 
-// ============================================================================
-// BodyBuilder: Fluent API for body creation
-// ============================================================================
+        virtual glm::vec3 get_angular_velocity(BodyId id) const = 0;
 
-class BodyBuilder
-{
-public:
-    explicit BodyBuilder(PhysicsWorld* world) : _world(world) {}
+        virtual uint64_t get_user_data(BodyId id) const = 0;
 
-    // Shape
-    BodyBuilder& shape(const CollisionShape& s) { _settings.shape = s; return *this; }
-    BodyBuilder& box(float hx, float hy, float hz) { _settings.shape = CollisionShape::Box(hx, hy, hz); return *this; }
-    BodyBuilder& box(const glm::vec3& half_extents) { _settings.shape = CollisionShape::Box(half_extents); return *this; }
-    BodyBuilder& sphere(float radius) { _settings.shape = CollisionShape::Sphere(radius); return *this; }
-    BodyBuilder& capsule(float radius, float half_height) { _settings.shape = CollisionShape::Capsule(radius, half_height); return *this; }
-    BodyBuilder& cylinder(float radius, float half_height) { _settings.shape = CollisionShape::Cylinder(radius, half_height); return *this; }
-    BodyBuilder& plane(const glm::vec3& normal = {0,1,0}) { _settings.shape = CollisionShape::Plane(normal); return *this; }
+        // ========================================================================
+        // Body manipulation
+        // ========================================================================
 
-    // Position / rotation
-    BodyBuilder& position(const glm::vec3& p) { _settings.position = p; return *this; }
-    BodyBuilder& position(float x, float y, float z) { _settings.position = {x, y, z}; return *this; }
-    BodyBuilder& rotation(const glm::quat& r) { _settings.rotation = r; return *this; }
+        virtual void set_position(BodyId id, const glm::vec3 &position) = 0;
 
-    // Motion type
-    BodyBuilder& static_body() { _settings.motion_type = MotionType::Static; return *this; }
-    BodyBuilder& kinematic_body() { _settings.motion_type = MotionType::Kinematic; return *this; }
-    BodyBuilder& dynamic_body() { _settings.motion_type = MotionType::Dynamic; return *this; }
+        virtual void set_rotation(BodyId id, const glm::quat &rotation) = 0;
 
-    // Physical properties
-    BodyBuilder& mass(float m) { _settings.mass = m; return *this; }
-    BodyBuilder& friction(float f) { _settings.friction = f; return *this; }
-    BodyBuilder& restitution(float r) { _settings.restitution = r; return *this; }
-    BodyBuilder& linear_damping(float d) { _settings.linear_damping = d; return *this; }
-    BodyBuilder& angular_damping(float d) { _settings.angular_damping = d; return *this; }
+        virtual void set_transform(BodyId id, const glm::vec3 &position, const glm::quat &rotation) = 0;
 
-    // Collision
-    BodyBuilder& layer(uint32_t l) { _settings.layer = l; return *this; }
-    BodyBuilder& sensor(bool s = true) { _settings.is_sensor = s; return *this; }
+        virtual void set_linear_velocity(BodyId id, const glm::vec3 &velocity) = 0;
 
-    // Gravity
-    BodyBuilder& gravity_scale(float s) { _settings.gravity_scale = s; return *this; }
-    BodyBuilder& no_gravity() { _settings.gravity_scale = 0.0f; return *this; }
+        virtual void set_angular_velocity(BodyId id, const glm::vec3 &velocity) = 0;
 
-    // Build
-    BodyId build() { return _world->create_body(_settings); }
-    BodyHandle build_handle() { return _world->create_body_handle(_settings); }
+        virtual void set_user_data(BodyId id, uint64_t user_data) = 0;
 
-    // Access settings for inspection
-    const BodySettings& settings() const { return _settings; }
+        // Force application (for dynamic bodies)
+        virtual void add_force(BodyId id, const glm::vec3 &force) = 0;
 
-private:
-    PhysicsWorld* _world;
-    BodySettings _settings;
-};
+        virtual void add_impulse(BodyId id, const glm::vec3 &impulse) = 0;
 
+        virtual void add_torque(BodyId id, const glm::vec3 &torque) = 0;
+
+        // Activation
+        virtual void activate(BodyId id) = 0;
+
+        virtual void deactivate(BodyId id) = 0;
+
+        virtual bool is_active(BodyId id) const = 0;
+
+        // ========================================================================
+        // Raycasting
+        // ========================================================================
+
+        // Simple raycast (legacy interface)
+        virtual RayHit raycast(const glm::vec3 &origin, const glm::vec3 &direction, float max_distance) const = 0;
+
+        // Extended raycast with filtering options
+        virtual RayHit raycast(const glm::vec3 &origin, const glm::vec3 &direction,
+                               const RaycastOptions &options) const = 0;
+
+        // ========================================================================
+        // Shape queries
+        // ========================================================================
+
+        virtual RayHit sweep(const CollisionShape &shape,
+                             const glm::vec3 &origin,
+                             const glm::quat &rotation,
+                             const glm::vec3 &direction,
+                             const SweepOptions &options) const = 0;
+
+        virtual void overlap(const CollisionShape &shape,
+                             const glm::vec3 &position,
+                             const glm::quat &rotation,
+                             const OverlapOptions &options,
+                             std::vector<OverlapHit> &out_hits) const = 0;
+
+        // ========================================================================
+        // Collision filtering
+        // ========================================================================
+
+        virtual void set_layer_collision(uint32_t layer_a, uint32_t layer_b, bool should_collide) = 0;
+
+        virtual bool get_layer_collision(uint32_t layer_a, uint32_t layer_b) const = 0;
+
+        // ========================================================================
+        // Contact callbacks
+        // ========================================================================
+
+        struct BodyCallbacks
+        {
+            std::function<void(const CollisionEvent &)> on_collision;
+            std::function<void(const TriggerEvent &)> on_trigger;
+        };
+
+        virtual void set_body_callbacks(BodyId id, const BodyCallbacks &callbacks) = 0;
+
+        virtual void clear_body_callbacks(BodyId id) = 0;
+
+        // ========================================================================
+        // Joints
+        // ========================================================================
+
+        virtual JointId create_fixed_joint(BodyId body_a, BodyId body_b) = 0;
+
+        virtual JointId create_hinge_joint(BodyId body_a, BodyId body_b, const HingeJointSettings &settings) = 0;
+
+        virtual JointId create_slider_joint(BodyId body_a, BodyId body_b, const SliderJointSettings &settings) = 0;
+
+        virtual void destroy_joint(JointId id) = 0;
+
+        virtual bool is_joint_valid(JointId id) const = 0;
+
+        // ========================================================================
+        // World settings
+        // ========================================================================
+
+        virtual void set_gravity(const glm::vec3 &gravity) = 0;
+
+        virtual glm::vec3 get_gravity() const = 0;
+    };
+
+    // ============================================================================
+    // BodyBuilder: Fluent API for body creation
+    // ============================================================================
+
+    class BodyBuilder
+    {
+    public:
+        explicit BodyBuilder(PhysicsWorld *world) : _world(world)
+        {
+        }
+
+        // Shape
+        BodyBuilder &shape(const CollisionShape &s)
+        {
+            _settings.shape = s;
+            return *this;
+        }
+
+        BodyBuilder &user_data(uint64_t v)
+        {
+            _settings.user_data = v;
+            return *this;
+        }
+
+        BodyBuilder &box(float hx, float hy, float hz)
+        {
+            _settings.shape = CollisionShape::Box(hx, hy, hz);
+            return *this;
+        }
+
+        BodyBuilder &box(const glm::vec3 &half_extents)
+        {
+            _settings.shape = CollisionShape::Box(half_extents);
+            return *this;
+        }
+
+        BodyBuilder &sphere(float radius)
+        {
+            _settings.shape = CollisionShape::Sphere(radius);
+            return *this;
+        }
+
+        BodyBuilder &capsule(float radius, float half_height)
+        {
+            _settings.shape = CollisionShape::Capsule(radius, half_height);
+            return *this;
+        }
+
+        BodyBuilder &cylinder(float radius, float half_height)
+        {
+            _settings.shape = CollisionShape::Cylinder(radius, half_height);
+            return *this;
+        }
+
+        BodyBuilder &plane(const glm::vec3 &normal = {0, 1, 0})
+        {
+            _settings.shape = CollisionShape::Plane(normal);
+            return *this;
+        }
+
+        // Position / rotation
+        BodyBuilder &position(const glm::vec3 &p)
+        {
+            _settings.position = p;
+            return *this;
+        }
+
+        BodyBuilder &position(float x, float y, float z)
+        {
+            _settings.position = {x, y, z};
+            return *this;
+        }
+
+        BodyBuilder &rotation(const glm::quat &r)
+        {
+            _settings.rotation = r;
+            return *this;
+        }
+
+        // Motion type
+        BodyBuilder &static_body()
+        {
+            _settings.motion_type = MotionType::Static;
+            return *this;
+        }
+
+        BodyBuilder &kinematic_body()
+        {
+            _settings.motion_type = MotionType::Kinematic;
+            return *this;
+        }
+
+        BodyBuilder &dynamic_body()
+        {
+            _settings.motion_type = MotionType::Dynamic;
+            return *this;
+        }
+
+        // Physical properties
+        BodyBuilder &mass(float m)
+        {
+            _settings.mass = m;
+            return *this;
+        }
+
+        BodyBuilder &friction(float f)
+        {
+            _settings.friction = f;
+            return *this;
+        }
+
+        BodyBuilder &restitution(float r)
+        {
+            _settings.restitution = r;
+            return *this;
+        }
+
+        BodyBuilder &linear_damping(float d)
+        {
+            _settings.linear_damping = d;
+            return *this;
+        }
+
+        BodyBuilder &angular_damping(float d)
+        {
+            _settings.angular_damping = d;
+            return *this;
+        }
+
+        // Collision
+        BodyBuilder &layer(uint32_t l)
+        {
+            _settings.layer = l;
+            return *this;
+        }
+
+        BodyBuilder &sensor(bool s = true)
+        {
+            _settings.is_sensor = s;
+            return *this;
+        }
+
+        // Gravity
+        BodyBuilder &gravity_scale(float s)
+        {
+            _settings.gravity_scale = s;
+            return *this;
+        }
+
+        BodyBuilder &no_gravity()
+        {
+            _settings.gravity_scale = 0.0f;
+            return *this;
+        }
+
+        // Build
+        BodyId build() { return _world->create_body(_settings); }
+        BodyHandle build_handle() { return _world->create_body_handle(_settings); }
+
+        // Access settings for inspection
+        const BodySettings &settings() const { return _settings; }
+
+    private:
+        PhysicsWorld *_world;
+        BodySettings _settings;
+    };
 } // namespace Physics
