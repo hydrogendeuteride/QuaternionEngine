@@ -1,7 +1,11 @@
 #pragma once
 
 #include <glm/vec3.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <cstdint>
 #include <variant>
+#include <vector>
+#include <utility>
 
 namespace Physics
 {
@@ -76,10 +80,91 @@ namespace Physics
     };
 
     // ============================================================================
+    // Compound shapes
+    // ============================================================================
+
+    using PrimitiveShapeVariant = std::variant<BoxShape, SphereShape, CapsuleShape, CylinderShape, PlaneShape>;
+
+    struct CompoundShapeChild
+    {
+        PrimitiveShapeVariant shape;
+        glm::vec3 position{0.0f};
+        glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+        uint32_t user_data{0};
+
+        CompoundShapeChild() = default;
+
+        CompoundShapeChild(const PrimitiveShapeVariant &s,
+                           const glm::vec3 &p = glm::vec3(0.0f),
+                           const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                           uint32_t ud = 0)
+            : shape(s)
+              , position(p)
+              , rotation(r)
+              , user_data(ud)
+        {
+        }
+    };
+
+    struct CompoundShape
+    {
+        std::vector<CompoundShapeChild> children;
+
+        CompoundShape() = default;
+
+        explicit CompoundShape(std::vector<CompoundShapeChild> c) : children(std::move(c))
+        {
+        }
+
+        CompoundShape &add_child(const PrimitiveShapeVariant &s,
+                                 const glm::vec3 &p = glm::vec3(0.0f),
+                                 const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                                 uint32_t ud = 0)
+        {
+            children.emplace_back(s, p, r, ud);
+            return *this;
+        }
+
+        CompoundShape &add_box(const glm::vec3 &half_extents,
+                               const glm::vec3 &p = glm::vec3(0.0f),
+                               const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                               uint32_t ud = 0)
+        {
+            return add_child(BoxShape{half_extents}, p, r, ud);
+        }
+
+        CompoundShape &add_sphere(float radius,
+                                  const glm::vec3 &p = glm::vec3(0.0f),
+                                  const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                                  uint32_t ud = 0)
+        {
+            return add_child(SphereShape{radius}, p, r, ud);
+        }
+
+        CompoundShape &add_capsule(float radius,
+                                   float half_height,
+                                   const glm::vec3 &p = glm::vec3(0.0f),
+                                   const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                                   uint32_t ud = 0)
+        {
+            return add_child(CapsuleShape{radius, half_height}, p, r, ud);
+        }
+
+        CompoundShape &add_cylinder(float radius,
+                                    float half_height,
+                                    const glm::vec3 &p = glm::vec3(0.0f),
+                                    const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                                    uint32_t ud = 0)
+        {
+            return add_child(CylinderShape{radius, half_height}, p, r, ud);
+        }
+    };
+
+    // ============================================================================
     // Unified shape type
     // ============================================================================
 
-    using ShapeVariant = std::variant<BoxShape, SphereShape, CapsuleShape, CylinderShape, PlaneShape>;
+    using ShapeVariant = std::variant<BoxShape, SphereShape, CapsuleShape, CylinderShape, PlaneShape, CompoundShape>;
 
     struct CollisionShape
     {
@@ -115,12 +200,20 @@ namespace Physics
             return CollisionShape{PlaneShape{normal, offset}};
         }
 
+        static CollisionShape Compound(CompoundShape compound)
+        {
+            CollisionShape out;
+            out.shape = std::move(compound);
+            return out;
+        }
+
         // Type queries
         bool is_box() const { return std::holds_alternative<BoxShape>(shape); }
         bool is_sphere() const { return std::holds_alternative<SphereShape>(shape); }
         bool is_capsule() const { return std::holds_alternative<CapsuleShape>(shape); }
         bool is_cylinder() const { return std::holds_alternative<CylinderShape>(shape); }
         bool is_plane() const { return std::holds_alternative<PlaneShape>(shape); }
+        bool is_compound() const { return std::holds_alternative<CompoundShape>(shape); }
 
         // Accessors (returns nullptr if wrong type)
         const BoxShape *as_box() const { return std::get_if<BoxShape>(&shape); }
@@ -128,5 +221,6 @@ namespace Physics
         const CapsuleShape *as_capsule() const { return std::get_if<CapsuleShape>(&shape); }
         const CylinderShape *as_cylinder() const { return std::get_if<CylinderShape>(&shape); }
         const PlaneShape *as_plane() const { return std::get_if<PlaneShape>(&shape); }
+        const CompoundShape *as_compound() const { return std::get_if<CompoundShape>(&shape); }
     };
 } // namespace Physics

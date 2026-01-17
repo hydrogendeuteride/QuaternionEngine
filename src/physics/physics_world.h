@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <functional>
+#include <utility>
 
 namespace Physics
 {
@@ -220,6 +221,12 @@ namespace Physics
         BodyBuilder &plane(const glm::vec3 &normal = {0, 1, 0})
         {
             _settings.shape = CollisionShape::Plane(normal);
+            return *this;
+        }
+
+        BodyBuilder &compound(CompoundShape compound)
+        {
+            _settings.shape = CollisionShape::Compound(std::move(compound));
             return *this;
         }
 

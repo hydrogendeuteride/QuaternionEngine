@@ -20,6 +20,7 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
+#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/Constraints/FixedConstraint.h>
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
 #include <Jolt/Physics/Constraints/SliderConstraint.h>
@@ -565,7 +566,7 @@ namespace Physics
 
     JPH::RefConst<JPH::Shape> JoltPhysicsWorld::create_jolt_shape(const CollisionShape &shape) const
     {
-        return std::visit([](const auto &s) -> JPH::RefConst<JPH::Shape> {
+        auto create_primitive = [](const auto &s) -> JPH::RefConst<JPH::Shape> {
             using T = std::decay_t<decltype(s)>;
 
             if constexpr (std::is_same_v<T, BoxShape>)
@@ -594,6 +595,44 @@ namespace Physics
                 // Default fallback
                 return new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
             }
+        };
+
+        return std::visit([&](const auto &s) -> JPH::RefConst<JPH::Shape> {
+            using T = std::decay_t<decltype(s)>;
+
+            if constexpr (std::is_same_v<T, CompoundShape>)
+            {
+                if (s.children.empty())
+                {
+                    return new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
+                }
+
+                JPH::StaticCompoundShapeSettings compound_settings;
+                for (const CompoundShapeChild &child : s.children)
+                {
+                    JPH::RefConst<JPH::Shape> child_shape = std::visit(create_primitive, child.shape);
+                    compound_settings.AddShape(
+                        JPH::Vec3(child.position.x, child.position.y, child.position.z),
+                        JPH::Quat(child.rotation.x, child.rotation.y, child.rotation.z, child.rotation.w),
+                        child_shape.GetPtr(),
+                        child.user_data);
+                }
+
+                JPH::ShapeSettings::ShapeResult result = compound_settings.Create();
+                if (result.IsValid())
+                {
+                    return result.Get();
+                }
+
+                if (result.HasError())
+                {
+                    trace_impl("[Physics][Jolt] Failed to create compound shape: %s", result.GetError().c_str());
+                }
+
+                return new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
+            }
+
+            return create_primitive(s);
         }, shape.shape);
     }
 

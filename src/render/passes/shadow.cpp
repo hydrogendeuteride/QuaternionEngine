@@ -64,10 +64,11 @@ void ShadowPass::init(EngineContext *context)
         b.enable_depthtest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
         b.set_depth_format(VK_FORMAT_D32_SFLOAT);
 
-        // Static depth bias to help with surface acne (tune later)
+        // Static depth bias to help with surface acne (tune later).
+        // With GREATER depth testing (reverse-Z style), the bias sign must be negated.
         b._rasterizer.depthBiasEnable = VK_TRUE;
-        b._rasterizer.depthBiasConstantFactor = kShadowDepthBiasConstant;
-        b._rasterizer.depthBiasSlopeFactor = kShadowDepthBiasSlope;
+        b._rasterizer.depthBiasConstantFactor = -kShadowDepthBiasConstant;
+        b._rasterizer.depthBiasSlopeFactor = -kShadowDepthBiasSlope;
         b._rasterizer.depthBiasClamp = 0.0f;
     };
 
