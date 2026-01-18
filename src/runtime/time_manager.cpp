@@ -49,4 +49,13 @@ namespace GameRuntime
         }
         return false;
     }
+
+    float TimeManager::interpolation_alpha() const
+    {
+        if (_fixed_delta_time <= 0.0f)
+        {
+            return 1.0f;
+        }
+        return _fixed_accumulator / _fixed_delta_time;
+    }
 } // namespace GameRuntime

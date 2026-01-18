@@ -47,6 +47,7 @@ public:
     float time_scale() const { return _time.time_scale(); }
     void set_time_scale(float scale) { _time.set_time_scale(scale); }
     void set_fixed_delta_time(float dt) { _time.set_fixed_delta_time(dt); }
+    float interpolation_alpha() const { return _time.interpolation_alpha(); }
 
     // ------------------------------------------------------------------------
     // Game API Access

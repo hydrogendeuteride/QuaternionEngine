@@ -45,6 +45,10 @@ public:
     // Consume fixed timestep from accumulator. Returns true if step should run.
     bool consume_fixed_step();
 
+    // Get interpolation alpha for rendering (0.0 to 1.0).
+    // Use this to interpolate between previous and current physics state for smooth rendering.
+    float interpolation_alpha() const;
+
     // Get frame count since start.
     uint64_t frame_count() const { return _frame_count; }
 

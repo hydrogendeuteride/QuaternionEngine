@@ -90,8 +90,11 @@ public:
 
         _box_bodies.clear();
         _box_bodies.reserve(_boxes.size());
-        for (const BoxInstance &box : _boxes)
+        _box_interps.clear();
+        _box_interps.resize(_boxes.size());
+        for (size_t i = 0; i < _boxes.size(); ++i)
         {
+            const BoxInstance &box = _boxes[i];
             _box_bodies.push_back(Physics::BodyBuilder(_physics.get())
                                       .box(box.half_extents)
                                       .position(box.spawn_position)
@@ -102,7 +105,19 @@ public:
                                       .linear_damping(0.02f)
                                       .angular_damping(0.05f)
                                       .build());
+
+            // Initialize interpolation state
+            _box_interps[i].prev_position = box.spawn_position;
+            _box_interps[i].prev_rotation = box.spawn_rotation;
+            _box_interps[i].curr_position = box.spawn_position;
+            _box_interps[i].curr_rotation = box.spawn_rotation;
         }
+
+        // Initialize sphere interpolation state
+        _sphere_interp.prev_position = _sphere_spawn_pos;
+        _sphere_interp.prev_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        _sphere_interp.curr_position = _sphere_spawn_pos;
+        _sphere_interp.curr_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 #endif
 
         _fixed_time = 0.0f;
@@ -117,23 +132,27 @@ public:
         if (_physics)
         {
             bool reset_requested = false;
+            const float alpha = _runtime->interpolation_alpha();
 
-            // Sphere -> visual
+            // Sphere -> visual (interpolated)
             if (_sphere_body.is_valid())
             {
-                glm::mat4 m = _physics->get_transform_matrix(_sphere_body);
+                glm::vec3 pos = _sphere_interp.interpolated_position(alpha);
+                glm::quat rot = _sphere_interp.interpolated_rotation(alpha);
 
-                GameAPI::Transform tr = GameAPI::Transform::from_matrix(m);
+                GameAPI::Transform tr{};
+                tr.position = pos;
+                tr.rotation = rot;
                 tr.scale = glm::vec3(1.0f); // keep primitive at unit scale (sphere mesh radius is 0.5)
                 _runtime->api().set_mesh_instance_transform(_sphere_instance, tr);
 
-                if (tr.position.y < -50.0f)
+                if (_sphere_interp.curr_position.y < -50.0f)
                 {
                     reset_requested = true;
                 }
             }
 
-            // Boxes -> visuals
+            // Boxes -> visuals (interpolated)
             const size_t count = std::min(_boxes.size(), _box_bodies.size());
             for (size_t i = 0; i < count; ++i)
             {
@@ -143,13 +162,16 @@ public:
                     continue;
                 }
 
-                glm::mat4 m = _physics->get_transform_matrix(body_id);
+                glm::vec3 pos = _box_interps[i].interpolated_position(alpha);
+                glm::quat rot = _box_interps[i].interpolated_rotation(alpha);
 
-                GameAPI::Transform tr = GameAPI::Transform::from_matrix(m);
+                GameAPI::Transform tr{};
+                tr.position = pos;
+                tr.rotation = rot;
                 tr.scale = _boxes[i].visual_scale;
                 _runtime->api().set_mesh_instance_transform(_boxes[i].instance_name, tr);
 
-                if (tr.position.y < -50.0f)
+                if (_box_interps[i].curr_position.y < -50.0f)
                 {
                     reset_requested = true;
                 }
@@ -170,7 +192,41 @@ public:
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (_physics)
         {
+            // Store previous transforms before physics step
+            if (_sphere_body.is_valid())
+            {
+                _sphere_interp.store_current_as_previous();
+            }
+
+            const size_t count = std::min(_boxes.size(), _box_bodies.size());
+            for (size_t i = 0; i < count; ++i)
+            {
+                if (_box_bodies[i].is_valid())
+                {
+                    _box_interps[i].store_current_as_previous();
+                }
+            }
+
+            // Step physics
             _physics->step(fixed_dt);
+
+            // Capture new current transforms after physics step
+            if (_sphere_body.is_valid())
+            {
+                Physics::BodyTransform t = _physics->get_transform(_sphere_body);
+                _sphere_interp.curr_position = t.position;
+                _sphere_interp.curr_rotation = t.rotation;
+            }
+
+            for (size_t i = 0; i < count; ++i)
+            {
+                if (_box_bodies[i].is_valid())
+                {
+                    Physics::BodyTransform t = _physics->get_transform(_box_bodies[i]);
+                    _box_interps[i].curr_position = t.position;
+                    _box_interps[i].curr_rotation = t.rotation;
+                }
+            }
         }
 
         // Launch a "bowling ball" after the stack has had a moment to settle.
@@ -198,6 +254,30 @@ private:
         glm::vec3 spawn_position{0.0f};
         glm::quat spawn_rotation{1.0f, 0.0f, 0.0f, 0.0f};
         glm::vec3 visual_scale{1.0f};
+    };
+
+    struct InterpolatedTransform
+    {
+        glm::vec3 prev_position{0.0f};
+        glm::quat prev_rotation{1.0f, 0.0f, 0.0f, 0.0f};
+        glm::vec3 curr_position{0.0f};
+        glm::quat curr_rotation{1.0f, 0.0f, 0.0f, 0.0f};
+
+        glm::vec3 interpolated_position(float alpha) const
+        {
+            return glm::mix(prev_position, curr_position, alpha);
+        }
+
+        glm::quat interpolated_rotation(float alpha) const
+        {
+            return glm::slerp(prev_rotation, curr_rotation, alpha);
+        }
+
+        void store_current_as_previous()
+        {
+            prev_position = curr_position;
+            prev_rotation = curr_rotation;
+        }
     };
 
     void build_box_stack_layout()
@@ -276,6 +356,12 @@ private:
             _physics->set_linear_velocity(_sphere_body, glm::vec3(0.0f));
             _physics->set_angular_velocity(_sphere_body, glm::vec3(0.0f));
             _physics->activate(_sphere_body);
+
+            // Reset interpolation state
+            _sphere_interp.prev_position = _sphere_spawn_pos;
+            _sphere_interp.prev_rotation = rot;
+            _sphere_interp.curr_position = _sphere_spawn_pos;
+            _sphere_interp.curr_rotation = rot;
         }
 
         const size_t count = std::min(_boxes.size(), _box_bodies.size());
@@ -291,6 +377,12 @@ private:
             _physics->set_linear_velocity(body_id, glm::vec3(0.0f));
             _physics->set_angular_velocity(body_id, glm::vec3(0.0f));
             _physics->activate(body_id);
+
+            // Reset interpolation state
+            _box_interps[i].prev_position = _boxes[i].spawn_position;
+            _box_interps[i].prev_rotation = _boxes[i].spawn_rotation;
+            _box_interps[i].curr_position = _boxes[i].spawn_position;
+            _box_interps[i].curr_rotation = _boxes[i].spawn_rotation;
         }
 
         // Snap visuals to spawn transforms immediately (avoids a frame of "old" transforms).
@@ -329,6 +421,9 @@ private:
     std::unique_ptr<Physics::JoltPhysicsWorld> _physics;
     Physics::BodyId _sphere_body;
     std::vector<Physics::BodyId> _box_bodies;
+
+    InterpolatedTransform _sphere_interp;
+    std::vector<InterpolatedTransform> _box_interps;
 #endif
 
     static constexpr const char *_ground_instance = "physics_ground";
