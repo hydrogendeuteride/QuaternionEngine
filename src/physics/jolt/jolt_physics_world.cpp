@@ -20,6 +20,7 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
+#include <Jolt/Physics/Collision/Shape/TaperedCylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/Constraints/FixedConstraint.h>
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
@@ -176,7 +177,9 @@ namespace Physics
 
             // Cache info for OnContactRemoved (can't access bodies there)
             const JPH::SubShapeIDPair pair(body1.GetID(), manifold.mSubShapeID1, body2.GetID(),
-                                           manifold.mSubShapeID2); {
+                                           manifold.mSubShapeID2);
+
+            {
                 PairCacheEntry entry;
                 entry.is_trigger = is_trigger;
                 entry.user_data1 = body1.GetUserData();
@@ -504,7 +507,9 @@ namespace Physics
         if (!_initialized)
         {
             return;
-        } {
+        }
+
+        {
             std::scoped_lock lock(_layer_mutex);
             _physics_system.Update(dt, 1, _temp_allocator.get(), _job_system.get());
         }
@@ -514,7 +519,9 @@ namespace Physics
 
     void JoltPhysicsWorld::dispatch_contact_events()
     {
-        std::vector<ContactEventRecord> events; {
+        std::vector<ContactEventRecord> events;
+
+        {
             std::scoped_lock lock(_events_mutex);
             events.swap(_queued_events);
         }
@@ -566,7 +573,7 @@ namespace Physics
 
     JPH::RefConst<JPH::Shape> JoltPhysicsWorld::create_jolt_shape(const CollisionShape &shape) const
     {
-        auto create_primitive = [](const auto &s) -> JPH::RefConst<JPH::Shape> {
+        auto create_primitive = [this](const auto &s) -> JPH::RefConst<JPH::Shape> {
             using T = std::decay_t<decltype(s)>;
 
             if constexpr (std::is_same_v<T, BoxShape>)
@@ -584,6 +591,28 @@ namespace Physics
             else if constexpr (std::is_same_v<T, CylinderShape>)
             {
                 return new JPH::CylinderShape(s.half_height, s.radius);
+            }
+            else if constexpr (std::is_same_v<T, TaperedCylinderShape>)
+            {
+                if (s.half_height <= 0.0f || s.top_radius < 0.0f || s.bottom_radius < 0.0f)
+                {
+                    return new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
+                }
+
+                JPH::TaperedCylinderShapeSettings settings(s.half_height, s.top_radius, s.bottom_radius);
+                JPH::ShapeSettings::ShapeResult result = settings.Create();
+                if (result.IsValid())
+                {
+                    return result.Get();
+                }
+
+                if (result.HasError())
+                {
+                    trace_impl("[Physics][Jolt] Failed to create tapered cylinder shape: %s",
+                               result.GetError().c_str());
+                }
+
+                return new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
             }
             else if constexpr (std::is_same_v<T, PlaneShape>)
             {
@@ -1135,7 +1164,9 @@ namespace Physics
                 static_cast<float>(hp.GetY()),
                 static_cast<float>(hp.GetZ()));
 
-            result.sub_shape_id = hit.mSubShapeID2.GetValue(); {
+            result.sub_shape_id = hit.mSubShapeID2.GetValue();
+
+            {
                 JPH::BodyLockRead lock(_physics_system.GetBodyLockInterface(), hit.mBodyID);
                 if (lock.Succeeded())
                 {
@@ -1145,6 +1176,7 @@ namespace Physics
                     result.layer = body.GetObjectLayer();
                 }
             }
+
             result.body_id = BodyId{hit.mBodyID.GetIndexAndSequenceNumber()};
             result.user_data = get_user_data(result.body_id);
         }
@@ -1637,7 +1669,9 @@ namespace Physics
 
         _physics_system.AddConstraint(constraint);
 
-        uint32_t id = 0; {
+        uint32_t id = 0;
+
+        {
             std::scoped_lock lock_joints(_joints_mutex);
             id = _next_joint_id++;
             _joints[id] = constraint;
@@ -1653,7 +1687,9 @@ namespace Physics
             return;
         }
 
-        JPH::Constraint *constraint = nullptr; {
+        JPH::Constraint *constraint = nullptr;
+
+        {
             std::scoped_lock lock_joints(_joints_mutex);
             auto it = _joints.find(id.value);
             if (it == _joints.end())

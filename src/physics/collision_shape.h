@@ -67,6 +67,22 @@ namespace Physics
         }
     };
 
+    // A cylinder with different top and bottom radii (supports cones when one radius is 0).
+    // Note: In Jolt this shape is centered around its center of mass, which for a cone is not the geometric center.
+    struct TaperedCylinderShape
+    {
+        float half_height{0.5f};
+        float top_radius{0.5f};
+        float bottom_radius{0.5f};
+
+        TaperedCylinderShape() = default;
+
+        // Matches Jolt: half_height, then top and bottom radii.
+        TaperedCylinderShape(float hh, float tr, float br) : half_height(hh), top_radius(tr), bottom_radius(br)
+        {
+        }
+    };
+
     struct PlaneShape
     {
         glm::vec3 normal{0.0f, 1.0f, 0.0f};
@@ -83,7 +99,8 @@ namespace Physics
     // Compound shapes
     // ============================================================================
 
-    using PrimitiveShapeVariant = std::variant<BoxShape, SphereShape, CapsuleShape, CylinderShape, PlaneShape>;
+    using PrimitiveShapeVariant =
+        std::variant<BoxShape, SphereShape, CapsuleShape, CylinderShape, TaperedCylinderShape, PlaneShape>;
 
     struct CompoundShapeChild
     {
@@ -158,13 +175,36 @@ namespace Physics
         {
             return add_child(CylinderShape{radius, half_height}, p, r, ud);
         }
+
+        CompoundShape &add_tapered_cylinder(float half_height,
+                                            float top_radius,
+                                            float bottom_radius,
+                                            const glm::vec3 &p = glm::vec3(0.0f),
+                                            const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                                            uint32_t ud = 0)
+        {
+            return add_child(TaperedCylinderShape{half_height, top_radius, bottom_radius}, p, r, ud);
+        }
+
+        // Cone convenience: tip_up=true means tip is along +Y in the shape's local space.
+        CompoundShape &add_cone(float radius,
+                                float half_height,
+                                bool tip_up = true,
+                                const glm::vec3 &p = glm::vec3(0.0f),
+                                const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                                uint32_t ud = 0)
+        {
+            return tip_up ? add_tapered_cylinder(half_height, 0.0f, radius, p, r, ud)
+                          : add_tapered_cylinder(half_height, radius, 0.0f, p, r, ud);
+        }
     };
 
     // ============================================================================
     // Unified shape type
     // ============================================================================
 
-    using ShapeVariant = std::variant<BoxShape, SphereShape, CapsuleShape, CylinderShape, PlaneShape, CompoundShape>;
+    using ShapeVariant =
+        std::variant<BoxShape, SphereShape, CapsuleShape, CylinderShape, TaperedCylinderShape, PlaneShape, CompoundShape>;
 
     struct CollisionShape
     {
@@ -195,6 +235,17 @@ namespace Physics
             return CollisionShape{CylinderShape{radius, half_height}};
         }
 
+        static CollisionShape TaperedCylinder(float half_height, float top_radius, float bottom_radius)
+        {
+            return CollisionShape{TaperedCylinderShape{half_height, top_radius, bottom_radius}};
+        }
+
+        // Cone convenience: tip_up=true means tip is along +Y in the shape's local space.
+        static CollisionShape Cone(float radius, float half_height, bool tip_up = true)
+        {
+            return tip_up ? TaperedCylinder(half_height, 0.0f, radius) : TaperedCylinder(half_height, radius, 0.0f);
+        }
+
         static CollisionShape Plane(const glm::vec3 &normal = {0, 1, 0}, float offset = 0.0f)
         {
             return CollisionShape{PlaneShape{normal, offset}};
@@ -212,6 +263,7 @@ namespace Physics
         bool is_sphere() const { return std::holds_alternative<SphereShape>(shape); }
         bool is_capsule() const { return std::holds_alternative<CapsuleShape>(shape); }
         bool is_cylinder() const { return std::holds_alternative<CylinderShape>(shape); }
+        bool is_tapered_cylinder() const { return std::holds_alternative<TaperedCylinderShape>(shape); }
         bool is_plane() const { return std::holds_alternative<PlaneShape>(shape); }
         bool is_compound() const { return std::holds_alternative<CompoundShape>(shape); }
 
@@ -220,6 +272,7 @@ namespace Physics
         const SphereShape *as_sphere() const { return std::get_if<SphereShape>(&shape); }
         const CapsuleShape *as_capsule() const { return std::get_if<CapsuleShape>(&shape); }
         const CylinderShape *as_cylinder() const { return std::get_if<CylinderShape>(&shape); }
+        const TaperedCylinderShape *as_tapered_cylinder() const { return std::get_if<TaperedCylinderShape>(&shape); }
         const PlaneShape *as_plane() const { return std::get_if<PlaneShape>(&shape); }
         const CompoundShape *as_compound() const { return std::get_if<CompoundShape>(&shape); }
     };
