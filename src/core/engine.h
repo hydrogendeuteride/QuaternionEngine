@@ -152,14 +152,21 @@ public:
     // Debug helpers: track spawned IBL test meshes to remove them easily
     std::vector<std::string> _iblTestNames;
 
-    // Simple world-space IBL reflection volumes (axis-aligned boxes).
-    struct IBLVolume
-    {
-        WorldVec3 center_world{0.0, 0.0, 0.0};
-        glm::vec3 halfExtents{10.0f, 10.0f, 10.0f};
-        IBLPaths paths{};   // HDRI paths for this volume
-        bool enabled{true};
-    };
+	    // Simple world-space IBL reflection volumes (boxes or spheres).
+	    enum class IBLVolumeShape : uint8_t
+	    {
+	        Box = 0,
+	        Sphere = 1
+	    };
+	    struct IBLVolume
+	    {
+	        WorldVec3 center_world{0.0, 0.0, 0.0};
+	        glm::vec3 halfExtents{10.0f, 10.0f, 10.0f};
+	        IBLPaths paths{};   // HDRI paths for this volume
+	        bool enabled{true};
+	        IBLVolumeShape shape{IBLVolumeShape::Box};
+	        float radius{10.0f};
+	    };
     // Global/default IBL used when no volume contains the camera.
     IBLPaths _globalIBLPaths{};
     bool _hasGlobalIBL{false};

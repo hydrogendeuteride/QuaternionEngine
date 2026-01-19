@@ -373,31 +373,41 @@ struct ParticleSystem
 };
 
 // IBL (Image-Based Lighting) paths
-struct IBLPaths
-{
-    std::string specularCube; // .ktx2 specular cubemap
-    std::string diffuseCube;  // .ktx2 diffuse cubemap
-    std::string brdfLut;      // .ktx2 BRDF lookup table
-    std::string background;   // .ktx2 background (optional, falls back to specular)
-};
+	struct IBLPaths
+	{
+	    std::string specularCube; // .ktx2 specular cubemap
+	    std::string diffuseCube;  // .ktx2 diffuse cubemap
+	    std::string brdfLut;      // .ktx2 BRDF lookup table
+	    std::string background;   // .ktx2 background (optional, falls back to specular)
+	};
 
-// IBL Volume (local reflection probe)
-struct IBLVolume
-{
-    glm::vec3 center{0.0f};
-    glm::vec3 halfExtents{10.0f};
-    IBLPaths paths;
-    bool enabled{true};
-};
+	enum class IBLVolumeShape : uint8_t
+	{
+	    Box = 0,
+	    Sphere = 1
+	};
 
-// Double-precision world-space IBL volume (center only).
-struct IBLVolumeD
-{
-    glm::dvec3 center{0.0};
-    glm::vec3 halfExtents{10.0f};
-    IBLPaths paths;
-    bool enabled{true};
-};
+	// IBL Volume (local reflection probe)
+	struct IBLVolume
+	{
+	    glm::vec3 center{0.0f};
+	    glm::vec3 halfExtents{10.0f};
+	    IBLPaths paths;
+	    bool enabled{true};
+	    IBLVolumeShape shape{IBLVolumeShape::Box};
+	    float radius{10.0f};
+	};
+
+	// Double-precision world-space IBL volume (center only).
+	struct IBLVolumeD
+	{
+	    glm::dvec3 center{0.0};
+	    glm::vec3 halfExtents{10.0f};
+	    IBLPaths paths;
+	    bool enabled{true};
+	    IBLVolumeShape shape{IBLVolumeShape::Box};
+	    float radius{10.0f};
+	};
 
 // Transform decomposition
 struct Transform
@@ -608,9 +618,11 @@ public:
     IBLPaths get_global_ibl_paths() const;
     void set_global_ibl_paths(const IBLPaths& paths);
 
-    // Add a local IBL volume (returns volume index)
-    size_t add_ibl_volume(const IBLVolume& volume);
-    size_t add_ibl_volume(const IBLVolumeD& volume);
+	    // Add a local IBL volume (returns volume index)
+	    size_t add_ibl_volume(const IBLVolume& volume);
+	    size_t add_ibl_volume(const IBLVolumeD& volume);
+	    size_t add_ibl_sphere_volume(const glm::vec3& center, float radius, const IBLPaths& paths, bool enabled = true);
+	    size_t add_ibl_sphere_volume(const glm::dvec3& center, float radius, const IBLPaths& paths, bool enabled = true);
 
     // Remove IBL volume by index
     bool remove_ibl_volume(size_t index);

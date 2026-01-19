@@ -101,6 +101,30 @@ static IBLPaths from_internal_ibl_paths(const ::IBLPaths& p)
     return out;
 }
 
+static VulkanEngine::IBLVolumeShape to_internal_ibl_volume_shape(IBLVolumeShape shape)
+{
+    switch (shape)
+    {
+    case IBLVolumeShape::Sphere:
+        return VulkanEngine::IBLVolumeShape::Sphere;
+    case IBLVolumeShape::Box:
+    default:
+        return VulkanEngine::IBLVolumeShape::Box;
+    }
+}
+
+static IBLVolumeShape from_internal_ibl_volume_shape(VulkanEngine::IBLVolumeShape shape)
+{
+    switch (shape)
+    {
+    case VulkanEngine::IBLVolumeShape::Sphere:
+        return IBLVolumeShape::Sphere;
+    case VulkanEngine::IBLVolumeShape::Box:
+    default:
+        return IBLVolumeShape::Box;
+    }
+}
+
 // ----------------------------------------------------------------------------
 // IBL (Image-Based Lighting)
 // ----------------------------------------------------------------------------
@@ -140,6 +164,8 @@ size_t Engine::add_ibl_volume(const IBLVolume& volume)
     v.halfExtents = volume.halfExtents;
     v.paths = to_internal_ibl_paths(volume.paths);
     v.enabled = volume.enabled;
+    v.shape = to_internal_ibl_volume_shape(volume.shape);
+    v.radius = volume.radius;
 
     _engine->_iblVolumes.push_back(v);
     return _engine->_iblVolumes.size() - 1;
@@ -152,9 +178,33 @@ size_t Engine::add_ibl_volume(const IBLVolumeD& volume)
     v.halfExtents = volume.halfExtents;
     v.paths = to_internal_ibl_paths(volume.paths);
     v.enabled = volume.enabled;
+    v.shape = to_internal_ibl_volume_shape(volume.shape);
+    v.radius = volume.radius;
 
     _engine->_iblVolumes.push_back(v);
     return _engine->_iblVolumes.size() - 1;
+}
+
+size_t Engine::add_ibl_sphere_volume(const glm::vec3& center, float radius, const IBLPaths& paths, bool enabled)
+{
+    IBLVolume v{};
+    v.center = center;
+    v.paths = paths;
+    v.enabled = enabled;
+    v.shape = IBLVolumeShape::Sphere;
+    v.radius = radius;
+    return add_ibl_volume(v);
+}
+
+size_t Engine::add_ibl_sphere_volume(const glm::dvec3& center, float radius, const IBLPaths& paths, bool enabled)
+{
+    IBLVolumeD v{};
+    v.center = center;
+    v.paths = paths;
+    v.enabled = enabled;
+    v.shape = IBLVolumeShape::Sphere;
+    v.radius = radius;
+    return add_ibl_volume(v);
 }
 
 bool Engine::remove_ibl_volume(size_t index)
@@ -183,6 +233,8 @@ bool Engine::get_ibl_volume(size_t index, IBLVolume& out) const
     out.halfExtents = v.halfExtents;
     out.paths = from_internal_ibl_paths(v.paths);
     out.enabled = v.enabled;
+    out.shape = from_internal_ibl_volume_shape(v.shape);
+    out.radius = v.radius;
     return true;
 }
 
@@ -195,6 +247,8 @@ bool Engine::get_ibl_volume(size_t index, IBLVolumeD& out) const
     out.halfExtents = v.halfExtents;
     out.paths = from_internal_ibl_paths(v.paths);
     out.enabled = v.enabled;
+    out.shape = from_internal_ibl_volume_shape(v.shape);
+    out.radius = v.radius;
     return true;
 }
 
@@ -207,6 +261,8 @@ bool Engine::set_ibl_volume(size_t index, const IBLVolume& volume)
     v.halfExtents = volume.halfExtents;
     v.paths = to_internal_ibl_paths(volume.paths);
     v.enabled = volume.enabled;
+    v.shape = to_internal_ibl_volume_shape(volume.shape);
+    v.radius = volume.radius;
     return true;
 }
 
@@ -219,6 +275,8 @@ bool Engine::set_ibl_volume(size_t index, const IBLVolumeD& volume)
     v.halfExtents = volume.halfExtents;
     v.paths = to_internal_ibl_paths(volume.paths);
     v.enabled = volume.enabled;
+    v.shape = to_internal_ibl_volume_shape(volume.shape);
+    v.radius = volume.radius;
     return true;
 }
 

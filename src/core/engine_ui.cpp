@@ -692,7 +692,36 @@ namespace
                     vol.center_world = WorldVec3(c[0], c[1], c[2]);
                 }
             }
-            ImGui::InputFloat3("Half Extents", &vol.halfExtents.x);
+            {
+                const char* shape_items[] = {"Box", "Sphere"};
+                int shape_idx = (vol.shape == VulkanEngine::IBLVolumeShape::Sphere) ? 1 : 0;
+                if (ImGui::Combo("Shape", &shape_idx, shape_items, IM_ARRAYSIZE(shape_items)))
+                {
+                    VulkanEngine::IBLVolumeShape new_shape =
+                        (shape_idx == 1) ? VulkanEngine::IBLVolumeShape::Sphere : VulkanEngine::IBLVolumeShape::Box;
+                    if (new_shape != vol.shape)
+                    {
+                        if (new_shape == VulkanEngine::IBLVolumeShape::Sphere)
+                        {
+                            vol.radius = std::max({vol.halfExtents.x, vol.halfExtents.y, vol.halfExtents.z});
+                        }
+                        else
+                        {
+                            vol.halfExtents = glm::vec3(vol.radius);
+                        }
+                        vol.shape = new_shape;
+                    }
+                }
+            }
+            if (vol.shape == VulkanEngine::IBLVolumeShape::Sphere)
+            {
+                ImGui::InputFloat("Radius", &vol.radius);
+                vol.radius = std::max(vol.radius, 0.0f);
+            }
+            else
+            {
+                ImGui::InputFloat3("Half Extents", &vol.halfExtents.x);
+            }
 
             // Simple path editors; store absolute or engine-local paths.
             char specBuf[256]{};

@@ -1074,21 +1074,41 @@ void VulkanEngine::draw()
     // Update IBL based on camera position and user-defined reflection volumes.
     if (_iblManager && _sceneManager)
     {
-        WorldVec3 camPosWorld = _sceneManager->getMainCamera().position_world;
-        int newVolume = -1;
-        for (size_t i = 0; i < _iblVolumes.size(); ++i)
-        {
-            const IBLVolume &v = _iblVolumes[i];
-            if (!v.enabled) continue;
-            WorldVec3 local = camPosWorld - v.center_world;
-            if (std::abs(local.x) <= static_cast<double>(v.halfExtents.x) &&
-                std::abs(local.y) <= static_cast<double>(v.halfExtents.y) &&
-                std::abs(local.z) <= static_cast<double>(v.halfExtents.z))
-            {
-                newVolume = static_cast<int>(i);
-                break;
-            }
-        }
+	        WorldVec3 camPosWorld = _sceneManager->getMainCamera().position_world;
+	        int newVolume = -1;
+	        for (size_t i = 0; i < _iblVolumes.size(); ++i)
+	        {
+	            const IBLVolume &v = _iblVolumes[i];
+	            if (!v.enabled) continue;
+	            WorldVec3 local = camPosWorld - v.center_world;
+	            bool inside = false;
+	            switch (v.shape)
+	            {
+	            case IBLVolumeShape::Box:
+	                inside = (std::abs(local.x) <= static_cast<double>(v.halfExtents.x) &&
+	                          std::abs(local.y) <= static_cast<double>(v.halfExtents.y) &&
+	                          std::abs(local.z) <= static_cast<double>(v.halfExtents.z));
+	                break;
+	            case IBLVolumeShape::Sphere:
+	            {
+	                const double r = static_cast<double>(std::max(v.radius, 0.0f));
+	                const double d2 = (local.x * local.x) + (local.y * local.y) + (local.z * local.z);
+	                inside = d2 <= (r * r);
+	                break;
+	            }
+	            default:
+	                inside = (std::abs(local.x) <= static_cast<double>(v.halfExtents.x) &&
+	                          std::abs(local.y) <= static_cast<double>(v.halfExtents.y) &&
+	                          std::abs(local.z) <= static_cast<double>(v.halfExtents.z));
+	                break;
+	            }
+
+	            if (inside)
+	            {
+	                newVolume = static_cast<int>(i);
+	                break;
+	            }
+	        }
 
         if (newVolume != _activeIBLVolume)
         {
