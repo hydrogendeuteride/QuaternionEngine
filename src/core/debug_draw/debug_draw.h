@@ -3,6 +3,7 @@
 #include <core/world.h>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <array>
 #include <cstdint>
@@ -118,7 +119,46 @@ public:
                   DebugDepth depth = DebugDepth::DepthTested,
                   DebugDrawLayer layer = DebugDrawLayer::Misc);
 
+    // Convenience: oriented box specified as center + rotation + half extents.
+    void add_obb(const WorldVec3 &center_world,
+                 const glm::quat &rotation,
+                 const glm::vec3 &half_extents,
+                 const glm::vec4 &color,
+                 float seconds = 0.0f,
+                 DebugDepth depth = DebugDepth::DepthTested,
+                 DebugDrawLayer layer = DebugDrawLayer::Misc);
+
     void add_obb_corners(const std::array<WorldVec3, 8> &corners_world,
+                         const glm::vec4 &color,
+                         float seconds = 0.0f,
+                         DebugDepth depth = DebugDepth::DepthTested,
+                         DebugDrawLayer layer = DebugDrawLayer::Misc);
+
+    // Convenience: draws cylinder wireframe using circles + 4 side lines.
+    void add_cylinder(const WorldVec3 &center_world,
+                      const glm::dvec3 &axis_world,
+                      float radius,
+                      float half_height,
+                      const glm::vec4 &color,
+                      float seconds = 0.0f,
+                      DebugDepth depth = DebugDepth::DepthTested,
+                      DebugDrawLayer layer = DebugDrawLayer::Misc);
+
+    // Convenience: draws tapered cylinder / cone wireframe (top_radius or bottom_radius may be 0).
+    void add_tapered_cylinder(const WorldVec3 &center_world,
+                              const glm::dvec3 &axis_world,
+                              float half_height,
+                              float top_radius,
+                              float bottom_radius,
+                              const glm::vec4 &color,
+                              float seconds = 0.0f,
+                              DebugDepth depth = DebugDepth::DepthTested,
+                              DebugDrawLayer layer = DebugDrawLayer::Misc);
+
+    // Convenience: draws a square patch on a plane (useful for PlaneShape visualization).
+    void add_plane_patch(const WorldVec3 &point_world,
+                         const glm::dvec3 &normal_world,
+                         float half_size,
                          const glm::vec4 &color,
                          float seconds = 0.0f,
                          DebugDepth depth = DebugDepth::DepthTested,

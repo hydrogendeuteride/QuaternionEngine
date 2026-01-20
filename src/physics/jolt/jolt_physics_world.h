@@ -14,6 +14,7 @@
 
 #include <memory>
 #include <mutex>
+#include <atomic>
 #include <unordered_map>
 #include <vector>
 
@@ -51,6 +52,9 @@ namespace Physics
         // ========================================================================
 
         void step(float dt) override;
+
+        DebugStats debug_stats() const override;
+        void for_each_debug_body(const DebugBodyFn &fn) const override;
 
         BodyId create_body(const BodySettings &settings) override;
 
@@ -241,6 +245,14 @@ namespace Physics
         // Member data
         // ========================================================================
 
+        struct BodyDebugRecord
+        {
+            CollisionShape shape{};
+            MotionType motion_type{MotionType::Static};
+            uint32_t layer{0};
+            bool is_sensor{false};
+        };
+
         JoltGlobals _globals; // Must be first to ensure proper initialization order
         bool _initialized{false};
 
@@ -290,6 +302,19 @@ namespace Physics
         uint32_t _next_joint_id{1};
         mutable std::mutex _joints_mutex;
         std::unordered_map<uint32_t, JPH::Constraint *> _joints;
+
+        // Debug: body metadata (shapes, types) for visualization and UI
+        mutable std::mutex _debug_bodies_mutex;
+        std::unordered_map<uint32_t, BodyDebugRecord> _debug_bodies;
+
+        // Debug: step instrumentation
+        std::atomic<float> _debug_last_step_ms{0.0f};
+        std::atomic<float> _debug_avg_step_ms{0.0f};
+        std::atomic<float> _debug_last_dt{0.0f};
+        std::atomic<uint32_t> _debug_body_count{0};
+        std::atomic<uint32_t> _debug_active_body_count{0};
+        std::atomic<uint32_t> _debug_joint_count{0};
+        std::atomic<uint32_t> _debug_contact_event_count{0};
 
         // Contact listener
         class ContactListenerImpl;

@@ -509,6 +509,36 @@ void DebugDrawSystem::add_cone(const WorldVec3 &apex_world,
     _cones.push_back(cmd);
 }
 
+void DebugDrawSystem::add_obb(const WorldVec3 &center_world,
+                              const glm::quat &rotation,
+                              const glm::vec3 &half_extents,
+                              const glm::vec4 &color,
+                              float seconds,
+                              DebugDepth depth,
+                              DebugDrawLayer layer)
+{
+    const glm::vec3 e = glm::max(half_extents, glm::vec3(0.0f));
+    const glm::vec3 corners_local[8] = {
+        glm::vec3(-e.x, -e.y, -e.z),
+        glm::vec3(+e.x, -e.y, -e.z),
+        glm::vec3(-e.x, +e.y, -e.z),
+        glm::vec3(+e.x, +e.y, -e.z),
+        glm::vec3(-e.x, -e.y, +e.z),
+        glm::vec3(+e.x, -e.y, +e.z),
+        glm::vec3(-e.x, +e.y, +e.z),
+        glm::vec3(+e.x, +e.y, +e.z),
+    };
+
+    std::array<WorldVec3, 8> corners_world{};
+    for (int i = 0; i < 8; ++i)
+    {
+        const glm::vec3 rotated = rotation * corners_local[i];
+        corners_world[i] = center_world + WorldVec3(rotated);
+    }
+
+    add_obb_corners(corners_world, color, seconds, depth, layer);
+}
+
 void DebugDrawSystem::add_obb_corners(const std::array<WorldVec3, 8> &corners_world,
                                       const glm::vec4 &color,
                                       float seconds,
@@ -522,6 +552,118 @@ void DebugDrawSystem::add_obb_corners(const std::array<WorldVec3, 8> &corners_wo
     cmd.layer = layer;
     cmd.ttl_seconds = ttl_from_seconds(seconds);
     _obbs.push_back(cmd);
+}
+
+void DebugDrawSystem::add_cylinder(const WorldVec3 &center_world,
+                                   const glm::dvec3 &axis_world,
+                                   float radius,
+                                   float half_height,
+                                   const glm::vec4 &color,
+                                   float seconds,
+                                   DebugDepth depth,
+                                   DebugDrawLayer layer)
+{
+    radius = clamp_nonnegative_finite(radius, 0.0f);
+    half_height = clamp_nonnegative_finite(half_height, 0.0f);
+    if (radius <= 0.0f)
+    {
+        return;
+    }
+
+    const glm::vec3 axis_n = safe_normalize(glm::vec3(axis_world), glm::vec3(0.0f, 1.0f, 0.0f));
+    const glm::dvec3 axis_nd = glm::dvec3(axis_n);
+    const WorldVec3 top_world = center_world + axis_nd * static_cast<double>(half_height);
+    const WorldVec3 bot_world = center_world - axis_nd * static_cast<double>(half_height);
+
+    add_circle(top_world, axis_nd, radius, color, seconds, depth, layer);
+    add_circle(bot_world, axis_nd, radius, color, seconds, depth, layer);
+
+    glm::vec3 u{}, v{};
+    basis_from_normal(axis_n, u, v);
+
+    const glm::vec3 dirs[4] = {u, -u, v, -v};
+    for (const glm::vec3 &d: dirs)
+    {
+        const WorldVec3 p0 = bot_world + WorldVec3(d * radius);
+        const WorldVec3 p1 = top_world + WorldVec3(d * radius);
+        add_line(p0, p1, color, seconds, depth, layer);
+    }
+}
+
+void DebugDrawSystem::add_tapered_cylinder(const WorldVec3 &center_world,
+                                          const glm::dvec3 &axis_world,
+                                          float half_height,
+                                          float top_radius,
+                                          float bottom_radius,
+                                          const glm::vec4 &color,
+                                          float seconds,
+                                          DebugDepth depth,
+                                          DebugDrawLayer layer)
+{
+    half_height = clamp_nonnegative_finite(half_height, 0.0f);
+    top_radius = clamp_nonnegative_finite(top_radius, 0.0f);
+    bottom_radius = clamp_nonnegative_finite(bottom_radius, 0.0f);
+    if (top_radius <= 0.0f && bottom_radius <= 0.0f)
+    {
+        return;
+    }
+
+    const glm::vec3 axis_n = safe_normalize(glm::vec3(axis_world), glm::vec3(0.0f, 1.0f, 0.0f));
+    const glm::dvec3 axis_nd = glm::dvec3(axis_n);
+    const WorldVec3 top_world = center_world + axis_nd * static_cast<double>(half_height);
+    const WorldVec3 bot_world = center_world - axis_nd * static_cast<double>(half_height);
+
+    if (top_radius > 0.0f)
+    {
+        add_circle(top_world, axis_nd, top_radius, color, seconds, depth, layer);
+    }
+    if (bottom_radius > 0.0f)
+    {
+        add_circle(bot_world, axis_nd, bottom_radius, color, seconds, depth, layer);
+    }
+
+    glm::vec3 u{}, v{};
+    basis_from_normal(axis_n, u, v);
+
+    const glm::vec3 dirs[4] = {u, -u, v, -v};
+    for (const glm::vec3 &d: dirs)
+    {
+        const WorldVec3 p0 = bot_world + WorldVec3(d * bottom_radius);
+        const WorldVec3 p1 = top_world + WorldVec3(d * top_radius);
+        add_line(p0, p1, color, seconds, depth, layer);
+    }
+}
+
+void DebugDrawSystem::add_plane_patch(const WorldVec3 &point_world,
+                                      const glm::dvec3 &normal_world,
+                                      float half_size,
+                                      const glm::vec4 &color,
+                                      float seconds,
+                                      DebugDepth depth,
+                                      DebugDrawLayer layer)
+{
+    half_size = clamp_nonnegative_finite(half_size, 0.0f);
+    if (half_size <= 0.0f)
+    {
+        return;
+    }
+
+    const glm::vec3 n = safe_normalize(glm::vec3(normal_world), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::vec3 u{}, v{};
+    basis_from_normal(n, u, v);
+
+    const WorldVec3 du = WorldVec3(u * half_size);
+    const WorldVec3 dv = WorldVec3(v * half_size);
+
+    const WorldVec3 c0 = point_world + du + dv;
+    const WorldVec3 c1 = point_world + du - dv;
+    const WorldVec3 c2 = point_world - du - dv;
+    const WorldVec3 c3 = point_world - du + dv;
+
+    add_line(c0, c1, color, seconds, depth, layer);
+    add_line(c1, c2, color, seconds, depth, layer);
+    add_line(c2, c3, color, seconds, depth, layer);
+    add_line(c3, c0, color, seconds, depth, layer);
 }
 
 DebugDrawSystem::LineVertexLists DebugDrawSystem::build_line_vertices(const WorldVec3 &origin_world) const

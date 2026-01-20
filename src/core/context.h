@@ -35,6 +35,20 @@ class TextureCache;
 class IBLManager;
 class InputSystem;
 class DebugDrawSystem;
+namespace Physics { class PhysicsWorld; }
+
+struct PhysicsDebugSettings
+{
+    bool draw_colliders{false};
+    bool active_only{false};
+    bool include_static{true};
+    bool include_kinematic{true};
+    bool include_dynamic{true};
+    bool include_sensors{true};
+    bool overlay{false}; // always-on-top
+    float alpha{0.75f};
+    int max_bodies{2048};
+};
 
 struct ShadowSettings
 {
@@ -195,6 +209,7 @@ public:
     SDL_Window* window = nullptr;                // SDL window handle
     InputSystem* input = nullptr;                // input system (engine-owned)
     DebugDrawSystem* debug_draw = nullptr;       // debug 3D draw collector (engine-owned)
+    Physics::PhysicsWorld* physics = nullptr;    // optional game-owned physics world for debugging/visualization
 
     // Frequently used values
     VkExtent2D drawExtent{};
@@ -243,4 +258,7 @@ public:
     // Streaming subsystems (engine-owned)
     TextureCache* textures = nullptr;            // texture streaming + cache
     IBLManager*  ibl = nullptr;                  // optional IBL owner (if created by engine)
+
+    // Debug settings
+    PhysicsDebugSettings physics_debug{};
 };

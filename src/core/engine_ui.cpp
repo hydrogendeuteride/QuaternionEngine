@@ -7,6 +7,7 @@
 #include "engine.h"
 #include "core/picking/picking_system.h"
 #include "core/debug_draw/debug_draw.h"
+#include "physics/physics_world.h"
 
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_vulkan.h"
@@ -2835,6 +2836,90 @@ namespace
             }
         }
     }
+
+    static void ui_physics(VulkanEngine *eng)
+    {
+        if (!eng || !eng->_context)
+        {
+            ImGui::TextUnformatted("Engine context not available");
+            return;
+        }
+
+        DebugDrawSystem *dd = eng->_debugDraw.get();
+        if (dd)
+        {
+            ImGui::SeparatorText("Debug Draw");
+
+            bool enabled = dd->settings().enabled;
+            if (ImGui::Checkbox("Enabled", &enabled))
+            {
+                dd->settings().enabled = enabled;
+            }
+
+            ImGui::SameLine();
+            ImGui::Checkbox("Depth-tested", &dd->settings().show_depth_tested);
+            ImGui::SameLine();
+            ImGui::Checkbox("Overlay", &dd->settings().show_overlay);
+
+            bool physics_layer = (dd->settings().layer_mask & static_cast<uint32_t>(DebugDrawLayer::Physics)) != 0u;
+            if (ImGui::Checkbox("Layer: Physics", &physics_layer))
+            {
+                if (physics_layer)
+                {
+                    dd->settings().layer_mask |= static_cast<uint32_t>(DebugDrawLayer::Physics);
+                }
+                else
+                {
+                    dd->settings().layer_mask &= ~static_cast<uint32_t>(DebugDrawLayer::Physics);
+                }
+            }
+
+            ImGui::SliderInt("Segments", &dd->settings().segments, 8, 128);
+        }
+
+        ImGui::SeparatorText("Physics World");
+
+        Physics::PhysicsWorld *physics = eng->_context->physics;
+        if (!physics)
+        {
+            ImGui::TextUnformatted("No active Physics::PhysicsWorld (EngineContext::physics is null).");
+            ImGui::TextUnformatted("Set it from your game/runtime to enable physics stats and collider debug draw.");
+            return;
+        }
+
+        const Physics::PhysicsWorld::DebugStats stats = physics->debug_stats();
+        ImGui::Text("Step: %.3f ms (avg %.3f ms) | dt: %.3f ms",
+                    stats.last_step_ms,
+                    stats.avg_step_ms,
+                    stats.last_dt * 1000.0f);
+        ImGui::Text("Bodies: %u (active %u) | Joints: %u | Contact events: %u",
+                    stats.body_count,
+                    stats.active_body_count,
+                    stats.joint_count,
+                    stats.contact_event_count);
+
+        ImGui::SeparatorText("Visualization");
+        PhysicsDebugSettings &ps = eng->_context->physics_debug;
+        ImGui::Checkbox("Draw colliders", &ps.draw_colliders);
+        ImGui::Checkbox("Active only", &ps.active_only);
+        ImGui::SameLine();
+        ImGui::Checkbox("Overlay (always on top)", &ps.overlay);
+
+        ImGui::Checkbox("Include static", &ps.include_static);
+        ImGui::SameLine();
+        ImGui::Checkbox("Include kinematic", &ps.include_kinematic);
+        ImGui::SameLine();
+        ImGui::Checkbox("Include dynamic", &ps.include_dynamic);
+        ImGui::Checkbox("Include sensors", &ps.include_sensors);
+
+        ImGui::SliderFloat("Alpha", &ps.alpha, 0.05f, 1.0f);
+        ImGui::SliderInt("Max bodies (0 = unlimited)", &ps.max_bodies, 0, 10000);
+
+        if (!dd || !dd->settings().enabled)
+        {
+            ImGui::TextUnformatted("Enable Debug Draw to see collider visualization.");
+        }
+    }
 } // namespace
 
 // Window visibility states for menu-bar toggles
@@ -2951,6 +3036,12 @@ void vk_engine_draw_debug_ui(VulkanEngine *eng)
                 if (ImGui::BeginTabItem("Particles"))
                 {
                     ui_particles(eng);
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Physics"))
+                {
+                    ui_physics(eng);
                     ImGui::EndTabItem();
                 }
 

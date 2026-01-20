@@ -27,6 +27,47 @@ namespace Physics
         virtual void step(float dt) = 0;
 
         // ========================================================================
+        // Debug / instrumentation (optional)
+        // ========================================================================
+
+        struct DebugStats
+        {
+            float last_step_ms{0.0f};
+            float avg_step_ms{0.0f};
+            float last_dt{0.0f}; // seconds
+
+            uint32_t body_count{0};
+            uint32_t active_body_count{0};
+            uint32_t joint_count{0};
+            uint32_t contact_event_count{0}; // last step (queued or dispatched, backend-dependent)
+        };
+
+        // Lightweight counters/timings for UI and telemetry. Backends may return zeros if unsupported.
+        virtual DebugStats debug_stats() const { return {}; }
+
+        struct DebugBodyView
+        {
+            BodyId id;
+
+            glm::vec3 position{0.0f};
+            glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+
+            MotionType motion_type{MotionType::Static};
+            uint32_t layer{0};
+            bool is_sensor{false};
+            bool is_active{false};
+            uint64_t user_data{0};
+
+            CollisionShape shape{};
+        };
+
+        using DebugBodyFn = std::function<void(const DebugBodyView &)>;
+
+        // Iterate over bodies with enough data to drive debug UI and debug rendering.
+        // Default implementation does nothing.
+        virtual void for_each_debug_body(const DebugBodyFn &fn) const { (void) fn; }
+
+        // ========================================================================
         // Body creation / destruction
         // ========================================================================
 

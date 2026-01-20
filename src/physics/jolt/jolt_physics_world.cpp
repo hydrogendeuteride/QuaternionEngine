@@ -2,6 +2,8 @@
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
 
+#include "jolt_query_filters.h"
+
 #include <Jolt/RegisterTypes.h>
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/IssueReporting.h>
@@ -29,6 +31,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdarg>
 #include <cstdio>
 #include <cmath>
@@ -84,7 +87,8 @@ namespace Physics
         void OnContactRemoved(const JPH::SubShapeIDPair &pair) override
         {
             PairCacheEntry cached;
-            bool found = false; {
+            bool found = false;
+            {
                 std::scoped_lock lock(_world->_pair_cache_mutex);
                 auto it = _world->_pair_cache.find(pair);
                 if (it != _world->_pair_cache.end())
@@ -509,12 +513,95 @@ namespace Physics
             return;
         }
 
+        using Clock = std::chrono::steady_clock;
+        const auto t0 = Clock::now();
+
         {
             std::scoped_lock lock(_layer_mutex);
             _physics_system.Update(dt, 1, _temp_allocator.get(), _job_system.get());
+
+            // Snapshot some Jolt counters while we're already serialized with update.
+            _debug_last_dt.store(dt, std::memory_order_relaxed);
+            _debug_body_count.store(static_cast<uint32_t>(_physics_system.GetNumBodies()), std::memory_order_relaxed);
+            const uint32_t active_rigid = _physics_system.GetNumActiveBodies(JPH::EBodyType::RigidBody);
+            const uint32_t active_soft = _physics_system.GetNumActiveBodies(JPH::EBodyType::SoftBody);
+            _debug_active_body_count.store(active_rigid + active_soft, std::memory_order_relaxed);
         }
 
+        const auto t1 = Clock::now();
+        const float step_ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
+        _debug_last_step_ms.store(step_ms, std::memory_order_relaxed);
+
+        // Simple exponential moving average to make the UI stable.
+        const float prev = _debug_avg_step_ms.load(std::memory_order_relaxed);
+        const float next = (prev <= 0.0f) ? step_ms : (prev * 0.9f + step_ms * 0.1f);
+        _debug_avg_step_ms.store(next, std::memory_order_relaxed);
+
         dispatch_contact_events();
+    }
+
+    PhysicsWorld::DebugStats JoltPhysicsWorld::debug_stats() const
+    {
+        DebugStats s{};
+        s.last_step_ms = _debug_last_step_ms.load(std::memory_order_relaxed);
+        s.avg_step_ms = _debug_avg_step_ms.load(std::memory_order_relaxed);
+        s.last_dt = _debug_last_dt.load(std::memory_order_relaxed);
+        s.body_count = _debug_body_count.load(std::memory_order_relaxed);
+        s.active_body_count = _debug_active_body_count.load(std::memory_order_relaxed);
+        s.joint_count = _debug_joint_count.load(std::memory_order_relaxed);
+        s.contact_event_count = _debug_contact_event_count.load(std::memory_order_relaxed);
+        return s;
+    }
+
+    void JoltPhysicsWorld::for_each_debug_body(const DebugBodyFn &fn) const
+    {
+        if (!_initialized || !fn)
+        {
+            return;
+        }
+
+        std::vector<uint32_t> ids;
+        {
+            std::scoped_lock lock(_debug_bodies_mutex);
+            ids.reserve(_debug_bodies.size());
+            for (const auto &kv: _debug_bodies)
+            {
+                ids.push_back(kv.first);
+            }
+        }
+
+        for (uint32_t id_value: ids)
+        {
+            BodyDebugRecord rec{};
+            {
+                std::scoped_lock lock(_debug_bodies_mutex);
+                auto it = _debug_bodies.find(id_value);
+                if (it == _debug_bodies.end())
+                {
+                    continue;
+                }
+                rec = it->second;
+            }
+
+            BodyId id{id_value};
+            if (!is_body_valid(id))
+            {
+                continue;
+            }
+
+            DebugBodyView v{};
+            v.id = id;
+            v.position = get_position(id);
+            v.rotation = get_rotation(id);
+            v.motion_type = rec.motion_type;
+            v.layer = rec.layer;
+            v.is_sensor = rec.is_sensor;
+            v.is_active = is_active(id);
+            v.user_data = get_user_data(id);
+            v.shape = rec.shape;
+
+            fn(v);
+        }
     }
 
     void JoltPhysicsWorld::dispatch_contact_events()
@@ -525,6 +612,8 @@ namespace Physics
             std::scoped_lock lock(_events_mutex);
             events.swap(_queued_events);
         }
+
+        _debug_contact_event_count.store(static_cast<uint32_t>(events.size()), std::memory_order_relaxed);
 
         for (const ContactEventRecord &e: events)
         {
@@ -740,7 +829,17 @@ namespace Physics
             return BodyId{};
         }
 
-        return BodyId{jolt_id.GetIndexAndSequenceNumber()};
+        BodyId id{jolt_id.GetIndexAndSequenceNumber()};
+        {
+            std::scoped_lock lock(_debug_bodies_mutex);
+            BodyDebugRecord rec{};
+            rec.shape = settings.shape;
+            rec.motion_type = settings.motion_type;
+            rec.layer = settings.layer;
+            rec.is_sensor = settings.is_sensor;
+            _debug_bodies[id.value] = std::move(rec);
+        }
+        return id;
     }
 
     void JoltPhysicsWorld::destroy_body(BodyId id)
@@ -751,6 +850,10 @@ namespace Physics
         } {
             std::scoped_lock lock(_callbacks_mutex);
             _callbacks.erase(id.value);
+        }
+        {
+            std::scoped_lock lock(_debug_bodies_mutex);
+            _debug_bodies.erase(id.value);
         }
 
         JPH::BodyID jolt_id(id.value);
@@ -1041,102 +1144,9 @@ namespace Physics
             JPH::RVec3(origin.x, origin.y, origin.z),
             JPH::Vec3(dir_norm.x, dir_norm.y, dir_norm.z) * options.max_distance);
 
-        class RaycastFilter : public JPH::BroadPhaseLayerFilter, public JPH::ObjectLayerFilter
-        {
-        public:
-            RaycastFilter(uint32_t layer_mask, BodyId ignore_body, bool include_sensors,
-                          const JPH::PhysicsSystem &physics_system)
-                : _layer_mask(layer_mask)
-                  , _ignore_body(ignore_body)
-                  , _include_sensors(include_sensors)
-                  , _physics_system(physics_system)
-            {
-            }
-
-            // BroadPhaseLayerFilter
-            bool ShouldCollide(JPH::BroadPhaseLayer) const override
-            {
-                // Always allow both moving and non-moving layers to be tested
-                return true;
-            }
-
-            // ObjectLayerFilter
-            bool ShouldCollide(JPH::ObjectLayer layer) const override
-            {
-                // Check if this layer is in the mask
-                return (_layer_mask & (1u << layer)) != 0;
-            }
-
-        private:
-            uint32_t _layer_mask;
-            BodyId _ignore_body;
-            bool _include_sensors;
-            const JPH::PhysicsSystem &_physics_system;
-        };
-
-        // Custom body filter for ignore_body and sensor filtering
-        class RaycastBodyFilter : public JPH::BodyFilter
-        {
-        public:
-            RaycastBodyFilter(BodyId ignore_body, bool include_sensors, const JPH::BodyLockInterface &lock_interface)
-                : _ignore_body(ignore_body)
-                  , _include_sensors(include_sensors)
-                  , _lock_interface(lock_interface)
-            {
-            }
-
-            bool ShouldCollide(const JPH::BodyID &body_id) const override
-            {
-                // Check if this is the body to ignore
-                if (_ignore_body.is_valid() && body_id.GetIndexAndSequenceNumber() == _ignore_body.value)
-                {
-                    return false;
-                }
-
-                // Check sensor filtering
-                if (!_include_sensors)
-                {
-                    JPH::BodyLockRead lock(_lock_interface, body_id);
-                    if (lock.Succeeded())
-                    {
-                        const JPH::Body &body = lock.GetBody();
-                        if (body.IsSensor())
-                        {
-                            return false;
-                        }
-                    }
-                }
-
-                return true;
-            }
-
-            bool ShouldCollideLocked(const JPH::Body &body) const override
-            {
-                // Check if this is the body to ignore
-                if (_ignore_body.is_valid() && body.GetID().GetIndexAndSequenceNumber() == _ignore_body.value)
-                {
-                    return false;
-                }
-
-                // Check sensor filtering
-                if (!_include_sensors && body.IsSensor())
-                {
-                    return false;
-                }
-
-                return true;
-            }
-
-        private:
-            BodyId _ignore_body;
-            bool _include_sensors;
-            const JPH::BodyLockInterface &_lock_interface;
-        };
-
-        RaycastFilter broad_phase_filter(options.layer_mask, options.ignore_body, options.include_sensors,
-                                         _physics_system);
-        RaycastBodyFilter body_filter(options.ignore_body, options.include_sensors,
-                                      _physics_system.GetBodyLockInterface());
+        JoltQuery::LayerMaskFilter layer_filter(options.layer_mask);
+        JoltQuery::IgnoreBodyAndSensorsFilter body_filter(options.ignore_body, options.include_sensors,
+                                                          _physics_system.GetBodyLockInterface());
 
         JPH::RayCastSettings ray_settings;
         ray_settings.mBackFaceModeTriangles = options.backface_culling
@@ -1148,8 +1158,8 @@ namespace Physics
 
         JPH::RayCastResult hit;
         JPH::ClosestHitCollisionCollector<JPH::CastRayCollector> collector;
-        _physics_system.GetNarrowPhaseQuery().CastRay(ray, ray_settings, collector, broad_phase_filter,
-                                                      broad_phase_filter, body_filter);
+        _physics_system.GetNarrowPhaseQuery().CastRay(ray, ray_settings, collector, layer_filter,
+                                                      layer_filter, body_filter);
 
         if (collector.HadHit())
         {
@@ -1214,77 +1224,9 @@ namespace Physics
         const JPH::Vec3 cast_dir = JPH::Vec3(dir_norm.x, dir_norm.y, dir_norm.z) * options.max_distance;
         const JPH::RShapeCast shape_cast(jolt_shape.GetPtr(), JPH::Vec3::sOne(), com_start, cast_dir);
 
-        class ShapeQueryFilter : public JPH::BroadPhaseLayerFilter, public JPH::ObjectLayerFilter
-        {
-        public:
-            explicit ShapeQueryFilter(uint32_t layer_mask) : _layer_mask(layer_mask)
-            {
-            }
-
-            bool ShouldCollide(JPH::BroadPhaseLayer) const override { return true; }
-
-            bool ShouldCollide(JPH::ObjectLayer layer) const override
-            {
-                return (_layer_mask & (1u << layer)) != 0;
-            }
-
-        private:
-            uint32_t _layer_mask;
-        };
-
-        class ShapeQueryBodyFilter : public JPH::BodyFilter
-        {
-        public:
-            ShapeQueryBodyFilter(BodyId ignore_body, bool include_sensors, const JPH::BodyLockInterface &lock_interface)
-                : _ignore_body(ignore_body)
-                  , _include_sensors(include_sensors)
-                  , _lock_interface(lock_interface)
-            {
-            }
-
-            bool ShouldCollide(const JPH::BodyID &body_id) const override
-            {
-                if (_ignore_body.is_valid() && body_id.GetIndexAndSequenceNumber() == _ignore_body.value)
-                {
-                    return false;
-                }
-
-                if (!_include_sensors)
-                {
-                    JPH::BodyLockRead lock(_lock_interface, body_id);
-                    if (lock.Succeeded() && lock.GetBody().IsSensor())
-                    {
-                        return false;
-                    }
-                }
-
-                return true;
-            }
-
-            bool ShouldCollideLocked(const JPH::Body &body) const override
-            {
-                if (_ignore_body.is_valid() && body.GetID().GetIndexAndSequenceNumber() == _ignore_body.value)
-                {
-                    return false;
-                }
-
-                if (!_include_sensors && body.IsSensor())
-                {
-                    return false;
-                }
-
-                return true;
-            }
-
-        private:
-            BodyId _ignore_body;
-            bool _include_sensors;
-            const JPH::BodyLockInterface &_lock_interface;
-        };
-
-        ShapeQueryFilter layer_filter(options.layer_mask);
-        ShapeQueryBodyFilter body_filter(options.ignore_body, options.include_sensors,
-                                         _physics_system.GetBodyLockInterface());
+        JoltQuery::LayerMaskFilter layer_filter(options.layer_mask);
+        JoltQuery::IgnoreBodyAndSensorsFilter body_filter(options.ignore_body, options.include_sensors,
+                                                          _physics_system.GetBodyLockInterface());
 
         JPH::ShapeCastSettings cast_settings;
         cast_settings.mReturnDeepestPoint = true;
@@ -1351,77 +1293,9 @@ namespace Physics
                 JPH::Mat44::sRotation(JPH::Quat(rotation.x, rotation.y, rotation.z, rotation.w)) *
                 shape_com;
 
-        class ShapeQueryFilter : public JPH::BroadPhaseLayerFilter, public JPH::ObjectLayerFilter
-        {
-        public:
-            explicit ShapeQueryFilter(uint32_t layer_mask) : _layer_mask(layer_mask)
-            {
-            }
-
-            bool ShouldCollide(JPH::BroadPhaseLayer) const override { return true; }
-
-            bool ShouldCollide(JPH::ObjectLayer layer) const override
-            {
-                return (_layer_mask & (1u << layer)) != 0;
-            }
-
-        private:
-            uint32_t _layer_mask;
-        };
-
-        class ShapeQueryBodyFilter : public JPH::BodyFilter
-        {
-        public:
-            ShapeQueryBodyFilter(BodyId ignore_body, bool include_sensors, const JPH::BodyLockInterface &lock_interface)
-                : _ignore_body(ignore_body)
-                  , _include_sensors(include_sensors)
-                  , _lock_interface(lock_interface)
-            {
-            }
-
-            bool ShouldCollide(const JPH::BodyID &body_id) const override
-            {
-                if (_ignore_body.is_valid() && body_id.GetIndexAndSequenceNumber() == _ignore_body.value)
-                {
-                    return false;
-                }
-
-                if (!_include_sensors)
-                {
-                    JPH::BodyLockRead lock(_lock_interface, body_id);
-                    if (lock.Succeeded() && lock.GetBody().IsSensor())
-                    {
-                        return false;
-                    }
-                }
-
-                return true;
-            }
-
-            bool ShouldCollideLocked(const JPH::Body &body) const override
-            {
-                if (_ignore_body.is_valid() && body.GetID().GetIndexAndSequenceNumber() == _ignore_body.value)
-                {
-                    return false;
-                }
-
-                if (!_include_sensors && body.IsSensor())
-                {
-                    return false;
-                }
-
-                return true;
-            }
-
-        private:
-            BodyId _ignore_body;
-            bool _include_sensors;
-            const JPH::BodyLockInterface &_lock_interface;
-        };
-
-        ShapeQueryFilter layer_filter(options.layer_mask);
-        ShapeQueryBodyFilter body_filter(options.ignore_body, options.include_sensors,
-                                         _physics_system.GetBodyLockInterface());
+        JoltQuery::LayerMaskFilter layer_filter(options.layer_mask);
+        JoltQuery::IgnoreBodyAndSensorsFilter body_filter(options.ignore_body, options.include_sensors,
+                                                          _physics_system.GetBodyLockInterface());
 
         JPH::CollideShapeSettings collide_settings;
         collide_settings.mBackFaceMode = JPH::EBackFaceMode::CollideWithBackFaces;
@@ -1558,6 +1432,7 @@ namespace Physics
             std::scoped_lock lock_joints(_joints_mutex);
             id = _next_joint_id++;
             _joints[id] = constraint;
+            _debug_joint_count.store(static_cast<uint32_t>(_joints.size()), std::memory_order_relaxed);
         }
 
         return JointId{id};
@@ -1615,6 +1490,7 @@ namespace Physics
             std::scoped_lock lock_joints(_joints_mutex);
             id = _next_joint_id++;
             _joints[id] = constraint;
+            _debug_joint_count.store(static_cast<uint32_t>(_joints.size()), std::memory_order_relaxed);
         }
 
         return JointId{id};
@@ -1675,6 +1551,7 @@ namespace Physics
             std::scoped_lock lock_joints(_joints_mutex);
             id = _next_joint_id++;
             _joints[id] = constraint;
+            _debug_joint_count.store(static_cast<uint32_t>(_joints.size()), std::memory_order_relaxed);
         }
 
         return JointId{id};
@@ -1698,6 +1575,7 @@ namespace Physics
             }
             constraint = it->second;
             _joints.erase(it);
+            _debug_joint_count.store(static_cast<uint32_t>(_joints.size()), std::memory_order_relaxed);
         }
 
         if (constraint != nullptr)

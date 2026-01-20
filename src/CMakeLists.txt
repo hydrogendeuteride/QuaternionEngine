@@ -17,6 +17,10 @@ add_executable (vulkan_engine
   core/picking/picking_system.cpp
   core/debug_draw/debug_draw.h
   core/debug_draw/debug_draw.cpp
+  core/debug_draw/physics_debug_draw.h
+  core/debug_draw/physics_debug_draw.cpp
+  core/debug_draw/engine_debug_draw.h
+  core/debug_draw/engine_debug_draw.cpp
   core/game_api.h
   core/game_api/game_api.cpp
   core/game_api/game_api_textures.cpp
@@ -168,6 +172,7 @@ add_executable (vulkan_engine
   physics/physics_world.h
   physics/jolt/jolt_physics_world.h
   physics/jolt/jolt_physics_world.cpp
+  physics/jolt/jolt_query_filters.h
   # game
   game/entity.h
   game/entity.cpp

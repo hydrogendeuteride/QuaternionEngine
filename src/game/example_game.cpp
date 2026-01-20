@@ -150,6 +150,16 @@ namespace Game
         _world.set_api(nullptr);
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
+        if (_runtime)
+        {
+            if (VulkanEngine *renderer = _runtime->renderer())
+            {
+                if (renderer->_context && renderer->_context->physics == _physics.get())
+                {
+                    renderer->_context->physics = nullptr;
+                }
+            }
+        }
         if (_physics && _ground_collider_body.is_valid())
         {
             _physics->destroy_body(_ground_collider_body);
@@ -181,6 +191,15 @@ namespace Game
         _physics.reset();
         _world.set_physics(nullptr);
 #endif
+
+        // Expose the active physics world to the renderer for debug UI / debug draw (optional).
+        if (VulkanEngine *renderer = _runtime->renderer())
+        {
+            if (renderer->_context)
+            {
+                renderer->_context->physics = _physics.get();
+            }
+        }
 
         // Ground (render)
         {
