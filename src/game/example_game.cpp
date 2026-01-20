@@ -32,6 +32,7 @@ namespace Game
     {
         _runtime = &runtime;
         auto &api = runtime.api();
+        _world.set_api(&api);
 
         // Setup camera
         VulkanEngine *renderer = runtime.renderer();
@@ -51,9 +52,8 @@ namespace Game
         // Build layout data
         build_box_stack_layout();
 
-        // Setup visuals and physics
-        setup_visuals();
-        setup_physics();
+        // Setup game scene (entities + render/physics resources)
+        setup_scene();
 
         // Game ImGui panels
         if (VulkanEngine *renderer = runtime.renderer())
@@ -81,12 +81,12 @@ namespace Game
         auto &api = _runtime->api();
 
         // Sync all entities to render
-        _entities.sync_to_render(api, alpha);
+        _world.entities().sync_to_render(api, alpha);
 
         // Check for reset condition
         bool reset_requested = false;
 
-        if (Entity *sphere = _entities.find(_sphere_entity))
+        if (Entity *sphere = _world.entities().find(_sphere_entity))
         {
             if (sphere->position().y < -50.0f)
             {
@@ -96,7 +96,7 @@ namespace Game
 
         for (EntityId box_id: _box_entities)
         {
-            if (Entity *box = _entities.find(box_id))
+            if (Entity *box = _world.entities().find(box_id))
             {
                 if (box->position().y < -50.0f)
                 {
@@ -120,18 +120,18 @@ namespace Game
         if (_physics)
         {
             // Pre-physics: store current transforms as previous for interpolation
-            _entities.pre_physics_step();
+            _world.entities().pre_physics_step();
 
             // Step physics
             _physics->step(fixed_dt);
 
             // Post-physics: update entity transforms from physics
-            _entities.post_physics_step(*_physics);
+            _world.entities().post_physics_step(*_physics);
 
             // Launch bowling ball after settling
             if (!_sphere_launched && _fixed_time >= 10.0f)
             {
-                Entity *sphere = _entities.find(_sphere_entity);
+                Entity *sphere = _world.entities().find(_sphere_entity);
                 if (sphere && sphere->has_physics())
                 {
                     Physics::BodyId body_id{sphere->physics_body_value()};
@@ -145,109 +145,138 @@ namespace Game
 
     void ExampleGame::on_shutdown()
     {
-        _entities.clear();
+        _world.clear();
+        _world.set_physics(nullptr);
+        _world.set_api(nullptr);
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
+        if (_physics && _ground_collider_body.is_valid())
+        {
+            _physics->destroy_body(_ground_collider_body);
+            _ground_collider_body = Physics::BodyId{};
+        }
         _physics.reset();
 #endif
 
         _runtime = nullptr;
     }
 
-    void ExampleGame::setup_visuals()
+    void ExampleGame::setup_scene()
     {
-        auto &api = _runtime->api();
-
-        // Ground
+        if (!_runtime)
         {
-            GameAPI::Transform tr{};
-            tr.position = {0.0f, 0.0f, 0.0f};
-            tr.scale = {50.0f, 1.0f, 50.0f};
-            api.add_primitive_instance("ground", GameAPI::PrimitiveType::Plane, tr);
-
-            Entity &ground = _entities.create_entity_with_render("ground", "ground");
-            ground.set_transform({tr.position, tr.rotation, tr.scale});
-            _ground_entity = ground.id();
+            return;
         }
 
-        // Sphere
-        {
-            GameAPI::Transform tr{};
-            tr.position = SPHERE_SPAWN_POS;
-            tr.scale = {1.0f, 1.0f, 1.0f};
-            api.add_primitive_instance("sphere", GameAPI::PrimitiveType::Sphere, tr);
-            // Entity created in setup_physics when we have the body
-        }
+        _ground_entity = EntityId{};
+        _sphere_entity = EntityId{};
+        _box_entities.clear();
+        _initial_pose.clear();
+        _ground_collider_body = Physics::BodyId{};
 
-        // Boxes
-        for (const BoxLayout &layout: _box_layouts)
-        {
-            GameAPI::Transform tr{};
-            tr.position = layout.position;
-            tr.rotation = layout.rotation;
-            tr.scale = layout.half_extents * 2.0f;
-            api.add_primitive_instance(layout.name, GameAPI::PrimitiveType::Cube, tr);
-            // Entities created in setup_physics
-        }
-    }
-
-    void ExampleGame::setup_physics()
-    {
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         _physics = std::make_unique<Physics::JoltPhysicsWorld>();
+        _world.set_physics(_physics.get());
+#else
+        _physics.reset();
+        _world.set_physics(nullptr);
+#endif
 
-        // Ground (static, no entity tracking needed)
-        _physics->create_body(Physics::BodySettings{}
-            .set_shape(Physics::CollisionShape::Box(25.0f, 1.0f, 25.0f))
-            .set_position(0.0f, -1.0f, 0.0f)
-            .set_user_data(static_cast<uint64_t>(_ground_entity.value))
-            .set_static()
-            .set_friction(0.8f));
+        // Ground (render)
+        {
+            Transform tr{};
+            tr.position = {0.0f, 0.0f, 0.0f};
+            tr.scale = {50.0f, 1.0f, 50.0f};
+            if (Entity* ground = _world.spawn_primitive("ground", GameAPI::PrimitiveType::Plane, tr))
+            {
+                _ground_entity = ground->id();
+            }
+        }
+
+#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
+        // Ground (physics collider; placed so the top surface is at y=0)
+        if (_physics && _ground_entity.is_valid())
+        {
+            _ground_collider_body = _physics->create_body(Physics::BodySettings{}
+                .set_shape(Physics::CollisionShape::Box(25.0f, 1.0f, 25.0f))
+                .set_position(0.0f, -1.0f, 0.0f)
+                .set_user_data(static_cast<uint64_t>(_ground_entity.value))
+                .set_static()
+                .set_friction(0.8f));
+        }
+#endif
 
         // Sphere
         {
-            Physics::BodyId body = Physics::BodyBuilder(_physics.get())
-                    .sphere(SPHERE_RADIUS)
-                    .position(SPHERE_SPAWN_POS)
-                    .dynamic_body()
-                    .friction(0.6f)
-                    .restitution(0.1f)
-                    .linear_damping(0.02f)
-                    .build();
+            Transform tr{};
+            tr.position = SPHERE_SPAWN_POS;
+            tr.scale = {1.0f, 1.0f, 1.0f};
 
-            Entity &sphere = _entities.create_entity_with_physics_and_render("sphere", body.value, "sphere");
-            sphere.set_position(SPHERE_SPAWN_POS);
-            sphere.interpolation().set_immediate(SPHERE_SPAWN_POS, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
-            _physics->set_user_data(body, static_cast<uint64_t>(sphere.id().value));
-            _sphere_entity = sphere.id();
+#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
+            if (_physics)
+            {
+                Physics::BodySettings settings{};
+                settings.set_shape(Physics::CollisionShape::Sphere(SPHERE_RADIUS))
+                        .set_dynamic()
+                        .set_friction(0.6f)
+                        .set_restitution(0.1f)
+                        .set_linear_damping(0.02f);
+
+                if (Entity* sphere = _world.spawn_primitive_rigid_body("sphere", GameAPI::PrimitiveType::Sphere, tr, settings))
+                {
+                    _sphere_entity = sphere->id();
+                    _initial_pose[_sphere_entity.value] = InitialPose{tr.position, tr.rotation};
+                }
+            }
+            else
+#endif
+            {
+                if (Entity* sphere = _world.spawn_primitive("sphere", GameAPI::PrimitiveType::Sphere, tr))
+                {
+                    _sphere_entity = sphere->id();
+                    _initial_pose[_sphere_entity.value] = InitialPose{tr.position, tr.rotation};
+                }
+            }
         }
 
         // Boxes
-        _box_entities.clear();
         _box_entities.reserve(_box_layouts.size());
 
         for (const BoxLayout &layout: _box_layouts)
         {
-            Physics::BodyId body = Physics::BodyBuilder(_physics.get())
-                    .box(layout.half_extents)
-                    .position(layout.position)
-                    .rotation(layout.rotation)
-                    .dynamic_body()
-                    .friction(0.8f)
-                    .restitution(0.0f)
-                    .linear_damping(0.02f)
-                    .angular_damping(0.05f)
-                    .build();
+            Transform tr{};
+            tr.position = layout.position;
+            tr.rotation = layout.rotation;
+            tr.scale = layout.half_extents * 2.0f;
 
-            Entity &box = _entities.create_entity_with_physics_and_render(layout.name, body.value, layout.name);
-            box.set_position(layout.position);
-            box.set_rotation(layout.rotation);
-            box.set_scale(layout.half_extents * 2.0f);
-            box.interpolation().set_immediate(layout.position, layout.rotation);
-            _physics->set_user_data(body, static_cast<uint64_t>(box.id().value));
-            _box_entities.push_back(box.id());
+#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
+            if (_physics)
+            {
+                Physics::BodySettings settings{};
+                settings.set_shape(Physics::CollisionShape::Box(layout.half_extents))
+                        .set_dynamic()
+                        .set_friction(0.8f)
+                        .set_restitution(0.0f)
+                        .set_linear_damping(0.02f)
+                        .set_angular_damping(0.05f);
+
+                if (Entity* box = _world.spawn_primitive_rigid_body(layout.name, GameAPI::PrimitiveType::Cube, tr, settings))
+                {
+                    _box_entities.push_back(box->id());
+                    _initial_pose[box->id().value] = InitialPose{tr.position, tr.rotation};
+                }
+                continue;
+            }
+#endif
+
+            if (Entity* box = _world.spawn_primitive(layout.name, GameAPI::PrimitiveType::Cube, tr))
+            {
+                _box_entities.push_back(box->id());
+                _initial_pose[box->id().value] = InitialPose{tr.position, tr.rotation};
+            }
         }
 
+#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         install_contact_callbacks();
 #endif
     }
@@ -315,33 +344,60 @@ namespace Game
 
     void ExampleGame::reset_scene()
     {
-#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-        if (!_physics || !_runtime)
+        if (!_runtime)
         {
             return;
         }
 
         auto &api = _runtime->api();
+        auto &entities = _world.entities();
 
-        // Reset sphere
-        if (_entities.find(_sphere_entity) != nullptr)
-        {
-            _entities.teleport(_sphere_entity, SPHERE_SPAWN_POS, glm::quat(1.0f, 0.0f, 0.0f, 0.0f), *_physics);
-        }
+        const auto reset_entity_pose = [&](EntityId id) {
+            Entity* ent = entities.find(id);
+            if (!ent)
+            {
+                return;
+            }
 
-        // Reset boxes
-        for (size_t i = 0; i < _box_entities.size() && i < _box_layouts.size(); ++i)
+            glm::vec3 pos = ent->position();
+            glm::quat rot = ent->rotation();
+            if (auto it = _initial_pose.find(id.value); it != _initial_pose.end())
+            {
+                pos = it->second.position;
+                rot = it->second.rotation;
+            }
+            else if (id == _sphere_entity)
+            {
+                pos = SPHERE_SPAWN_POS;
+                rot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            }
+
+            if (_physics)
+            {
+                entities.teleport(id, pos, rot, *_physics);
+            }
+            else
+            {
+                ent->set_position(pos);
+                ent->set_rotation(rot);
+                if (ent->uses_interpolation())
+                {
+                    ent->interpolation().set_immediate(pos, rot);
+                }
+            }
+        };
+
+        reset_entity_pose(_sphere_entity);
+        for (EntityId id : _box_entities)
         {
-            const BoxLayout &layout = _box_layouts[i];
-            _entities.teleport(_box_entities[i], layout.position, layout.rotation, *_physics);
+            reset_entity_pose(id);
         }
 
         // Immediate sync to render to avoid visual blending
-        _entities.sync_to_render(api, 1.0f);
+        entities.sync_to_render(api, 1.0f);
 
         _fixed_time = 0.0f;
         _sphere_launched = false;
-#endif
     }
 
     void ExampleGame::install_contact_callbacks()
@@ -443,7 +499,7 @@ namespace Game
         };
 
         auto install_for_entity = [&](EntityId id) {
-            Entity *ent = _entities.find(id);
+            Entity *ent = _world.entities().find(id);
             if (!ent || !ent->has_physics())
             {
                 return;
@@ -459,7 +515,7 @@ namespace Game
         };
 
         auto clear_for_entity = [&](EntityId id) {
-            Entity *ent = _entities.find(id);
+            Entity *ent = _world.entities().find(id);
             if (!ent || !ent->has_physics())
             {
                 return;
@@ -498,7 +554,7 @@ namespace Game
     {
         if (user_data != 0)
         {
-            if (const Entity *ent = _entities.find(EntityId{static_cast<uint32_t>(user_data)}))
+            if (const Entity *ent = _world.entities().find(EntityId{static_cast<uint32_t>(user_data)}))
             {
                 if (!ent->name().empty())
                 {

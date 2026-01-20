@@ -173,6 +173,8 @@ add_executable (vulkan_engine
   game/entity.cpp
   game/entity_manager.h
   game/entity_manager.cpp
+  game/game_world.h
+  game/game_world.cpp
   game/example_game.h
   game/example_game.cpp
 )

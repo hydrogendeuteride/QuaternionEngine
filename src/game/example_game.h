@@ -1,12 +1,13 @@
 #pragma once
 
 #include "runtime/i_game_callbacks.h"
-#include "entity_manager.h"
+#include "game_world.h"
 #include "physics/physics_world.h"
 
 #include <memory>
 #include <vector>
 #include <deque>
+#include <unordered_map>
 
 namespace Game
 {
@@ -29,8 +30,7 @@ public:
 
 private:
     // Setup helpers
-    void setup_visuals();
-    void setup_physics();
+    void setup_scene();
     void build_box_stack_layout();
     void reset_scene();
 
@@ -42,8 +42,8 @@ private:
     // Runtime reference
     GameRuntime::Runtime* _runtime{nullptr};
 
-    // Entity system
-    EntityManager _entities;
+    // Game world (entities + resource lifetime)
+    GameWorld _world;
 
     // Physics world
     std::unique_ptr<Physics::PhysicsWorld> _physics;
@@ -63,10 +63,22 @@ private:
     EntityId _sphere_entity;
     std::vector<EntityId> _box_entities;
 
+    // World-owned static collider for the ground. Not bound to the ground entity,
+    // because the render plane sits at y=0 while the physics box is centered at y=-1.
+    Physics::BodyId _ground_collider_body;
+
     // Timing
     float _elapsed{0.0f};
     float _fixed_time{0.0f};
     bool _sphere_launched{false};
+
+    // Initial transforms for reset (EntityId::value -> pose)
+    struct InitialPose
+    {
+        glm::vec3 position{0.0f};
+        glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+    };
+    std::unordered_map<uint32_t, InitialPose> _initial_pose;
 
     // Contact debug logging
     struct ContactLogEntry
