@@ -16,6 +16,9 @@
 #include <cmath>
 
 #include "core/frame/resources.h"
+#include "physics/physics_world.h"
+#include "physics/body_settings.h"
+#include "physics/collider_asset.h"
 #include <fmt/core.h>
 
 namespace
@@ -303,6 +306,9 @@ void SceneManager::update_scene()
         mainDrawContext.gltfNodeLocalOverrides = nullptr;
         tagOwner(RenderObject::OwnerType::GLTFInstance, kv.first, opaqueStart, transpStart);
     }
+
+    // Synchronize physics collider transforms after animation updates
+    syncColliders();
 
     // Default primitives are added as dynamic instances by the engine.
 
@@ -847,6 +853,9 @@ bool SceneManager::removeGLTFInstance(const std::string &name)
     auto it = dynamicGLTFInstances.find(name);
     if (it == dynamicGLTFInstances.end()) return false;
 
+    // Clean up collider sync if enabled
+    disableColliderSync(name);
+
     // Defer destruction until after the next frame fence (update_scene).
     if (it->second.scene)
     {
@@ -1063,6 +1072,14 @@ void SceneManager::clearGLTFInstances()
     fmt::println("[SceneManager] clearGLTFInstances: dynamicGLTFInstances={} pendingBefore={}",
                  dynamicGLTFInstances.size(),
                  pendingGLTFRelease.size());
+
+    // Clean up all collider sync entries first
+    for (auto &[entryName, entry] : _colliderSyncEntries)
+    {
+        destroyColliderSyncEntry(entry);
+    }
+    _colliderSyncEntries.clear();
+
     for (auto &kv : dynamicGLTFInstances)
     {
         if (kv.second.scene)
@@ -1321,4 +1338,192 @@ glm::vec3 SceneManager::getSunlightColor() const
 float SceneManager::getSunlightIntensity() const
 {
     return sceneData.sunlightColor.w;
+}
+
+// =============================================================================
+// Physics collider synchronization
+// =============================================================================
+
+size_t SceneManager::enableColliderSync(const std::string &instanceName,
+                                        Physics::PhysicsWorld *world,
+                                        uint32_t layer,
+                                        uint64_t user_data)
+{
+    if (!world)
+    {
+        fmt::println("[SceneManager] enableColliderSync: null physics world");
+        return 0;
+    }
+
+    // Already enabled?
+    if (_colliderSyncEntries.contains(instanceName))
+    {
+        return 0;
+    }
+
+    // Find instance
+    auto instIt = dynamicGLTFInstances.find(instanceName);
+    if (instIt == dynamicGLTFInstances.end())
+    {
+        fmt::println("[SceneManager] enableColliderSync: instance '{}' not found", instanceName);
+        return 0;
+    }
+
+    const GLTFInstance &inst = instIt->second;
+    if (!inst.scene)
+    {
+        fmt::println("[SceneManager] enableColliderSync: instance '{}' has no scene", instanceName);
+        return 0;
+    }
+
+    const auto &compounds = inst.scene->collider_compounds;
+    if (compounds.empty())
+    {
+        fmt::println("[SceneManager] enableColliderSync: instance '{}' has no colliders", instanceName);
+        return 0;
+    }
+
+    // Check for uniform scale
+    const glm::vec3 &s = inst.scale;
+    const float uniform_scale = s.x;
+    constexpr float kScaleEps = 1.0e-3f;
+    if (std::abs(s.y - uniform_scale) > kScaleEps || std::abs(s.z - uniform_scale) > kScaleEps)
+    {
+        fmt::println("[SceneManager] enableColliderSync: instance '{}' has non-uniform scale ({}, {}, {}); "
+                     "using x-component for collider scaling",
+                     instanceName, s.x, s.y, s.z);
+    }
+
+    ColliderSyncEntry entry{};
+    entry.world = world;
+    entry.layer = layer;
+    entry.user_data = user_data;
+
+    size_t created = 0;
+    for (const auto &[nodeName, compound] : compounds)
+    {
+        // Get node world transform
+        glm::mat4 nodeWorld = getGLTFInstanceNodeWorldTransform(instanceName, nodeName);
+
+        glm::vec3 t{0.0f};
+        glm::quat r{1.0f, 0.0f, 0.0f, 0.0f};
+        glm::vec3 nodeScale{1.0f};
+        decompose_trs_matrix(nodeWorld, t, r, nodeScale);
+
+        // Scale the compound shape
+        Physics::CompoundShape scaledCompound = Physics::scale_compound_uniform(compound, uniform_scale);
+        if (scaledCompound.children.empty())
+        {
+            continue;
+        }
+
+        // Create kinematic body
+        Physics::BodySettings settings{};
+        settings.shape = Physics::CollisionShape::Compound(std::move(scaledCompound));
+        settings.position = t;
+        settings.rotation = glm::normalize(r);
+        settings.motion_type = Physics::MotionType::Kinematic;
+        settings.layer = layer;
+        settings.user_data = user_data;
+
+        Physics::BodyId bodyId = world->create_body(settings);
+        if (bodyId.is_valid())
+        {
+            entry.node_bodies[nodeName] = bodyId;
+            ++created;
+        }
+    }
+
+    if (created > 0)
+    {
+        _colliderSyncEntries[instanceName] = std::move(entry);
+        fmt::println("[SceneManager] enableColliderSync: created {} bodies for '{}'", created, instanceName);
+    }
+
+    return created;
+}
+
+bool SceneManager::disableColliderSync(const std::string &instanceName)
+{
+    auto it = _colliderSyncEntries.find(instanceName);
+    if (it == _colliderSyncEntries.end())
+    {
+        return false;
+    }
+
+    destroyColliderSyncEntry(it->second);
+    _colliderSyncEntries.erase(it);
+    return true;
+}
+
+bool SceneManager::isColliderSyncEnabled(const std::string &instanceName) const
+{
+    return _colliderSyncEntries.contains(instanceName);
+}
+
+void SceneManager::syncColliders()
+{
+    for (auto &[instanceName, entry] : _colliderSyncEntries)
+    {
+        if (!entry.world)
+        {
+            continue;
+        }
+
+        auto instIt = dynamicGLTFInstances.find(instanceName);
+        if (instIt == dynamicGLTFInstances.end())
+        {
+            // Instance was removed; will be cleaned up separately
+            continue;
+        }
+
+        for (auto &[nodeName, bodyId] : entry.node_bodies)
+        {
+            if (!entry.world->is_body_valid(bodyId))
+            {
+                continue;
+            }
+
+            glm::mat4 nodeWorld = getGLTFInstanceNodeWorldTransform(instanceName, nodeName);
+
+            glm::vec3 t{0.0f};
+            glm::quat r{1.0f, 0.0f, 0.0f, 0.0f};
+            glm::vec3 s{1.0f};
+            decompose_trs_matrix(nodeWorld, t, r, s);
+
+            entry.world->set_transform(bodyId, t, glm::normalize(r));
+        }
+    }
+}
+
+std::vector<Physics::BodyId> SceneManager::getColliderSyncBodies(const std::string &instanceName) const
+{
+    std::vector<Physics::BodyId> result;
+    auto it = _colliderSyncEntries.find(instanceName);
+    if (it != _colliderSyncEntries.end())
+    {
+        result.reserve(it->second.node_bodies.size());
+        for (const auto &[nodeName, bodyId] : it->second.node_bodies)
+        {
+            result.push_back(bodyId);
+        }
+    }
+    return result;
+}
+
+void SceneManager::destroyColliderSyncEntry(ColliderSyncEntry &entry)
+{
+    if (!entry.world)
+    {
+        return;
+    }
+
+    for (auto &[nodeName, bodyId] : entry.node_bodies)
+    {
+        if (entry.world->is_body_valid(bodyId))
+        {
+            entry.world->destroy_body(bodyId);
+        }
+    }
+    entry.node_bodies.clear();
 }

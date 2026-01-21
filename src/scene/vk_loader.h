@@ -11,6 +11,8 @@
 #include <filesystem>
 #include <functional>
 
+#include "physics/collision_shape.h"
+
 class VulkanEngine;
 
 // Basic collision / selection shape associated with a render surface.
@@ -133,6 +135,13 @@ struct LoadedGLTF : public IRenderable
     // Optional debug name (e.g., key used when loaded into SceneManager)
     std::string debugName;
 
+    // Optional physics collider definitions authored as glTF node markers (COL_*)
+    // or loaded from a sibling "*.colliders.glb/gltf" sidecar file.
+    // Keys are glTF node names as exposed by LoadedGLTF::nodes (stable/unique).
+    std::unordered_map<std::string, Physics::CompoundShape> collider_compounds;
+    bool colliders_from_sidecar = false;
+    std::string collider_source_path;
+
     // Animation helpers
     void updateAnimation(float dt, AnimationState &state);
     void refreshAllTransforms();
@@ -141,6 +150,13 @@ struct LoadedGLTF : public IRenderable
     void setActiveAnimation(AnimationState &state, const std::string &name, bool resetTime = true);
     void transitionAnimation(AnimationState &state, int index, float blendDurationSeconds, bool resetTime = true);
     void transitionAnimation(AnimationState &state, const std::string &name, float blendDurationSeconds, bool resetTime = true);
+
+    // Build collider_compounds by scanning this scene's nodes for COL_* markers.
+    void build_colliders_from_markers(bool clear_existing = true);
+
+    // Build collider_compounds by scanning a separate collider-only glTF sidecar.
+    // Colliders are mapped to this scene's nodes by matching ancestor node names.
+    void build_colliders_from_sidecar(const LoadedGLTF &sidecar, bool clear_existing = true);
 
     ~LoadedGLTF()
     {

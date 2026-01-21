@@ -11,8 +11,12 @@
 #include <string>
 
 #include "scene/vk_loader.h"
+#include "physics/physics_body.h"
+
 class EngineContext;
 class PlanetSystem;
+
+namespace Physics { class PhysicsWorld; }
 
 struct RenderObject
 {
@@ -252,6 +256,39 @@ public:
     // Returns the LoadedGLTF scene for a named GLTF instance, or nullptr if not found.
     std::shared_ptr<LoadedGLTF> getGLTFInstanceScene(const std::string &instanceName) const;
 
+    // =========================================================================
+    // Physics collider synchronization
+    // =========================================================================
+    // Enables automatic physics body creation and transform sync for a glTF instance.
+    // Creates one kinematic body per collider-owning node, updated each frame to match
+    // the node's world transform (including animation). Returns number of bodies created.
+    //
+    // Parameters:
+    //   instanceName  - Name of the glTF instance (must exist in dynamicGLTFInstances)
+    //   world         - Physics world to create bodies in
+    //   layer         - Collision layer for created bodies
+    //   user_data     - Optional user data attached to all created bodies
+    //
+    // The instance must have collider_compounds defined (from COL_* markers or sidecar).
+    // If already enabled, this is a no-op and returns 0.
+    size_t enableColliderSync(const std::string &instanceName,
+                              Physics::PhysicsWorld *world,
+                              uint32_t layer = 0,
+                              uint64_t user_data = 0);
+
+    // Disables collider sync for an instance, destroying all associated physics bodies.
+    // Returns true if the instance had collider sync enabled.
+    bool disableColliderSync(const std::string &instanceName);
+
+    // Returns true if collider sync is enabled for the given instance.
+    bool isColliderSyncEnabled(const std::string &instanceName) const;
+
+    // Manually trigger collider sync update (called automatically in update_scene).
+    void syncColliders();
+
+    // Debug: get body IDs for a synced instance (empty if not synced).
+    std::vector<Physics::BodyId> getColliderSyncBodies(const std::string &instanceName) const;
+
 private:
     EngineContext *_context = nullptr;
 
@@ -281,4 +318,17 @@ private:
     std::unique_ptr<PlanetSystem> _planetSystem;
 
     PickingDebug pickingDebug{};
+
+    // Collider sync state per glTF instance
+    struct ColliderSyncEntry
+    {
+        Physics::PhysicsWorld *world{nullptr};
+        // node name → physics body ID
+        std::unordered_map<std::string, Physics::BodyId> node_bodies;
+        uint32_t layer{0};
+        uint64_t user_data{0};
+    };
+    std::unordered_map<std::string, ColliderSyncEntry> _colliderSyncEntries;
+
+    void destroyColliderSyncEntry(ColliderSyncEntry &entry);
 };

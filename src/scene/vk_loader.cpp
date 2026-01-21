@@ -20,6 +20,7 @@
 #include <optional>
 #include "tangent_space.h"
 #include "mesh_bvh.h"
+#include "physics/gltf_collider_parser.h"
 //> loadimg
 std::optional<AllocatedImage> load_image(VulkanEngine *engine, fastgltf::Asset &asset, fastgltf::Image &image, bool srgb)
 {
@@ -785,6 +786,33 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
     }
     //> load_nodes
     // load all nodes and their meshes
+    std::vector<std::string> stable_node_names;
+    stable_node_names.resize(gltf.nodes.size());
+    {
+        std::unordered_set<std::string> used_names;
+        used_names.reserve(gltf.nodes.size());
+
+        for (size_t nodeIndex = 0; nodeIndex < gltf.nodes.size(); ++nodeIndex)
+        {
+            const fastgltf::Node &node = gltf.nodes[nodeIndex];
+            std::string base_name = node.name.empty() ? fmt::format("__node_{}", nodeIndex) : std::string(node.name);
+
+            std::string unique_name = base_name;
+            if (used_names.contains(unique_name))
+            {
+                uint32_t suffix = 2;
+                do
+                {
+                    unique_name = fmt::format("{}#{}", base_name, suffix++);
+                }
+                while (used_names.contains(unique_name));
+            }
+
+            used_names.insert(unique_name);
+            stable_node_names[nodeIndex] = std::move(unique_name);
+        }
+    }
+
     for (size_t nodeIndex = 0; nodeIndex < gltf.nodes.size(); ++nodeIndex)
     {
         if (is_cancelled()) return {};
@@ -806,10 +834,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
         }
 
         nodes.push_back(newNode);
-        if (!node.name.empty())
-        {
-            file.nodes[std::string(node.name)] = newNode;
-        }
+        file.nodes[stable_node_names[nodeIndex]] = newNode;
 
         std::visit(fastgltf::visitor{
                        [&](fastgltf::Node::TransformMatrix matrix) {
@@ -1039,6 +1064,24 @@ void LoadedGLTF::refreshAllTransforms()
             n->refreshTransform(glm::mat4{1.f});
         }
     }
+}
+
+void LoadedGLTF::build_colliders_from_markers(bool clear_existing)
+{
+    Physics::build_colliders_from_markers(collider_compounds, *this, clear_existing);
+}
+
+void LoadedGLTF::build_colliders_from_sidecar(const LoadedGLTF &sidecar, bool clear_existing)
+{
+    std::unordered_set<std::string_view> dst_names;
+    dst_names.reserve(nodes.size());
+    for (const auto &[name, ptr] : nodes)
+    {
+        (void) ptr;
+        dst_names.insert(name);
+    }
+
+    Physics::build_colliders_from_sidecar(collider_compounds, sidecar, dst_names, clear_existing);
 }
 
 void LoadedGLTF::ensureRestTransformsCached()

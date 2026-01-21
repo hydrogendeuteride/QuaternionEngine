@@ -19,6 +19,33 @@
 
 using std::filesystem::path;
 
+namespace
+{
+    static bool file_exists_nothrow(const std::filesystem::path &p)
+    {
+        std::error_code ec;
+        return !p.empty() && std::filesystem::exists(p, ec) && !ec;
+    }
+
+    static std::string derive_gltf_collider_sidecar_path(const std::string &model_path)
+    {
+        if (model_path.empty())
+        {
+            return {};
+        }
+
+        const path p = path(model_path);
+        if (!p.has_extension())
+        {
+            return {};
+        }
+
+        const std::string stem = p.stem().string();
+        const std::string ext = p.extension().string();
+        return (p.parent_path() / (stem + ".colliders" + ext)).string();
+    }
+} // namespace
+
 void AssetManager::init(VulkanEngine *engine)
 {
     _engine = engine;
@@ -111,6 +138,57 @@ std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_v
 
     if (loaded.value())
     {
+        // Check for cancellation before collider processing
+        if (cb && cb->is_cancelled && cb->is_cancelled())
+        {
+            return {};
+        }
+
+        // Attach physics collider definitions:
+        // - Prefer sibling "*.colliders.glb/gltf" if present
+        // - Otherwise fall back to embedded COL_* marker nodes (empties) in the visual glTF
+        const std::string sidecar_path = derive_gltf_collider_sidecar_path(resolved);
+        if (!sidecar_path.empty() && file_exists_nothrow(sidecar_path))
+        {
+            // Pass cancellation callback to sidecar load (progress not forwarded as main load is complete)
+            GLTFLoadCallbacks sidecar_cb{};
+            if (cb && cb->is_cancelled)
+            {
+                sidecar_cb.is_cancelled = cb->is_cancelled;
+            }
+
+            auto sidecar = loadGltf(_engine, sidecar_path, cb ? &sidecar_cb : nullptr);
+            if (sidecar.has_value() && sidecar.value())
+            {
+                if ((*sidecar)->debugName.empty())
+                {
+                    (*sidecar)->debugName = path(sidecar_path).filename().string();
+                }
+
+                (*loaded)->build_colliders_from_sidecar(*(*sidecar), true);
+                (*loaded)->colliders_from_sidecar = true;
+                (*loaded)->collider_source_path = sidecar_path;
+            }
+            else
+            {
+                // Sidecar load failed or was cancelled - fall back to markers
+                if (cb && cb->is_cancelled && cb->is_cancelled())
+                {
+                    return {};
+                }
+                fmt::println("[AssetManager] Warning: collider sidecar exists but failed to load ('{}')", sidecar_path);
+                (*loaded)->build_colliders_from_markers(true);
+                (*loaded)->colliders_from_sidecar = false;
+                (*loaded)->collider_source_path.clear();
+            }
+        }
+        else
+        {
+            (*loaded)->build_colliders_from_markers(true);
+            (*loaded)->colliders_from_sidecar = false;
+            (*loaded)->collider_source_path.clear();
+        }
+
         fmt::println("[AssetManager] loadGLTF loaded new scene key='{}' path='{}' ptr={}", key, resolved,
                      static_cast<const void *>(loaded.value().get()));
     }

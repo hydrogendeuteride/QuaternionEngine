@@ -167,6 +167,10 @@ add_executable (vulkan_engine
   # physics
   physics/collision_shape.h
   physics/body_settings.h
+  physics/collider_asset.h
+  physics/collider_asset.cpp
+  physics/gltf_collider_parser.h
+  physics/gltf_collider_parser.cpp
   physics/physics_body.h
   physics/physics_body.cpp
   physics/physics_world.h
