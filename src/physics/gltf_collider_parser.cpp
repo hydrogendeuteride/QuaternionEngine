@@ -1,5 +1,6 @@
 #include "gltf_collider_parser.h"
 #include "scene/vk_loader.h"
+#include "scene/mesh_bvh.h"
 #include "core/engine.h"
 #include "core/types.h"
 
@@ -30,6 +31,16 @@ namespace Physics
             const float bb = std::abs(b);
             const float denom = std::max(1.0f, std::max(aa, bb));
             return std::abs(a - b) <= eps * denom;
+        }
+
+        bool is_mesh_collider_marker(std::string_view node_name)
+        {
+            return starts_with_icase(node_name, "COL_MESH");
+        }
+
+        bool is_any_collider_marker(std::string_view node_name)
+        {
+            return parse_collider_marker_type(node_name) != GltfColliderMarkerType::Unknown || is_mesh_collider_marker(node_name);
         }
 
         std::optional<PrimitiveShapeVariant> make_collider_shape_from_scale(
@@ -135,6 +146,35 @@ namespace Physics
             return {};
         }
 
+        static std::shared_ptr<const TriangleMeshData> build_triangle_mesh_data_from_mesh_asset(const MeshAsset &mesh)
+        {
+            if (!mesh.bvh || mesh.bvh->primitives.empty())
+            {
+                return {};
+            }
+
+            auto data = std::make_shared<TriangleMeshData>();
+            data->triangles.reserve(mesh.bvh->primitives.size());
+
+            for (size_t i = 0; i < mesh.bvh->primitives.size(); ++i)
+            {
+                const PrimitiveF &prim = mesh.bvh->primitives[i];
+                TriangleMeshTriangle tri{};
+                tri.v0 = glm::vec3(prim.v0.x, prim.v0.y, prim.v0.z);
+                tri.v1 = glm::vec3(prim.v1.x, prim.v1.y, prim.v1.z);
+                tri.v2 = glm::vec3(prim.v2.x, prim.v2.y, prim.v2.z);
+                tri.user_data = static_cast<uint32_t>(i);
+                data->triangles.push_back(tri);
+            }
+
+            if (data->triangles.empty())
+            {
+                return {};
+            }
+
+            return data;
+        }
+
         template <typename OwnerPredicate>
         void build_compounds_from_scene_markers_impl(
             std::unordered_map<std::string, CompoundShape>& out,
@@ -196,6 +236,90 @@ namespace Physics
             }
         }
 
+        template <typename OwnerPredicate, typename AcceptPredicate>
+        void build_mesh_instances_from_scene_impl(
+            std::unordered_map<std::string, std::vector<ColliderMeshInstance>> &out,
+            const LoadedGLTF &scene,
+            const OwnerPredicate &resolve_owner,
+            const AcceptPredicate &accept_collider_node)
+        {
+            std::unordered_map<const Node *, std::string_view> name_by_ptr;
+            name_by_ptr.reserve(scene.nodes.size());
+            for (const auto &[name, node_ptr] : scene.nodes)
+            {
+                if (!node_ptr) continue;
+                name_by_ptr[node_ptr.get()] = name;
+            }
+
+            std::unordered_map<const MeshAsset *, std::shared_ptr<const TriangleMeshData>> mesh_cache;
+            mesh_cache.reserve(scene.meshes.size());
+
+            const std::string_view scene_name = scene.debugName.empty() ? "<unnamed>" : std::string_view(scene.debugName);
+
+            for (const auto &[node_name, node_ptr] : scene.nodes)
+            {
+                if (!node_ptr) continue;
+
+                const auto *mesh_node = dynamic_cast<const MeshNode *>(node_ptr.get());
+                if (!mesh_node || !mesh_node->mesh)
+                {
+                    continue;
+                }
+
+                if (!accept_collider_node(node_name, *mesh_node))
+                {
+                    continue;
+                }
+
+                const Node *owner = resolve_owner(node_ptr.get(), name_by_ptr);
+                if (!owner)
+                {
+                    fmt::println("[GLTF][Colliders] '{}' mesh collider node '{}' has no valid owner; skipping",
+                                 scene_name, node_name);
+                    continue;
+                }
+
+                auto owner_name_it = name_by_ptr.find(owner);
+                if (owner_name_it == name_by_ptr.end())
+                {
+                    fmt::println("[GLTF][Colliders] '{}' mesh collider node '{}' owner missing name mapping; skipping",
+                                 scene_name, node_name);
+                    continue;
+                }
+                const std::string owner_name(owner_name_it->second);
+
+                std::shared_ptr<const TriangleMeshData> mesh_data;
+                const MeshAsset *mesh_ptr = mesh_node->mesh.get();
+                if (mesh_ptr)
+                {
+                    auto it = mesh_cache.find(mesh_ptr);
+                    if (it != mesh_cache.end())
+                    {
+                        mesh_data = it->second;
+                    }
+                    else
+                    {
+                        mesh_data = build_triangle_mesh_data_from_mesh_asset(*mesh_ptr);
+                        mesh_cache.emplace(mesh_ptr, mesh_data);
+                    }
+                }
+
+                if (!mesh_data || mesh_data->triangles.empty())
+                {
+                    fmt::println("[GLTF][Colliders] '{}' mesh collider node '{}' has no triangle data (missing BVH?); skipping",
+                                 scene_name, node_name);
+                    continue;
+                }
+
+                const glm::mat4 rel = glm::inverse(owner->worldTransform) * node_ptr->worldTransform;
+
+                ColliderMeshInstance inst{};
+                inst.mesh = std::move(mesh_data);
+                inst.relative_transform = rel;
+                out[owner_name].push_back(std::move(inst));
+            }
+        }
+
     } // anonymous namespace
 
     GltfColliderMarkerType parse_collider_marker_type(std::string_view node_name)
@@ -232,7 +356,7 @@ namespace Physics
                 }
 
                 const std::string_view cur_name = it->second;
-                if (parse_collider_marker_type(cur_name) != GltfColliderMarkerType::Unknown)
+                if (is_any_collider_marker(cur_name))
                 {
                     p = p->parent.lock();
                     continue;
@@ -280,7 +404,7 @@ namespace Physics
                 }
 
                 const std::string_view cur_name = it->second;
-                if (parse_collider_marker_type(cur_name) != GltfColliderMarkerType::Unknown)
+                if (is_any_collider_marker(cur_name))
                 {
                     p = p->parent.lock();
                     continue;
@@ -295,6 +419,119 @@ namespace Physics
         };
 
         build_compounds_from_scene_markers_impl(out_compounds, sidecar_scene, resolve_owner);
+    }
+
+    void build_mesh_colliders_from_markers(
+        std::unordered_map<std::string, std::vector<ColliderMeshInstance>> &out_instances,
+        const LoadedGLTF &scene,
+        bool clear_existing)
+    {
+        if (clear_existing)
+        {
+            out_instances.clear();
+        }
+
+        auto accept_node = [](std::string_view node_name, const MeshNode &) {
+            return is_mesh_collider_marker(node_name);
+        };
+
+        auto resolve_owner = [](const Node *collider_node,
+                                const std::unordered_map<const Node *, std::string_view> &name_by_ptr) -> const Node * {
+            const Node *best_owner = nullptr;
+            auto p = collider_node ? collider_node->parent.lock() : std::shared_ptr<Node>{};
+            while (p)
+            {
+                const Node *cur = p.get();
+                auto it = name_by_ptr.find(cur);
+                if (it == name_by_ptr.end())
+                {
+                    break;
+                }
+
+                const std::string_view cur_name = it->second;
+                if (is_any_collider_marker(cur_name))
+                {
+                    p = p->parent.lock();
+                    continue;
+                }
+
+                if (!best_owner)
+                {
+                    best_owner = cur;
+                }
+                if (dynamic_cast<const MeshNode *>(cur) != nullptr)
+                {
+                    return cur; // prefer closest mesh node
+                }
+
+                p = p->parent.lock();
+            }
+
+            return best_owner;
+        };
+
+        build_mesh_instances_from_scene_impl(out_instances, scene, resolve_owner, accept_node);
+    }
+
+    void build_mesh_colliders_from_sidecar(
+        std::unordered_map<std::string, std::vector<ColliderMeshInstance>> &out_instances,
+        const LoadedGLTF &sidecar_scene,
+        const std::unordered_set<std::string_view> &dst_node_names,
+        bool clear_existing)
+    {
+        if (clear_existing)
+        {
+            out_instances.clear();
+        }
+
+        auto accept_node = [&dst_node_names](std::string_view node_name, const MeshNode &) {
+            return is_mesh_collider_marker(node_name) || dst_node_names.contains(node_name);
+        };
+
+        auto resolve_owner = [&dst_node_names](const Node *collider_node,
+                                               const std::unordered_map<const Node *, std::string_view> &name_by_ptr) -> const Node * {
+            if (!collider_node)
+            {
+                return nullptr;
+            }
+
+            // If this node matches a destination node name and is not itself a collider marker, map directly.
+            auto self_it = name_by_ptr.find(collider_node);
+            if (self_it != name_by_ptr.end())
+            {
+                const std::string_view self_name = self_it->second;
+                if (!is_any_collider_marker(self_name) && dst_node_names.contains(self_name))
+                {
+                    return collider_node;
+                }
+            }
+
+            auto p = collider_node->parent.lock();
+            while (p)
+            {
+                const Node *cur = p.get();
+                auto it = name_by_ptr.find(cur);
+                if (it == name_by_ptr.end())
+                {
+                    break;
+                }
+
+                const std::string_view cur_name = it->second;
+                if (is_any_collider_marker(cur_name))
+                {
+                    p = p->parent.lock();
+                    continue;
+                }
+                if (dst_node_names.contains(cur_name))
+                {
+                    return cur;
+                }
+                p = p->parent.lock();
+            }
+            return nullptr;
+        };
+
+        build_mesh_instances_from_scene_impl(out_instances, sidecar_scene, resolve_owner, accept_node);
     }
 
 } // namespace Physics

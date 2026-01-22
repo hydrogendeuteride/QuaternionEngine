@@ -166,6 +166,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_v
                 }
 
                 (*loaded)->build_colliders_from_sidecar(*(*sidecar), true);
+                (*loaded)->build_mesh_colliders_from_sidecar(*(*sidecar), true);
                 (*loaded)->colliders_from_sidecar = true;
                 (*loaded)->collider_source_path = sidecar_path;
             }
@@ -178,6 +179,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_v
                 }
                 fmt::println("[AssetManager] Warning: collider sidecar exists but failed to load ('{}')", sidecar_path);
                 (*loaded)->build_colliders_from_markers(true);
+                (*loaded)->build_mesh_colliders_from_markers(true);
                 (*loaded)->colliders_from_sidecar = false;
                 (*loaded)->collider_source_path.clear();
             }
@@ -185,6 +187,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_v
         else
         {
             (*loaded)->build_colliders_from_markers(true);
+            (*loaded)->build_mesh_colliders_from_markers(true);
             (*loaded)->colliders_from_sidecar = false;
             (*loaded)->collider_source_path.clear();
         }

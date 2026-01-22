@@ -1071,6 +1071,11 @@ void LoadedGLTF::build_colliders_from_markers(bool clear_existing)
     Physics::build_colliders_from_markers(collider_compounds, *this, clear_existing);
 }
 
+void LoadedGLTF::build_mesh_colliders_from_markers(bool clear_existing)
+{
+    Physics::build_mesh_colliders_from_markers(collider_mesh_instances, *this, clear_existing);
+}
+
 void LoadedGLTF::build_colliders_from_sidecar(const LoadedGLTF &sidecar, bool clear_existing)
 {
     std::unordered_set<std::string_view> dst_names;
@@ -1082,6 +1087,19 @@ void LoadedGLTF::build_colliders_from_sidecar(const LoadedGLTF &sidecar, bool cl
     }
 
     Physics::build_colliders_from_sidecar(collider_compounds, sidecar, dst_names, clear_existing);
+}
+
+void LoadedGLTF::build_mesh_colliders_from_sidecar(const LoadedGLTF &sidecar, bool clear_existing)
+{
+    std::unordered_set<std::string_view> dst_names;
+    dst_names.reserve(nodes.size());
+    for (const auto &[name, ptr] : nodes)
+    {
+        (void) ptr;
+        dst_names.insert(name);
+    }
+
+    Physics::build_mesh_colliders_from_sidecar(collider_mesh_instances, sidecar, dst_names, clear_existing);
 }
 
 void LoadedGLTF::ensureRestTransformsCached()

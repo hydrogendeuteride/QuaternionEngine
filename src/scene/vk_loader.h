@@ -12,6 +12,7 @@
 #include <functional>
 
 #include "physics/collision_shape.h"
+#include "physics/collider_mesh_instance.h"
 
 class VulkanEngine;
 
@@ -139,6 +140,11 @@ struct LoadedGLTF : public IRenderable
     // or loaded from a sibling "*.colliders.glb/gltf" sidecar file.
     // Keys are glTF node names as exposed by LoadedGLTF::nodes (stable/unique).
     std::unordered_map<std::string, Physics::CompoundShape> collider_compounds;
+    // Optional mesh collider instances (triangle meshes), keyed by owner node name.
+    // Typically authored in a collider sidecar file as either:
+    // - A mesh node whose name matches a node in the visual glTF, or
+    // - A child mesh node named "COL_MESH*" under a matching ancestor node.
+    std::unordered_map<std::string, std::vector<Physics::ColliderMeshInstance>> collider_mesh_instances;
     bool colliders_from_sidecar = false;
     std::string collider_source_path;
 
@@ -154,9 +160,16 @@ struct LoadedGLTF : public IRenderable
     // Build collider_compounds by scanning this scene's nodes for COL_* markers.
     void build_colliders_from_markers(bool clear_existing = true);
 
+    // Build collider_mesh_instances by scanning this scene's nodes for COL_MESH marker mesh nodes.
+    void build_mesh_colliders_from_markers(bool clear_existing = true);
+
     // Build collider_compounds by scanning a separate collider-only glTF sidecar.
     // Colliders are mapped to this scene's nodes by matching ancestor node names.
     void build_colliders_from_sidecar(const LoadedGLTF &sidecar, bool clear_existing = true);
+
+    // Build collider_mesh_instances by scanning a separate collider-only glTF sidecar.
+    // Mesh colliders are mapped to this scene's nodes by matching ancestor node names.
+    void build_mesh_colliders_from_sidecar(const LoadedGLTF &sidecar, bool clear_existing = true);
 
     ~LoadedGLTF()
     {

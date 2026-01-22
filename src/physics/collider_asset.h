@@ -15,8 +15,7 @@ namespace Physics
     CompoundShape scale_compound_uniform(const CompoundShape &compound, float uniform_scale);
 
     // Returns a uniformly scaled copy of a collision shape.
-    // - Supports primitives and compound shapes.
+    // - Supports primitives, compound shapes, and triangle meshes (scale applied to mesh scale vector).
     // - Returns nullopt if scale is non-finite or <= 0.
     std::optional<CollisionShape> scale_collision_shape_uniform(const CollisionShape &shape, float uniform_scale);
 } // namespace Physics
-

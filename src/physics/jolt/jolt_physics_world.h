@@ -298,6 +298,10 @@ namespace Physics
         mutable std::mutex _pair_cache_mutex;
         std::unordered_map<JPH::SubShapeIDPair, PairCacheEntry> _pair_cache;
 
+        // Mesh shape cache (TriangleMeshData → built Jolt MeshShape)
+        mutable std::mutex _mesh_shape_cache_mutex;
+        mutable std::unordered_map<std::shared_ptr<const TriangleMeshData>, JPH::RefConst<JPH::Shape>> _mesh_shape_cache;
+
         // Joints
         uint32_t _next_joint_id{1};
         mutable std::mutex _joints_mutex;

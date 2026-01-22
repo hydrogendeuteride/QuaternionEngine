@@ -24,6 +24,8 @@
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/TaperedCylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
+#include <Jolt/Physics/Collision/Shape/ScaledShape.h>
 #include <Jolt/Physics/Constraints/FixedConstraint.h>
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
 #include <Jolt/Physics/Constraints/SliderConstraint.h>
@@ -708,6 +710,87 @@ namespace Physics
                 // Use a very large thin box as a plane approximation
                 return new JPH::BoxShape(JPH::Vec3(1000.0f, 0.01f, 1000.0f));
             }
+            else if constexpr (std::is_same_v<T, TriangleMeshShape>)
+            {
+                if (!s.mesh || s.mesh->triangles.empty())
+                {
+                    return new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
+                }
+
+                JPH::RefConst<JPH::Shape> base_shape;
+                {
+                    std::scoped_lock lock(_mesh_shape_cache_mutex);
+                    auto it = _mesh_shape_cache.find(s.mesh);
+                    if (it != _mesh_shape_cache.end())
+                    {
+                        base_shape = it->second;
+                    }
+                }
+
+                if (!base_shape)
+                {
+                    JPH::TriangleList triangles;
+                    triangles.reserve(static_cast<JPH::uint>(s.mesh->triangles.size()));
+                    for (const TriangleMeshTriangle &tri : s.mesh->triangles)
+                    {
+                        triangles.emplace_back(
+                            JPH::Vec3(tri.v0.x, tri.v0.y, tri.v0.z),
+                            JPH::Vec3(tri.v1.x, tri.v1.y, tri.v1.z),
+                            JPH::Vec3(tri.v2.x, tri.v2.y, tri.v2.z));
+                    }
+
+                    JPH::MeshShapeSettings mesh_settings(triangles);
+                    JPH::ShapeSettings::ShapeResult result = mesh_settings.Create();
+                    if (!result.IsValid())
+                    {
+                        if (result.HasError())
+                        {
+                            trace_impl("[Physics][Jolt] Failed to create mesh shape: %s", result.GetError().c_str());
+                        }
+                        return new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
+                    }
+
+                    base_shape = result.Get();
+                    {
+                        std::scoped_lock lock(_mesh_shape_cache_mutex);
+                        _mesh_shape_cache.emplace(s.mesh, base_shape);
+                    }
+                }
+
+                // Apply local scaling via ScaledShape if needed.
+                auto approx_one = [](float v) { return std::abs(v - 1.0f) <= 1.0e-6f; };
+                const glm::vec3 raw_scale = s.scale;
+                const glm::vec3 scale{std::abs(raw_scale.x), std::abs(raw_scale.y), std::abs(raw_scale.z)};
+
+                auto valid_scale = [](float v) { return std::isfinite(v) && v > 0.0f; };
+                if (!valid_scale(scale.x) || !valid_scale(scale.y) || !valid_scale(scale.z))
+                {
+                    return base_shape;
+                }
+
+                if (approx_one(scale.x) && approx_one(scale.y) && approx_one(scale.z))
+                {
+                    return base_shape;
+                }
+
+                JPH::Vec3 jscale(scale.x, scale.y, scale.z);
+                jscale = base_shape->MakeScaleValid(jscale);
+
+                JPH::ScaledShapeSettings scaled_settings(base_shape.GetPtr(), jscale);
+                JPH::ShapeSettings::ShapeResult scaled_result = scaled_settings.Create();
+                if (scaled_result.IsValid())
+                {
+                    return scaled_result.Get();
+                }
+
+                if (scaled_result.HasError())
+                {
+                    trace_impl("[Physics][Jolt] Failed to create scaled mesh shape: %s",
+                               scaled_result.GetError().c_str());
+                }
+
+                return base_shape;
+            }
             else
             {
                 // Default fallback
@@ -791,12 +874,19 @@ namespace Physics
 
         JPH::RefConst<JPH::Shape> jolt_shape = create_jolt_shape(settings.shape);
 
+        MotionType motion = settings.motion_type;
+        if (jolt_shape && jolt_shape->MustBeStatic() && motion != MotionType::Static)
+        {
+            trace_impl("[Physics][Jolt] create_body: shape requires static body; forcing MotionType::Static");
+            motion = MotionType::Static;
+        }
+
         JPH::BodyCreationSettings body_settings(
             jolt_shape,
             JPH::RVec3(settings.position.x, settings.position.y, settings.position.z),
             JPH::Quat(settings.rotation.x, settings.rotation.y, settings.rotation.z, settings.rotation.w),
-            to_jolt_motion_type(settings.motion_type),
-            to_jolt_layer(settings.layer, settings.motion_type));
+            to_jolt_motion_type(motion),
+            to_jolt_layer(settings.layer, motion));
 
         body_settings.mUserData = settings.user_data;
 
@@ -817,7 +907,7 @@ namespace Physics
                                           : JPH::EActivation::DontActivate;
 
         // For static bodies, never activate
-        if (settings.motion_type == MotionType::Static)
+        if (motion == MotionType::Static)
         {
             activation = JPH::EActivation::DontActivate;
         }
@@ -834,7 +924,7 @@ namespace Physics
             std::scoped_lock lock(_debug_bodies_mutex);
             BodyDebugRecord rec{};
             rec.shape = settings.shape;
-            rec.motion_type = settings.motion_type;
+            rec.motion_type = motion;
             rec.layer = settings.layer;
             rec.is_sensor = settings.is_sensor;
             _debug_bodies[id.value] = std::move(rec);

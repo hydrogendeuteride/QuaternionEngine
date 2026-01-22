@@ -3,6 +3,7 @@
 #include <glm/vec3.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <cstdint>
+#include <memory>
 #include <variant>
 #include <vector>
 #include <utility>
@@ -93,6 +94,31 @@ namespace Physics
         PlaneShape(const glm::vec3 &n, float o = 0.0f) : normal(n), offset(o)
         {
         }
+    };
+
+    // ============================================================================
+    // Triangle mesh shapes
+    // ============================================================================
+
+    struct TriangleMeshTriangle
+    {
+        glm::vec3 v0{0.0f};
+        glm::vec3 v1{0.0f};
+        glm::vec3 v2{0.0f};
+        uint32_t user_data{0};
+    };
+
+    struct TriangleMeshData
+    {
+        std::vector<TriangleMeshTriangle> triangles;
+    };
+
+    // A triangle mesh collider (static-only for most physics backends, e.g., Jolt MeshShape).
+    // Scale is applied in the mesh's local space (before body rotation).
+    struct TriangleMeshShape
+    {
+        std::shared_ptr<const TriangleMeshData> mesh;
+        glm::vec3 scale{1.0f, 1.0f, 1.0f};
     };
 
     // ============================================================================
@@ -204,7 +230,7 @@ namespace Physics
     // ============================================================================
 
     using ShapeVariant =
-        std::variant<BoxShape, SphereShape, CapsuleShape, CylinderShape, TaperedCylinderShape, PlaneShape, CompoundShape>;
+        std::variant<BoxShape, SphereShape, CapsuleShape, CylinderShape, TaperedCylinderShape, PlaneShape, TriangleMeshShape, CompoundShape>;
 
     struct CollisionShape
     {
@@ -251,6 +277,14 @@ namespace Physics
             return CollisionShape{PlaneShape{normal, offset}};
         }
 
+        static CollisionShape TriangleMesh(std::shared_ptr<const TriangleMeshData> mesh,
+                                           const glm::vec3 &scale = {1.0f, 1.0f, 1.0f})
+        {
+            CollisionShape out;
+            out.shape = TriangleMeshShape{std::move(mesh), scale};
+            return out;
+        }
+
         static CollisionShape Compound(CompoundShape compound)
         {
             CollisionShape out;
@@ -265,6 +299,7 @@ namespace Physics
         bool is_cylinder() const { return std::holds_alternative<CylinderShape>(shape); }
         bool is_tapered_cylinder() const { return std::holds_alternative<TaperedCylinderShape>(shape); }
         bool is_plane() const { return std::holds_alternative<PlaneShape>(shape); }
+        bool is_triangle_mesh() const { return std::holds_alternative<TriangleMeshShape>(shape); }
         bool is_compound() const { return std::holds_alternative<CompoundShape>(shape); }
 
         // Accessors (returns nullptr if wrong type)
@@ -274,6 +309,7 @@ namespace Physics
         const CylinderShape *as_cylinder() const { return std::get_if<CylinderShape>(&shape); }
         const TaperedCylinderShape *as_tapered_cylinder() const { return std::get_if<TaperedCylinderShape>(&shape); }
         const PlaneShape *as_plane() const { return std::get_if<PlaneShape>(&shape); }
+        const TriangleMeshShape *as_triangle_mesh() const { return std::get_if<TriangleMeshShape>(&shape); }
         const CompoundShape *as_compound() const { return std::get_if<CompoundShape>(&shape); }
     };
 } // namespace Physics

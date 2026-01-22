@@ -166,6 +166,7 @@ add_executable (vulkan_engine
   runtime/game_runtime.cpp
   # physics
   physics/collision_shape.h
+  physics/collider_mesh_instance.h
   physics/body_settings.h
   physics/collider_asset.h
   physics/collider_asset.cpp

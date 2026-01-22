@@ -109,6 +109,12 @@ namespace Physics
             {
                 return CollisionShape::Plane(src.normal, src.offset * s);
             }
+            else if constexpr (std::is_same_v<T, TriangleMeshShape>)
+            {
+                TriangleMeshShape out = src;
+                out.scale *= s;
+                return CollisionShape{out};
+            }
             else if constexpr (std::is_same_v<T, CompoundShape>)
             {
                 return CollisionShape::Compound(scale_compound_uniform(src, s));
@@ -120,4 +126,3 @@ namespace Physics
         }, shape.shape);
     }
 } // namespace Physics
-

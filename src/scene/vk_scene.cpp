@@ -1377,7 +1377,8 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
     }
 
     const auto &compounds = inst.scene->collider_compounds;
-    if (compounds.empty())
+    const auto &mesh_instances = inst.scene->collider_mesh_instances;
+    if (compounds.empty() && mesh_instances.empty())
     {
         fmt::println("[SceneManager] enableColliderSync: instance '{}' has no colliders", instanceName);
         return 0;
@@ -1403,7 +1404,11 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
     for (const auto &[nodeName, compound] : compounds)
     {
         // Get node world transform
-        glm::mat4 nodeWorld = getGLTFInstanceNodeWorldTransform(instanceName, nodeName);
+        glm::mat4 nodeWorld(1.0f);
+        if (!getGLTFInstanceNodeWorldTransform(instanceName, nodeName, nodeWorld))
+        {
+            continue;
+        }
 
         glm::vec3 t{0.0f};
         glm::quat r{1.0f, 0.0f, 0.0f, 0.0f};
@@ -1431,6 +1436,51 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
         {
             entry.node_bodies[nodeName] = bodyId;
             ++created;
+        }
+    }
+
+    // Mesh colliders (static bodies)
+    for (const auto &[ownerNodeName, instances] : mesh_instances)
+    {
+        if (instances.empty())
+        {
+            continue;
+        }
+
+        glm::mat4 ownerWorld(1.0f);
+        if (!getGLTFInstanceNodeWorldTransform(instanceName, ownerNodeName, ownerWorld))
+        {
+            continue;
+        }
+
+        for (const Physics::ColliderMeshInstance &mesh_inst : instances)
+        {
+            if (!mesh_inst.mesh || mesh_inst.mesh->triangles.empty())
+            {
+                continue;
+            }
+
+            glm::mat4 colliderWorld = ownerWorld * mesh_inst.relative_transform;
+
+            glm::vec3 t{0.0f};
+            glm::quat r{1.0f, 0.0f, 0.0f, 0.0f};
+            glm::vec3 s{1.0f};
+            decompose_trs_matrix(colliderWorld, t, r, s);
+
+            Physics::BodySettings settings{};
+            settings.shape = Physics::CollisionShape::TriangleMesh(mesh_inst.mesh, s);
+            settings.position = t;
+            settings.rotation = glm::normalize(r);
+            settings.motion_type = Physics::MotionType::Static;
+            settings.layer = layer;
+            settings.user_data = user_data;
+
+            Physics::BodyId bodyId = world->create_body(settings);
+            if (bodyId.is_valid())
+            {
+                entry.mesh_bodies.push_back(bodyId);
+                ++created;
+            }
         }
     }
 
@@ -1502,8 +1552,12 @@ std::vector<Physics::BodyId> SceneManager::getColliderSyncBodies(const std::stri
     auto it = _colliderSyncEntries.find(instanceName);
     if (it != _colliderSyncEntries.end())
     {
-        result.reserve(it->second.node_bodies.size());
+        result.reserve(it->second.node_bodies.size() + it->second.mesh_bodies.size());
         for (const auto &[nodeName, bodyId] : it->second.node_bodies)
+        {
+            result.push_back(bodyId);
+        }
+        for (const Physics::BodyId bodyId : it->second.mesh_bodies)
         {
             result.push_back(bodyId);
         }
@@ -1526,4 +1580,13 @@ void SceneManager::destroyColliderSyncEntry(ColliderSyncEntry &entry)
         }
     }
     entry.node_bodies.clear();
+
+    for (Physics::BodyId bodyId : entry.mesh_bodies)
+    {
+        if (entry.world->is_body_valid(bodyId))
+        {
+            entry.world->destroy_body(bodyId);
+        }
+    }
+    entry.mesh_bodies.clear();
 }

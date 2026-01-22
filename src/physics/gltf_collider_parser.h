@@ -1,12 +1,14 @@
 #pragma once
 
 #include "collision_shape.h"
+#include "collider_mesh_instance.h"
 
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
+#include <vector>
 
 struct Node;
 struct LoadedGLTF;
@@ -40,6 +42,23 @@ namespace Physics
     // dst_node_names provides the set of valid node names in the destination scene.
     void build_colliders_from_sidecar(
         std::unordered_map<std::string, CompoundShape>& out_compounds,
+        const LoadedGLTF& sidecar_scene,
+        const std::unordered_set<std::string_view>& dst_node_names,
+        bool clear_existing = true);
+
+    // Build triangle-mesh collider instances (COL_MESH nodes) from COL_* marker nodes within a glTF scene.
+    // Mesh colliders are grouped by their owner node (nearest non-collider ancestor, preferring mesh nodes).
+    // Results are stored in out_instances keyed by the owner node's stable name.
+    void build_mesh_colliders_from_markers(
+        std::unordered_map<std::string, std::vector<ColliderMeshInstance>>& out_instances,
+        const LoadedGLTF& scene,
+        bool clear_existing = true);
+
+    // Build triangle-mesh collider instances from a separate collider-only glTF sidecar.
+    // Mesh colliders are mapped to dst_scene's nodes by matching ancestor node names.
+    // dst_node_names provides the set of valid node names in the destination scene.
+    void build_mesh_colliders_from_sidecar(
+        std::unordered_map<std::string, std::vector<ColliderMeshInstance>>& out_instances,
         const LoadedGLTF& sidecar_scene,
         const std::unordered_set<std::string_view>& dst_node_names,
         bool clear_existing = true);

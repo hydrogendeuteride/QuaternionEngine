@@ -270,6 +270,7 @@ public:
     //   user_data     - Optional user data attached to all created bodies
     //
     // The instance must have collider_compounds defined (from COL_* markers or sidecar).
+    // Mesh colliders (COL_MESH) from sidecars are also supported and will be created as static bodies.
     // If already enabled, this is a no-op and returns 0.
     size_t enableColliderSync(const std::string &instanceName,
                               Physics::PhysicsWorld *world,
@@ -325,6 +326,8 @@ private:
         Physics::PhysicsWorld *world{nullptr};
         // node name → physics body ID
         std::unordered_map<std::string, Physics::BodyId> node_bodies;
+        // Static mesh collider bodies (do not get per-frame transform sync).
+        std::vector<Physics::BodyId> mesh_bodies;
         uint32_t layer{0};
         uint64_t user_data{0};
     };
