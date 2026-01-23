@@ -187,6 +187,7 @@ add_executable (vulkan_engine
   game/game_world.cpp
   game/example_game.h
   game/example_game.cpp
+        physics/collider_mesh_instance.h
 )
 
 set_property(TARGET vulkan_engine PROPERTY CXX_STANDARD 20)
