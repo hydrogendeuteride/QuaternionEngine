@@ -9,10 +9,10 @@ namespace Game
 {
     namespace
     {
-        GameAPI::Transform to_api_transform(const Transform &t)
+        GameAPI::Transform to_api_transform(const Transform &t, const WorldVec3 &render_origin_world)
         {
             GameAPI::Transform out{};
-            out.position = t.position;
+            out.position = world_to_local(t.position_world, render_origin_world);
             out.rotation = t.rotation;
             out.scale = t.scale;
             return out;
@@ -74,7 +74,8 @@ namespace Game
         entity.set_transform(transform);
         entity.set_render_name(name);
 
-        if (!_api->add_primitive_instance(name, type, to_api_transform(transform)))
+        const WorldVec3 render_origin_world = WorldVec3(_api->get_world_origin());
+        if (!_api->add_primitive_instance(name, type, to_api_transform(transform, render_origin_world)))
         {
             _entities.destroy_entity(entity.id());
             return nullptr;
@@ -101,7 +102,8 @@ namespace Game
         entity.set_transform(transform);
         entity.set_render_name(name);
 
-        if (!_api->add_primitive_instance(name, type, to_api_transform(transform)))
+        const WorldVec3 render_origin_world = WorldVec3(_api->get_world_origin());
+        if (!_api->add_primitive_instance(name, type, to_api_transform(transform, render_origin_world)))
         {
             _entities.destroy_entity(entity.id());
             return nullptr;
@@ -109,7 +111,7 @@ namespace Game
 
         Physics::BodySettings settings = body_settings_template;
         const WorldVec3 physics_origin_world = WorldVec3(_api->get_physics_origin());
-        settings.position = WorldVec3(transform.position) - physics_origin_world;
+        settings.position = transform.position_world - physics_origin_world;
         settings.rotation = transform.rotation;
         if (override_user_data || settings.user_data == 0)
         {
@@ -131,7 +133,7 @@ namespace Game
 
         entity.set_physics_body(body_id.value);
         entity.set_use_interpolation(true);
-        entity.interpolation().set_immediate(transform.position, transform.rotation);
+        entity.interpolation().set_immediate(transform.position_world, transform.rotation);
 
         return &entity;
     }
@@ -160,7 +162,7 @@ namespace Game
 
         if (use_interpolation)
         {
-            entity->interpolation().set_immediate(entity->position(), entity->rotation());
+            entity->interpolation().set_immediate(entity->position_world(), entity->rotation());
         }
 
         if (_physics && override_user_data)

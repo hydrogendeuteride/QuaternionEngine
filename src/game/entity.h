@@ -3,6 +3,7 @@
 #include <glm/vec3.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/mat4x4.hpp>
+#include <core/world.h>
 #include <string>
 #include <vector>
 #include <optional>
@@ -36,38 +37,38 @@ struct EntityId
 };
 
 // ============================================================================
-// Transform: Position, rotation, scale
+// Transform: World-space position (double precision), rotation, scale
 // ============================================================================
 
 struct Transform
 {
-    glm::vec3 position{0.0f};
+    WorldVec3 position_world{0.0, 0.0, 0.0};
     glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
     glm::vec3 scale{1.0f};
 
-    glm::mat4 to_matrix() const;
-    static Transform from_matrix(const glm::mat4& m);
+    // Returns local-space matrix (caller provides origin for position conversion)
+    glm::mat4 to_local_matrix(const WorldVec3& origin_world) const;
 
-    // Combine transforms (parent * child)
+    // Combine transforms (parent * child) - child position is treated as local offset
     Transform operator*(const Transform& child) const;
 };
 
 // ============================================================================
-// InterpolatedTransform: For smooth physics rendering
-//// ============================================================================
+// InterpolatedTransform: For smooth physics rendering (world-space, double precision)
+// ============================================================================
 
 struct InterpolatedTransform
 {
-    glm::vec3 prev_position{0.0f};
+    WorldVec3 prev_position{0.0, 0.0, 0.0};
     glm::quat prev_rotation{1.0f, 0.0f, 0.0f, 0.0f};
-    glm::vec3 curr_position{0.0f};
+    WorldVec3 curr_position{0.0, 0.0, 0.0};
     glm::quat curr_rotation{1.0f, 0.0f, 0.0f, 0.0f};
 
-    glm::vec3 interpolated_position(float alpha) const;
+    WorldVec3 interpolated_position(float alpha) const;
     glm::quat interpolated_rotation(float alpha) const;
 
     void store_current_as_previous();
-    void set_immediate(const glm::vec3& pos, const glm::quat& rot);
+    void set_immediate(const WorldVec3& pos, const glm::quat& rot);
 };
 
 // ============================================================================
@@ -117,21 +118,22 @@ public:
     void set_name(const std::string& name) { _name = name; }
 
     // ------------------------------------------------------------------------
-    // Transform (authoritative)
+    // Transform (authoritative, world-space position)
     // ------------------------------------------------------------------------
 
     const Transform& transform() const { return _transform; }
     void set_transform(const Transform& transform) { _transform = transform; }
 
-    void set_position(const glm::vec3& pos) { _transform.position = pos; }
+    void set_position_world(const WorldVec3& pos) { _transform.position_world = pos; }
     void set_rotation(const glm::quat& rot) { _transform.rotation = rot; }
     void set_scale(const glm::vec3& scale) { _transform.scale = scale; }
 
-    const glm::vec3& position() const { return _transform.position; }
+    const WorldVec3& position_world() const { return _transform.position_world; }
     const glm::quat& rotation() const { return _transform.rotation; }
     const glm::vec3& scale() const { return _transform.scale; }
 
-    glm::mat4 get_world_matrix() const { return _transform.to_matrix(); }
+    // Get local-space matrix for rendering (requires origin)
+    glm::mat4 get_local_matrix(const WorldVec3& origin_world) const { return _transform.to_local_matrix(origin_world); }
 
     // ------------------------------------------------------------------------
     // Interpolation (for physics smoothing)
@@ -143,10 +145,10 @@ public:
     bool uses_interpolation() const { return _use_interpolation; }
     void set_use_interpolation(bool use) { _use_interpolation = use; }
 
-    // Get interpolated transform for rendering
-    glm::vec3 get_render_position(float alpha) const;
+    // Get interpolated transform for rendering (requires origin for local-space conversion)
+    WorldVec3 get_render_position_world(float alpha) const;
     glm::quat get_render_rotation(float alpha) const;
-    glm::mat4 get_render_matrix(float alpha) const;
+    glm::mat4 get_render_local_matrix(float alpha, const WorldVec3& origin_world) const;
 
     // ------------------------------------------------------------------------
     // Physics binding
@@ -179,9 +181,9 @@ public:
     Attachment* find_attachment(const std::string& name);
     const Attachment* find_attachment(const std::string& name) const;
 
-    // Get world transform for an attachment
-    glm::mat4 get_attachment_world_matrix(const Attachment& att) const;
-    glm::mat4 get_attachment_world_matrix(const Attachment& att, float alpha) const;
+    // Get local-space transform for an attachment (requires origin)
+    glm::mat4 get_attachment_local_matrix(const Attachment& att, const WorldVec3& origin_world) const;
+    glm::mat4 get_attachment_local_matrix(const Attachment& att, float alpha, const WorldVec3& origin_world) const;
 
     // ------------------------------------------------------------------------
     // Flags

@@ -3,6 +3,7 @@
 #include "runtime/i_game_callbacks.h"
 #include "game_world.h"
 #include "physics/physics_world.h"
+#include "core/world.h"
 
 #include <memory>
 #include <vector>
@@ -75,7 +76,7 @@ private:
     // Initial transforms for reset (EntityId::value -> pose)
     struct InitialPose
     {
-        glm::vec3 position{0.0f};
+        WorldVec3 position_world{0.0, 0.0, 0.0};
         glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
     };
     std::unordered_map<uint32_t, InitialPose> _initial_pose;

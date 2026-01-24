@@ -3,6 +3,7 @@
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
 
 #include "jolt_query_filters.h"
+#include <core/world.h>
 
 #include <Jolt/RegisterTypes.h>
 #include <Jolt/Core/Factory.h>
@@ -549,7 +550,7 @@ namespace Physics
             return;
         }
 
-        if (delta_local.x == 0.0 && delta_local.y == 0.0 && delta_local.z == 0.0)
+        if (is_zero(delta_local))
         {
             return;
         }
@@ -582,7 +583,7 @@ namespace Physics
             return;
         }
 
-        if (delta_local_velocity.x == 0.0 && delta_local_velocity.y == 0.0 && delta_local_velocity.z == 0.0)
+        if (is_zero(delta_local_velocity))
         {
             return;
         }

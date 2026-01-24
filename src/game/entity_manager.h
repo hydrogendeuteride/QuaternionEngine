@@ -100,10 +100,11 @@ public:
 
     // Sync all entity transforms to render instances
     // alpha: interpolation factor (0 = previous, 1 = current)
-    void sync_to_render(GameAPI::Engine& api, float alpha);
+    // render_origin_world: the render system's floating origin
+    void sync_to_render(GameAPI::Engine& api, float alpha, const WorldVec3& render_origin_world);
 
     // Sync specific entity to render
-    void sync_entity_to_render(Entity& entity, GameAPI::Engine& api, float alpha);
+    void sync_entity_to_render(Entity& entity, GameAPI::Engine& api, float alpha, const WorldVec3& render_origin_world);
 
     // ------------------------------------------------------------------------
     // Convenience Methods
@@ -132,7 +133,7 @@ public:
     // ------------------------------------------------------------------------
 
     // Set transform for entity and immediately sync to physics (teleport)
-    void teleport(EntityId id, const glm::vec3& position, const glm::quat& rotation,
+    void teleport(EntityId id, const WorldVec3& position_world, const glm::quat& rotation,
                   Physics::PhysicsWorld& physics, const WorldVec3& physics_origin_world);
 
     // Reset all interpolation states (for scene reloads, etc.)

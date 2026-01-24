@@ -240,8 +240,7 @@ public:
     // Returns true when origin changed.
     bool set_origin_world(const WorldVec3 &new_origin)
     {
-        const WorldVec3 delta = new_origin - origin_world;
-        if (delta.x == 0.0 && delta.y == 0.0 && delta.z == 0.0)
+        if (is_zero(new_origin - origin_world))
         {
             return false;
         }
@@ -252,8 +251,7 @@ public:
 
     bool set_physics_origin_world(const WorldVec3 &new_origin)
     {
-        const WorldVec3 delta = new_origin - physics_origin_world;
-        if (delta.x == 0.0 && delta.y == 0.0 && delta.z == 0.0)
+        if (is_zero(new_origin - physics_origin_world))
         {
             return false;
         }
@@ -264,8 +262,7 @@ public:
 
     bool set_physics_velocity_origin_world(const glm::dvec3 &new_origin_velocity)
     {
-        const glm::dvec3 delta = new_origin_velocity - physics_velocity_origin_world;
-        if (delta.x == 0.0 && delta.y == 0.0 && delta.z == 0.0)
+        if (is_zero(new_origin_velocity - physics_velocity_origin_world))
         {
             return false;
         }

@@ -158,14 +158,14 @@ void EntityManager::post_physics_step(Physics::PhysicsWorld& physics, const Worl
 
         const WorldVec3 position_world = physics_origin_world + transform.position;
 
-        // Update entity transform
-        entity.set_position(glm::vec3(position_world));
+        // Update entity transform (world-space)
+        entity.set_position_world(position_world);
         entity.set_rotation(transform.rotation);
 
-        // Update interpolation state
+        // Update interpolation state (world-space)
         if (entity.uses_interpolation())
         {
-            entity.interpolation().curr_position = glm::vec3(position_world);
+            entity.interpolation().curr_position = position_world;
             entity.interpolation().curr_rotation = transform.rotation;
         }
     }
@@ -175,7 +175,7 @@ void EntityManager::post_physics_step(Physics::PhysicsWorld& physics, const Worl
 // Render Synchronization
 // ============================================================================
 
-void EntityManager::sync_to_render(GameAPI::Engine& api, float alpha)
+void EntityManager::sync_to_render(GameAPI::Engine& api, float alpha, const WorldVec3& render_origin_world)
 {
     for (auto& [id, entity] : _entities)
     {
@@ -184,27 +184,30 @@ void EntityManager::sync_to_render(GameAPI::Engine& api, float alpha)
             continue;
         }
 
-        sync_entity_to_render(entity, api, alpha);
+        sync_entity_to_render(entity, api, alpha, render_origin_world);
     }
 }
 
-void EntityManager::sync_entity_to_render(Entity& entity, GameAPI::Engine& api, float alpha)
+void EntityManager::sync_entity_to_render(Entity& entity, GameAPI::Engine& api, float alpha, const WorldVec3& render_origin_world)
 {
     if (!entity.has_render() || !entity.is_visible())
     {
         return;
     }
 
-    // Get render transform (interpolated if using interpolation)
+    // Get render transform (interpolated if using interpolation), converted to local space
+    const WorldVec3 pos_world = entity.get_render_position_world(alpha);
+    const glm::vec3 pos_local = world_to_local(pos_world, render_origin_world);
+
     GameAPI::Transform tr;
-    tr.position = entity.get_render_position(alpha);
+    tr.position = pos_local;
     tr.rotation = entity.get_render_rotation(alpha);
     tr.scale = entity.scale();
 
     api.set_mesh_instance_transform(entity.render_name(), tr);
 
     // Sync attachments
-    glm::mat4 parent_matrix = entity.get_render_matrix(alpha);
+    glm::mat4 parent_matrix = entity.get_render_local_matrix(alpha, render_origin_world);
 
     for (const Attachment& att : entity.attachments())
     {
@@ -213,8 +216,8 @@ void EntityManager::sync_entity_to_render(Entity& entity, GameAPI::Engine& api, 
             continue;
         }
 
-        glm::mat4 world_matrix = parent_matrix * att.get_local_matrix();
-        GameAPI::Transform att_tr = GameAPI::Transform::from_matrix(world_matrix);
+        glm::mat4 local_matrix = parent_matrix * att.get_local_matrix();
+        GameAPI::Transform att_tr = GameAPI::Transform::from_matrix(local_matrix);
         api.set_mesh_instance_transform(att.render_name, att_tr);
     }
 }
@@ -278,7 +281,7 @@ Entity* EntityManager::find_by_render_name(const std::string& render_name)
 // Bulk Operations
 // ============================================================================
 
-void EntityManager::teleport(EntityId id, const glm::vec3& position, const glm::quat& rotation,
+void EntityManager::teleport(EntityId id, const WorldVec3& position_world, const glm::quat& rotation,
                              Physics::PhysicsWorld& physics, const WorldVec3& physics_origin_world)
 {
     Entity* entity = find(id);
@@ -287,14 +290,14 @@ void EntityManager::teleport(EntityId id, const glm::vec3& position, const glm::
         return;
     }
 
-    // Update entity transform
-    entity->set_position(position);
+    // Update entity transform (world-space)
+    entity->set_position_world(position_world);
     entity->set_rotation(rotation);
 
     // Reset interpolation to avoid visual blending
     if (entity->uses_interpolation())
     {
-        entity->interpolation().set_immediate(position, rotation);
+        entity->interpolation().set_immediate(position_world, rotation);
     }
 
     // Update physics body
@@ -303,7 +306,7 @@ void EntityManager::teleport(EntityId id, const glm::vec3& position, const glm::
         Physics::BodyId body_id{entity->physics_body_value()};
         if (physics.is_body_valid(body_id))
         {
-            const glm::dvec3 position_local = WorldVec3(position) - physics_origin_world;
+            const glm::dvec3 position_local = position_world - physics_origin_world;
             physics.set_transform(body_id, position_local, rotation);
             physics.set_linear_velocity(body_id, glm::vec3(0.0f));
             physics.set_angular_velocity(body_id, glm::vec3(0.0f));
@@ -318,7 +321,7 @@ void EntityManager::reset_interpolation()
     {
         if (entity.uses_interpolation())
         {
-            entity.interpolation().set_immediate(entity.position(), entity.rotation());
+            entity.interpolation().set_immediate(entity.position_world(), entity.rotation());
         }
     }
 }

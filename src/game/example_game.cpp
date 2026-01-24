@@ -58,7 +58,7 @@ namespace Game
         // Anchor floating origin to the active physics object (ExampleGame: the sphere).
         if (Entity *sphere = _world.entities().find(_sphere_entity))
         {
-            api.set_physics_origin_anchor(glm::dvec3(sphere->position()));
+            api.set_physics_origin_anchor(sphere->position_world());
         }
 
         // Game ImGui panels
@@ -87,14 +87,15 @@ namespace Game
         auto &api = _runtime->api();
 
         // Sync all entities to render
-        _world.entities().sync_to_render(api, alpha);
+        const WorldVec3 render_origin = WorldVec3(api.get_world_origin());
+        _world.entities().sync_to_render(api, alpha, render_origin);
 
         // Check for reset condition
         bool reset_requested = false;
 
         if (Entity *sphere = _world.entities().find(_sphere_entity))
         {
-            if (sphere->position().y < -50.0f)
+            if (sphere->position_world().y < -50.0)
             {
                 reset_requested = true;
             }
@@ -104,7 +105,7 @@ namespace Game
         {
             if (Entity *box = _world.entities().find(box_id))
             {
-                if (box->position().y < -50.0f)
+                if (box->position_world().y < -50.0)
                 {
                     reset_requested = true;
                     break;
@@ -160,7 +161,7 @@ namespace Game
         // Keep the floating origin anchored to the "active" physics entity (ExampleGame: the sphere)
         if (Entity *sphere = _world.entities().find(_sphere_entity))
         {
-            api.set_physics_origin_anchor(glm::dvec3(sphere->position()));
+            api.set_physics_origin_anchor(sphere->position_world());
         }
 
         // Launch bowling ball after settling
@@ -243,7 +244,7 @@ namespace Game
         // Ground (render)
         {
             Transform tr{};
-            tr.position = {0.0f, 0.0f, 0.0f};
+            tr.position_world = {0.0, 0.0, 0.0};
             tr.scale = {50.0f, 1.0f, 50.0f};
             if (Entity* ground = _world.spawn_primitive("ground", GameAPI::PrimitiveType::Plane, tr))
             {
@@ -267,7 +268,7 @@ namespace Game
         // Sphere
         {
             Transform tr{};
-            tr.position = SPHERE_SPAWN_POS;
+            tr.position_world = WorldVec3(SPHERE_SPAWN_POS);
             tr.scale = {1.0f, 1.0f, 1.0f};
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
@@ -283,7 +284,7 @@ namespace Game
                 if (Entity* sphere = _world.spawn_primitive_rigid_body("sphere", GameAPI::PrimitiveType::Sphere, tr, settings))
                 {
                     _sphere_entity = sphere->id();
-                    _initial_pose[_sphere_entity.value] = InitialPose{tr.position, tr.rotation};
+                    _initial_pose[_sphere_entity.value] = InitialPose{tr.position_world, tr.rotation};
                 }
             }
             else
@@ -292,7 +293,7 @@ namespace Game
                 if (Entity* sphere = _world.spawn_primitive("sphere", GameAPI::PrimitiveType::Sphere, tr))
                 {
                     _sphere_entity = sphere->id();
-                    _initial_pose[_sphere_entity.value] = InitialPose{tr.position, tr.rotation};
+                    _initial_pose[_sphere_entity.value] = InitialPose{tr.position_world, tr.rotation};
                 }
             }
         }
@@ -303,7 +304,7 @@ namespace Game
         for (const BoxLayout &layout: _box_layouts)
         {
             Transform tr{};
-            tr.position = layout.position;
+            tr.position_world = WorldVec3(layout.position);
             tr.rotation = layout.rotation;
             tr.scale = layout.half_extents * 2.0f;
 
@@ -321,7 +322,7 @@ namespace Game
                 if (Entity* box = _world.spawn_primitive_rigid_body(layout.name, GameAPI::PrimitiveType::Cube, tr, settings))
                 {
                     _box_entities.push_back(box->id());
-                    _initial_pose[box->id().value] = InitialPose{tr.position, tr.rotation};
+                    _initial_pose[box->id().value] = InitialPose{tr.position_world, tr.rotation};
                 }
                 continue;
             }
@@ -330,7 +331,7 @@ namespace Game
             if (Entity* box = _world.spawn_primitive(layout.name, GameAPI::PrimitiveType::Cube, tr))
             {
                 _box_entities.push_back(box->id());
-                _initial_pose[box->id().value] = InitialPose{tr.position, tr.rotation};
+                _initial_pose[box->id().value] = InitialPose{tr.position_world, tr.rotation};
             }
         }
 
@@ -417,30 +418,30 @@ namespace Game
                 return;
             }
 
-            glm::vec3 pos = ent->position();
+            WorldVec3 pos_world = ent->position_world();
             glm::quat rot = ent->rotation();
             if (auto it = _initial_pose.find(id.value); it != _initial_pose.end())
             {
-                pos = it->second.position;
+                pos_world = it->second.position_world;
                 rot = it->second.rotation;
             }
             else if (id == _sphere_entity)
             {
-                pos = SPHERE_SPAWN_POS;
+                pos_world = WorldVec3(SPHERE_SPAWN_POS);
                 rot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
             }
 
             if (_physics)
             {
-                entities.teleport(id, pos, rot, *_physics, WorldVec3(api.get_physics_origin()));
+                entities.teleport(id, pos_world, rot, *_physics, WorldVec3(api.get_physics_origin()));
             }
             else
             {
-                ent->set_position(pos);
+                ent->set_position_world(pos_world);
                 ent->set_rotation(rot);
                 if (ent->uses_interpolation())
                 {
-                    ent->interpolation().set_immediate(pos, rot);
+                    ent->interpolation().set_immediate(pos_world, rot);
                 }
             }
         };
@@ -452,7 +453,8 @@ namespace Game
         }
 
         // Immediate sync to render to avoid visual blending
-        entities.sync_to_render(api, 1.0f);
+        const WorldVec3 render_origin = WorldVec3(api.get_world_origin());
+        entities.sync_to_render(api, 1.0f, render_origin);
 
         _fixed_time = 0.0f;
         _sphere_launched = false;

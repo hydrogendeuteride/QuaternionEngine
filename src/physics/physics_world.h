@@ -28,11 +28,13 @@ namespace Physics
 
         // Shift the local coordinate origin by translating all bodies by delta_local.
         // Used to keep world-space positions stable when the engine's floating origin changes.
+        // IMPORTANT: Must be called BEFORE step() in the same frame to avoid stale transforms.
         // Default implementation is a no-op.
         virtual void shift_origin(const glm::dvec3 &delta_local) { (void)delta_local; }
 
         // Shift the local velocity origin by subtracting delta_local_velocity from all bodies' linear velocities.
         // Used to keep world-space velocities stable when switching inertial frames (Galilean transform).
+        // IMPORTANT: Must be called BEFORE step() in the same frame to avoid stale velocities.
         // Default implementation is a no-op.
         virtual void shift_velocity_origin(const glm::dvec3 &delta_local_velocity) { (void)delta_local_velocity; }
 

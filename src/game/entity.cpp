@@ -11,22 +11,14 @@ namespace Game
 // Transform
 // ============================================================================
 
-glm::mat4 Transform::to_matrix() const
+glm::mat4 Transform::to_local_matrix(const WorldVec3& origin_world) const
 {
+    const glm::vec3 local_pos = world_to_local(position_world, origin_world);
     glm::mat4 m = glm::mat4(1.0f);
-    m = glm::translate(m, position);
+    m = glm::translate(m, local_pos);
     m = m * glm::mat4_cast(rotation);
     m = glm::scale(m, scale);
     return m;
-}
-
-Transform Transform::from_matrix(const glm::mat4& m)
-{
-    Transform t;
-    glm::vec3 skew;
-    glm::vec4 perspective;
-    glm::decompose(m, t.scale, t.rotation, t.position, skew, perspective);
-    return t;
 }
 
 Transform Transform::operator*(const Transform& child) const
@@ -36,9 +28,11 @@ Transform Transform::operator*(const Transform& child) const
     // Combine rotations
     result.rotation = rotation * child.rotation;
 
-    // Scale child position by parent scale, rotate, then add parent position
-    glm::vec3 scaled_child_pos = scale * child.position;
-    result.position = position + rotation * scaled_child_pos;
+    // Scale child position by parent scale, rotate, then add to parent world position
+    const glm::vec3 child_local = glm::vec3(child.position_world); // child position as local offset
+    const glm::vec3 scaled_child_pos = scale * child_local;
+    const glm::dvec3 offset = glm::dvec3(rotation * scaled_child_pos);
+    result.position_world = position_world + offset;
 
     // Combine scales
     result.scale = scale * child.scale;
@@ -50,9 +44,10 @@ Transform Transform::operator*(const Transform& child) const
 // InterpolatedTransform
 // ============================================================================
 
-glm::vec3 InterpolatedTransform::interpolated_position(float alpha) const
+WorldVec3 InterpolatedTransform::interpolated_position(float alpha) const
 {
-    return glm::mix(prev_position, curr_position, alpha);
+    const double a = static_cast<double>(alpha);
+    return prev_position + (curr_position - prev_position) * a;
 }
 
 glm::quat InterpolatedTransform::interpolated_rotation(float alpha) const
@@ -66,7 +61,7 @@ void InterpolatedTransform::store_current_as_previous()
     prev_rotation = curr_rotation;
 }
 
-void InterpolatedTransform::set_immediate(const glm::vec3& pos, const glm::quat& rot)
+void InterpolatedTransform::set_immediate(const WorldVec3& pos, const glm::quat& rot)
 {
     prev_position = pos;
     curr_position = pos;
@@ -90,7 +85,8 @@ glm::mat4 Attachment::get_local_matrix() const
 Transform Attachment::get_local_transform() const
 {
     Transform t;
-    t.position = local_position;
+    // Attachment local_position is treated as a local offset, stored in position_world
+    t.position_world = WorldVec3(local_position);
     t.rotation = local_rotation;
     t.scale = local_scale;
     return t;
@@ -105,13 +101,13 @@ Entity::Entity(EntityId id, const std::string& name)
 {
 }
 
-glm::vec3 Entity::get_render_position(float alpha) const
+WorldVec3 Entity::get_render_position_world(float alpha) const
 {
     if (_use_interpolation)
     {
         return _interp.interpolated_position(alpha);
     }
-    return _transform.position;
+    return _transform.position_world;
 }
 
 glm::quat Entity::get_render_rotation(float alpha) const
@@ -123,17 +119,17 @@ glm::quat Entity::get_render_rotation(float alpha) const
     return _transform.rotation;
 }
 
-glm::mat4 Entity::get_render_matrix(float alpha) const
+glm::mat4 Entity::get_render_local_matrix(float alpha, const WorldVec3& origin_world) const
 {
-    if (_use_interpolation)
-    {
-        glm::mat4 m = glm::mat4(1.0f);
-        m = glm::translate(m, _interp.interpolated_position(alpha));
-        m = m * glm::mat4_cast(_interp.interpolated_rotation(alpha));
-        m = glm::scale(m, _transform.scale);
-        return m;
-    }
-    return _transform.to_matrix();
+    const WorldVec3 pos_world = get_render_position_world(alpha);
+    const glm::vec3 pos_local = world_to_local(pos_world, origin_world);
+    const glm::quat rot = get_render_rotation(alpha);
+
+    glm::mat4 m = glm::mat4(1.0f);
+    m = glm::translate(m, pos_local);
+    m = m * glm::mat4_cast(rot);
+    m = glm::scale(m, _transform.scale);
+    return m;
 }
 
 void Entity::add_attachment(const Attachment& attachment)
@@ -190,14 +186,14 @@ const Attachment* Entity::find_attachment(const std::string& name) const
     return nullptr;
 }
 
-glm::mat4 Entity::get_attachment_world_matrix(const Attachment& att) const
+glm::mat4 Entity::get_attachment_local_matrix(const Attachment& att, const WorldVec3& origin_world) const
 {
-    return _transform.to_matrix() * att.get_local_matrix();
+    return _transform.to_local_matrix(origin_world) * att.get_local_matrix();
 }
 
-glm::mat4 Entity::get_attachment_world_matrix(const Attachment& att, float alpha) const
+glm::mat4 Entity::get_attachment_local_matrix(const Attachment& att, float alpha, const WorldVec3& origin_world) const
 {
-    return get_render_matrix(alpha) * att.get_local_matrix();
+    return get_render_local_matrix(alpha, origin_world) * att.get_local_matrix();
 }
 
 } // namespace Game
