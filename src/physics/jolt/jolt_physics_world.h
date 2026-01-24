@@ -52,6 +52,8 @@ namespace Physics
         // ========================================================================
 
         void step(float dt) override;
+        void shift_origin(const glm::dvec3 &delta_local) override;
+        void shift_velocity_origin(const glm::dvec3 &delta_local_velocity) override;
 
         DebugStats debug_stats() const override;
         void for_each_debug_body(const DebugBodyFn &fn) const override;
@@ -64,7 +66,7 @@ namespace Physics
 
         BodyTransform get_transform(BodyId id) const override;
 
-        glm::vec3 get_position(BodyId id) const override;
+        glm::dvec3 get_position(BodyId id) const override;
 
         glm::quat get_rotation(BodyId id) const override;
 
@@ -76,11 +78,11 @@ namespace Physics
 
         uint64_t get_user_data(BodyId id) const override;
 
-        void set_position(BodyId id, const glm::vec3 &position) override;
+        void set_position(BodyId id, const glm::dvec3 &position) override;
 
         void set_rotation(BodyId id, const glm::quat &rotation) override;
 
-        void set_transform(BodyId id, const glm::vec3 &position, const glm::quat &rotation) override;
+        void set_transform(BodyId id, const glm::dvec3 &position, const glm::quat &rotation) override;
 
         void set_linear_velocity(BodyId id, const glm::vec3 &velocity) override;
 
@@ -100,19 +102,19 @@ namespace Physics
 
         bool is_active(BodyId id) const override;
 
-        RayHit raycast(const glm::vec3 &origin, const glm::vec3 &direction, float max_distance) const override;
+        RayHit raycast(const glm::dvec3 &origin, const glm::vec3 &direction, float max_distance) const override;
 
-        RayHit raycast(const glm::vec3 &origin, const glm::vec3 &direction,
+        RayHit raycast(const glm::dvec3 &origin, const glm::vec3 &direction,
                        const RaycastOptions &options) const override;
 
         RayHit sweep(const CollisionShape &shape,
-                     const glm::vec3 &origin,
+                     const glm::dvec3 &origin,
                      const glm::quat &rotation,
                      const glm::vec3 &direction,
                      const SweepOptions &options) const override;
 
         void overlap(const CollisionShape &shape,
-                     const glm::vec3 &position,
+                     const glm::dvec3 &position,
                      const glm::quat &rotation,
                      const OverlapOptions &options,
                      std::vector<OverlapHit> &out_hits) const override;

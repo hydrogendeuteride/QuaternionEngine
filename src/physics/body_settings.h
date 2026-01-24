@@ -49,7 +49,7 @@ namespace Physics
         uint64_t user_data{0};
 
         // Transform
-        glm::vec3 position{0.0f};
+        glm::dvec3 position{0.0, 0.0, 0.0};
         glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
 
         // Motion
@@ -89,13 +89,19 @@ namespace Physics
             return *this;
         }
 
-        BodySettings &set_position(const glm::vec3 &p)
+        BodySettings &set_position(const glm::dvec3 &p)
         {
             position = p;
             return *this;
         }
 
-        BodySettings &set_position(float x, float y, float z)
+        BodySettings &set_position(const glm::vec3 &p)
+        {
+            position = glm::dvec3(p);
+            return *this;
+        }
+
+        BodySettings &set_position(double x, double y, double z)
         {
             position = {x, y, z};
             return *this;

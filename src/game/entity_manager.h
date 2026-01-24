@@ -1,6 +1,7 @@
 #pragma once
 
 #include "entity.h"
+#include "core/world.h"
 
 #include <unordered_map>
 #include <functional>
@@ -91,7 +92,7 @@ public:
     void pre_physics_step();
 
     // Called after physics step - update entity transforms from physics
-    void post_physics_step(Physics::PhysicsWorld& physics);
+    void post_physics_step(Physics::PhysicsWorld& physics, const WorldVec3& physics_origin_world);
 
     // ------------------------------------------------------------------------
     // Render Synchronization
@@ -132,7 +133,7 @@ public:
 
     // Set transform for entity and immediately sync to physics (teleport)
     void teleport(EntityId id, const glm::vec3& position, const glm::quat& rotation,
-                  Physics::PhysicsWorld& physics);
+                  Physics::PhysicsWorld& physics, const WorldVec3& physics_origin_world);
 
     // Reset all interpolation states (for scene reloads, etc.)
     void reset_interpolation();

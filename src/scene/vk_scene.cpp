@@ -159,10 +159,15 @@ void SceneManager::init(EngineContext *context)
 
     cameraRig.init(*this, mainCamera);
 
-    _camera_position_local = world_to_local(mainCamera.position_world, _origin_world);
+    _camera_position_local = world_to_local(mainCamera.position_world, get_world_origin());
 
     _planetSystem = std::make_unique<PlanetSystem>();
     _planetSystem->init(_context);
+}
+
+WorldVec3 SceneManager::get_world_origin() const
+{
+    return _context ? _context->origin_world : WorldVec3{0.0, 0.0, 0.0};
 }
 
 void SceneManager::update_scene()
@@ -218,7 +223,8 @@ void SceneManager::update_scene()
     // when the camera drifts too far in world space.
     if (_floating_origin_recenter_threshold > 0.0)
     {
-        const WorldVec3 d = mainCamera.position_world - _origin_world;
+        const WorldVec3 origin_before = get_world_origin();
+        const WorldVec3 d = mainCamera.position_world - origin_before;
         const double threshold2 = _floating_origin_recenter_threshold * _floating_origin_recenter_threshold;
         if (glm::length2(d) > threshold2)
         {
@@ -226,11 +232,16 @@ void SceneManager::update_scene()
                 (_floating_origin_snap_size > 0.0)
                     ? snap_world(mainCamera.position_world, _floating_origin_snap_size)
                     : mainCamera.position_world;
-            _origin_world = newOrigin;
+
+            if (_context)
+            {
+                (void)_context->set_origin_world(newOrigin);
+            }
         }
     }
 
-    _camera_position_local = world_to_local(mainCamera.position_world, _origin_world);
+    const WorldVec3 origin_world = get_world_origin();
+    _camera_position_local = world_to_local(mainCamera.position_world, origin_world);
 
     auto tagOwner = [&](RenderObject::OwnerType type, const std::string &name,
                         size_t opaqueBegin, size_t transpBegin)
@@ -250,7 +261,7 @@ void SceneManager::update_scene()
     // Root transform to shift "world space" float scenes into render-local space.
     // Any object that is authored in world coordinates (float) should be offset by -origin.
     const glm::mat4 world_to_local_root =
-        glm::translate(glm::mat4{1.f}, world_to_local(WorldVec3(0.0, 0.0, 0.0), _origin_world));
+        glm::translate(glm::mat4{1.f}, world_to_local(WorldVec3(0.0, 0.0, 0.0), origin_world));
 
     // Draw all loaded GLTF scenes (static world), advancing their independent animation states.
     for (auto &[name, scene] : loadedScenes)
@@ -300,7 +311,7 @@ void SceneManager::update_scene()
         {
             mainDrawContext.gltfNodeLocalOverrides = nullptr;
         }
-        glm::vec3 tLocal = world_to_local(inst.translation_world, _origin_world);
+        glm::vec3 tLocal = world_to_local(inst.translation_world, origin_world);
         glm::mat4 instanceTransform = make_trs_matrix(tLocal, inst.rotation, inst.scale);
         inst.scene->Draw(instanceTransform, mainDrawContext);
         mainDrawContext.gltfNodeLocalOverrides = nullptr;
@@ -317,7 +328,7 @@ void SceneManager::update_scene()
     {
         const MeshInstance &inst = kv.second;
         if (!inst.mesh || inst.mesh->surfaces.empty()) continue;
-        glm::vec3 tLocal = world_to_local(inst.translation_world, _origin_world);
+        glm::vec3 tLocal = world_to_local(inst.translation_world, origin_world);
         glm::mat4 instanceTransform = make_trs_matrix(tLocal, inst.rotation, inst.scale);
         uint32_t surfaceIndex = 0;
         for (const auto &surf: inst.mesh->surfaces)
@@ -486,7 +497,7 @@ void SceneManager::update_scene()
         if (ss.enabled && ss.mode == 2u && _planetSystem && _planetSystem->enabled())
         {
             const WorldVec3 camW = mainCamera.position_world;
-            const WorldVec3 originW = _origin_world;
+            const WorldVec3 originW = origin_world;
 
             auto point_in_any_cascade = [&](const glm::vec3 &pLocal) -> bool
             {
@@ -553,7 +564,7 @@ void SceneManager::update_scene()
     for (uint32_t i = 0; i < lightCount; ++i)
     {
         const PointLight &pl = pointLights[i];
-        glm::vec3 posLocal = world_to_local(pl.position_world, _origin_world);
+        glm::vec3 posLocal = world_to_local(pl.position_world, origin_world);
         sceneData.punctualLights[i].position_radius = glm::vec4(posLocal, pl.radius);
         sceneData.punctualLights[i].color_intensity = glm::vec4(pl.color, pl.intensity);
     }
@@ -567,7 +578,7 @@ void SceneManager::update_scene()
     for (uint32_t i = 0; i < spotCount; ++i)
     {
         const SpotLight &sl = spotLights[i];
-        glm::vec3 posLocal = world_to_local(sl.position_world, _origin_world);
+        glm::vec3 posLocal = world_to_local(sl.position_world, origin_world);
 
         glm::vec3 dir = sl.direction;
         const float dirLen2 = glm::length2(dir);
@@ -642,7 +653,7 @@ void SceneManager::update_scene()
         for (uint32_t i = 0; i < planetOccluderCount; ++i)
         {
             const PlanetSystem::PlanetBody &b = *candidates[i].body;
-            const glm::vec3 centerLocal = world_to_local(b.center_world, _origin_world);
+            const glm::vec3 centerLocal = world_to_local(b.center_world, origin_world);
             const float radiusM = static_cast<float>(std::max(0.0, b.radius_m));
             sceneData.planetOccluders[i] = glm::vec4(centerLocal, radiusM);
         }
@@ -761,7 +772,7 @@ bool SceneManager::getMeshInstanceTransformLocal(const std::string &name, glm::m
     }
 
     const MeshInstance &inst = it->second;
-    glm::vec3 tLocal = world_to_local(inst.translation_world, _origin_world);
+    glm::vec3 tLocal = world_to_local(inst.translation_world, get_world_origin());
     outTransformLocal = make_trs_matrix(tLocal, inst.rotation, inst.scale);
     return true;
 }
@@ -777,7 +788,7 @@ bool SceneManager::setMeshInstanceTransformLocal(const std::string &name, const 
     MeshInstance &inst = it->second;
     glm::vec3 tLocal{};
     decompose_trs_matrix(transformLocal, tLocal, inst.rotation, inst.scale);
-    inst.translation_world = local_to_world(tLocal, _origin_world);
+    inst.translation_world = local_to_world(tLocal, get_world_origin());
     return true;
 }
 
@@ -937,6 +948,14 @@ bool SceneManager::getGLTFInstanceNodeWorldTransformLocal(const std::string &ins
                                                           const std::string &nodeName,
                                                           glm::mat4 &outWorldTransformLocal) const
 {
+    return getGLTFInstanceNodeWorldTransformLocal(instanceName, nodeName, get_world_origin(), outWorldTransformLocal);
+}
+
+bool SceneManager::getGLTFInstanceNodeWorldTransformLocal(const std::string &instanceName,
+                                                          const std::string &nodeName,
+                                                          const WorldVec3 &origin_world,
+                                                          glm::mat4 &outWorldTransformLocal) const
+{
     auto it = dynamicGLTFInstances.find(instanceName);
     if (it == dynamicGLTFInstances.end())
     {
@@ -965,7 +984,7 @@ bool SceneManager::getGLTFInstanceNodeWorldTransformLocal(const std::string &ins
         nodeWorld = nodePtr->worldTransform;
     }
 
-    glm::vec3 tLocal = world_to_local(inst.translation_world, _origin_world);
+    glm::vec3 tLocal = world_to_local(inst.translation_world, origin_world);
     glm::mat4 instLocal = make_trs_matrix(tLocal, inst.rotation, inst.scale);
     outWorldTransformLocal = instLocal * nodeWorld;
     return true;
@@ -976,6 +995,15 @@ glm::mat4 SceneManager::getGLTFInstanceNodeWorldTransformLocal(const std::string
 {
     glm::mat4 worldLocal(1.0f);
     (void)getGLTFInstanceNodeWorldTransformLocal(instanceName, nodeName, worldLocal);
+    return worldLocal;
+}
+
+glm::mat4 SceneManager::getGLTFInstanceNodeWorldTransformLocal(const std::string &instanceName,
+                                                               const std::string &nodeName,
+                                                               const WorldVec3 &origin_world) const
+{
+    glm::mat4 worldLocal(1.0f);
+    (void)getGLTFInstanceNodeWorldTransformLocal(instanceName, nodeName, origin_world, worldLocal);
     return worldLocal;
 }
 
@@ -1011,7 +1039,7 @@ bool SceneManager::getGLTFInstanceTransformLocal(const std::string &name, glm::m
     }
 
     const GLTFInstance &inst = it->second;
-    glm::vec3 tLocal = world_to_local(inst.translation_world, _origin_world);
+    glm::vec3 tLocal = world_to_local(inst.translation_world, get_world_origin());
     outTransformLocal = make_trs_matrix(tLocal, inst.rotation, inst.scale);
     return true;
 }
@@ -1027,7 +1055,7 @@ bool SceneManager::setGLTFInstanceTransformLocal(const std::string &name, const 
     GLTFInstance &inst = it->second;
     glm::vec3 tLocal{};
     decompose_trs_matrix(transformLocal, tLocal, inst.rotation, inst.scale);
-    inst.translation_world = local_to_world(tLocal, _origin_world);
+    inst.translation_world = local_to_world(tLocal, get_world_origin());
     return true;
 }
 
@@ -1400,12 +1428,14 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
     entry.layer = layer;
     entry.user_data = user_data;
 
+    const WorldVec3 physics_origin_world = (_context ? _context->physics_origin_world : WorldVec3{0.0, 0.0, 0.0});
+
     size_t created = 0;
     for (const auto &[nodeName, compound] : compounds)
     {
         // Get node world transform
         glm::mat4 nodeWorld(1.0f);
-        if (!getGLTFInstanceNodeWorldTransform(instanceName, nodeName, nodeWorld))
+        if (!getGLTFInstanceNodeWorldTransformLocal(instanceName, nodeName, physics_origin_world, nodeWorld))
         {
             continue;
         }
@@ -1425,7 +1455,7 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
         // Create kinematic body
         Physics::BodySettings settings{};
         settings.shape = Physics::CollisionShape::Compound(std::move(scaledCompound));
-        settings.position = t;
+        settings.position = glm::dvec3(t);
         settings.rotation = glm::normalize(r);
         settings.motion_type = Physics::MotionType::Kinematic;
         settings.layer = layer;
@@ -1448,7 +1478,7 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
         }
 
         glm::mat4 ownerWorld(1.0f);
-        if (!getGLTFInstanceNodeWorldTransform(instanceName, ownerNodeName, ownerWorld))
+        if (!getGLTFInstanceNodeWorldTransformLocal(instanceName, ownerNodeName, physics_origin_world, ownerWorld))
         {
             continue;
         }
@@ -1469,7 +1499,7 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
 
             Physics::BodySettings settings{};
             settings.shape = Physics::CollisionShape::TriangleMesh(mesh_inst.mesh, s);
-            settings.position = t;
+            settings.position = glm::dvec3(t);
             settings.rotation = glm::normalize(r);
             settings.motion_type = Physics::MotionType::Static;
             settings.layer = layer;
@@ -1520,6 +1550,9 @@ void SceneManager::syncColliders()
             continue;
         }
 
+        const WorldVec3 physics_origin_world =
+            (_context ? _context->physics_origin_world : WorldVec3{0.0, 0.0, 0.0});
+
         auto instIt = dynamicGLTFInstances.find(instanceName);
         if (instIt == dynamicGLTFInstances.end())
         {
@@ -1534,14 +1567,14 @@ void SceneManager::syncColliders()
                 continue;
             }
 
-            glm::mat4 nodeWorld = getGLTFInstanceNodeWorldTransform(instanceName, nodeName);
+            glm::mat4 nodeWorld = getGLTFInstanceNodeWorldTransformLocal(instanceName, nodeName, physics_origin_world);
 
             glm::vec3 t{0.0f};
             glm::quat r{1.0f, 0.0f, 0.0f, 0.0f};
             glm::vec3 s{1.0f};
             decompose_trs_matrix(nodeWorld, t, r, s);
 
-            entry.world->set_transform(bodyId, t, glm::normalize(r));
+            entry.world->set_transform(bodyId, glm::dvec3(t), glm::normalize(r));
         }
     }
 }

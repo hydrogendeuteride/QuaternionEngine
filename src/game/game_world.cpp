@@ -108,7 +108,8 @@ namespace Game
         }
 
         Physics::BodySettings settings = body_settings_template;
-        settings.position = transform.position;
+        const WorldVec3 physics_origin_world = WorldVec3(_api->get_physics_origin());
+        settings.position = WorldVec3(transform.position) - physics_origin_world;
         settings.rotation = transform.rotation;
         if (override_user_data || settings.user_data == 0)
         {
@@ -218,4 +219,3 @@ namespace Game
         }
     }
 } // namespace Game
-

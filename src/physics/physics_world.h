@@ -26,6 +26,16 @@ namespace Physics
 
         virtual void step(float dt) = 0;
 
+        // Shift the local coordinate origin by translating all bodies by delta_local.
+        // Used to keep world-space positions stable when the engine's floating origin changes.
+        // Default implementation is a no-op.
+        virtual void shift_origin(const glm::dvec3 &delta_local) { (void)delta_local; }
+
+        // Shift the local velocity origin by subtracting delta_local_velocity from all bodies' linear velocities.
+        // Used to keep world-space velocities stable when switching inertial frames (Galilean transform).
+        // Default implementation is a no-op.
+        virtual void shift_velocity_origin(const glm::dvec3 &delta_local_velocity) { (void)delta_local_velocity; }
+
         // ========================================================================
         // Debug / instrumentation (optional)
         // ========================================================================
@@ -49,7 +59,7 @@ namespace Physics
         {
             BodyId id;
 
-            glm::vec3 position{0.0f};
+            glm::dvec3 position{0.0, 0.0, 0.0};
             glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
 
             MotionType motion_type{MotionType::Static};
@@ -91,7 +101,7 @@ namespace Physics
 
         virtual BodyTransform get_transform(BodyId id) const = 0;
 
-        virtual glm::vec3 get_position(BodyId id) const = 0;
+        virtual glm::dvec3 get_position(BodyId id) const = 0;
 
         virtual glm::quat get_rotation(BodyId id) const = 0;
 
@@ -107,11 +117,11 @@ namespace Physics
         // Body manipulation
         // ========================================================================
 
-        virtual void set_position(BodyId id, const glm::vec3 &position) = 0;
+        virtual void set_position(BodyId id, const glm::dvec3 &position) = 0;
 
         virtual void set_rotation(BodyId id, const glm::quat &rotation) = 0;
 
-        virtual void set_transform(BodyId id, const glm::vec3 &position, const glm::quat &rotation) = 0;
+        virtual void set_transform(BodyId id, const glm::dvec3 &position, const glm::quat &rotation) = 0;
 
         virtual void set_linear_velocity(BodyId id, const glm::vec3 &velocity) = 0;
 
@@ -138,10 +148,10 @@ namespace Physics
         // ========================================================================
 
         // Simple raycast (legacy interface)
-        virtual RayHit raycast(const glm::vec3 &origin, const glm::vec3 &direction, float max_distance) const = 0;
+        virtual RayHit raycast(const glm::dvec3 &origin, const glm::vec3 &direction, float max_distance) const = 0;
 
         // Extended raycast with filtering options
-        virtual RayHit raycast(const glm::vec3 &origin, const glm::vec3 &direction,
+        virtual RayHit raycast(const glm::dvec3 &origin, const glm::vec3 &direction,
                                const RaycastOptions &options) const = 0;
 
         // ========================================================================
@@ -149,13 +159,13 @@ namespace Physics
         // ========================================================================
 
         virtual RayHit sweep(const CollisionShape &shape,
-                             const glm::vec3 &origin,
+                             const glm::dvec3 &origin,
                              const glm::quat &rotation,
                              const glm::vec3 &direction,
                              const SweepOptions &options) const = 0;
 
         virtual void overlap(const CollisionShape &shape,
-                             const glm::vec3 &position,
+                             const glm::dvec3 &position,
                              const glm::quat &rotation,
                              const OverlapOptions &options,
                              std::vector<OverlapHit> &out_hits) const = 0;
@@ -272,13 +282,19 @@ namespace Physics
         }
 
         // Position / rotation
-        BodyBuilder &position(const glm::vec3 &p)
+        BodyBuilder &position(const glm::dvec3 &p)
         {
             _settings.position = p;
             return *this;
         }
 
-        BodyBuilder &position(float x, float y, float z)
+        BodyBuilder &position(const glm::vec3 &p)
+        {
+            _settings.position = glm::dvec3(p);
+            return *this;
+        }
+
+        BodyBuilder &position(double x, double y, double z)
         {
             _settings.position = {x, y, z};
             return *this;

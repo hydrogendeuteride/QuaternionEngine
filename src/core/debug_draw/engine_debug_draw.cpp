@@ -33,7 +33,7 @@ void debug_draw_engine_layers(DebugDrawSystem *dd,
     // Physics: collider visualization (from game-owned Physics::PhysicsWorld, if provided)
     if (layer_on(DebugDrawLayer::Physics) && context->physics && context->physics_debug.draw_colliders)
     {
-        debug_draw_physics_colliders(dd, origin_world, context->physics, context->physics_debug);
+        debug_draw_physics_colliders(dd, context->physics_origin_world, context->physics, context->physics_debug);
     }
 
     // Picking: BVH root bounds + picked surface bounds (if available)

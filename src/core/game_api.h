@@ -951,6 +951,36 @@ public:
     void set_orbit_camera_reference_up(const glm::vec3& up);
 
     // ------------------------------------------------------------------------
+    // Floating Origin
+    // ------------------------------------------------------------------------
+
+    // Current world origin used by the renderer (double precision).
+    glm::dvec3 get_world_origin() const;
+
+    // Current origin used by the physics simulation (double precision).
+    glm::dvec3 get_physics_origin() const;
+
+    // Current velocity origin used by the physics simulation (double precision, m/s).
+    // World-space velocity = physics_velocity_origin + local_linear_velocity.
+    glm::dvec3 get_physics_velocity_origin() const;
+
+    // Set/clear the physics-origin anchor (e.g., active spacecraft). This does not affect rendering.
+    void set_physics_origin_anchor(const glm::dvec3& anchor_world);
+    void clear_physics_origin_anchor();
+
+    // If EngineContext::physics is set, rebase the physics position origin to the specified body when its
+    // local distance exceeds threshold_m. Returns true when rebasing occurred.
+    bool maybe_rebase_physics_origin_to_body(uint32_t physics_body_value, double threshold_m, double snap_size_m);
+
+    // If EngineContext::physics is set, rebase the physics velocity origin to the specified body when its
+    // local speed exceeds threshold_mps. Returns true when rebasing occurred.
+    bool maybe_rebase_physics_velocity_to_body(uint32_t physics_body_value, double threshold_mps);
+
+    // Backwards-compatible aliases (previously anchored the renderer origin; now anchors physics).
+    void set_floating_origin_anchor(const glm::dvec3& anchor_world);
+    void clear_floating_origin_anchor();
+
+    // ------------------------------------------------------------------------
     // Rendering
     // ------------------------------------------------------------------------
 

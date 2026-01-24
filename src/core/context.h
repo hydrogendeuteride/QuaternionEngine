@@ -3,6 +3,7 @@
 #include <array>
 #include <memory>
 #include <core/types.h>
+#include <core/world.h>
 #include <core/descriptor/descriptors.h>
 // Avoid including vk_scene.h here to prevent cycles
 
@@ -214,6 +215,75 @@ public:
     // Frequently used values
     VkExtent2D drawExtent{};
     VkExtent2D logicalRenderExtent{};
+
+    // Floating origin (authoritative, double precision)
+    WorldVec3 origin_world{0.0, 0.0, 0.0};
+    uint64_t origin_revision{0};
+
+    // Physics origin (authoritative, double precision). This is independent from the render origin
+    // so the camera can move far away while physics continues to simulate in its own local bubble.
+    WorldVec3 physics_origin_world{0.0, 0.0, 0.0};
+    uint64_t physics_origin_revision{0};
+
+    // Physics velocity origin (authoritative, double precision, m/s). This is independent from the
+    // render origin and is used for inertial velocity rebasing (Galilean transforms) so local
+    // physics velocities stay small even when the absolute world velocity is large (e.g. orbit).
+    glm::dvec3 physics_velocity_origin_world{0.0, 0.0, 0.0};
+    uint64_t physics_velocity_origin_revision{0};
+
+    // Optional anchor for deciding when/where to recenter the physics origin.
+    // For space sims this should be set to the active spacecraft's world position.
+    WorldVec3 physics_origin_anchor_world{0.0, 0.0, 0.0};
+    bool physics_origin_anchor_enabled{false};
+
+    // Updates origin and increments origin_revision if changed.
+    // Returns true when origin changed.
+    bool set_origin_world(const WorldVec3 &new_origin)
+    {
+        const WorldVec3 delta = new_origin - origin_world;
+        if (delta.x == 0.0 && delta.y == 0.0 && delta.z == 0.0)
+        {
+            return false;
+        }
+        origin_world = new_origin;
+        ++origin_revision;
+        return true;
+    }
+
+    bool set_physics_origin_world(const WorldVec3 &new_origin)
+    {
+        const WorldVec3 delta = new_origin - physics_origin_world;
+        if (delta.x == 0.0 && delta.y == 0.0 && delta.z == 0.0)
+        {
+            return false;
+        }
+        physics_origin_world = new_origin;
+        ++physics_origin_revision;
+        return true;
+    }
+
+    bool set_physics_velocity_origin_world(const glm::dvec3 &new_origin_velocity)
+    {
+        const glm::dvec3 delta = new_origin_velocity - physics_velocity_origin_world;
+        if (delta.x == 0.0 && delta.y == 0.0 && delta.z == 0.0)
+        {
+            return false;
+        }
+        physics_velocity_origin_world = new_origin_velocity;
+        ++physics_velocity_origin_revision;
+        return true;
+    }
+
+    void set_physics_origin_anchor_world(const WorldVec3 &anchor_world)
+    {
+        physics_origin_anchor_world = anchor_world;
+        physics_origin_anchor_enabled = true;
+    }
+
+    void clear_physics_origin_anchor_world()
+    {
+        physics_origin_anchor_enabled = false;
+    }
 
     // Optional convenience content pointers (moved to AssetManager for meshes)
 

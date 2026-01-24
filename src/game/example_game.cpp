@@ -55,6 +55,12 @@ namespace Game
         // Setup game scene (entities + render/physics resources)
         setup_scene();
 
+        // Anchor floating origin to the active physics object (ExampleGame: the sphere).
+        if (Entity *sphere = _world.entities().find(_sphere_entity))
+        {
+            api.set_physics_origin_anchor(glm::dvec3(sphere->position()));
+        }
+
         // Game ImGui panels
         if (VulkanEngine *renderer = runtime.renderer())
         {
@@ -117,27 +123,55 @@ namespace Game
         _fixed_time += fixed_dt;
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-        if (_physics)
+        if (!_runtime || !_physics)
         {
-            // Pre-physics: store current transforms as previous for interpolation
-            _world.entities().pre_physics_step();
+            return;
+        }
 
-            // Step physics
-            _physics->step(fixed_dt);
+        auto &api = _runtime->api();
 
-            // Post-physics: update entity transforms from physics
-            _world.entities().post_physics_step(*_physics);
+        // Pre-physics: store current transforms as previous for interpolation
+        _world.entities().pre_physics_step();
 
-            // Launch bowling ball after settling
-            if (!_sphere_launched && _fixed_time >= 10.0f)
+        // Velocity rebasing: keep local physics velocities small even when the absolute world velocity is large.
+        // This is an inertial (Galilean) frame change: subtract a constant velocity from every body.
+        if (Entity *sphere = _world.entities().find(_sphere_entity))
+        {
+            if (sphere->has_physics())
             {
-                Entity *sphere = _world.entities().find(_sphere_entity);
-                if (sphere && sphere->has_physics())
-                {
-                    Physics::BodyId body_id{sphere->physics_body_value()};
-                    _physics->set_linear_velocity(body_id, glm::vec3(18.0f, 0.0f, 4.0f));
-                    _sphere_launched = true;
-                }
+                constexpr double kOriginRecenterThresholdM = 500.0;
+                constexpr double kOriginSnapSizeM = 100.0;
+                (void)api.maybe_rebase_physics_origin_to_body(sphere->physics_body_value(),
+                                                             kOriginRecenterThresholdM,
+                                                             kOriginSnapSizeM);
+
+                constexpr double kVelocityRebaseThresholdMps = 1000.0;
+                (void)api.maybe_rebase_physics_velocity_to_body(sphere->physics_body_value(),
+                                                               kVelocityRebaseThresholdMps);
+            }
+        }
+
+        // Step physics
+        _physics->step(fixed_dt);
+
+        // Post-physics: update entity transforms from physics
+        _world.entities().post_physics_step(*_physics, WorldVec3(api.get_physics_origin()));
+
+        // Keep the floating origin anchored to the "active" physics entity (ExampleGame: the sphere)
+        if (Entity *sphere = _world.entities().find(_sphere_entity))
+        {
+            api.set_physics_origin_anchor(glm::dvec3(sphere->position()));
+        }
+
+        // Launch bowling ball after settling
+        if (!_sphere_launched && _fixed_time >= 10.0f)
+        {
+            Entity *sphere = _world.entities().find(_sphere_entity);
+            if (sphere && sphere->has_physics())
+            {
+                Physics::BodyId body_id{sphere->physics_body_value()};
+                _physics->set_linear_velocity(body_id, glm::vec3(18.0f, 0.0f, 4.0f));
+                _sphere_launched = true;
             }
         }
 #endif
@@ -145,6 +179,11 @@ namespace Game
 
     void ExampleGame::on_shutdown()
     {
+        if (_runtime)
+        {
+            _runtime->api().clear_physics_origin_anchor();
+        }
+
         _world.clear();
         _world.set_physics(nullptr);
         _world.set_api(nullptr);
@@ -393,7 +432,7 @@ namespace Game
 
             if (_physics)
             {
-                entities.teleport(id, pos, rot, *_physics);
+                entities.teleport(id, pos, rot, *_physics, WorldVec3(api.get_physics_origin()));
             }
             else
             {

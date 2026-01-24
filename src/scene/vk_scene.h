@@ -79,7 +79,7 @@ public:
     CameraRig &getCameraRig() { return cameraRig; }
     const CameraRig &getCameraRig() const { return cameraRig; }
 
-    WorldVec3 get_world_origin() const { return _origin_world; }
+    WorldVec3 get_world_origin() const;
     glm::vec3 get_camera_local_position() const { return _camera_position_local; }
 
     // Ray-pick against current DrawContext using per-surface Bounds.
@@ -178,8 +178,15 @@ public:
     bool getGLTFInstanceNodeWorldTransformLocal(const std::string &instanceName,
                                                const std::string &nodeName,
                                                glm::mat4 &outWorldTransformLocal) const;
+    bool getGLTFInstanceNodeWorldTransformLocal(const std::string &instanceName,
+                                               const std::string &nodeName,
+                                               const WorldVec3 &origin_world,
+                                               glm::mat4 &outWorldTransformLocal) const;
     glm::mat4 getGLTFInstanceNodeWorldTransformLocal(const std::string &instanceName,
                                                      const std::string &nodeName) const;
+    glm::mat4 getGLTFInstanceNodeWorldTransformLocal(const std::string &instanceName,
+                                                     const std::string &nodeName,
+                                                     const WorldVec3 &origin_world) const;
 
     // Animation control helpers (glTF)
     // Note: a LoadedGLTF may be shared by multiple instances; changing
@@ -299,7 +306,6 @@ private:
     DrawContext mainDrawContext;
     std::vector<PointLight> pointLights;
     std::vector<SpotLight> spotLights;
-    WorldVec3 _origin_world{0.0, 0.0, 0.0};
     glm::vec3 _camera_position_local{0.0f, 0.0f, 0.0f};
     double _floating_origin_recenter_threshold = 1000.0;
     double _floating_origin_snap_size = 100.0;

@@ -542,6 +542,78 @@ namespace Physics
         dispatch_contact_events();
     }
 
+    void JoltPhysicsWorld::shift_origin(const glm::dvec3 &delta_local)
+    {
+        if (!_initialized)
+        {
+            return;
+        }
+
+        if (delta_local.x == 0.0 && delta_local.y == 0.0 && delta_local.z == 0.0)
+        {
+            return;
+        }
+
+        std::scoped_lock lock(_layer_mutex);
+
+        JPH::BodyIDVector body_ids;
+        _physics_system.GetBodies(body_ids);
+
+        JPH::BodyInterface &bi = _physics_system.GetBodyInterface();
+        const JPH::RVec3 shift(delta_local.x, delta_local.y, delta_local.z);
+
+        for (const JPH::BodyID &id : body_ids)
+        {
+            if (id.IsInvalid())
+            {
+                continue;
+            }
+
+            const JPH::RVec3 p = bi.GetPosition(id);
+            const JPH::Quat q = bi.GetRotation(id);
+            bi.SetPositionAndRotation(id, p + shift, q, JPH::EActivation::DontActivate);
+        }
+    }
+
+    void JoltPhysicsWorld::shift_velocity_origin(const glm::dvec3 &delta_local_velocity)
+    {
+        if (!_initialized)
+        {
+            return;
+        }
+
+        if (delta_local_velocity.x == 0.0 && delta_local_velocity.y == 0.0 && delta_local_velocity.z == 0.0)
+        {
+            return;
+        }
+
+        std::scoped_lock lock(_layer_mutex);
+
+        JPH::BodyIDVector body_ids;
+        _physics_system.GetBodies(body_ids);
+
+        JPH::BodyInterface &bi = _physics_system.GetBodyInterface();
+        const JPH::Vec3 dv(static_cast<float>(delta_local_velocity.x),
+                           static_cast<float>(delta_local_velocity.y),
+                           static_cast<float>(delta_local_velocity.z));
+
+        for (const JPH::BodyID &id : body_ids)
+        {
+            if (id.IsInvalid())
+            {
+                continue;
+            }
+
+            if (bi.GetMotionType(id) == JPH::EMotionType::Static)
+            {
+                continue;
+            }
+
+            const JPH::Vec3 v = bi.GetLinearVelocity(id);
+            bi.SetLinearVelocity(id, v - dv);
+        }
+    }
+
     PhysicsWorld::DebugStats JoltPhysicsWorld::debug_stats() const
     {
         DebugStats s{};
@@ -989,17 +1061,17 @@ namespace Physics
         const JPH::RVec3 p = body.GetPosition();
         const JPH::Quat q = body.GetRotation();
 
-        result.position = glm::vec3(
-            static_cast<float>(p.GetX()),
-            static_cast<float>(p.GetY()),
-            static_cast<float>(p.GetZ()));
+        result.position = glm::dvec3(
+            static_cast<double>(p.GetX()),
+            static_cast<double>(p.GetY()),
+            static_cast<double>(p.GetZ()));
 
         result.rotation = glm::quat(q.GetW(), q.GetX(), q.GetY(), q.GetZ());
 
         return result;
     }
 
-    glm::vec3 JoltPhysicsWorld::get_position(BodyId id) const
+    glm::dvec3 JoltPhysicsWorld::get_position(BodyId id) const
     {
         return get_transform(id).position;
     }
@@ -1053,7 +1125,7 @@ namespace Physics
     // Body manipulation
     // ============================================================================
 
-    void JoltPhysicsWorld::set_position(BodyId id, const glm::vec3 &position)
+    void JoltPhysicsWorld::set_position(BodyId id, const glm::dvec3 &position)
     {
         if (!_initialized || !id.is_valid())
         {
@@ -1081,7 +1153,7 @@ namespace Physics
             JPH::EActivation::Activate);
     }
 
-    void JoltPhysicsWorld::set_transform(BodyId id, const glm::vec3 &position, const glm::quat &rotation)
+    void JoltPhysicsWorld::set_transform(BodyId id, const glm::dvec3 &position, const glm::quat &rotation)
     {
         if (!_initialized || !id.is_valid())
         {
@@ -1209,14 +1281,14 @@ namespace Physics
     // Raycasting
     // ============================================================================
 
-    RayHit JoltPhysicsWorld::raycast(const glm::vec3 &origin, const glm::vec3 &direction, float max_distance) const
+    RayHit JoltPhysicsWorld::raycast(const glm::dvec3 &origin, const glm::vec3 &direction, float max_distance) const
     {
         RaycastOptions options;
         options.max_distance = max_distance;
         return raycast(origin, direction, options);
     }
 
-    RayHit JoltPhysicsWorld::raycast(const glm::vec3 &origin, const glm::vec3 &direction,
+    RayHit JoltPhysicsWorld::raycast(const glm::dvec3 &origin, const glm::vec3 &direction,
                                      const RaycastOptions &options) const
     {
         RayHit result;
@@ -1259,10 +1331,10 @@ namespace Physics
             result.distance = hit.mFraction * options.max_distance;
 
             JPH::RVec3 hp = ray.GetPointOnRay(hit.mFraction);
-            result.position = glm::vec3(
-                static_cast<float>(hp.GetX()),
-                static_cast<float>(hp.GetY()),
-                static_cast<float>(hp.GetZ()));
+            result.position = glm::dvec3(
+                static_cast<double>(hp.GetX()),
+                static_cast<double>(hp.GetY()),
+                static_cast<double>(hp.GetZ()));
 
             result.sub_shape_id = hit.mSubShapeID2.GetValue();
 
@@ -1289,7 +1361,7 @@ namespace Physics
     // ============================================================================
 
     RayHit JoltPhysicsWorld::sweep(const CollisionShape &shape,
-                                   const glm::vec3 &origin,
+                                   const glm::dvec3 &origin,
                                    const glm::quat &rotation,
                                    const glm::vec3 &direction,
                                    const SweepOptions &options) const
@@ -1337,8 +1409,9 @@ namespace Physics
 
             result.hit = true;
             result.distance = hit.mFraction * options.max_distance;
-            result.position = glm::vec3(hit.mContactPointOn2.GetX(), hit.mContactPointOn2.GetY(),
-                                        hit.mContactPointOn2.GetZ());
+            result.position = glm::dvec3(static_cast<double>(hit.mContactPointOn2.GetX()),
+                                         static_cast<double>(hit.mContactPointOn2.GetY()),
+                                         static_cast<double>(hit.mContactPointOn2.GetZ()));
 
             const float n_len = hit.mPenetrationAxis.Length();
             if (n_len > 0.0f)
@@ -1363,7 +1436,7 @@ namespace Physics
     }
 
     void JoltPhysicsWorld::overlap(const CollisionShape &shape,
-                                   const glm::vec3 &position,
+                                   const glm::dvec3 &position,
                                    const glm::quat &rotation,
                                    const OverlapOptions &options,
                                    std::vector<OverlapHit> &out_hits) const

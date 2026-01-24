@@ -55,12 +55,12 @@ void debug_draw_physics_colliders(DebugDrawSystem *dd,
         if (b.motion_type == Physics::MotionType::Dynamic && !settings.include_dynamic) return;
 
         const glm::vec4 color = color_for(b);
-        const glm::vec3 body_pos_local = b.position;
+        const glm::dvec3 body_pos_local = b.position;
         const glm::quat body_rot_local = b.rotation;
 
-        auto draw_primitive = [&](const auto &prim, const glm::vec3 &pos_local, const glm::quat &rot_local) {
+        auto draw_primitive = [&](const auto &prim, const glm::dvec3 &pos_local, const glm::quat &rot_local) {
             using T = std::decay_t<decltype(prim)>;
-            const WorldVec3 center_world = local_to_world(pos_local, origin_world);
+            const WorldVec3 center_world = origin_world + pos_local;
 
             if constexpr (std::is_same_v<T, Physics::BoxShape>)
             {
@@ -74,10 +74,11 @@ void debug_draw_physics_colliders(DebugDrawSystem *dd,
             {
                 const glm::vec3 axis = safe_normalize(rot_local * glm::vec3(0.0f, 1.0f, 0.0f),
                                                       glm::vec3(0.0f, 1.0f, 0.0f));
-                const glm::vec3 p0_local = pos_local - axis * prim.half_height;
-                const glm::vec3 p1_local = pos_local + axis * prim.half_height;
-                dd->add_capsule(local_to_world(p0_local, origin_world),
-                                local_to_world(p1_local, origin_world),
+                const glm::dvec3 axis_d(axis);
+                const glm::dvec3 p0_local = pos_local - axis_d * static_cast<double>(prim.half_height);
+                const glm::dvec3 p1_local = pos_local + axis_d * static_cast<double>(prim.half_height);
+                dd->add_capsule(origin_world + p0_local,
+                                origin_world + p1_local,
                                 prim.radius,
                                 color,
                                 0.0f,
@@ -111,8 +112,8 @@ void debug_draw_physics_colliders(DebugDrawSystem *dd,
             {
                 const glm::vec3 n0 = safe_normalize(prim.normal, glm::vec3(0.0f, 1.0f, 0.0f));
                 const glm::vec3 n = safe_normalize(rot_local * n0, glm::vec3(0.0f, 1.0f, 0.0f));
-                const glm::vec3 point_local = pos_local + n * prim.offset;
-                dd->add_plane_patch(local_to_world(point_local, origin_world),
+                const glm::dvec3 point_local = pos_local + glm::dvec3(n) * static_cast<double>(prim.offset);
+                dd->add_plane_patch(origin_world + point_local,
                                     glm::dvec3(n),
                                     25.0f,
                                     color,
@@ -128,7 +129,7 @@ void debug_draw_physics_colliders(DebugDrawSystem *dd,
             {
                 for (const Physics::CompoundShapeChild &child: shape.children)
                 {
-                    const glm::vec3 child_pos = body_pos_local + (body_rot_local * child.position);
+                    const glm::dvec3 child_pos = body_pos_local + glm::dvec3(body_rot_local * child.position);
                     const glm::quat child_rot = body_rot_local * child.rotation;
                     std::visit([&](const auto &prim) { draw_primitive(prim, child_pos, child_rot); }, child.shape);
                 }
@@ -142,4 +143,3 @@ void debug_draw_physics_colliders(DebugDrawSystem *dd,
         drawn++;
     });
 }
-

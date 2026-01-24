@@ -73,7 +73,7 @@ namespace Physics
 
     struct BodyTransform
     {
-        glm::vec3 position{0.0f};
+        glm::dvec3 position{0.0, 0.0, 0.0};
         glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
 
         glm::mat4 to_matrix() const;
@@ -99,7 +99,7 @@ namespace Physics
     struct RayHit
     {
         bool hit{false};
-        glm::vec3 position{0.0f};
+        glm::dvec3 position{0.0, 0.0, 0.0};
         glm::vec3 normal{0.0f, 1.0f, 0.0f};
         float distance{0.0f};
         BodyId body_id;

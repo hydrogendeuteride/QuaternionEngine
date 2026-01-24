@@ -62,6 +62,6 @@ namespace Physics
 
     glm::mat4 BodyTransform::to_matrix() const
     {
-        return glm::translate(glm::mat4(1.0f), position) * glm::mat4_cast(rotation);
+        return glm::translate(glm::mat4(1.0f), glm::vec3(position)) * glm::mat4_cast(rotation);
     }
 } // namespace Physics

@@ -139,7 +139,7 @@ void EntityManager::pre_physics_step()
     }
 }
 
-void EntityManager::post_physics_step(Physics::PhysicsWorld& physics)
+void EntityManager::post_physics_step(Physics::PhysicsWorld& physics, const WorldVec3& physics_origin_world)
 {
     for (auto& [id, entity] : _entities)
     {
@@ -156,14 +156,16 @@ void EntityManager::post_physics_step(Physics::PhysicsWorld& physics)
 
         Physics::BodyTransform transform = physics.get_transform(body_id);
 
+        const WorldVec3 position_world = physics_origin_world + transform.position;
+
         // Update entity transform
-        entity.set_position(transform.position);
+        entity.set_position(glm::vec3(position_world));
         entity.set_rotation(transform.rotation);
 
         // Update interpolation state
         if (entity.uses_interpolation())
         {
-            entity.interpolation().curr_position = transform.position;
+            entity.interpolation().curr_position = glm::vec3(position_world);
             entity.interpolation().curr_rotation = transform.rotation;
         }
     }
@@ -277,7 +279,7 @@ Entity* EntityManager::find_by_render_name(const std::string& render_name)
 // ============================================================================
 
 void EntityManager::teleport(EntityId id, const glm::vec3& position, const glm::quat& rotation,
-                             Physics::PhysicsWorld& physics)
+                             Physics::PhysicsWorld& physics, const WorldVec3& physics_origin_world)
 {
     Entity* entity = find(id);
     if (!entity)
@@ -301,7 +303,8 @@ void EntityManager::teleport(EntityId id, const glm::vec3& position, const glm::
         Physics::BodyId body_id{entity->physics_body_value()};
         if (physics.is_body_valid(body_id))
         {
-            physics.set_transform(body_id, position, rotation);
+            const glm::dvec3 position_local = WorldVec3(position) - physics_origin_world;
+            physics.set_transform(body_id, position_local, rotation);
             physics.set_linear_velocity(body_id, glm::vec3(0.0f));
             physics.set_angular_velocity(body_id, glm::vec3(0.0f));
             physics.activate(body_id);

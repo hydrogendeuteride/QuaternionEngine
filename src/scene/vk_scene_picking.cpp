@@ -480,7 +480,8 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
                         -1.0f);
     dirCamera = glm::normalize(dirCamera);
 
-    glm::vec3 rayOrigin = world_to_local(mainCamera.position_world, _origin_world);
+    const WorldVec3 origin_world = get_world_origin();
+    glm::vec3 rayOrigin = world_to_local(mainCamera.position_world, origin_world);
     glm::mat4 camRotation = mainCamera.getRotationMatrix();
     glm::vec3 rayDir = glm::normalize(glm::vec3(camRotation * glm::vec4(dirCamera, 0.0f)));
 
@@ -518,7 +519,7 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
 
         const glm::dvec3 ro = glm::dvec3(rayOrigin);
         const glm::dvec3 rd = glm::dvec3(rayDir);
-        const glm::dvec3 center_local = body->center_world - _origin_world;
+        const glm::dvec3 center_local = body->center_world - origin_world;
         const double r = std::max(0.0, body->radius_m);
         if (!(r > 0.0))
         {
@@ -608,7 +609,7 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
 
     if (anyHit)
     {
-        outWorldPos = local_to_world(bestHitPos, _origin_world);
+        outWorldPos = local_to_world(bestHitPos, origin_world);
     }
 
     return anyHit;
