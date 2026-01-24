@@ -20,6 +20,11 @@ inline WorldVec3 local_to_world(const glm::vec3 &local, const WorldVec3 &origin_
     return origin_world + WorldVec3(local);
 }
 
+inline bool is_zero(const glm::dvec3 &v)
+{
+    return v.x == 0.0 && v.y == 0.0 && v.z == 0.0;
+}
+
 inline WorldVec3 snap_world(const WorldVec3 &p, double grid_size)
 {
     if (grid_size <= 0.0)
