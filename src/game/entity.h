@@ -18,204 +18,217 @@ namespace Physics
 
 namespace Game
 {
+    // ============================================================================
+    // EntityId: Strongly-typed entity identifier
+    // ============================================================================
 
-// ============================================================================
-// EntityId: Strongly-typed entity identifier
-// ============================================================================
+    struct EntityId
+    {
+        uint32_t value{0};
 
-struct EntityId
-{
-    uint32_t value{0};
+        EntityId() = default;
 
-    EntityId() = default;
-    explicit EntityId(uint32_t v) : value(v) {}
+        explicit EntityId(uint32_t v) : value(v)
+        {
+        }
 
-    bool is_valid() const { return value != 0; }
-    explicit operator bool() const { return is_valid(); }
-    bool operator==(const EntityId& other) const { return value == other.value; }
-    bool operator!=(const EntityId& other) const { return value != other.value; }
-};
+        bool is_valid() const { return value != 0; }
+        explicit operator bool() const { return is_valid(); }
+        bool operator==(const EntityId &other) const { return value == other.value; }
+        bool operator!=(const EntityId &other) const { return value != other.value; }
+    };
 
-// ============================================================================
-// Transform: World-space position (double precision), rotation, scale
-// ============================================================================
+    // ============================================================================
+    // Transform: World-space position (double precision), rotation, scale
+    // ============================================================================
 
-struct Transform
-{
-    WorldVec3 position_world{0.0, 0.0, 0.0};
-    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
-    glm::vec3 scale{1.0f};
+    struct Transform
+    {
+        WorldVec3 position_world{0.0, 0.0, 0.0};
+        glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+        glm::vec3 scale{1.0f};
 
-    // Returns local-space matrix (caller provides origin for position conversion)
-    glm::mat4 to_local_matrix(const WorldVec3& origin_world) const;
+        // Returns local-space matrix (caller provides origin for position conversion)
+        glm::mat4 to_local_matrix(const WorldVec3 &origin_world) const;
 
-    // Combine transforms (parent * child) - child position is treated as local offset
-    Transform operator*(const Transform& child) const;
-};
+        // Combine transforms (parent * child) - child position is treated as local offset
+        Transform operator*(const Transform &child) const;
+    };
 
-// ============================================================================
-// InterpolatedTransform: For smooth physics rendering (world-space, double precision)
-// ============================================================================
+    // ============================================================================
+    // InterpolatedTransform: For smooth physics rendering (world-space, double precision)
+    // ============================================================================
 
-struct InterpolatedTransform
-{
-    WorldVec3 prev_position{0.0, 0.0, 0.0};
-    glm::quat prev_rotation{1.0f, 0.0f, 0.0f, 0.0f};
-    WorldVec3 curr_position{0.0, 0.0, 0.0};
-    glm::quat curr_rotation{1.0f, 0.0f, 0.0f, 0.0f};
+    struct InterpolatedTransform
+    {
+        WorldVec3 prev_position{0.0, 0.0, 0.0};
+        glm::quat prev_rotation{1.0f, 0.0f, 0.0f, 0.0f};
+        WorldVec3 curr_position{0.0, 0.0, 0.0};
+        glm::quat curr_rotation{1.0f, 0.0f, 0.0f, 0.0f};
 
-    WorldVec3 interpolated_position(float alpha) const;
-    glm::quat interpolated_rotation(float alpha) const;
+        WorldVec3 interpolated_position(float alpha) const;
 
-    void store_current_as_previous();
-    void set_immediate(const WorldVec3& pos, const glm::quat& rot);
-};
+        glm::quat interpolated_rotation(float alpha) const;
 
-// ============================================================================
-// Attachment: A part attached to an entity (child object)
-// ============================================================================
+        void store_current_as_previous();
 
-struct Attachment
-{
-    std::string name;                              // Unique name within parent entity
-    std::string render_name;                       // SceneManager instance name
+        void set_immediate(const WorldVec3 &pos, const glm::quat &rot);
+    };
 
-    // Local transform relative to parent
-    glm::vec3 local_position{0.0f};
-    glm::quat local_rotation{1.0f, 0.0f, 0.0f, 0.0f};
-    glm::vec3 local_scale{1.0f};
+    // ============================================================================
+    // Attachment: A part attached to an entity (child object)
+    // ============================================================================
 
-    // Optional physics body (for kinematic parts or joints)
-    std::optional<uint32_t> physics_body_value;    // Physics::BodyId::value
-    bool sync_physics{false};                      // If true, sync attachment transform to physics body
+    struct Attachment
+    {
+        std::string name; // Unique name within parent entity
+        std::string render_name; // SceneManager instance name
 
-    // Flags
-    bool visible{true};
+        // Local transform relative to parent
+        glm::vec3 local_position{0.0f};
+        glm::quat local_rotation{1.0f, 0.0f, 0.0f, 0.0f};
+        glm::vec3 local_scale{1.0f};
 
-    // Get local transform as matrix
-    glm::mat4 get_local_matrix() const;
+        // Optional physics body (for kinematic parts or joints)
+        std::optional<uint32_t> physics_body_value; // Physics::BodyId::value
+        bool sync_physics{false}; // If true, sync attachment transform to physics body
 
-    // Get local transform as Transform struct
-    Transform get_local_transform() const;
-};
+        // Flags
+        bool visible{true};
 
-// ============================================================================
-// Entity: A game object with optional physics and rendering
-// ============================================================================
+        // Get local transform as matrix
+        glm::mat4 get_local_matrix() const;
 
-class Entity
-{
-public:
-    Entity() = default;
-    explicit Entity(EntityId id, const std::string& name = "");
+        // Get local transform as Transform struct
+        Transform get_local_transform() const;
+    };
 
-    // ------------------------------------------------------------------------
-    // Identity
-    // ------------------------------------------------------------------------
+    // ============================================================================
+    // Entity: A game object with optional physics and rendering
+    // ============================================================================
 
-    EntityId id() const { return _id; }
-    const std::string& name() const { return _name; }
-    void set_name(const std::string& name) { _name = name; }
+    class Entity
+    {
+    public:
+        Entity() = default;
 
-    // ------------------------------------------------------------------------
-    // Transform (authoritative, world-space position)
-    // ------------------------------------------------------------------------
+        explicit Entity(EntityId id, const std::string &name = "");
 
-    const Transform& transform() const { return _transform; }
-    void set_transform(const Transform& transform) { _transform = transform; }
+        // ------------------------------------------------------------------------
+        // Identity
+        // ------------------------------------------------------------------------
 
-    void set_position_world(const WorldVec3& pos) { _transform.position_world = pos; }
-    void set_rotation(const glm::quat& rot) { _transform.rotation = rot; }
-    void set_scale(const glm::vec3& scale) { _transform.scale = scale; }
+        EntityId id() const { return _id; }
+        const std::string &name() const { return _name; }
+        void set_name(const std::string &name) { _name = name; }
 
-    const WorldVec3& position_world() const { return _transform.position_world; }
-    const glm::quat& rotation() const { return _transform.rotation; }
-    const glm::vec3& scale() const { return _transform.scale; }
+        // ------------------------------------------------------------------------
+        // Transform (authoritative, world-space position)
+        // ------------------------------------------------------------------------
 
-    // Get local-space matrix for rendering (requires origin)
-    glm::mat4 get_local_matrix(const WorldVec3& origin_world) const { return _transform.to_local_matrix(origin_world); }
+        const Transform &transform() const { return _transform; }
+        void set_transform(const Transform &transform) { _transform = transform; }
 
-    // ------------------------------------------------------------------------
-    // Interpolation (for physics smoothing)
-    // ------------------------------------------------------------------------
+        void set_position_world(const WorldVec3 &pos) { _transform.position_world = pos; }
+        void set_rotation(const glm::quat &rot) { _transform.rotation = rot; }
+        void set_scale(const glm::vec3 &scale) { _transform.scale = scale; }
 
-    InterpolatedTransform& interpolation() { return _interp; }
-    const InterpolatedTransform& interpolation() const { return _interp; }
+        const WorldVec3 &position_world() const { return _transform.position_world; }
+        const glm::quat &rotation() const { return _transform.rotation; }
+        const glm::vec3 &scale() const { return _transform.scale; }
 
-    bool uses_interpolation() const { return _use_interpolation; }
-    void set_use_interpolation(bool use) { _use_interpolation = use; }
+        // Get local-space matrix for rendering (requires origin)
+        glm::mat4 get_local_matrix(const WorldVec3 &origin_world) const
+        {
+            return _transform.to_local_matrix(origin_world);
+        }
 
-    // Get interpolated transform for rendering (requires origin for local-space conversion)
-    WorldVec3 get_render_position_world(float alpha) const;
-    glm::quat get_render_rotation(float alpha) const;
-    glm::mat4 get_render_local_matrix(float alpha, const WorldVec3& origin_world) const;
+        // ------------------------------------------------------------------------
+        // Interpolation (for physics smoothing)
+        // ------------------------------------------------------------------------
 
-    // ------------------------------------------------------------------------
-    // Physics binding
-    // ------------------------------------------------------------------------
+        InterpolatedTransform &interpolation() { return _interp; }
+        const InterpolatedTransform &interpolation() const { return _interp; }
 
-    bool has_physics() const { return _physics_body_value.has_value(); }
+        bool uses_interpolation() const { return _use_interpolation; }
+        void set_use_interpolation(bool use) { _use_interpolation = use; }
 
-    uint32_t physics_body_value() const { return _physics_body_value.value_or(0); }
-    void set_physics_body(uint32_t body_value) { _physics_body_value = body_value; }
-    void clear_physics_body() { _physics_body_value.reset(); }
+        // Get interpolated transform for rendering (requires origin for local-space conversion)
+        WorldVec3 get_render_position_world(float alpha) const;
 
-    // ------------------------------------------------------------------------
-    // Render binding
-    // ------------------------------------------------------------------------
+        glm::quat get_render_rotation(float alpha) const;
 
-    bool has_render() const { return !_render_name.empty(); }
+        glm::mat4 get_render_local_matrix(float alpha, const WorldVec3 &origin_world) const;
 
-    const std::string& render_name() const { return _render_name; }
-    void set_render_name(const std::string& name) { _render_name = name; }
+        // ------------------------------------------------------------------------
+        // Physics binding
+        // ------------------------------------------------------------------------
 
-    // ------------------------------------------------------------------------
-    // Attachments
-    // ------------------------------------------------------------------------
+        bool has_physics() const { return _physics_body_value.has_value(); }
 
-    const std::vector<Attachment>& attachments() const { return _attachments; }
-    std::vector<Attachment>& attachments() { return _attachments; }
+        uint32_t physics_body_value() const { return _physics_body_value.value_or(0); }
+        void set_physics_body(uint32_t body_value) { _physics_body_value = body_value; }
+        void clear_physics_body() { _physics_body_value.reset(); }
 
-    void add_attachment(const Attachment& attachment);
-    bool remove_attachment(const std::string& name);
-    Attachment* find_attachment(const std::string& name);
-    const Attachment* find_attachment(const std::string& name) const;
+        // ------------------------------------------------------------------------
+        // Render binding
+        // ------------------------------------------------------------------------
 
-    // Get local-space transform for an attachment (requires origin)
-    glm::mat4 get_attachment_local_matrix(const Attachment& att, const WorldVec3& origin_world) const;
-    glm::mat4 get_attachment_local_matrix(const Attachment& att, float alpha, const WorldVec3& origin_world) const;
+        bool has_render() const { return !_render_name.empty(); }
 
-    // ------------------------------------------------------------------------
-    // Flags
-    // ------------------------------------------------------------------------
+        const std::string &render_name() const { return _render_name; }
+        void set_render_name(const std::string &name) { _render_name = name; }
 
-    bool is_active() const { return _active; }
-    void set_active(bool active) { _active = active; }
+        // ------------------------------------------------------------------------
+        // Attachments
+        // ------------------------------------------------------------------------
 
-    bool is_visible() const { return _visible; }
-    void set_visible(bool visible) { _visible = visible; }
+        const std::vector<Attachment> &attachments() const { return _attachments; }
+        std::vector<Attachment> &attachments() { return _attachments; }
 
-private:
-    EntityId _id;
-    std::string _name;
+        void add_attachment(const Attachment &attachment);
 
-    // Transform
-    Transform _transform;
-    InterpolatedTransform _interp;
-    bool _use_interpolation{false};
+        bool remove_attachment(const std::string &name);
 
-    // Physics binding (stores BodyId::value)
-    std::optional<uint32_t> _physics_body_value;
+        Attachment *find_attachment(const std::string &name);
 
-    // Render binding (SceneManager instance name)
-    std::string _render_name;
+        const Attachment *find_attachment(const std::string &name) const;
 
-    // Child attachments
-    std::vector<Attachment> _attachments;
+        // Get local-space transform for an attachment (requires origin)
+        glm::mat4 get_attachment_local_matrix(const Attachment &att, const WorldVec3 &origin_world) const;
 
-    // Flags
-    bool _active{true};
-    bool _visible{true};
-};
+        glm::mat4 get_attachment_local_matrix(const Attachment &att, float alpha, const WorldVec3 &origin_world) const;
 
+        // ------------------------------------------------------------------------
+        // Flags
+        // ------------------------------------------------------------------------
+
+        bool is_active() const { return _active; }
+        void set_active(bool active) { _active = active; }
+
+        bool is_visible() const { return _visible; }
+        void set_visible(bool visible) { _visible = visible; }
+
+    private:
+        EntityId _id;
+        std::string _name;
+
+        // Transform
+        Transform _transform;
+        InterpolatedTransform _interp;
+        bool _use_interpolation{false};
+
+        // Physics binding (stores BodyId::value)
+        std::optional<uint32_t> _physics_body_value;
+
+        // Render binding (SceneManager instance name)
+        std::string _render_name;
+
+        // Child attachments
+        std::vector<Attachment> _attachments;
+
+        // Flags
+        bool _active{true};
+        bool _visible{true};
+    };
 } // namespace Game

@@ -163,7 +163,7 @@ namespace Game
         {
             Physics::BodySettings settings = _physics_settings;
             const WorldVec3 physics_origin_world =
-                world._api ? WorldVec3(world._api->get_physics_origin()) : WorldVec3{0.0, 0.0, 0.0};
+                    world._api ? WorldVec3(world._api->get_physics_origin()) : WorldVec3{0.0, 0.0, 0.0};
             settings.position = world_to_local_d(_transform.position_world, physics_origin_world);
             settings.rotation = _transform.rotation;
             if (_override_user_data || settings.user_data == 0)

@@ -80,6 +80,7 @@ namespace Game
         EntityBuilder &transform(const Transform &transform);
 
         EntityBuilder &render_primitive(GameAPI::PrimitiveType type);
+
         EntityBuilder &render_gltf(const std::string &path, bool preload_textures = true);
 
         EntityBuilder &physics(const Physics::BodySettings &settings,

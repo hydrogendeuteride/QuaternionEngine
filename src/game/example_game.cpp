@@ -141,13 +141,13 @@ namespace Game
             {
                 constexpr double kOriginRecenterThresholdM = 500.0;
                 constexpr double kOriginSnapSizeM = 100.0;
-                (void)api.maybe_rebase_physics_origin_to_body(sphere->physics_body_value(),
-                                                             kOriginRecenterThresholdM,
-                                                             kOriginSnapSizeM);
+                (void) api.maybe_rebase_physics_origin_to_body(sphere->physics_body_value(),
+                                                               kOriginRecenterThresholdM,
+                                                               kOriginSnapSizeM);
 
                 constexpr double kVelocityRebaseThresholdMps = 1000.0;
-                (void)api.maybe_rebase_physics_velocity_to_body(sphere->physics_body_value(),
-                                                               kVelocityRebaseThresholdMps);
+                (void) api.maybe_rebase_physics_velocity_to_body(sphere->physics_body_value(),
+                                                                 kVelocityRebaseThresholdMps);
             }
         }
 
@@ -245,10 +245,10 @@ namespace Game
             Transform tr{};
             tr.position_world = {0.0, 0.0, 0.0};
             tr.scale = {50.0f, 1.0f, 50.0f};
-            if (Entity* ground = _world.builder("ground")
-                                       .transform(tr)
-                                       .render_primitive(GameAPI::PrimitiveType::Plane)
-                                       .build())
+            if (Entity *ground = _world.builder("ground")
+                    .transform(tr)
+                    .render_primitive(GameAPI::PrimitiveType::Plane)
+                    .build())
             {
                 _ground_entity = ground->id();
             }
@@ -283,11 +283,11 @@ namespace Game
                         .set_restitution(0.1f)
                         .set_linear_damping(0.02f);
 
-                if (Entity* sphere = _world.builder("sphere")
-                                          .transform(tr)
-                                          .render_primitive(GameAPI::PrimitiveType::Sphere)
-                                          .physics(settings)
-                                          .build())
+                if (Entity *sphere = _world.builder("sphere")
+                        .transform(tr)
+                        .render_primitive(GameAPI::PrimitiveType::Sphere)
+                        .physics(settings)
+                        .build())
                 {
                     _sphere_entity = sphere->id();
                     _initial_pose[_sphere_entity.value] = InitialPose{tr.position_world, tr.rotation};
@@ -296,10 +296,10 @@ namespace Game
             else
 #endif
             {
-                if (Entity* sphere = _world.builder("sphere")
-                                          .transform(tr)
-                                          .render_primitive(GameAPI::PrimitiveType::Sphere)
-                                          .build())
+                if (Entity *sphere = _world.builder("sphere")
+                        .transform(tr)
+                        .render_primitive(GameAPI::PrimitiveType::Sphere)
+                        .build())
                 {
                     _sphere_entity = sphere->id();
                     _initial_pose[_sphere_entity.value] = InitialPose{tr.position_world, tr.rotation};
@@ -328,11 +328,11 @@ namespace Game
                         .set_linear_damping(0.02f)
                         .set_angular_damping(0.05f);
 
-                if (Entity* box = _world.builder(layout.name)
-                                        .transform(tr)
-                                        .render_primitive(GameAPI::PrimitiveType::Cube)
-                                        .physics(settings)
-                                        .build())
+                if (Entity *box = _world.builder(layout.name)
+                        .transform(tr)
+                        .render_primitive(GameAPI::PrimitiveType::Cube)
+                        .physics(settings)
+                        .build())
                 {
                     _box_entities.push_back(box->id());
                     _initial_pose[box->id().value] = InitialPose{tr.position_world, tr.rotation};
@@ -341,10 +341,10 @@ namespace Game
             }
 #endif
 
-            if (Entity* box = _world.builder(layout.name)
-                                    .transform(tr)
-                                    .render_primitive(GameAPI::PrimitiveType::Cube)
-                                    .build())
+            if (Entity *box = _world.builder(layout.name)
+                    .transform(tr)
+                    .render_primitive(GameAPI::PrimitiveType::Cube)
+                    .build())
             {
                 _box_entities.push_back(box->id());
                 _initial_pose[box->id().value] = InitialPose{tr.position_world, tr.rotation};
@@ -428,7 +428,7 @@ namespace Game
         auto &entities = _world.entities();
 
         const auto reset_entity_pose = [&](EntityId id) {
-            Entity* ent = entities.find(id);
+            Entity *ent = entities.find(id);
             if (!ent)
             {
                 return;
@@ -463,7 +463,7 @@ namespace Game
         };
 
         reset_entity_pose(_sphere_entity);
-        for (EntityId id : _box_entities)
+        for (EntityId id: _box_entities)
         {
             reset_entity_pose(id);
         }
