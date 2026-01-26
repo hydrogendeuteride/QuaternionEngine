@@ -1,6 +1,7 @@
 #pragma once
 
 #include "entity_manager.h"
+#include "physics/body_settings.h"
 
 #include <string>
 #include <vector>
@@ -8,7 +9,6 @@
 namespace Physics
 {
     class PhysicsWorld;
-    struct BodySettings;
 } // namespace Physics
 
 namespace GameAPI
@@ -26,6 +26,8 @@ namespace Game
     class GameWorld
     {
     public:
+        class EntityBuilder;
+
         GameWorld() = default;
 
         explicit GameWorld(GameAPI::Engine *api, Physics::PhysicsWorld *physics = nullptr);
@@ -48,15 +50,10 @@ namespace Game
         void clear();
 
         // ------------------------------------------------------------------------
-        // Spawning helpers (simple, single-source-of-truth)
+        // Entity builder
         // ------------------------------------------------------------------------
 
-        Entity *spawn_primitive(const std::string &name, GameAPI::PrimitiveType type, const Transform &transform);
-
-        Entity *spawn_primitive_rigid_body(const std::string &name, GameAPI::PrimitiveType type,
-                                           const Transform &transform,
-                                           const Physics::BodySettings &body_settings_template,
-                                           bool override_user_data = true);
+        EntityBuilder builder(const std::string &name);
 
         // ------------------------------------------------------------------------
         // Binding existing resources (for incremental adoption)
@@ -74,5 +71,43 @@ namespace Game
 
         void destroy_entity_resources(Entity &entity);
     };
-} // namespace Game
 
+    class GameWorld::EntityBuilder
+    {
+    public:
+        EntityBuilder(GameWorld &world, std::string name);
+
+        EntityBuilder &transform(const Transform &transform);
+
+        EntityBuilder &render_primitive(GameAPI::PrimitiveType type);
+        EntityBuilder &render_gltf(const std::string &path, bool preload_textures = true);
+
+        EntityBuilder &physics(const Physics::BodySettings &settings,
+                               bool use_interpolation = true,
+                               bool override_user_data = true);
+
+        Entity *build();
+
+    private:
+        GameWorld *_world{nullptr};
+        std::string _name;
+        Transform _transform{};
+
+        enum class RenderKind
+        {
+            None,
+            Primitive,
+            GLTF
+        };
+
+        RenderKind _render_kind{RenderKind::None};
+        GameAPI::PrimitiveType _primitive_type{};
+        std::string _gltf_path{};
+        bool _gltf_preload{true};
+
+        bool _wants_physics{false};
+        Physics::BodySettings _physics_settings{};
+        bool _use_interpolation{true};
+        bool _override_user_data{true};
+    };
+} // namespace Game

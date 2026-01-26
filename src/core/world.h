@@ -15,7 +15,17 @@ inline glm::vec3 world_to_local(const WorldVec3 &world, const WorldVec3 &origin_
                      static_cast<float>(local_d.z));
 }
 
+inline glm::dvec3 world_to_local_d(const WorldVec3 &world, const WorldVec3 &origin_world)
+{
+    return world - origin_world;
+}
+
 inline WorldVec3 local_to_world(const glm::vec3 &local, const WorldVec3 &origin_world)
+{
+    return origin_world + WorldVec3(local);
+}
+
+inline WorldVec3 local_to_world_d(const glm::dvec3 &local, const WorldVec3 &origin_world)
 {
     return origin_world + WorldVec3(local);
 }
@@ -38,4 +48,3 @@ inline WorldVec3 snap_world(const WorldVec3 &p, double grid_size)
 
     return WorldVec3(snap(p.x), snap(p.y), snap(p.z));
 }
-

@@ -156,7 +156,7 @@ void EntityManager::post_physics_step(Physics::PhysicsWorld& physics, const Worl
 
         Physics::BodyTransform transform = physics.get_transform(body_id);
 
-        const WorldVec3 position_world = physics_origin_world + transform.position;
+        const WorldVec3 position_world = local_to_world_d(transform.position, physics_origin_world);
 
         // Update entity transform (world-space)
         entity.set_position_world(position_world);
@@ -175,7 +175,7 @@ void EntityManager::post_physics_step(Physics::PhysicsWorld& physics, const Worl
 // Render Synchronization
 // ============================================================================
 
-void EntityManager::sync_to_render(GameAPI::Engine& api, float alpha, const WorldVec3& render_origin_world)
+void EntityManager::sync_to_render(GameAPI::Engine& api, float alpha)
 {
     for (auto& [id, entity] : _entities)
     {
@@ -184,30 +184,34 @@ void EntityManager::sync_to_render(GameAPI::Engine& api, float alpha, const Worl
             continue;
         }
 
-        sync_entity_to_render(entity, api, alpha, render_origin_world);
+        sync_entity_to_render(entity, api, alpha);
     }
 }
 
-void EntityManager::sync_entity_to_render(Entity& entity, GameAPI::Engine& api, float alpha, const WorldVec3& render_origin_world)
+void EntityManager::sync_entity_to_render(Entity& entity, GameAPI::Engine& api, float alpha)
 {
     if (!entity.has_render() || !entity.is_visible())
     {
         return;
     }
 
-    // Get render transform (interpolated if using interpolation), converted to local space
+    // Get render transform (interpolated if using interpolation), in world space (double precision)
     const WorldVec3 pos_world = entity.get_render_position_world(alpha);
-    const glm::vec3 pos_local = world_to_local(pos_world, render_origin_world);
+    const glm::quat rot_world = entity.get_render_rotation(alpha);
+    const glm::vec3 scale = entity.scale();
 
-    GameAPI::Transform tr;
-    tr.position = pos_local;
-    tr.rotation = entity.get_render_rotation(alpha);
-    tr.scale = entity.scale();
+    GameAPI::TransformD tr;
+    tr.position = glm::dvec3(pos_world);
+    tr.rotation = rot_world;
+    tr.scale = scale;
 
     api.set_mesh_instance_transform(entity.render_name(), tr);
 
     // Sync attachments
-    glm::mat4 parent_matrix = entity.get_render_local_matrix(alpha, render_origin_world);
+    Transform parent_transform{};
+    parent_transform.position_world = pos_world;
+    parent_transform.rotation = rot_world;
+    parent_transform.scale = scale;
 
     for (const Attachment& att : entity.attachments())
     {
@@ -216,8 +220,11 @@ void EntityManager::sync_entity_to_render(Entity& entity, GameAPI::Engine& api, 
             continue;
         }
 
-        glm::mat4 local_matrix = parent_matrix * att.get_local_matrix();
-        GameAPI::Transform att_tr = GameAPI::Transform::from_matrix(local_matrix);
+        Transform world_transform = parent_transform * att.get_local_transform();
+        GameAPI::TransformD att_tr;
+        att_tr.position = glm::dvec3(world_transform.position_world);
+        att_tr.rotation = world_transform.rotation;
+        att_tr.scale = world_transform.scale;
         api.set_mesh_instance_transform(att.render_name, att_tr);
     }
 }
@@ -306,7 +313,7 @@ void EntityManager::teleport(EntityId id, const WorldVec3& position_world, const
         Physics::BodyId body_id{entity->physics_body_value()};
         if (physics.is_body_valid(body_id))
         {
-            const glm::dvec3 position_local = position_world - physics_origin_world;
+            const glm::dvec3 position_local = world_to_local_d(position_world, physics_origin_world);
             physics.set_transform(body_id, position_local, rotation);
             physics.set_linear_velocity(body_id, glm::vec3(0.0f));
             physics.set_angular_velocity(body_id, glm::vec3(0.0f));

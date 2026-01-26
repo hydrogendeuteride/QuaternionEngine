@@ -4,15 +4,16 @@
 #include "physics/physics_world.h"
 
 #include <unordered_set>
+#include <utility>
 
 namespace Game
 {
     namespace
     {
-        GameAPI::Transform to_api_transform(const Transform &t, const WorldVec3 &render_origin_world)
+        GameAPI::TransformD to_api_transform_d(const Transform &t)
         {
-            GameAPI::Transform out{};
-            out.position = world_to_local(t.position_world, render_origin_world);
+            GameAPI::TransformD out{};
+            out.position = glm::dvec3(t.position_world);
             out.rotation = t.rotation;
             out.scale = t.scale;
             return out;
@@ -59,81 +60,140 @@ namespace Game
         }
     }
 
-    Entity *GameWorld::spawn_primitive(const std::string &name, GameAPI::PrimitiveType type, const Transform &transform)
+    GameWorld::EntityBuilder GameWorld::builder(const std::string &name)
     {
-        if (!_api)
-        {
-            return nullptr;
-        }
-        if (!name.empty() && _entities.exists(name))
-        {
-            return nullptr;
-        }
-
-        Entity &entity = _entities.create_entity(name);
-        entity.set_transform(transform);
-        entity.set_render_name(name);
-
-        const WorldVec3 render_origin_world = WorldVec3(_api->get_world_origin());
-        if (!_api->add_primitive_instance(name, type, to_api_transform(transform, render_origin_world)))
-        {
-            _entities.destroy_entity(entity.id());
-            return nullptr;
-        }
-
-        return &entity;
+        return EntityBuilder(*this, name);
     }
 
-    Entity *GameWorld::spawn_primitive_rigid_body(const std::string &name, GameAPI::PrimitiveType type,
-                                                  const Transform &transform,
-                                                  const Physics::BodySettings &body_settings_template,
-                                                  bool override_user_data)
+    GameWorld::EntityBuilder::EntityBuilder(GameWorld &world, std::string name)
+        : _world(&world), _name(std::move(name))
     {
-        if (!_api || !_physics)
+    }
+
+    GameWorld::EntityBuilder &GameWorld::EntityBuilder::transform(const Transform &transform)
+    {
+        _transform = transform;
+        return *this;
+    }
+
+    GameWorld::EntityBuilder &GameWorld::EntityBuilder::render_primitive(GameAPI::PrimitiveType type)
+    {
+        _render_kind = RenderKind::Primitive;
+        _primitive_type = type;
+        return *this;
+    }
+
+    GameWorld::EntityBuilder &GameWorld::EntityBuilder::render_gltf(const std::string &path, bool preload_textures)
+    {
+        _render_kind = RenderKind::GLTF;
+        _gltf_path = path;
+        _gltf_preload = preload_textures;
+        return *this;
+    }
+
+    GameWorld::EntityBuilder &GameWorld::EntityBuilder::physics(const Physics::BodySettings &settings,
+                                                                bool use_interpolation,
+                                                                bool override_user_data)
+    {
+        _wants_physics = true;
+        _physics_settings = settings;
+        _use_interpolation = use_interpolation;
+        _override_user_data = override_user_data;
+        return *this;
+    }
+
+    Entity *GameWorld::EntityBuilder::build()
+    {
+        if (!_world)
         {
             return nullptr;
         }
-        if (!name.empty() && _entities.exists(name))
+
+        GameWorld &world = *_world;
+
+        if (!world._api && _render_kind != RenderKind::None)
         {
             return nullptr;
         }
 
-        Entity &entity = _entities.create_entity(name);
-        entity.set_transform(transform);
-        entity.set_render_name(name);
-
-        const WorldVec3 render_origin_world = WorldVec3(_api->get_world_origin());
-        if (!_api->add_primitive_instance(name, type, to_api_transform(transform, render_origin_world)))
+        if (!world._physics && _wants_physics)
         {
-            _entities.destroy_entity(entity.id());
             return nullptr;
         }
 
-        Physics::BodySettings settings = body_settings_template;
-        const WorldVec3 physics_origin_world = WorldVec3(_api->get_physics_origin());
-        settings.position = transform.position_world - physics_origin_world;
-        settings.rotation = transform.rotation;
-        if (override_user_data || settings.user_data == 0)
+        if (!_name.empty() && world._entities.exists(_name))
         {
-            settings.user_data = static_cast<uint64_t>(entity.id().value);
-        }
-
-        Physics::BodyId body_id = _physics->create_body(settings);
-        if (!body_id.is_valid())
-        {
-            remove_any_instance(*_api, name);
-            _entities.destroy_entity(entity.id());
             return nullptr;
         }
 
-        if (override_user_data)
+        if (_render_kind != RenderKind::None && _name.empty())
         {
-            _physics->set_user_data(body_id, static_cast<uint64_t>(entity.id().value));
+            return nullptr;
         }
 
-        entity.set_physics_body(body_id.value);
-        entity.set_use_interpolation(true);
-        entity.interpolation().set_immediate(transform.position_world, transform.rotation);
+        Entity &entity = world._entities.create_entity(_name);
+        entity.set_transform(_transform);
+
+        if (_render_kind == RenderKind::Primitive)
+        {
+            entity.set_render_name(_name);
+            if (!world._api->add_primitive_instance(_name, _primitive_type, to_api_transform_d(_transform)))
+            {
+                world._entities.destroy_entity(entity.id());
+                return nullptr;
+            }
+        }
+        else if (_render_kind == RenderKind::GLTF)
+        {
+            if (_gltf_path.empty())
+            {
+                world._entities.destroy_entity(entity.id());
+                return nullptr;
+            }
+
+            entity.set_render_name(_name);
+            if (!world._api->add_gltf_instance(_name, _gltf_path, to_api_transform_d(_transform), _gltf_preload))
+            {
+                world._entities.destroy_entity(entity.id());
+                return nullptr;
+            }
+        }
+
+        if (_wants_physics)
+        {
+            Physics::BodySettings settings = _physics_settings;
+            const WorldVec3 physics_origin_world =
+                world._api ? WorldVec3(world._api->get_physics_origin()) : WorldVec3{0.0, 0.0, 0.0};
+            settings.position = world_to_local_d(_transform.position_world, physics_origin_world);
+            settings.rotation = _transform.rotation;
+            if (_override_user_data || settings.user_data == 0)
+            {
+                settings.user_data = static_cast<uint64_t>(entity.id().value);
+            }
+
+            Physics::BodyId body_id = world._physics->create_body(settings);
+            if (!body_id.is_valid())
+            {
+                if (world._api)
+                {
+                    remove_any_instance(*world._api, _name);
+                }
+                world._entities.destroy_entity(entity.id());
+                return nullptr;
+            }
+
+            if (_override_user_data)
+            {
+                world._physics->set_user_data(body_id, static_cast<uint64_t>(entity.id().value));
+            }
+
+            entity.set_physics_body(body_id.value);
+            entity.set_use_interpolation(_use_interpolation);
+            if (_use_interpolation)
+            {
+                entity.interpolation().set_immediate(_transform.position_world, _transform.rotation);
+            }
+        }
 
         return &entity;
     }

@@ -86,9 +86,8 @@ namespace Game
         const float alpha = _runtime->interpolation_alpha();
         auto &api = _runtime->api();
 
-        // Sync all entities to render
-        const WorldVec3 render_origin = WorldVec3(api.get_world_origin());
-        _world.entities().sync_to_render(api, alpha, render_origin);
+        // Sync all entities to render (world-space, double precision)
+        _world.entities().sync_to_render(api, alpha);
 
         // Check for reset condition
         bool reset_requested = false;
@@ -246,7 +245,10 @@ namespace Game
             Transform tr{};
             tr.position_world = {0.0, 0.0, 0.0};
             tr.scale = {50.0f, 1.0f, 50.0f};
-            if (Entity* ground = _world.spawn_primitive("ground", GameAPI::PrimitiveType::Plane, tr))
+            if (Entity* ground = _world.builder("ground")
+                                       .transform(tr)
+                                       .render_primitive(GameAPI::PrimitiveType::Plane)
+                                       .build())
             {
                 _ground_entity = ground->id();
             }
@@ -281,7 +283,11 @@ namespace Game
                         .set_restitution(0.1f)
                         .set_linear_damping(0.02f);
 
-                if (Entity* sphere = _world.spawn_primitive_rigid_body("sphere", GameAPI::PrimitiveType::Sphere, tr, settings))
+                if (Entity* sphere = _world.builder("sphere")
+                                          .transform(tr)
+                                          .render_primitive(GameAPI::PrimitiveType::Sphere)
+                                          .physics(settings)
+                                          .build())
                 {
                     _sphere_entity = sphere->id();
                     _initial_pose[_sphere_entity.value] = InitialPose{tr.position_world, tr.rotation};
@@ -290,7 +296,10 @@ namespace Game
             else
 #endif
             {
-                if (Entity* sphere = _world.spawn_primitive("sphere", GameAPI::PrimitiveType::Sphere, tr))
+                if (Entity* sphere = _world.builder("sphere")
+                                          .transform(tr)
+                                          .render_primitive(GameAPI::PrimitiveType::Sphere)
+                                          .build())
                 {
                     _sphere_entity = sphere->id();
                     _initial_pose[_sphere_entity.value] = InitialPose{tr.position_world, tr.rotation};
@@ -319,7 +328,11 @@ namespace Game
                         .set_linear_damping(0.02f)
                         .set_angular_damping(0.05f);
 
-                if (Entity* box = _world.spawn_primitive_rigid_body(layout.name, GameAPI::PrimitiveType::Cube, tr, settings))
+                if (Entity* box = _world.builder(layout.name)
+                                        .transform(tr)
+                                        .render_primitive(GameAPI::PrimitiveType::Cube)
+                                        .physics(settings)
+                                        .build())
                 {
                     _box_entities.push_back(box->id());
                     _initial_pose[box->id().value] = InitialPose{tr.position_world, tr.rotation};
@@ -328,7 +341,10 @@ namespace Game
             }
 #endif
 
-            if (Entity* box = _world.spawn_primitive(layout.name, GameAPI::PrimitiveType::Cube, tr))
+            if (Entity* box = _world.builder(layout.name)
+                                    .transform(tr)
+                                    .render_primitive(GameAPI::PrimitiveType::Cube)
+                                    .build())
             {
                 _box_entities.push_back(box->id());
                 _initial_pose[box->id().value] = InitialPose{tr.position_world, tr.rotation};
@@ -453,8 +469,7 @@ namespace Game
         }
 
         // Immediate sync to render to avoid visual blending
-        const WorldVec3 render_origin = WorldVec3(api.get_world_origin());
-        entities.sync_to_render(api, 1.0f, render_origin);
+        entities.sync_to_render(api, 1.0f);
 
         _fixed_time = 0.0f;
         _sphere_launched = false;

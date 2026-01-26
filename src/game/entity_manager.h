@@ -100,11 +100,10 @@ public:
 
     // Sync all entity transforms to render instances
     // alpha: interpolation factor (0 = previous, 1 = current)
-    // render_origin_world: the render system's floating origin
-    void sync_to_render(GameAPI::Engine& api, float alpha, const WorldVec3& render_origin_world);
+    void sync_to_render(GameAPI::Engine& api, float alpha);
 
     // Sync specific entity to render
-    void sync_entity_to_render(Entity& entity, GameAPI::Engine& api, float alpha, const WorldVec3& render_origin_world);
+    void sync_entity_to_render(Entity& entity, GameAPI::Engine& api, float alpha);
 
     // ------------------------------------------------------------------------
     // Convenience Methods
