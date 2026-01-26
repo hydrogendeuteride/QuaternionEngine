@@ -43,6 +43,11 @@ namespace Game
             return false;
         }
 
+        if (_rebase_anchor == id)
+        {
+            clear_rebase_anchor();
+        }
+
         destroy_entity_resources(*entity);
         return _entities.destroy_entity(id);
     }
@@ -58,6 +63,48 @@ namespace Game
         {
             (void) destroy_entity(id);
         }
+    }
+
+    void GameWorld::pre_physics_step()
+    {
+        _entities.pre_physics_step();
+
+        if (!_physics || !_api || !_rebase_anchor.is_valid())
+        {
+            return;
+        }
+
+        Entity *anchor = _entities.find(_rebase_anchor);
+        if (!anchor || !anchor->has_physics())
+        {
+            return;
+        }
+
+        const uint32_t body_value = anchor->physics_body_value();
+        if (_rebase_settings.origin_threshold_m > 0.0)
+        {
+            (void) _api->maybe_rebase_physics_origin_to_body(body_value,
+                                                            _rebase_settings.origin_threshold_m,
+                                                            _rebase_settings.origin_snap_m);
+        }
+
+        if (_rebase_settings.velocity_threshold_mps > 0.0)
+        {
+            (void) _api->maybe_rebase_physics_velocity_to_body(body_value,
+                                                              _rebase_settings.velocity_threshold_mps);
+        }
+    }
+
+    void GameWorld::post_physics_step()
+    {
+        if (!_physics)
+        {
+            return;
+        }
+
+        const WorldVec3 physics_origin_world =
+            _api ? WorldVec3(_api->get_physics_origin()) : WorldVec3{0.0, 0.0, 0.0};
+        _entities.post_physics_step(*_physics, physics_origin_world);
     }
 
     GameWorld::EntityBuilder GameWorld::builder(const std::string &name)

@@ -50,6 +50,30 @@ namespace Game
         void clear();
 
         // ------------------------------------------------------------------------
+        // Physics sync + rebasing
+        // ------------------------------------------------------------------------
+
+        struct RebaseSettings
+        {
+            double origin_threshold_m{0.0};
+            double origin_snap_m{0.0};
+            double velocity_threshold_mps{0.0};
+        };
+
+        void set_rebase_settings(const RebaseSettings &settings) { _rebase_settings = settings; }
+        const RebaseSettings &rebase_settings() const { return _rebase_settings; }
+
+        void set_rebase_anchor(EntityId id) { _rebase_anchor = id; }
+        void clear_rebase_anchor() { _rebase_anchor = EntityId{}; }
+        EntityId rebase_anchor() const { return _rebase_anchor; }
+
+        // Call before physics step.
+        void pre_physics_step();
+
+        // Call after physics step.
+        void post_physics_step();
+
+        // ------------------------------------------------------------------------
         // Entity builder
         // ------------------------------------------------------------------------
 
@@ -68,6 +92,8 @@ namespace Game
         EntityManager _entities;
         GameAPI::Engine *_api{nullptr};
         Physics::PhysicsWorld *_physics{nullptr};
+        EntityId _rebase_anchor;
+        RebaseSettings _rebase_settings{};
 
         void destroy_entity_resources(Entity &entity);
     };
