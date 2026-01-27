@@ -158,6 +158,7 @@ namespace Game
 
         _world.clear();
         _world.set_physics(nullptr);
+        _world.set_physics_context(nullptr);
         _world.set_api(nullptr);
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
@@ -165,9 +166,12 @@ namespace Game
         {
             if (VulkanEngine *renderer = _runtime->renderer())
             {
-                if (renderer->_context && renderer->_context->physics == _physics.get())
+                if (renderer->_context)
                 {
-                    renderer->_context->physics = nullptr;
+                    if (renderer->_context->physics_context == _physics_context.get())
+                    {
+                        renderer->_context->physics_context = nullptr;
+                    }
                 }
             }
         }
@@ -176,6 +180,7 @@ namespace Game
             _physics->destroy_body(_ground_collider_body);
             _ground_collider_body = Physics::BodyId{};
         }
+        _physics_context.reset();
         _physics.reset();
 #endif
 
@@ -197,18 +202,25 @@ namespace Game
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         _physics = std::make_unique<Physics::JoltPhysicsWorld>();
+
+        _physics_context = std::make_unique<Physics::PhysicsContext>();
+        _physics_context->set_physics_world(_physics.get());
+
         _world.set_physics(_physics.get());
+        _world.set_physics_context(_physics_context.get());
 #else
         _physics.reset();
+        _physics_context.reset();
         _world.set_physics(nullptr);
+        _world.set_physics_context(nullptr);
 #endif
 
-        // Expose the active physics world to the renderer for debug UI / debug draw (optional).
+        // Expose to EngineContext for debug systems (physics debug draw, etc.)
         if (VulkanEngine *renderer = _runtime->renderer())
         {
             if (renderer->_context)
             {
-                renderer->_context->physics = _physics.get();
+                renderer->_context->physics_context = _physics_context.get();
             }
         }
 
@@ -421,7 +433,9 @@ namespace Game
 
             if (_physics)
             {
-                entities.teleport(id, pos_world, rot, *_physics, WorldVec3(api.get_physics_origin()));
+                const WorldVec3 physics_origin_world =
+                    (_physics_context ? _physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0});
+                entities.teleport(id, pos_world, rot, *_physics, physics_origin_world);
             }
             else
             {

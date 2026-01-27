@@ -16,6 +16,7 @@
 #include <cmath>
 
 #include "core/frame/resources.h"
+#include "physics/physics_context.h"
 #include "physics/physics_world.h"
 #include "physics/body_settings.h"
 #include "physics/collider_asset.h"
@@ -1428,7 +1429,8 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
     entry.layer = layer;
     entry.user_data = user_data;
 
-    const WorldVec3 physics_origin_world = (_context ? _context->physics_origin_world : WorldVec3{0.0, 0.0, 0.0});
+    const WorldVec3 physics_origin_world =
+        (_context && _context->physics_context) ? _context->physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
 
     size_t created = 0;
     for (const auto &[nodeName, compound] : compounds)
@@ -1551,7 +1553,7 @@ void SceneManager::syncColliders()
         }
 
         const WorldVec3 physics_origin_world =
-            (_context ? _context->physics_origin_world : WorldVec3{0.0, 0.0, 0.0});
+            (_context && _context->physics_context) ? _context->physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
 
         auto instIt = dynamicGLTFInstances.find(instanceName);
         if (instIt == dynamicGLTFInstances.end())

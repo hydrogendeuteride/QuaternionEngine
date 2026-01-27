@@ -17,8 +17,6 @@ add_executable (vulkan_engine
   core/picking/picking_system.cpp
   core/debug_draw/debug_draw.h
   core/debug_draw/debug_draw.cpp
-  core/debug_draw/physics_debug_draw.h
-  core/debug_draw/physics_debug_draw.cpp
   core/debug_draw/engine_debug_draw.h
   core/debug_draw/engine_debug_draw.cpp
   core/game_api.h
@@ -175,6 +173,8 @@ add_executable (vulkan_engine
   physics/physics_body.h
   physics/physics_body.cpp
   physics/physics_world.h
+  physics/physics_context.h
+  physics/physics_context.cpp
   physics/jolt/jolt_physics_world.h
   physics/jolt/jolt_physics_world.cpp
   physics/jolt/jolt_query_filters.h
@@ -187,6 +187,8 @@ add_executable (vulkan_engine
   game/game_world.cpp
   game/example_game.h
   game/example_game.cpp
+  game/rebasing_test_game.h
+  game/rebasing_test_game.cpp
         physics/collider_mesh_instance.h
 )
 

@@ -2,6 +2,7 @@
 
 #include "core/game_api.h"
 #include "physics/physics_world.h"
+#include "physics/physics_context.h"
 
 #include <unordered_set>
 #include <utility>
@@ -69,7 +70,7 @@ namespace Game
     {
         _entities.pre_physics_step();
 
-        if (!_physics || !_api || !_rebase_anchor.is_valid())
+        if (!_physics || !_physics_context || !_rebase_anchor.is_valid())
         {
             return;
         }
@@ -83,15 +84,15 @@ namespace Game
         const uint32_t body_value = anchor->physics_body_value();
         if (_rebase_settings.origin_threshold_m > 0.0)
         {
-            (void) _api->maybe_rebase_physics_origin_to_body(body_value,
-                                                            _rebase_settings.origin_threshold_m,
-                                                            _rebase_settings.origin_snap_m);
+            (void) _physics_context->maybe_rebase_origin_to_body(body_value,
+                                                                 _rebase_settings.origin_threshold_m,
+                                                                 _rebase_settings.origin_snap_m);
         }
 
         if (_rebase_settings.velocity_threshold_mps > 0.0)
         {
-            (void) _api->maybe_rebase_physics_velocity_to_body(body_value,
-                                                              _rebase_settings.velocity_threshold_mps);
+            (void) _physics_context->maybe_rebase_velocity_to_body(body_value,
+                                                                   _rebase_settings.velocity_threshold_mps);
         }
     }
 
@@ -103,7 +104,7 @@ namespace Game
         }
 
         const WorldVec3 physics_origin_world =
-            _api ? WorldVec3(_api->get_physics_origin()) : WorldVec3{0.0, 0.0, 0.0};
+            _physics_context ? _physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
         _entities.post_physics_step(*_physics, physics_origin_world);
     }
 
@@ -210,7 +211,7 @@ namespace Game
         {
             Physics::BodySettings settings = _physics_settings;
             const WorldVec3 physics_origin_world =
-                    world._api ? WorldVec3(world._api->get_physics_origin()) : WorldVec3{0.0, 0.0, 0.0};
+                    world._physics_context ? world._physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
             settings.position = world_to_local_d(_transform.position_world, physics_origin_world);
             settings.rotation = _transform.rotation;
             if (_override_user_data || settings.user_data == 0)

@@ -2,7 +2,6 @@
 
 #include "core/context.h"
 #include "core/debug_draw/debug_draw.h"
-#include "core/debug_draw/physics_debug_draw.h"
 #include "core/picking/picking_system.h"
 
 #include "render/renderpass.h"
@@ -29,12 +28,6 @@ void debug_draw_engine_layers(DebugDrawSystem *dd,
     auto layer_on = [layer_mask](DebugDrawLayer layer) {
         return (layer_mask & static_cast<uint32_t>(layer)) != 0u;
     };
-
-    // Physics: collider visualization (from game-owned Physics::PhysicsWorld, if provided)
-    if (layer_on(DebugDrawLayer::Physics) && context->physics && context->physics_debug.draw_colliders)
-    {
-        debug_draw_physics_colliders(dd, context->physics_origin_world, context->physics, context->physics_debug);
-    }
 
     // Picking: BVH root bounds + picked surface bounds (if available)
     if (layer_on(DebugDrawLayer::Picking) && picking && picking->debug_draw_bvh())

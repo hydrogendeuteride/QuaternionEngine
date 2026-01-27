@@ -3,8 +3,6 @@
 #include "core/context.h"
 #include "core/assets/manager.h"
 #include "scene/vk_scene.h"
-#include "physics/physics_body.h"
-#include "physics/physics_world.h"
 
 namespace GameAPI
 {
@@ -16,126 +14,6 @@ glm::dvec3 Engine::get_world_origin() const
         return glm::dvec3(0.0);
     }
     return glm::dvec3(_engine->_context->origin_world);
-}
-
-glm::dvec3 Engine::get_physics_origin() const
-{
-    if (!_engine || !_engine->_context)
-    {
-        return glm::dvec3(0.0);
-    }
-    return glm::dvec3(_engine->_context->physics_origin_world);
-}
-
-glm::dvec3 Engine::get_physics_velocity_origin() const
-{
-    if (!_engine || !_engine->_context)
-    {
-        return glm::dvec3(0.0);
-    }
-    return _engine->_context->physics_velocity_origin_world;
-}
-
-void Engine::set_physics_origin_anchor(const glm::dvec3& anchor_world)
-{
-    if (!_engine || !_engine->_context)
-    {
-        return;
-    }
-    _engine->_context->set_physics_origin_anchor_world(WorldVec3(anchor_world));
-}
-
-void Engine::clear_physics_origin_anchor()
-{
-    if (!_engine || !_engine->_context)
-    {
-        return;
-    }
-    _engine->_context->clear_physics_origin_anchor_world();
-}
-
-bool Engine::maybe_rebase_physics_origin_to_body(uint32_t physics_body_value, double threshold_m, double snap_size_m)
-{
-    if (!_engine || !_engine->_context)
-    {
-        return false;
-    }
-
-    Physics::PhysicsWorld *physics = _engine->_context->physics;
-    if (!physics)
-    {
-        return false;
-    }
-
-    Physics::BodyId body_id{physics_body_value};
-    if (!physics->is_body_valid(body_id))
-    {
-        return false;
-    }
-
-    const glm::dvec3 p_local = physics->get_position(body_id);
-    const double dist2 = glm::dot(p_local, p_local);
-    const double threshold2 = (threshold_m <= 0.0) ? 0.0 : (threshold_m * threshold_m);
-    if (dist2 <= threshold2)
-    {
-        return false;
-    }
-
-    const WorldVec3 origin_before = _engine->_context->physics_origin_world;
-    const WorldVec3 anchor_world = origin_before + WorldVec3(p_local);
-    const WorldVec3 new_origin =
-        (snap_size_m > 0.0) ? snap_world(anchor_world, snap_size_m) : anchor_world;
-
-    const glm::dvec3 delta_local = origin_before - new_origin;
-    physics->shift_origin(delta_local);
-
-    (void)_engine->_context->set_physics_origin_world(new_origin);
-    return true;
-}
-
-bool Engine::maybe_rebase_physics_velocity_to_body(uint32_t physics_body_value, double threshold_mps)
-{
-    if (!_engine || !_engine->_context)
-    {
-        return false;
-    }
-
-    Physics::PhysicsWorld *physics = _engine->_context->physics;
-    if (!physics)
-    {
-        return false;
-    }
-
-    Physics::BodyId body_id{physics_body_value};
-    if (!physics->is_body_valid(body_id))
-    {
-        return false;
-    }
-
-    const glm::vec3 v_local_f = physics->get_linear_velocity(body_id);
-    const double speed2 = static_cast<double>(glm::dot(v_local_f, v_local_f));
-    const double threshold2 = (threshold_mps <= 0.0) ? 0.0 : (threshold_mps * threshold_mps);
-    if (speed2 <= threshold2)
-    {
-        return false;
-    }
-
-    const glm::dvec3 delta_v_local(v_local_f);
-    physics->shift_velocity_origin(delta_v_local);
-
-    _engine->_context->physics_velocity_origin_world += delta_v_local;
-    ++_engine->_context->physics_velocity_origin_revision;
-    return true;
-}
-
-void Engine::set_floating_origin_anchor(const glm::dvec3& anchor_world)
-{
-    set_physics_origin_anchor(anchor_world);
-}
-
-void Engine::clear_floating_origin_anchor()
-{
-    clear_physics_origin_anchor();
 }
 
 // ----------------------------------------------------------------------------

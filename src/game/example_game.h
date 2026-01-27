@@ -3,6 +3,7 @@
 #include "runtime/i_game_callbacks.h"
 #include "game_world.h"
 #include "physics/physics_world.h"
+#include "physics/physics_context.h"
 #include "core/world.h"
 
 #include <memory>
@@ -48,6 +49,7 @@ private:
 
     // Physics world
     std::unique_ptr<Physics::PhysicsWorld> _physics;
+    std::unique_ptr<Physics::PhysicsContext> _physics_context;
 
     // Box stack layout data (before entity creation)
     struct BoxLayout

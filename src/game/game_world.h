@@ -9,6 +9,7 @@
 namespace Physics
 {
     class PhysicsWorld;
+    class PhysicsContext;
 } // namespace Physics
 
 namespace GameAPI
@@ -34,9 +35,11 @@ namespace Game
 
         void set_api(GameAPI::Engine *api) { _api = api; }
         void set_physics(Physics::PhysicsWorld *physics) { _physics = physics; }
+        void set_physics_context(Physics::PhysicsContext *ctx) { _physics_context = ctx; }
 
         GameAPI::Engine *api() const { return _api; }
         Physics::PhysicsWorld *physics() const { return _physics; }
+        Physics::PhysicsContext *physics_context() const { return _physics_context; }
 
         EntityManager &entities() { return _entities; }
         const EntityManager &entities() const { return _entities; }
@@ -92,6 +95,7 @@ namespace Game
         EntityManager _entities;
         GameAPI::Engine *_api{nullptr};
         Physics::PhysicsWorld *_physics{nullptr};
+        Physics::PhysicsContext *_physics_context{nullptr};
         EntityId _rebase_anchor;
         RebaseSettings _rebase_settings{};
 

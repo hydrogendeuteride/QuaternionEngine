@@ -15,15 +15,16 @@
 
 #if USE_ENTITY_SYSTEM
 #include "game/example_game.h"
+#include "game/rebasing_test_game.h"
 #else
 #endif // USE_ENTITY_SYSTEM
 #endif // USE_GAME_RUNTIME
 
+#include <memory>
+#include <string>
+
 int main(int argc, char *argv[])
 {
-    (void) argc;
-    (void) argv;
-
     VulkanEngine engine;
     engine.init();
 
@@ -31,9 +32,34 @@ int main(int argc, char *argv[])
     {
         GameRuntime::Runtime runtime(&engine);
 #if USE_ENTITY_SYSTEM
-        Game::ExampleGame game;
+        std::string game_name = "example";
+        for (int i = 1; i < argc; ++i)
+        {
+            const char *arg = argv[i];
+            if (!arg)
+            {
+                continue;
+            }
+
+            const std::string a(arg);
+            constexpr const char *prefix = "--game=";
+            if (a.rfind(prefix, 0) == 0)
+            {
+                game_name = a.substr(std::char_traits<char>::length(prefix));
+            }
+        }
+
+        std::unique_ptr<GameRuntime::IGameCallbacks> game;
+        if (game_name == "rebase" || game_name == "rebasing" || game_name == "rebasing_test")
+        {
+            game = std::make_unique<Game::RebasingTestGame>();
+        }
+        else
+        {
+            game = std::make_unique<Game::ExampleGame>();
+        }
 #endif
-        runtime.run(&game);
+        runtime.run(game.get());
     }
 #else
     // Legacy
