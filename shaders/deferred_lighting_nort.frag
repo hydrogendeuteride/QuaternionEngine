@@ -18,11 +18,11 @@ layout(set=2, binding=0) uniform sampler2D shadowTex[4];
 // Border smoothing width in light-space NDC (0..1). Larger = wider cross-fade.
 const float SHADOW_BORDER_SMOOTH_NDC = 0.08;
 // Base PCF radius in texels for cascade 0; higher cascades scale this up slightly.
-const float SHADOW_PCF_BASE_RADIUS = 1.15;
+const float SHADOW_PCF_BASE_RADIUS = 1.05;
 // Additional per-cascade radius scale for coarser cascades (0..1 factor added across levels)
 const float SHADOW_PCF_CASCADE_GAIN = 2.0; // extra radius at far end
 // Receiver normal-based offset to reduce acne (in world units)
-const float SHADOW_NORMAL_OFFSET = 0.0025;
+const float SHADOW_NORMAL_OFFSET = 0.0015;
 // Scale for receiver-plane depth bias term (tweak if over/under biased)
 const float SHADOW_RPDB_SCALE = 1.0;
 // Minimum clamp to keep a tiny bias even on perpendicular receivers

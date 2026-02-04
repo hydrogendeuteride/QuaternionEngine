@@ -60,8 +60,8 @@ inline constexpr float kShadowPCFBaseRadius   = 1.15f;
 inline constexpr float kShadowPCFCascadeGain  = 2.0f;
 
 // Raster depth-bias parameters for shadow map rendering (tuned conservatively)
-inline constexpr float kShadowDepthBiasConstant = 1.15f;
-inline constexpr float kShadowDepthBiasSlope    = 1.1f;
+inline constexpr float kShadowDepthBiasConstant = 1.0f;
+inline constexpr float kShadowDepthBiasSlope    = 1.0f;
 
 // Texture streaming / VRAM budget configuration
 // Fraction of total device-local VRAM reserved for streamed textures.
