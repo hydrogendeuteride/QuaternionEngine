@@ -5,6 +5,7 @@
 #include <core/types.h>
 #include <core/world.h>
 #include <core/descriptor/descriptors.h>
+#include <core/config.h>
 // Avoid including vk_scene.h here to prevent cycles
 
 struct EngineStats
@@ -46,6 +47,9 @@ struct ShadowSettings
     uint32_t mode = 2;
     // Global enable/disable for all shadowing (raster + RT).
     bool enabled = true;
+    // Shadow map resolution (square) used for raster clipmap cascades and stabilization (texel snapping).
+    // Changing this at runtime is supported; it affects transient RenderGraph images and light-space snapping.
+    uint32_t shadowMapResolution = kShadowMapResolution;
     bool hybridRayQueryEnabled = false;   // derived convenience: (mode != 0)
     uint32_t hybridRayCascadesMask = 0b1110; // bit i => cascade i uses ray query assist (default: 1..3)
     float hybridRayNoLThreshold = 0.25f;  // trigger when N·L below this (mode==1)
@@ -261,6 +265,10 @@ public:
     // Convenience alias (singular) requested
     AssetManager* getAsset() const { return assets; }
     RenderGraph* getRenderGraph() const { return renderGraph; }
+
+    // Shadow map resolution utilities (clamped to device limits).
+    uint32_t get_shadow_map_resolution() const;
+    void set_shadow_map_resolution(uint32_t resolution);
 
     // Streaming subsystems (engine-owned)
     TextureCache* textures = nullptr;            // texture streaming + cache

@@ -41,7 +41,6 @@ struct RenderObject
     enum class OwnerType : uint8_t
     {
         None = 0,
-        StaticGLTF,     // loaded scene
         GLTFInstance,   // runtime glTF instance with transform
         MeshInstance    // dynamic primitive/mesh instance
     };
@@ -107,10 +106,6 @@ public:
     // Delta time (seconds) for the current frame
     float getDeltaTime() const { return _deltaTime; }
     DrawContext &getMainDrawContext() { return mainDrawContext; }
-
-    void loadScene(const std::string &name, std::shared_ptr<LoadedGLTF> scene);
-
-    std::shared_ptr<LoadedGLTF> getScene(const std::string &name);
 
     // Dynamic renderables API
     struct MeshInstance
@@ -192,13 +187,6 @@ public:
     // Note: a LoadedGLTF may be shared by multiple instances; changing
     // the active animation on a scene or instance affects all users
     // of that shared LoadedGLTF.
-    bool setSceneAnimation(const std::string &sceneName, int animationIndex, bool resetTime = true);
-    bool setSceneAnimation(const std::string &sceneName, const std::string &animationName, bool resetTime = true);
-    bool setSceneAnimationLoop(const std::string &sceneName, bool loop);
-    bool setSceneAnimationSpeed(const std::string &sceneName, float speed);
-    bool transitionSceneAnimation(const std::string &sceneName, int animationIndex, float blendDurationSeconds, bool resetTime = true);
-    bool transitionSceneAnimation(const std::string &sceneName, const std::string &animationName, float blendDurationSeconds, bool resetTime = true);
-
     bool setGLTFInstanceAnimation(const std::string &instanceName, int animationIndex, bool resetTime = true);
     bool setGLTFInstanceAnimation(const std::string &instanceName, const std::string &animationName, bool resetTime = true);
     bool setGLTFInstanceAnimationLoop(const std::string &instanceName, bool loop);
@@ -312,10 +300,6 @@ private:
     float _deltaTime = 0.0f;
     std::chrono::steady_clock::time_point _lastFrameTime{};
 
-    std::unordered_map<std::string, std::shared_ptr<LoadedGLTF> > loadedScenes;
-    // Per-named static glTF scene animation state (independent of instances).
-    std::unordered_map<std::string, LoadedGLTF::AnimationState> sceneAnimations;
-    std::unordered_map<std::string, std::shared_ptr<Node> > loadedNodes;
     std::unordered_map<std::string, MeshInstance> dynamicMeshInstances;
     std::unordered_map<std::string, GLTFInstance> dynamicGLTFInstances;
     // Keep GLTF assets alive until after the next frame fence to avoid destroying

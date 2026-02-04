@@ -599,6 +599,10 @@ public:
     void set_shadow_mode(ShadowMode mode);
     ShadowMode get_shadow_mode() const;
 
+    // Shadow map resolution (square). Affects raster clipmap cascades + stabilization.
+    void set_shadow_map_resolution(uint32_t resolution);
+    uint32_t get_shadow_map_resolution() const;
+
     // For hybrid mode: which cascades use ray assist (bitmask, bits 0-3)
     void set_hybrid_ray_cascade_mask(uint32_t mask);
     uint32_t get_hybrid_ray_cascade_mask() const;

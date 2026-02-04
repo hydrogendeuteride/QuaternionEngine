@@ -33,8 +33,9 @@ inline constexpr uint32_t kRenderHeight = 1080;
 inline constexpr int kShadowCascadeCount = 4;
 // Maximum shadow distance for CSM in view-space units
 inline constexpr float kShadowCSMFar = 800.0f;
-// Shadow map resolution used for stabilization (texel snapping). Must match actual image size.
-inline constexpr float kShadowMapResolution = 2048.0f;
+// Default shadow map resolution (square) used for stabilization (texel snapping) and image allocation.
+// Actual runtime resolution may override this via EngineContext::ShadowSettings.
+inline constexpr uint32_t kShadowMapResolution = 2048;
 // Extra XY expansion for cascade footprint (safety against FOV/aspect changes)
 inline constexpr float kShadowCascadeRadiusScale = 1.1f;
 // Additive XY margin in world units beyond the scaled half-size

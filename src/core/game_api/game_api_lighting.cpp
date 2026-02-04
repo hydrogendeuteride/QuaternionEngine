@@ -51,6 +51,19 @@ ShadowMode Engine::get_shadow_mode() const
     return static_cast<ShadowMode>(_engine->_context->shadowSettings.mode);
 }
 
+void Engine::set_shadow_map_resolution(uint32_t resolution)
+{
+    if (_engine->_context)
+    {
+        _engine->_context->set_shadow_map_resolution(resolution);
+    }
+}
+
+uint32_t Engine::get_shadow_map_resolution() const
+{
+    return _engine->_context ? _engine->_context->get_shadow_map_resolution() : 0u;
+}
+
 void Engine::set_hybrid_ray_cascade_mask(uint32_t mask)
 {
     if (_engine->_context)

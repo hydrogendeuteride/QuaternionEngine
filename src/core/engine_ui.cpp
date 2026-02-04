@@ -1327,6 +1327,39 @@ namespace
         ss.mode = static_cast<uint32_t>(mode);
         ss.hybridRayQueryEnabled = ss.enabled && (ss.mode != 0);
 
+        ImGui::Separator();
+        ImGui::TextUnformatted("Shadow Map Resolution");
+        {
+            static constexpr uint32_t kResValues[] = {256u, 512u, 1024u, 2048u, 4096u, 8192u};
+            static const char *kResLabels[] = {"256", "512", "1024", "2048", "4096", "8192"};
+
+            const uint32_t effective = eng->_context ? eng->_context->get_shadow_map_resolution() : ss.shadowMapResolution;
+            int currentIdx = -1;
+            for (int i = 0; i < static_cast<int>(IM_ARRAYSIZE(kResValues)); ++i)
+            {
+                if (kResValues[i] == effective)
+                {
+                    currentIdx = i;
+                    break;
+                }
+            }
+
+            int idx = (currentIdx >= 0) ? currentIdx : 3; // default to 2048 when custom
+            if (ImGui::Combo("Preset", &idx, kResLabels, IM_ARRAYSIZE(kResLabels)))
+            {
+                if (eng->_context) eng->_context->set_shadow_map_resolution(kResValues[idx]);
+                else ss.shadowMapResolution = kResValues[idx];
+            }
+
+            int custom = static_cast<int>(ss.shadowMapResolution);
+            if (ImGui::InputInt("Custom", &custom, 256, 1024, ImGuiInputTextFlags_EnterReturnsTrue))
+            {
+                if (eng->_context) eng->_context->set_shadow_map_resolution(static_cast<uint32_t>(custom));
+                else ss.shadowMapResolution = static_cast<uint32_t>(custom);
+            }
+            ImGui::Text("Effective: %u", effective);
+        }
+
         ImGui::BeginDisabled(ss.mode != 1u);
         ImGui::TextUnformatted("Cascades using ray assist:");
         for (int i = 0; i < 4; ++i)
@@ -2214,7 +2247,6 @@ namespace
             {
                 case RenderObject::OwnerType::MeshInstance: ownerTypeStr = "mesh instance"; break;
                 case RenderObject::OwnerType::GLTFInstance: ownerTypeStr = "glTF instance"; break;
-                case RenderObject::OwnerType::StaticGLTF: ownerTypeStr = "glTF scene"; break;
                 default: break;
             }
             const char *ownerName = last.ownerName.empty() ? "<unnamed>" : last.ownerName.c_str();
@@ -2253,7 +2285,6 @@ namespace
             {
                 case RenderObject::OwnerType::MeshInstance: ownerTypeStr = "mesh instance"; break;
                 case RenderObject::OwnerType::GLTFInstance: ownerTypeStr = "glTF instance"; break;
-                case RenderObject::OwnerType::StaticGLTF: ownerTypeStr = "glTF scene"; break;
                 default: break;
             }
             const char *ownerName = hover.ownerName.empty() ? "<unnamed>" : hover.ownerName.c_str();

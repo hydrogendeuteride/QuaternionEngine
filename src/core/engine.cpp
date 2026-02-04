@@ -1252,9 +1252,8 @@ void VulkanEngine::draw()
         RGImageHandle hDebugColor = hDraw;
 
         // Create transient depth targets for cascaded shadow maps (even if RT-only / disabled, to keep descriptors stable)
-        const VkExtent2D shadowExtent{
-            static_cast<uint32_t>(kShadowMapResolution),
-            static_cast<uint32_t>(kShadowMapResolution)};
+        const uint32_t shadowRes = _context ? _context->get_shadow_map_resolution() : kShadowMapResolution;
+        const VkExtent2D shadowExtent{shadowRes, shadowRes};
         std::array<RGImageHandle, kShadowCascadeCount> hShadowCascades{};
         for (int i = 0; i < kShadowCascadeCount; ++i)
         {
