@@ -22,6 +22,10 @@ Engine::PickResult Engine::get_last_pick() const
         const auto &pick = picking->last_pick();
         r.valid = pick.valid;
         r.ownerName = pick.ownerName;
+        r.nodeName = pick.nodeName;
+        r.nodeParentName = pick.nodeParentName;
+        r.nodeChildren = pick.nodeChildren;
+        r.nodePath = pick.nodePath;
         r.worldPosition = glm::vec3(pick.worldPos);
     }
     return r;
@@ -36,9 +40,43 @@ Engine::PickResultD Engine::get_last_pick_d() const
         const auto &pick = picking->last_pick();
         r.valid = pick.valid;
         r.ownerName = pick.ownerName;
+        r.nodeName = pick.nodeName;
+        r.nodeParentName = pick.nodeParentName;
+        r.nodeChildren = pick.nodeChildren;
+        r.nodePath = pick.nodePath;
         r.worldPosition = pick.worldPos;
     }
     return r;
+}
+
+bool Engine::select_parent_of_last_pick()
+{
+    if (!_engine)
+    {
+        return false;
+    }
+    PickingSystem *picking = _engine->picking();
+    return picking ? picking->move_last_pick_to_parent() : false;
+}
+
+bool Engine::select_child_of_last_pick(size_t childIndex)
+{
+    if (!_engine)
+    {
+        return false;
+    }
+    PickingSystem *picking = _engine->picking();
+    return picking ? picking->move_last_pick_to_child(childIndex) : false;
+}
+
+bool Engine::select_child_of_last_pick(const std::string &childName)
+{
+    if (!_engine)
+    {
+        return false;
+    }
+    PickingSystem *picking = _engine->picking();
+    return picking ? picking->move_last_pick_to_child(childName) : false;
 }
 
 void Engine::set_picking_enabled(bool enabled)

@@ -489,8 +489,25 @@ bool Engine::set_camera_target_from_last_pick()
     }
     else if (pick.ownerType == RenderObject::OwnerType::GLTFInstance)
     {
-        t.type = ::CameraTargetType::GLTFInstance;
-        t.name = pick.ownerName;
+        if (!pick.nodeName.empty())
+        {
+            glm::mat4 node_world{1.0f};
+            if (_engine->_sceneManager->getGLTFInstanceNodeWorldTransform(pick.ownerName, pick.nodeName, node_world))
+            {
+                t.type = ::CameraTargetType::WorldPoint;
+                t.world_point = WorldVec3(glm::dvec3(node_world[3]));
+            }
+            else
+            {
+                t.type = ::CameraTargetType::GLTFInstance;
+                t.name = pick.ownerName;
+            }
+        }
+        else
+        {
+            t.type = ::CameraTargetType::GLTFInstance;
+            t.name = pick.ownerName;
+        }
     }
     else
     {

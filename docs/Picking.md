@@ -27,6 +27,10 @@ struct PickInfo
     Node *node = nullptr;                // glTF node that owns this surface
     RenderObject::OwnerType ownerType;   // GLTFInstance, MeshInstance
     std::string ownerName;               // Logical name (e.g., "player", "cube01")
+    std::string nodeName;                // Selected glTF node name (if glTF pick)
+    std::string nodeParentName;          // Direct parent node name
+    std::vector<std::string> nodeChildren; // Direct child node names
+    std::vector<std::string> nodePath;   // Root-to-node hierarchy path
     WorldVec3 worldPos;                  // Hit position in world space (double-precision)
     glm::mat4 worldTransform;            // Object's world transform
     uint32_t indexCount;                 // Index count of picked surface
@@ -95,6 +99,9 @@ const PickInfo& last_pick() const;           // Last click selection
 const PickInfo& hover_pick() const;          // Current hover (under cursor)
 const std::vector<PickInfo>& drag_selection() const;  // Multi-select results
 uint32_t last_pick_object_id() const;        // Raw object ID of last pick
+bool move_last_pick_to_parent();
+bool move_last_pick_to_child(size_t child_index = 0);
+bool move_last_pick_to_child(const std::string &child_name);
 ```
 
 **Configuration:**
@@ -174,6 +181,28 @@ void Game::handle_selection(PickingSystem& picking)
             default:
                 break;
         }
+    }
+}
+```
+
+**Hierarchical glTF Selection:**
+
+```cpp
+const auto& pick = picking.last_pick();
+if (pick.valid && pick.ownerType == RenderObject::OwnerType::GLTFInstance)
+{
+    if (!pick.nodeParentName.empty())
+    {
+        picking.move_last_pick_to_parent();
+    }
+
+    if (!pick.nodeChildren.empty())
+    {
+        // First child
+        picking.move_last_pick_to_child();
+
+        // Or explicit child by name
+        picking.move_last_pick_to_child(pick.nodeChildren.front());
     }
 }
 ```

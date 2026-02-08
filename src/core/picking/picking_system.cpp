@@ -11,6 +11,145 @@
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
+
+namespace
+{
+    using NodeNameLookup = std::unordered_map<const Node *, const std::string *>;
+
+    NodeNameLookup build_node_name_lookup(const LoadedGLTF *scene)
+    {
+        NodeNameLookup lookup{};
+        if (!scene)
+        {
+            return lookup;
+        }
+
+        lookup.reserve(scene->nodes.size());
+        for (const auto &entry : scene->nodes)
+        {
+            if (!entry.second)
+            {
+                continue;
+            }
+            lookup[entry.second.get()] = &entry.first;
+        }
+        return lookup;
+    }
+
+    const std::string *find_node_name(const NodeNameLookup &lookup, const Node *node)
+    {
+        if (!node)
+        {
+            return nullptr;
+        }
+        auto it = lookup.find(node);
+        return (it != lookup.end()) ? it->second : nullptr;
+    }
+
+    void populate_pick_node_hierarchy(const LoadedGLTF *scene, const Node *node, PickingSystem::PickInfo &out_pick)
+    {
+        out_pick.nodeName.clear();
+        out_pick.nodeParentName.clear();
+        out_pick.nodeChildren.clear();
+        out_pick.nodePath.clear();
+
+        if (!scene || !node)
+        {
+            return;
+        }
+
+        const NodeNameLookup lookup = build_node_name_lookup(scene);
+        const std::string *node_name = find_node_name(lookup, node);
+        if (!node_name)
+        {
+            return;
+        }
+        out_pick.nodeName = *node_name;
+
+        if (const std::shared_ptr<Node> parent = node->parent.lock())
+        {
+            if (const std::string *parent_name = find_node_name(lookup, parent.get()))
+            {
+                out_pick.nodeParentName = *parent_name;
+            }
+        }
+
+        out_pick.nodeChildren.reserve(node->children.size());
+        for (const std::shared_ptr<Node> &child : node->children)
+        {
+            if (!child)
+            {
+                continue;
+            }
+            if (const std::string *child_name = find_node_name(lookup, child.get()))
+            {
+                out_pick.nodeChildren.push_back(*child_name);
+            }
+        }
+
+        std::vector<std::string> reverse_path{};
+        reverse_path.reserve(8);
+
+        const Node *cursor = node;
+        size_t guard = 0;
+        constexpr size_t kMaxHierarchyDepth = 1024;
+        while (cursor && guard < kMaxHierarchyDepth)
+        {
+            ++guard;
+            const std::string *cursor_name = find_node_name(lookup, cursor);
+            if (!cursor_name)
+            {
+                break;
+            }
+            reverse_path.push_back(*cursor_name);
+
+            const std::shared_ptr<Node> parent = cursor->parent.lock();
+            cursor = parent.get();
+        }
+
+        out_pick.nodePath.assign(reverse_path.rbegin(), reverse_path.rend());
+    }
+
+    Node *get_child_by_compact_index(Node *parent, size_t child_index)
+    {
+        if (!parent)
+        {
+            return nullptr;
+        }
+
+        size_t compact_index = 0;
+        for (const std::shared_ptr<Node> &child : parent->children)
+        {
+            if (!child)
+            {
+                continue;
+            }
+            if (compact_index == child_index)
+            {
+                return child.get();
+            }
+            ++compact_index;
+        }
+        return nullptr;
+    }
+
+    bool is_direct_child(const Node *parent, const Node *candidate_child)
+    {
+        if (!parent || !candidate_child)
+        {
+            return false;
+        }
+        for (const std::shared_ptr<Node> &child : parent->children)
+        {
+            if (child && child.get() == candidate_child)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+} // namespace
 
 void PickingSystem::init(EngineContext *context)
 {
@@ -185,18 +324,8 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
                     for (const RenderObject &obj : selected)
                     {
                         PickInfo info{};
-                        info.mesh = obj.sourceMesh;
-                        info.scene = obj.sourceScene;
-                        info.node = obj.sourceNode;
-                        info.ownerType = obj.ownerType;
-                        info.ownerName = obj.ownerName;
                         glm::vec3 center_local = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.0f));
-                        info.worldPos = local_to_world(center_local, scene->get_world_origin());
-                        info.worldTransform = obj.transform;
-                        info.firstIndex = obj.firstIndex;
-                        info.indexCount = obj.indexCount;
-                        info.surfaceIndex = obj.surfaceIndex;
-                        info.valid = true;
+                        set_pick_from_hit(obj, local_to_world(center_local, scene->get_world_origin()), info);
                         _drag_selection.push_back(std::move(info));
                     }
                 }
@@ -401,6 +530,65 @@ void PickingSystem::clear_owner_picks(RenderObject::OwnerType owner_type, const 
     }
 }
 
+bool PickingSystem::move_last_pick_to_parent()
+{
+    if (!_last_pick.valid ||
+        _last_pick.ownerType != RenderObject::OwnerType::GLTFInstance ||
+        _last_pick.node == nullptr)
+    {
+        return false;
+    }
+
+    const std::shared_ptr<Node> parent = _last_pick.node->parent.lock();
+    if (!parent)
+    {
+        return false;
+    }
+    return set_pick_to_gltf_node(_last_pick, parent.get());
+}
+
+bool PickingSystem::move_last_pick_to_child(size_t child_index)
+{
+    if (!_last_pick.valid ||
+        _last_pick.ownerType != RenderObject::OwnerType::GLTFInstance ||
+        _last_pick.node == nullptr)
+    {
+        return false;
+    }
+
+    Node *child = get_child_by_compact_index(_last_pick.node, child_index);
+    if (!child)
+    {
+        return false;
+    }
+    return set_pick_to_gltf_node(_last_pick, child);
+}
+
+bool PickingSystem::move_last_pick_to_child(const std::string &child_name)
+{
+    if (!_last_pick.valid ||
+        _last_pick.ownerType != RenderObject::OwnerType::GLTFInstance ||
+        _last_pick.node == nullptr ||
+        _last_pick.scene == nullptr ||
+        child_name.empty())
+    {
+        return false;
+    }
+
+    auto child_it = _last_pick.scene->nodes.find(child_name);
+    if (child_it == _last_pick.scene->nodes.end() || !child_it->second)
+    {
+        return false;
+    }
+
+    Node *child = child_it->second.get();
+    if (!is_direct_child(_last_pick.node, child))
+    {
+        return false;
+    }
+    return set_pick_to_gltf_node(_last_pick, child);
+}
+
 glm::vec2 PickingSystem::window_to_swapchain_pixels(const glm::vec2 &window_pos) const
 {
     if (_context == nullptr || _context->window == nullptr || _context->getSwapchain() == nullptr)
@@ -452,12 +640,68 @@ void PickingSystem::set_pick_from_hit(const RenderObject &hit_object, const Worl
     out_pick.node = hit_object.sourceNode;
     out_pick.ownerType = hit_object.ownerType;
     out_pick.ownerName = hit_object.ownerName;
+    if (out_pick.ownerType == RenderObject::OwnerType::GLTFInstance)
+    {
+        populate_pick_node_hierarchy(out_pick.scene, out_pick.node, out_pick);
+    }
+    else
+    {
+        out_pick.nodeName.clear();
+        out_pick.nodeParentName.clear();
+        out_pick.nodeChildren.clear();
+        out_pick.nodePath.clear();
+    }
     out_pick.worldPos = hit_pos;
     out_pick.worldTransform = hit_object.transform;
     out_pick.firstIndex = hit_object.firstIndex;
     out_pick.indexCount = hit_object.indexCount;
     out_pick.surfaceIndex = hit_object.surfaceIndex;
     out_pick.valid = true;
+}
+
+bool PickingSystem::set_pick_to_gltf_node(PickInfo &pick, Node *target_node)
+{
+    if (_context == nullptr ||
+        _context->scene == nullptr ||
+        !pick.valid ||
+        pick.ownerType != RenderObject::OwnerType::GLTFInstance ||
+        pick.ownerName.empty() ||
+        pick.scene == nullptr ||
+        target_node == nullptr)
+    {
+        return false;
+    }
+
+    PickInfo updated = pick;
+    updated.mesh = nullptr;
+    updated.node = target_node;
+    updated.firstIndex = 0;
+    updated.indexCount = 0;
+    updated.surfaceIndex = 0;
+
+    populate_pick_node_hierarchy(updated.scene, updated.node, updated);
+    if (updated.nodeName.empty())
+    {
+        return false;
+    }
+
+    glm::mat4 node_world{1.0f};
+    if (_context->scene->getGLTFInstanceNodeWorldTransform(updated.ownerName, updated.nodeName, node_world))
+    {
+        updated.worldTransform = node_world;
+        updated.worldPos = WorldVec3(glm::dvec3(node_world[3]));
+    }
+    else
+    {
+        // Fallback to node-local cached world transform if the instance lookup fails.
+        updated.worldTransform = target_node->worldTransform;
+        updated.worldPos = WorldVec3(glm::dvec3(updated.worldTransform[3]));
+    }
+    updated.valid = true;
+
+    pick = std::move(updated);
+    _last_pick_object_id = 0;
+    return true;
 }
 
 void PickingSystem::clear_pick(PickInfo &pick)
@@ -467,6 +711,10 @@ void PickingSystem::clear_pick(PickInfo &pick)
     pick.node = nullptr;
     pick.ownerType = RenderObject::OwnerType::None;
     pick.ownerName.clear();
+    pick.nodeName.clear();
+    pick.nodeParentName.clear();
+    pick.nodeChildren.clear();
+    pick.nodePath.clear();
     pick.worldPos = WorldVec3{0.0, 0.0, 0.0};
     pick.worldTransform = glm::mat4(1.0f);
     pick.indexCount = 0;

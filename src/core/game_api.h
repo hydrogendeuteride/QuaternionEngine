@@ -1041,6 +1041,10 @@ public:
     {
         bool valid{false};
         std::string ownerName;
+        std::string nodeName;
+        std::string nodeParentName;
+        std::vector<std::string> nodeChildren;
+        std::vector<std::string> nodePath;
         glm::vec3 worldPosition{0.0f};
     };
 
@@ -1048,12 +1052,19 @@ public:
     {
         bool valid{false};
         std::string ownerName;
+        std::string nodeName;
+        std::string nodeParentName;
+        std::vector<std::string> nodeChildren;
+        std::vector<std::string> nodePath;
         glm::dvec3 worldPosition{0.0};
     };
 
     // Get last click selection result
     PickResult get_last_pick() const;
     PickResultD get_last_pick_d() const;
+    bool select_parent_of_last_pick();
+    bool select_child_of_last_pick(size_t childIndex = 0);
+    bool select_child_of_last_pick(const std::string& childName);
 
     // Picking settings (see PickingSystem::Settings)
     void set_picking_enabled(bool enabled);

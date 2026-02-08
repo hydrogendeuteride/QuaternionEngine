@@ -54,6 +54,11 @@ public:
         Node *node = nullptr;
         RenderObject::OwnerType ownerType = RenderObject::OwnerType::None;
         std::string ownerName;
+        // Populated for glTF picks when node identity can be resolved from scene->nodes.
+        std::string nodeName;
+        std::string nodeParentName;
+        std::vector<std::string> nodeChildren;
+        std::vector<std::string> nodePath;
         WorldVec3 worldPos{0.0, 0.0, 0.0};
         glm::mat4 worldTransform{1.0f};
         uint32_t indexCount = 0;
@@ -100,6 +105,11 @@ public:
     PickInfo *mutable_last_pick() { return &_last_pick; }
     PickInfo *mutable_hover_pick() { return &_hover_pick; }
 
+    // Hierarchical selection helpers for glTF picks.
+    bool move_last_pick_to_parent();
+    bool move_last_pick_to_child(size_t child_index = 0);
+    bool move_last_pick_to_child(const std::string &child_name);
+
 private:
     struct PickRequest
     {
@@ -120,6 +130,7 @@ private:
     glm::vec2 window_to_swapchain_pixels(const glm::vec2 &window_pos) const;
 
     void set_pick_from_hit(const RenderObject &hit_object, const WorldVec3 &hit_pos, PickInfo &out_pick);
+    bool set_pick_to_gltf_node(PickInfo &pick, Node *target_node);
 
     void clear_pick(PickInfo &pick);
 

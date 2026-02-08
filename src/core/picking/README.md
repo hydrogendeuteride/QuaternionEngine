@@ -24,7 +24,7 @@ picking/
 | Type | Role |
 |------|------|
 | `PickingSystem` | Central entry point — event processing, pick state, RenderGraph integration |
-| `PickInfo` | Result of a pick: mesh, node, owner, world position, transform, surface indices |
+| `PickInfo` | Result of a pick: mesh, node, owner, world position, transform, surface indices, and glTF node hierarchy metadata |
 | `PickRequest` | Internal pending pick request with window/ID-buffer coordinates |
 | `DragState` | Internal mouse drag tracking (start, current, threshold detection) |
 
@@ -74,8 +74,27 @@ picking.settings().select_button_mask =
 // Query results
 const auto& pick = picking.last_pick();
 if (pick.valid)
-    fmt::println("Selected: {}", pick.ownerName);
+    fmt::println("Selected: {} (node='{}')", pick.ownerName, pick.nodeName);
 ```
+
+### Hierarchical glTF Selection
+
+```cpp
+// Move current glTF selection to parent node.
+picking.move_last_pick_to_parent();
+
+// Move to first child (or choose a specific child by index/name).
+picking.move_last_pick_to_child();
+picking.move_last_pick_to_child(2);
+picking.move_last_pick_to_child("Armature/Spine");
+```
+
+For glTF picks, `PickInfo` now includes:
+
+- `nodeName` — selected node name in `LoadedGLTF::nodes`
+- `nodeParentName` — direct parent node name (empty for roots)
+- `nodeChildren` — direct child node names
+- `nodePath` — root→selected node path
 
 ### GPU ID-Buffer Picking
 

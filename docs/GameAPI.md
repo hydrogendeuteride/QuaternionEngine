@@ -332,6 +332,9 @@ Picking:
 
 - `Engine::PickResult get_last_pick() const;`
 - `Engine::PickResultD get_last_pick_d() const;`  // double-precision
+- `bool select_parent_of_last_pick();`
+- `bool select_child_of_last_pick(size_t childIndex = 0);`
+- `bool select_child_of_last_pick(const std::string &childName);`
 - `void set_use_id_buffer_picking(bool use);`
 - `bool get_use_id_buffer_picking() const;`
 
@@ -341,6 +344,10 @@ struct PickResult
 {
     bool valid{false};
     std::string ownerName;
+    std::string nodeName;
+    std::string nodeParentName;
+    std::vector<std::string> nodeChildren;
+    std::vector<std::string> nodePath;
     glm::vec3 worldPosition{0.0f};
 };
 
@@ -348,6 +355,10 @@ struct PickResultD  // double-precision variant
 {
     bool valid{false};
     std::string ownerName;
+    std::string nodeName;
+    std::string nodeParentName;
+    std::vector<std::string> nodeChildren;
+    std::vector<std::string> nodePath;
     glm::dvec3 worldPosition{0.0};
 };
 ```
@@ -356,6 +367,8 @@ These mirror `VulkanEngine::get_last_pick()` and `_useIdBufferPicking`, letting 
 
 - CPU raycast picking (immediate, cheaper VRAM).
 - ID‑buffer based picking (async, 1‑frame latency, robust for dense scenes).
+
+For glTF picks, `nodeName`/`nodeParentName`/`nodeChildren`/`nodePath` provide hierarchy metadata and the selection can be moved with `select_parent_of_last_pick()` / `select_child_of_last_pick(...)`.
 
 Render‑graph pass toggles:
 
@@ -531,6 +544,8 @@ Header: `src/core/engine.h`
     - `MeshAsset *mesh`, `LoadedGLTF *scene`, `Node *node`
     - `RenderObject::OwnerType ownerType` (e.g. `GLTFInstance`, `MeshInstance`)
     - `std::string ownerName`
+    - `std::string nodeName`, `std::string nodeParentName`
+    - `std::vector<std::string> nodeChildren`, `std::vector<std::string> nodePath`
     - `glm::vec3 worldPos`
     - `glm::mat4 worldTransform`
     - `uint32_t indexCount`, `firstIndex`, `surfaceIndex`
@@ -930,7 +945,7 @@ void Game::handle_interaction(VulkanEngine& engine)
     const PickingSystem::PickInfo& pick = picking.last_pick();
     if (pick.valid)
     {
-        fmt::println("Selected: {}", pick.ownerName);
+        fmt::println("Selected: {} (node='{}')", pick.ownerName, pick.nodeName);
         interact_with(pick.ownerName, pick.worldPos);
     }
 
@@ -952,6 +967,25 @@ void Game::handle_interaction(VulkanEngine& engine)
 }
 ```
 
+### Hierarchical glTF Navigation
+
+```cpp
+auto pick = api.get_last_pick();
+if (pick.valid && !pick.nodeParentName.empty())
+{
+    api.select_parent_of_last_pick();
+}
+
+if (pick.valid && !pick.nodeChildren.empty())
+{
+    // First direct child
+    api.select_child_of_last_pick();
+
+    // Or a specific child name from pick.nodeChildren
+    api.select_child_of_last_pick(pick.nodeChildren.front());
+}
+```
+
 ### PickInfo Structure
 
 ```cpp
@@ -962,6 +996,10 @@ struct PickInfo
     Node *node;                          // glTF node
     RenderObject::OwnerType ownerType;   // GLTFInstance, MeshInstance
     std::string ownerName;               // Logical name (e.g., "player")
+    std::string nodeName;                // Selected glTF node name
+    std::string nodeParentName;          // Direct parent node
+    std::vector<std::string> nodeChildren; // Direct child nodes
+    std::vector<std::string> nodePath;   // Root-to-node path
     WorldVec3 worldPos;                  // Hit position (double-precision)
     glm::mat4 worldTransform;            // Object transform
     uint32_t indexCount, firstIndex;     // Picked surface indices

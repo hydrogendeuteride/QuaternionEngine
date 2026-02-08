@@ -269,6 +269,8 @@ The scene system exposes CPU ray‑based picking and rectangle selection that th
   - `struct PickInfo`
     - `MeshAsset *mesh`, `LoadedGLTF *scene`, `Node *node`
     - `RenderObject::OwnerType ownerType`, `std::string ownerName`
+    - `std::string nodeName`, `std::string nodeParentName`
+    - `std::vector<std::string> nodeChildren`, `std::vector<std::string> nodePath`
     - `glm::vec3 worldPos`, `glm::mat4 worldTransform`
     - `uint32_t indexCount`, `firstIndex`, `surfaceIndex`
     - `bool valid`
