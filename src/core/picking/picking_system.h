@@ -1,6 +1,7 @@
 #pragma once
 
 #include <core/types.h>
+#include <core/input/input_system.h>
 #include <core/world.h>
 #include <core/device/resource.h>
 
@@ -12,7 +13,6 @@
 #include <string>
 #include <vector>
 
-union SDL_Event;
 class EngineContext;
 class RenderGraph;
 struct RGImageHandle;
@@ -20,6 +20,33 @@ struct RGImageHandle;
 class PickingSystem
 {
 public:
+    struct Settings
+    {
+        // Master toggle for all picking behavior (click, drag, hover).
+        bool enabled = true;
+
+        // Click/drag is driven by these buttons (bit i => MouseButton with value i).
+        // Default: Left click.
+        uint32_t select_button_mask = (1u << static_cast<uint32_t>(MouseButton::Left));
+
+        // Maximum cursor travel (in window pixels) to treat press→release as a click.
+        float click_threshold_px = 3.0f;
+
+        bool enable_hover = true;
+        bool enable_click_select = true;
+        bool enable_drag_select = true;
+
+        // When true, ignore mouse interactions while UI wants mouse capture.
+        bool respect_ui_capture_mouse = true;
+
+        // When true, disable picking when the cursor is captured/relative.
+        // (Useful to prevent selection while in FPS-style camera control.)
+        bool require_cursor_normal = false;
+
+        // When true, clear last pick on a click miss (CPU raycast mode only).
+        bool clear_last_pick_on_miss = true;
+    };
+
     struct PickInfo
     {
         MeshAsset *mesh = nullptr;
@@ -36,19 +63,25 @@ public:
     };
 
     void init(EngineContext *context);
+
     void cleanup();
 
-    void process_event(const SDL_Event &event, bool ui_want_capture_mouse);
-    void update_hover();
+    // Consume per-frame input events (mouse click, drag, release).
+    void process_input(const InputSystem &input, bool ui_want_capture_mouse);
+
+    void update_hover(bool ui_want_capture_mouse = false);
 
     // Called after the per-frame fence is waited to resolve async ID-buffer picks.
     void begin_frame();
 
     // Called during RenderGraph build after the ID buffer is available.
     void register_id_buffer_readback(RenderGraph &graph,
-                                    RGImageHandle id_buffer,
-                                    VkExtent2D draw_extent,
-                                    VkExtent2D swapchain_extent);
+                                     RGImageHandle id_buffer,
+                                     VkExtent2D draw_extent,
+                                     VkExtent2D swapchain_extent);
+
+    Settings &settings() { return _settings; }
+    const Settings &settings() const { return _settings; }
 
     const PickInfo &last_pick() const { return _last_pick; }
     const PickInfo &hover_pick() const { return _hover_pick; }
@@ -79,12 +112,15 @@ private:
     {
         bool dragging = false;
         bool button_down = false;
+        MouseButton button = MouseButton::Left;
         glm::vec2 start{0.0f};
         glm::vec2 current{0.0f};
     };
 
     glm::vec2 window_to_swapchain_pixels(const glm::vec2 &window_pos) const;
+
     void set_pick_from_hit(const RenderObject &hit_object, const WorldVec3 &hit_pos, PickInfo &out_pick);
+
     void clear_pick(PickInfo &pick);
 
     EngineContext *_context = nullptr;
@@ -96,6 +132,7 @@ private:
     glm::vec2 _mouse_pos_window{-1.0f, -1.0f};
     DragState _drag_state{};
 
+    Settings _settings{};
     bool _use_id_buffer_picking = false;
     bool _debug_draw_bvh = false;
 

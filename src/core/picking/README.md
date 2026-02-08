@@ -4,8 +4,8 @@
 
 ## Purpose
 
-Provides a central system for picking objects in the 3D viewport. Handles SDL
-mouse events (click, drag, release), maintains per-frame hover and selection
+Provides a central system for picking objects in the 3D viewport. Consumes
+mouse input (click, drag, release) via the engine `InputSystem`, maintains per-frame hover and selection
 state, and integrates with the RenderGraph for asynchronous GPU ID-buffer
 readback. Two picking backends are available: immediate CPU ray-casting through
 the SceneManager BVH, and deferred GPU ID-buffer picking with single-pixel
@@ -39,14 +39,14 @@ begin_frame()
      ├─ reads picked objectID from readback buffer
      └─ calls SceneManager::resolveObjectID → populates _last_pick
 
-process_event(SDL_Event, ui_want_capture_mouse)
-  ├─ MOUSEMOTION → updates cursor position, tracks drag
-  ├─ MOUSEBUTTONDOWN → starts potential drag
-  └─ MOUSEBUTTONUP
-     ├─ click (< 3 px motion) → CPU ray pick or queues ID-buffer pick
+process_input(InputSystem, ui_want_capture_mouse)
+  ├─ MouseMove → updates cursor position, tracks drag
+  ├─ MouseButtonDown → starts potential drag
+  └─ MouseButtonUp
+     ├─ click (<= threshold motion) → CPU ray pick or queues ID-buffer pick
      └─ drag  → rectangle multi-select via SceneManager::selectRect
 
-update_hover()
+update_hover(ui_want_capture_mouse)
   └─ CPU ray-cast under cursor → populates _hover_pick
 
 register_id_buffer_readback(RenderGraph, id_buffer, ...)
@@ -61,9 +61,15 @@ cleanup()
 ### CPU Ray Picking (default)
 
 ```cpp
-// Events are forwarded from the main loop
-picking.process_event(event, imgui.want_capture_mouse());
-picking.update_hover();
+// Run once per-frame after InputSystem::pump_events()
+const bool ui_capture_mouse = engine->ui() && engine->ui()->want_capture_mouse();
+picking.process_input(*engine->input(), ui_capture_mouse);
+picking.update_hover(ui_capture_mouse);
+
+// Optional: allow multiple selection buttons (Left + Right)
+picking.settings().select_button_mask =
+    (1u << static_cast<uint32_t>(MouseButton::Left)) |
+    (1u << static_cast<uint32_t>(MouseButton::Right));
 
 // Query results
 const auto& pick = picking.last_pick();
@@ -100,7 +106,7 @@ It interacts with:
 
 - **SceneManager** — CPU ray-casting (`pick`, `selectRect`, `resolveObjectID`)
 - **RenderGraph** — registers a `PickReadback` transfer pass for ID-buffer mode
-- **SDL** — receives mouse events via `process_event`
+- **InputSystem** — consumes mouse input (`process_input`, `MouseButton`, `InputEvent`)
 - **ImGui** — respects `ui_want_capture_mouse` to avoid picking through UI
 
 Coordinate transforms handle HiDPI scaling (window pixels → drawable pixels →

@@ -91,8 +91,7 @@ namespace GameRuntime
                 struct DispatchCtx
                 {
                     VulkanEngine *engine;
-                    bool ui_capture_mouse;
-                } ctx{_renderer, ui_capture_mouse};
+                } ctx{_renderer};
 
                 input->for_each_native_event([](void *user, InputSystem::NativeEventView view) {
                     auto *c = static_cast<DispatchCtx *>(user);
@@ -105,11 +104,12 @@ namespace GameRuntime
                     {
                         c->engine->ui()->process_event(e);
                     }
-                    if (c->engine->picking())
-                    {
-                        c->engine->picking()->process_event(e, c->ui_capture_mouse);
-                    }
                 }, &ctx);
+            }
+
+            if (_renderer->picking() && input)
+            {
+                _renderer->picking()->process_input(*input, ui_capture_mouse);
             }
 
             // --- Camera input (if not captured by UI) --- //

@@ -4,6 +4,8 @@
 #include "core/debug_draw/debug_draw.h"
 #include "core/picking/picking_system.h"
 
+#include <cmath>
+
 namespace GameAPI
 {
 
@@ -37,6 +39,58 @@ Engine::PickResultD Engine::get_last_pick_d() const
         r.worldPosition = pick.worldPos;
     }
     return r;
+}
+
+void Engine::set_picking_enabled(bool enabled)
+{
+    if (!_engine) return;
+    PickingSystem *picking = _engine->picking();
+    if (!picking) return;
+    picking->settings().enabled = enabled;
+}
+
+bool Engine::get_picking_enabled() const
+{
+    const PickingSystem *picking = _engine ? _engine->picking() : nullptr;
+    if (!picking) return false;
+    return picking->settings().enabled;
+}
+
+void Engine::set_picking_select_button_mask(uint32_t mask)
+{
+    if (!_engine) return;
+    PickingSystem *picking = _engine->picking();
+    if (!picking) return;
+
+    constexpr uint32_t kAllButtonsMask = (1u << InputState::kMouseButtonCount) - 1u;
+    picking->settings().select_button_mask = (mask & kAllButtonsMask);
+}
+
+uint32_t Engine::get_picking_select_button_mask() const
+{
+    const PickingSystem *picking = _engine ? _engine->picking() : nullptr;
+    if (!picking) return 0u;
+    return picking->settings().select_button_mask;
+}
+
+void Engine::set_picking_click_threshold_px(float px)
+{
+    if (!_engine) return;
+    PickingSystem *picking = _engine->picking();
+    if (!picking) return;
+
+    if (!std::isfinite(px) || px < 0.0f)
+    {
+        px = 0.0f;
+    }
+    picking->settings().click_threshold_px = px;
+}
+
+float Engine::get_picking_click_threshold_px() const
+{
+    const PickingSystem *picking = _engine ? _engine->picking() : nullptr;
+    if (!picking) return 0.0f;
+    return picking->settings().click_threshold_px;
 }
 
 void Engine::set_use_id_buffer_picking(bool use)

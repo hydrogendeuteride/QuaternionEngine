@@ -51,122 +51,190 @@ void PickingSystem::cleanup()
     _last_pick_object_id = 0;
 }
 
-void PickingSystem::process_event(const SDL_Event &event, bool ui_want_capture_mouse)
+void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture_mouse)
 {
     if (_context == nullptr)
     {
         return;
     }
 
-    if (event.type == SDL_MOUSEMOTION)
+    float click_threshold_px = _settings.click_threshold_px;
+    if (!std::isfinite(click_threshold_px) || click_threshold_px < 0.0f)
     {
-        _mouse_pos_window = glm::vec2{static_cast<float>(event.motion.x),
-                                      static_cast<float>(event.motion.y)};
-        if (_drag_state.button_down)
-        {
-            _drag_state.current = _mouse_pos_window;
-            _drag_state.dragging = true;
-        }
-        return;
+        click_threshold_px = 0.0f;
     }
 
-    if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT)
+    const uint32_t select_button_mask = _settings.select_button_mask;
+    auto is_select_button = [select_button_mask](MouseButton button) -> bool {
+        const uint32_t bit = (1u << static_cast<uint32_t>(button));
+        return (select_button_mask & bit) != 0u;
+    };
+
+    for (const InputEvent &event : input.events())
     {
-        if (ui_want_capture_mouse)
+        if (event.type == InputEvent::Type::MouseMove)
         {
-            return;
+            _mouse_pos_window = event.mouse_pos;
+            if (_drag_state.button_down)
+            {
+                _drag_state.current = _mouse_pos_window;
+                const glm::vec2 delta = _drag_state.current - _drag_state.start;
+                if (!_drag_state.dragging &&
+                    (std::abs(delta.x) > click_threshold_px || std::abs(delta.y) > click_threshold_px))
+                {
+                    _drag_state.dragging = true;
+                }
+            }
+            continue;
         }
 
-        _drag_state.button_down = true;
-        _drag_state.dragging = false;
-        _drag_state.start = glm::vec2{static_cast<float>(event.button.x),
-                                      static_cast<float>(event.button.y)};
-        _drag_state.current = _drag_state.start;
-        return;
-    }
-
-    if (event.type == SDL_MOUSEBUTTONUP && event.button.button == SDL_BUTTON_LEFT)
-    {
-        const bool was_down = _drag_state.button_down;
-        _drag_state.button_down = false;
-        if (!was_down)
+        if (event.type == InputEvent::Type::MouseButtonDown && is_select_button(event.mouse_button))
         {
+            _mouse_pos_window = event.mouse_pos;
+
+            if (!_settings.enabled)
+            {
+                continue;
+            }
+
+            if (_settings.require_cursor_normal && input.cursor_mode() != CursorMode::Normal)
+            {
+                continue;
+            }
+
+            if (_settings.respect_ui_capture_mouse && ui_want_capture_mouse)
+            {
+                continue;
+            }
+
+            if (_drag_state.button_down)
+            {
+                continue;
+            }
+
+            _drag_state.button_down = true;
             _drag_state.dragging = false;
-            return;
+            _drag_state.button = event.mouse_button;
+            _drag_state.start = event.mouse_pos;
+            _drag_state.current = _drag_state.start;
+            continue;
         }
 
-        glm::vec2 release_pos{static_cast<float>(event.button.x),
-                              static_cast<float>(event.button.y)};
-
-        constexpr float click_threshold = 3.0f;
-        glm::vec2 delta = release_pos - _drag_state.start;
-        bool treat_as_click = !_drag_state.dragging &&
-                              std::abs(delta.x) < click_threshold &&
-                              std::abs(delta.y) < click_threshold;
-
-        SceneManager *scene = _context->scene;
-
-        if (treat_as_click)
+        if (event.type == InputEvent::Type::MouseButtonUp && _drag_state.button_down && event.mouse_button == _drag_state.button)
         {
-            if (_use_id_buffer_picking)
-            {
-                _pending_pick.active = true;
-                _pending_pick.window_pos_swapchain = window_to_swapchain_pixels(release_pos);
-            }
-            else if (scene)
-            {
-                RenderObject hit_object{};
-                WorldVec3 hit_pos{};
-                if (scene->pick(window_to_swapchain_pixels(release_pos), hit_object, hit_pos))
-                {
-                    set_pick_from_hit(hit_object, hit_pos, _last_pick);
-                    _last_pick_object_id = hit_object.objectID;
-                }
-                else
-                {
-                    clear_pick(_last_pick);
-                    _last_pick_object_id = 0;
-                }
-            }
-        }
-        else
-        {
-            _drag_selection.clear();
-            if (scene)
-            {
-                std::vector<RenderObject> selected;
-                scene->selectRect(window_to_swapchain_pixels(_drag_state.start),
-                                  window_to_swapchain_pixels(release_pos),
-                                  selected);
-                _drag_selection.reserve(selected.size());
-                for (const RenderObject &obj : selected)
-                {
-                    PickInfo info{};
-                    info.mesh = obj.sourceMesh;
-                    info.scene = obj.sourceScene;
-                    info.node = obj.sourceNode;
-                    info.ownerType = obj.ownerType;
-                    info.ownerName = obj.ownerName;
-                    glm::vec3 center_local = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.0f));
-                    info.worldPos = local_to_world(center_local, scene->get_world_origin());
-                    info.worldTransform = obj.transform;
-                    info.firstIndex = obj.firstIndex;
-                    info.indexCount = obj.indexCount;
-                    info.surfaceIndex = obj.surfaceIndex;
-                    info.valid = true;
-                    _drag_selection.push_back(std::move(info));
-                }
-            }
-        }
+            _mouse_pos_window = event.mouse_pos;
 
-        _drag_state.dragging = false;
+            const bool was_down = _drag_state.button_down;
+            _drag_state.button_down = false;
+            if (!was_down)
+            {
+                _drag_state.dragging = false;
+                continue;
+            }
+
+            const glm::vec2 release_pos = event.mouse_pos;
+            const glm::vec2 delta = release_pos - _drag_state.start;
+            const bool moved_enough_for_drag = (std::abs(delta.x) > click_threshold_px || std::abs(delta.y) > click_threshold_px);
+
+            SceneManager *scene = _context->scene;
+
+            if (!_settings.enabled ||
+                (_settings.require_cursor_normal && input.cursor_mode() != CursorMode::Normal) ||
+                (_settings.respect_ui_capture_mouse && ui_want_capture_mouse))
+            {
+                _drag_state.dragging = false;
+                continue;
+            }
+
+            const bool do_drag_select = _settings.enable_drag_select && moved_enough_for_drag;
+            const bool do_click_select = _settings.enable_click_select && !do_drag_select;
+
+            if (do_click_select)
+            {
+                if (_use_id_buffer_picking)
+                {
+                    _pending_pick.active = true;
+                    _pending_pick.window_pos_swapchain = window_to_swapchain_pixels(release_pos);
+                }
+                else if (scene)
+                {
+                    RenderObject hit_object{};
+                    WorldVec3 hit_pos{};
+                    if (scene->pick(window_to_swapchain_pixels(release_pos), hit_object, hit_pos))
+                    {
+                        set_pick_from_hit(hit_object, hit_pos, _last_pick);
+                        _last_pick_object_id = hit_object.objectID;
+                    }
+                    else if (_settings.clear_last_pick_on_miss)
+                    {
+                        clear_pick(_last_pick);
+                        _last_pick_object_id = 0;
+                    }
+                }
+            }
+            else if (do_drag_select)
+            {
+                _drag_selection.clear();
+                if (scene)
+                {
+                    std::vector<RenderObject> selected;
+                    scene->selectRect(window_to_swapchain_pixels(_drag_state.start),
+                                      window_to_swapchain_pixels(release_pos),
+                                      selected);
+                    _drag_selection.reserve(selected.size());
+                    for (const RenderObject &obj : selected)
+                    {
+                        PickInfo info{};
+                        info.mesh = obj.sourceMesh;
+                        info.scene = obj.sourceScene;
+                        info.node = obj.sourceNode;
+                        info.ownerType = obj.ownerType;
+                        info.ownerName = obj.ownerName;
+                        glm::vec3 center_local = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.0f));
+                        info.worldPos = local_to_world(center_local, scene->get_world_origin());
+                        info.worldTransform = obj.transform;
+                        info.firstIndex = obj.firstIndex;
+                        info.indexCount = obj.indexCount;
+                        info.surfaceIndex = obj.surfaceIndex;
+                        info.valid = true;
+                        _drag_selection.push_back(std::move(info));
+                    }
+                }
+            }
+
+            _drag_state.dragging = false;
+        }
+    }
+
+    // Safety: avoid stuck drag state if focus/SDL event is missed.
+    if (_drag_state.button_down && !input.state().mouse_down(_drag_state.button))
+    {
+        _drag_state = {};
     }
 }
 
-void PickingSystem::update_hover()
+void PickingSystem::update_hover(bool ui_want_capture_mouse)
 {
     if (_context == nullptr || _context->scene == nullptr)
     {
+        return;
+    }
+
+    if (!_settings.enabled || !_settings.enable_hover)
+    {
+        clear_pick(_hover_pick);
+        return;
+    }
+
+    if (_settings.respect_ui_capture_mouse && ui_want_capture_mouse)
+    {
+        clear_pick(_hover_pick);
+        return;
+    }
+
+    if (_settings.require_cursor_normal && _context->input && _context->input->cursor_mode() != CursorMode::Normal)
+    {
+        clear_pick(_hover_pick);
         return;
     }
 
@@ -211,20 +279,23 @@ void PickingSystem::begin_frame()
 
     if (picked_id == 0)
     {
-        clear_pick(_last_pick);
-        _last_pick_object_id = 0;
+        if (_settings.clear_last_pick_on_miss)
+        {
+            clear_pick(_last_pick);
+            _last_pick_object_id = 0;
+        }
     }
     else
     {
-        _last_pick_object_id = picked_id;
         RenderObject picked{};
         if (_context->scene->resolveObjectID(picked_id, picked))
         {
+            _last_pick_object_id = picked_id;
             glm::vec3 fallback_local = glm::vec3(picked.transform[3]);
             WorldVec3 fallback_pos = local_to_world(fallback_local, _context->scene->get_world_origin());
             set_pick_from_hit(picked, fallback_pos, _last_pick);
         }
-        else
+        else if (_settings.clear_last_pick_on_miss)
         {
             clear_pick(_last_pick);
             _last_pick_object_id = 0;

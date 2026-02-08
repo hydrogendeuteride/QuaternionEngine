@@ -1055,6 +1055,19 @@ public:
     PickResult get_last_pick() const;
     PickResultD get_last_pick_d() const;
 
+    // Picking settings (see PickingSystem::Settings)
+    void set_picking_enabled(bool enabled);
+    bool get_picking_enabled() const;
+
+    // Set which mouse buttons can start a pick/drag.
+    // Bits: 1<<0 Left, 1<<1 Middle, 1<<2 Right, 1<<3 X1, 1<<4 X2.
+    void set_picking_select_button_mask(uint32_t mask);
+    uint32_t get_picking_select_button_mask() const;
+
+    // Click/drag threshold in window pixels.
+    void set_picking_click_threshold_px(float px);
+    float get_picking_click_threshold_px() const;
+
     // Enable/disable ID buffer picking (vs CPU raycast)
     void set_use_id_buffer_picking(bool use);
     bool get_use_id_buffer_picking() const;

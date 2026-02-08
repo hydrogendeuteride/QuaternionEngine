@@ -6,7 +6,7 @@ Unified picking system that handles single-click selection, hover detection, and
 
 - `PickingSystem` (src/core/picking/picking_system.h/.cpp)
   - Main entry point for all picking operations.
-  - Processes SDL mouse events (click, drag, release).
+  - Consumes engine `InputSystem` mouse events (click, drag, release).
   - Maintains per-frame hover picks and last click selection.
   - Integrates with RenderGraph for async ID-buffer readback.
 
@@ -84,8 +84,8 @@ void cleanup();
 
 ```cpp
 void begin_frame();  // Resolve pending async picks after fence wait
-void process_event(const SDL_Event &event, bool ui_want_capture_mouse);
-void update_hover(); // Update hover pick each frame
+void process_input(const InputSystem &input, bool ui_want_capture_mouse);
+void update_hover(bool ui_want_capture_mouse); // Update hover pick each frame
 ```
 
 **Results Access:**
@@ -100,6 +100,9 @@ uint32_t last_pick_object_id() const;        // Raw object ID of last pick
 **Configuration:**
 
 ```cpp
+PickingSystem::Settings& settings();
+const PickingSystem::Settings& settings() const;
+
 bool use_id_buffer_picking() const;
 void set_use_id_buffer_picking(bool enabled);
 
@@ -261,7 +264,7 @@ picking.set_debug_draw_bvh(true);  // Shows BVH nodes in debug overlay
 
 The picking system handles multiple coordinate transformations:
 
-1. **Window pixels** (SDL event coordinates, top-left origin)
+1. **Window pixels** (`InputEvent::mouse_pos`, top-left origin)
 2. **Swapchain pixels** (scaled for HiDPI displays)
 3. **Logical render pixels** (internal render resolution)
 4. **NDC** (normalized device coordinates, -1 to 1)
@@ -272,7 +275,7 @@ The `window_to_swapchain_pixels()` helper handles HiDPI scaling. Letterboxing is
 ### Frame Flow
 
 1. `begin_frame()` — Resolve pending async ID-buffer picks from previous frame.
-2. `process_event()` — Handle mouse events (click start/end, motion).
+2. `process_input()` — Handle mouse events (click start/end, motion).
 3. `update_hover()` — CPU ray-cast for current hover under cursor.
 4. RenderGraph build — If ID-buffer picking enabled, register readback pass.
 5. Next frame — Async pick result becomes available.
@@ -282,15 +285,16 @@ The `window_to_swapchain_pixels()` helper handles HiDPI scaling. Letterboxing is
 The picking system respects ImGui's input capture:
 
 ```cpp
-// In event loop
+// In main loop (after InputSystem::pump_events())
 bool ui_capture = imgui_system.want_capture_mouse();
-picking_system.process_event(event, ui_capture);
+picking_system.process_input(input_system, ui_capture);
+picking_system.update_hover(ui_capture);
 ```
 
 When `ui_want_capture_mouse` is true:
-- Click events are ignored (no picks started).
+- Click/drag interactions are ignored (no picks started).
 - Mouse motion still updates cursor position for future picks.
-- Hover picking is not affected.
+- Hover picking is cleared while captured (configurable via `PickingSystem::Settings`).
 
 ### Tips
 
@@ -298,4 +302,5 @@ When `ui_want_capture_mouse` is true:
 - Use ID-buffer picking for pixel-perfect selection in dense scenes.
 - Call `clear_owner_picks()` when removing instances to avoid stale picks.
 - For mesh BVH to work, ensure the mesh was loaded with BVH generation enabled.
-- The drag selection threshold is 3 pixels — smaller motions are treated as clicks.
+- Select buttons are controlled by `settings().select_button_mask` (default: Left). Bits: 1<<0 Left, 1<<1 Middle, 1<<2 Right, 1<<3 X1, 1<<4 X2.
+- Click vs drag is controlled by `settings().click_threshold_px` (default: 3 px).

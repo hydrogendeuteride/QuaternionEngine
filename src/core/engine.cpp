@@ -1156,7 +1156,8 @@ void VulkanEngine::draw()
 
     if (_picking)
     {
-        _picking->update_hover();
+        const bool ui_capture_mouse = _ui && _ui->want_capture_mouse();
+        _picking->update_hover(ui_capture_mouse);
     }
 
     // Compute desired internal render-target extent from logical extent + render scale.
@@ -1507,7 +1508,6 @@ namespace
     struct NativeEventDispatchCtx
     {
         VulkanEngine *engine = nullptr;
-        bool ui_capture_mouse = false;
     };
 
     void dispatch_native_event(void *user, InputSystem::NativeEventView view)
@@ -1523,10 +1523,6 @@ namespace
         if (ctx->engine->ui())
         {
             ctx->engine->ui()->process_event(e);
-        }
-        if (ctx->engine->picking())
-        {
-            ctx->engine->picking()->process_event(e, ctx->ui_capture_mouse);
         }
     }
 } // namespace
@@ -1567,8 +1563,12 @@ void VulkanEngine::run()
         {
             NativeEventDispatchCtx ctx{};
             ctx.engine = this;
-            ctx.ui_capture_mouse = ui_capture_mouse;
             _input->for_each_native_event(dispatch_native_event, &ctx);
+        }
+
+        if (_picking && _input)
+        {
+            _picking->process_input(*_input, ui_capture_mouse);
         }
 
         if (_sceneManager && _input)
