@@ -1093,6 +1093,7 @@ The engine provides comprehensive debug widgets in `src/core/engine_ui.cpp`:
 - **Window Tab**: Monitor selection, fullscreen modes, HiDPI info
 - **Stats Tab**: Frame time, FPS, draw calls, triangle count
 - **Scene Tab**: Instance spawning, point light editor, ImGuizmo gizmos
+- **Picking & Gizmo Tab**: Last/hover pick details, glTF node hierarchy navigation (parent/child), transform gizmo
 - **Render Graph Tab**: Pass toggles, resource tracking
 - **Texture Streaming Tab**: VRAM budget, cache stats
 - **Shadows Tab**: Shadow mode, cascade visualization

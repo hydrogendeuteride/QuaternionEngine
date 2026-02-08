@@ -214,6 +214,11 @@ The engine provides comprehensive debug widgets in `engine_ui.cpp`:
 - Point light editor.
 - Object transform manipulation (ImGuizmo).
 
+**Picking & Gizmo Tab:**
+- Last/hover picking details.
+- glTF hierarchy navigation (parent/child node selection).
+- Object transform manipulation with ImGuizmo.
+
 **Render Graph Tab:**
 - Pass list with toggle controls.
 - Resource tracking visualization.

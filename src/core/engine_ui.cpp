@@ -2251,6 +2251,102 @@ namespace
             }
             const char *ownerName = last.ownerName.empty() ? "<unnamed>" : last.ownerName.c_str();
             ImGui::Text("Owner: %s (%s)", ownerName, ownerTypeStr);
+            if (last.ownerType == RenderObject::OwnerType::GLTFInstance)
+            {
+                const char *nodeName = last.nodeName.empty() ? "<none>" : last.nodeName.c_str();
+                const char *parentName = last.nodeParentName.empty() ? "<root>" : last.nodeParentName.c_str();
+                ImGui::Text("glTF node: %s", nodeName);
+                ImGui::Text("Parent node: %s", parentName);
+
+                if (!last.nodePath.empty())
+                {
+                    std::string nodePath;
+                    nodePath.reserve(last.nodePath.size() * 16);
+                    for (size_t i = 0; i < last.nodePath.size(); ++i)
+                    {
+                        if (i > 0)
+                        {
+                            nodePath += " / ";
+                        }
+                        nodePath += last.nodePath[i];
+                    }
+                    ImGui::TextWrapped("Node path: %s", nodePath.c_str());
+                }
+
+                static int childPickIndex = 0;
+                static std::string childPickOwner{};
+                static std::string childPickNode{};
+                if (childPickOwner != last.ownerName || childPickNode != last.nodeName)
+                {
+                    childPickOwner = last.ownerName;
+                    childPickNode = last.nodeName;
+                    childPickIndex = 0;
+                }
+
+                bool requestParent = false;
+                bool requestChild = false;
+
+                if (last.nodeParentName.empty())
+                {
+                    ImGui::BeginDisabled();
+                    ImGui::Button("Select parent node");
+                    ImGui::EndDisabled();
+                }
+                else if (ImGui::Button("Select parent node"))
+                {
+                    requestParent = true;
+                }
+
+                if (last.nodeChildren.empty())
+                {
+                    ImGui::TextUnformatted("Child nodes: <none>");
+                }
+                else
+                {
+                    childPickIndex = std::clamp(childPickIndex, 0, static_cast<int>(last.nodeChildren.size()) - 1);
+
+                    ImGui::SameLine();
+                    if (ImGui::Button("Select first child"))
+                    {
+                        childPickIndex = 0;
+                        requestChild = true;
+                    }
+
+                    ImGui::PushItemWidth(300.0f);
+                    const char *preview = last.nodeChildren[childPickIndex].c_str();
+                    if (ImGui::BeginCombo("Child node", preview))
+                    {
+                        for (int i = 0; i < static_cast<int>(last.nodeChildren.size()); ++i)
+                        {
+                            const bool selected = (childPickIndex == i);
+                            if (ImGui::Selectable(last.nodeChildren[i].c_str(), selected))
+                            {
+                                childPickIndex = i;
+                            }
+                            if (selected)
+                            {
+                                ImGui::SetItemDefaultFocus();
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                    ImGui::PopItemWidth();
+
+                    if (ImGui::Button("Select child node"))
+                    {
+                        requestChild = true;
+                    }
+                }
+
+                if (requestParent)
+                {
+                    (void)picking->move_last_pick_to_parent();
+                }
+                else if (requestChild && !last.nodeChildren.empty())
+                {
+                    (void)picking->move_last_pick_to_child(static_cast<size_t>(childPickIndex));
+                }
+            }
             ImGui::Text("Indices: first=%u count=%u",
                         last.firstIndex,
                         last.indexCount);
@@ -2289,6 +2385,10 @@ namespace
             }
             const char *ownerName = hover.ownerName.empty() ? "<unnamed>" : hover.ownerName.c_str();
             ImGui::Text("Hover owner: %s (%s)", ownerName, ownerTypeStr);
+            if (hover.ownerType == RenderObject::OwnerType::GLTFInstance && !hover.nodeName.empty())
+            {
+                ImGui::Text("Hover glTF node: %s", hover.nodeName.c_str());
+            }
         }
         else
         {

@@ -333,3 +333,4 @@ When `ui_want_capture_mouse` is true:
 - For mesh BVH to work, ensure the mesh was loaded with BVH generation enabled.
 - Select buttons are controlled by `settings().select_button_mask` (default: Left). Bits: 1<<0 Left, 1<<1 Middle, 1<<2 Right, 1<<3 X1, 1<<4 X2.
 - Click vs drag is controlled by `settings().click_threshold_px` (default: 3 px).
+- In the built-in `Picking & Gizmo` tab, glTF picks expose parent/child node navigation using these hierarchy fields.
