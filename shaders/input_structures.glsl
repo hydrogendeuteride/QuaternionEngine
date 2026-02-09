@@ -54,6 +54,10 @@ layout(set = 0, binding = 0) uniform  SceneData{
     // Analytic planet shadow occluders (max 4):
     // planetOccluders[i].xyz = center in render-local space, w = radius in meters.
     vec4 planetOccluders[MAX_PLANET_OCCLUDERS];
+
+    // Shadow tuning:
+    // shadowTuning.x = minimum sun shadow visibility (0..1)
+    vec4 shadowTuning;
 } sceneData;
 
 layout(set = 1, binding = 0) uniform GLTFMaterialData{

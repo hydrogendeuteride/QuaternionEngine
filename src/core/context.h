@@ -47,6 +47,10 @@ struct ShadowSettings
     uint32_t mode = 2;
     // Global enable/disable for all shadowing (raster + RT).
     bool enabled = true;
+    // Shadow brightness control: minimum visibility applied to sun shadows (0..1).
+    // Raises the darkest parts of CSM / RT / planet shadows so fully-shadowed areas
+    // are not pitch black. 0 = original behavior (full dark), 0.2 = keep 20% light.
+    float shadowMinVisibility = 0.0f;
     // Shadow map resolution (square) used for raster clipmap cascades and stabilization (texel snapping).
     // Changing this at runtime is supported; it affects transient RenderGraph images and light-space snapping.
     uint32_t shadowMapResolution = kShadowMapResolution;

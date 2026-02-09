@@ -596,6 +596,10 @@ public:
     void set_shadows_enabled(bool enabled);
     bool get_shadows_enabled() const;
 
+    // Shadow brightness control: minimum visibility applied to sun shadows (0..1).
+    void set_shadow_min_visibility(float min_visibility);
+    float get_shadow_min_visibility() const;
+
     void set_shadow_mode(ShadowMode mode);
     ShadowMode get_shadow_mode() const;
 

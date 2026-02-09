@@ -74,6 +74,7 @@ void main()
         // Use a small receiver offset to reduce precision issues near the boundary.
         vec3 wp = inWorldPos + N * 0.0025;
         sunVis = planet_analytic_shadow_visibility(wp, Lsun);
+        sunVis = max(sunVis, clamp(sceneData.shadowTuning.x, 0.0, 1.0));
     }
     vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
     vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * sunVis;

@@ -24,6 +24,19 @@ bool Engine::get_shadows_enabled() const
     return _engine->_context ? _engine->_context->shadowSettings.enabled : false;
 }
 
+void Engine::set_shadow_min_visibility(float min_visibility)
+{
+    if (_engine->_context)
+    {
+        _engine->_context->shadowSettings.shadowMinVisibility = glm::clamp(min_visibility, 0.0f, 1.0f);
+    }
+}
+
+float Engine::get_shadow_min_visibility() const
+{
+    return _engine->_context ? _engine->_context->shadowSettings.shadowMinVisibility : 0.0f;
+}
+
 void Engine::set_shadow_mode(ShadowMode mode)
 {
     if (_engine->_context)

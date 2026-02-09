@@ -203,6 +203,8 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
 
 float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
 {
+    float minVis = clamp(sceneData.shadowTuning.x, 0.0, 1.0);
+
     // Early out when shadows are globally disabled.
     if (sceneData.rtParams.y <= 0.0)
     {
@@ -213,17 +215,19 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
     float planetVis = planet_analytic_shadow_visibility(wp, L);
     if (planetVis <= 0.0)
     {
-        return 0.0;
+        return minVis;
     }
 
     CascadeMix cm = computeCascadeMix(wp);
     float v0 = sampleCascadeShadow(cm.i0, wp, N, L);
     if (cm.w1 <= 0.0)
-    return min(planetVis, v0);
+    {
+        return max(minVis, min(planetVis, v0));
+    }
 
     float v1 = sampleCascadeShadow(cm.i1, wp, N, L);
     float vis = mix(v0, v1, clamp(cm.w1, 0.0, 1.0));
-    return min(planetVis, vis);
+    return max(minVis, min(planetVis, vis));
 }
 
 void main(){

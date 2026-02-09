@@ -233,6 +233,8 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
 
 float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L, bool forceClipmapShadows)
 {
+    float minVis = clamp(sceneData.shadowTuning.x, 0.0, 1.0);
+
     // Early out: shadows are globally disabled.
     if (sceneData.rtParams.y <= 0.0)
     {
@@ -243,7 +245,7 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L, bool forceClipmapShado
     float planetVis = planet_analytic_shadow_visibility(wp, L);
     if (planetVis <= 0.0)
     {
-        return 0.0;
+        return minVis;
     }
 
     // RT-only mode: by default cast a ray and skip clipmap sampling entirely.
@@ -257,11 +259,11 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L, bool forceClipmapShado
             float v0 = sampleCascadeShadow(cm.i0, wp, N, L);
             if (cm.w1 <= 0.0)
             {
-                return min(planetVis, v0);
+                return max(minVis, min(planetVis, v0));
             }
             float v1 = sampleCascadeShadow(cm.i1, wp, N, L);
             float vis = mix(v0, v1, clamp(cm.w1, 0.0, 1.0));
-            return min(planetVis, vis);
+            return max(minVis, min(planetVis, vis));
         }
 
         #ifdef GL_EXT_ray_query
@@ -274,10 +276,10 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L, bool forceClipmapShado
         0xFF, wp + N * originBias, tmin, L, farR);
         while (rayQueryProceedEXT(rq)) { }
         bool hit = (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT);
-        return min(planetVis, hit ? 0.0 : 1.0);
+        return max(minVis, min(planetVis, hit ? 0.0 : 1.0));
         #else
         // Fallback to clipmap PCF if ray query is not available at compile time
-        return min(planetVis, sampleCascadeShadow(0u, wp, N, L));
+        return max(minVis, min(planetVis, sampleCascadeShadow(0u, wp, N, L)));
         #endif
     }
 
@@ -308,7 +310,7 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L, bool forceClipmapShado
             }
         }
         #endif
-        return min(planetVis, v0);
+        return max(minVis, min(planetVis, v0));
     }
 
     float v1 = sampleCascadeShadow(cm.i1, wp, N, L);
@@ -337,7 +339,7 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L, bool forceClipmapShado
         }
     }
     #endif
-    return min(planetVis, vis);
+    return max(minVis, min(planetVis, vis));
 }
 
 void main(){

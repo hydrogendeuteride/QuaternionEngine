@@ -524,6 +524,9 @@ void SceneManager::update_scene()
                                         ss.enabled ? 1.0f : 0.0f,
                                         planetReceiverShadowMaps,
                                         glm::radians(std::max(0.0f, ss.planetSunAngularRadiusDeg)));
+
+        sceneData.shadowTuning = glm::vec4(std::clamp(ss.shadowMinVisibility, 0.0f, 1.0f),
+                                           0.0f, 0.0f, 0.0f);
     }
 
     if (_planetSystem)

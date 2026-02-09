@@ -1328,6 +1328,10 @@ namespace
         ss.hybridRayQueryEnabled = ss.enabled && (ss.mode != 0);
 
         ImGui::Separator();
+        ImGui::SliderFloat("Shadow min visibility", &ss.shadowMinVisibility, 0.0f, 0.5f, "%.2f");
+        ImGui::TextWrapped("Keeps some direct sun light in shadow (0 = full dark).");
+
+        ImGui::Separator();
         ImGui::TextUnformatted("Shadow Map Resolution");
         {
             static constexpr uint32_t kResValues[] = {256u, 512u, 1024u, 2048u, 4096u, 8192u};

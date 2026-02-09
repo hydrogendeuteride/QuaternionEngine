@@ -160,6 +160,10 @@ struct GPUSceneData {
     // Analytic planet shadow occluders (max 4):
     // xyz = center in render-local space, w = radius in meters.
     glm::vec4 planetOccluders[4];
+
+    // Shadow tuning (match shaders/input_structures.glsl)
+    // shadowTuning.x = minimum sun shadow visibility (0..1)
+    glm::vec4 shadowTuning;
 };
 
 enum class MaterialPass :uint8_t {
