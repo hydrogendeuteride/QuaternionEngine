@@ -350,7 +350,7 @@ target_include_directories(vulkan_engine PUBLIC
 
 option(ENABLE_MIKKTS "Use MikkTSpace for tangent generation" ON)
 
-target_link_libraries(vulkan_engine PUBLIC vma glm Vulkan::Vulkan fmt::fmt stb_image SDL2::SDL2 vkbootstrap imgui fastgltf::fastgltf ImGuizmo BVH2)
+target_link_libraries(vulkan_engine PUBLIC vma glm Vulkan::Vulkan fmt::fmt stb_image SDL2::SDL2 vkbootstrap imgui fastgltf::fastgltf ImGuizmo BVH2 orbitsim)
 if (VULKAN_ENGINE_USE_JOLT)
   target_link_libraries(vulkan_engine PUBLIC Jolt::Jolt)
   target_compile_definitions(vulkan_engine PUBLIC VULKAN_ENGINE_USE_JOLT=1)

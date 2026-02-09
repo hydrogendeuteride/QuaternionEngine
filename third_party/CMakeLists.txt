@@ -81,6 +81,11 @@ target_include_directories(BVH2 INTERFACE taskflow)
 
 target_include_directories(stb_image INTERFACE stb_image)
 
+# orbitsim (header-only)
+add_library(orbitsim INTERFACE)
+target_include_directories(orbitsim INTERFACE orbitsim/include)
+target_link_libraries(orbitsim INTERFACE glm)
+
 # MikkTSpace (optional)
 add_library(mikktspace STATIC MikkTSpace/mikktspace.c)
 target_include_directories(mikktspace PUBLIC MikkTSpace)

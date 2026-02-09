@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include "orbitsim/orbitsim.hpp"
 
 namespace Game
 {

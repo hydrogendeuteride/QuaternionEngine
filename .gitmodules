@@ -11,3 +11,6 @@
 [submodule "third_party/JoltPhysics"]
 	path = third_party/JoltPhysics
 	url = https://github.com/jrouwe/JoltPhysics.git
+[submodule "third_party/orbitsim"]
+	path = third_party/orbitsim
+	url = https://github.com/hydrogendeuteride/orbitsim.git
