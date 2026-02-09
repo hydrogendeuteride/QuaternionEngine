@@ -13,6 +13,8 @@
 
 namespace Game
 {
+    struct OrbitsimDemo;
+
     // ============================================================================
     // RebasingTestGame: Stress-test for floating origin + velocity rebasing.
     //
@@ -24,8 +26,8 @@ namespace Game
     class RebasingTestGame final : public GameRuntime::IGameCallbacks
     {
     public:
-        RebasingTestGame() = default;
-        ~RebasingTestGame() override = default;
+        RebasingTestGame();
+        ~RebasingTestGame() override;
 
         void on_init(GameRuntime::Runtime &runtime) override;
         void on_update(float dt) override;
@@ -49,6 +51,9 @@ namespace Game
 
         EntityId _ship_entity;
         EntityId _probe_entity;
+        EntityId _moon_entity;
+
+        std::unique_ptr<OrbitsimDemo> _orbitsim;
 
         // Planet configuration (world-space, meters)
         std::string _planet_name{"earth"};
@@ -56,8 +61,10 @@ namespace Game
         double _planet_radius_m{6'371'000.0};
 
         // Orbit configuration (meters / seconds)
+        bool _use_orbitsim{false};
         double _orbit_altitude_m{400'000.0};
         double _orbit_speed_scale{10.0}; // scales circular speed via mu *= scale^2
+        double _moon_distance_m{384'400'000.0};
 
         // Earth gravitational parameter (m^3/s^2). We scale this to get faster orbits.
         double _mu_base_m3ps2{3.986004418e14};

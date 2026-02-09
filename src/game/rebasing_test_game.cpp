@@ -13,13 +13,23 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include "orbitsim/orbitsim.hpp"
+#include "orbitsim/game_sim.hpp"
+#include "orbitsim/orbit_utils.hpp"
 
 namespace Game
 {
+    struct OrbitsimDemo
+    {
+        orbitsim::GameSimulation sim{};
+        orbitsim::BodyId earth_id{orbitsim::kInvalidBodyId};
+        orbitsim::BodyId moon_id{orbitsim::kInvalidBodyId};
+        orbitsim::SpacecraftId ship_id{orbitsim::kInvalidSpacecraftId};
+    };
+
     namespace
     {
         constexpr glm::vec4 COLOR_PLANET_TO_SHIP{0.2f, 0.8f, 1.0f, 1.0f};
+        constexpr glm::vec4 COLOR_PLANET_TO_MOON{0.8f, 0.8f, 0.9f, 0.8f};
         constexpr glm::vec4 COLOR_VELOCITY{1.0f, 0.35f, 0.1f, 1.0f};
         constexpr glm::vec4 COLOR_TRAIL{0.8f, 0.8f, 0.2f, 0.9f};
         constexpr glm::vec4 COLOR_ORBIT{0.2f, 0.9f, 0.2f, 0.6f};
@@ -41,7 +51,62 @@ namespace Game
             const double d2 = glm::dot(d, d);
             return std::isfinite(d2) && d2 > 0.0;
         }
+
+        struct OrbitRelativeState
+        {
+            orbitsim::Vec3 position_m{0.0, 0.0, 0.0};
+            orbitsim::Vec3 velocity_mps{0.0, 0.0, 0.0};
+        };
+
+        OrbitRelativeState circular_orbit_relative_state_xz(const double gravitational_constant,
+                                                            const double central_mass_kg,
+                                                            const double orbital_radius_m,
+                                                            const double arg_latitude_rad = 0.0)
+        {
+            if (!(central_mass_kg > 0.0) || !(orbital_radius_m > 0.0) || !std::isfinite(gravitational_constant))
+            {
+                return {};
+            }
+
+            const double mu = gravitational_constant * central_mass_kg;
+            const double v_circ = std::sqrt(mu / orbital_radius_m);
+
+            const double cos_u = std::cos(arg_latitude_rad);
+            const double sin_u = std::sin(arg_latitude_rad);
+
+            OrbitRelativeState out;
+            out.position_m = orbitsim::Vec3{orbital_radius_m * cos_u, 0.0, orbital_radius_m * sin_u};
+            out.velocity_mps = orbitsim::Vec3{-v_circ * sin_u, 0.0, v_circ * cos_u};
+            return out;
+        }
+
+        orbitsim::TwoBodyBarycentricStates two_body_circular_barycentric_xz(const double gravitational_constant,
+                                                                            const double mass_a_kg,
+                                                                            const double mass_b_kg,
+                                                                            const double separation_m,
+                                                                            const double arg_latitude_rad = 0.0)
+        {
+            const double m_tot = mass_a_kg + mass_b_kg;
+            if (!(m_tot > 0.0) || !(separation_m > 0.0) || !std::isfinite(m_tot))
+            {
+                return {};
+            }
+
+            const OrbitRelativeState rel = circular_orbit_relative_state_xz(gravitational_constant, m_tot, separation_m,
+                                                                            arg_latitude_rad);
+
+            const double frac_a = mass_b_kg / m_tot;
+            const double frac_b = mass_a_kg / m_tot;
+
+            orbitsim::TwoBodyBarycentricStates out;
+            out.state_a = orbitsim::make_state(-frac_a * rel.position_m, -frac_a * rel.velocity_mps);
+            out.state_b = orbitsim::make_state(frac_b * rel.position_m, frac_b * rel.velocity_mps);
+            return out;
+        }
     } // namespace
+
+    RebasingTestGame::RebasingTestGame() = default;
+    RebasingTestGame::~RebasingTestGame() = default;
 
     void RebasingTestGame::on_init(GameRuntime::Runtime &runtime)
     {
@@ -114,8 +179,6 @@ namespace Game
             return;
         }
 
-        auto &api = _runtime->api();
-
         if (!_physics_context)
         {
             return;
@@ -136,6 +199,84 @@ namespace Game
         if (changed(vel_origin_before, vel_origin_after_rebase, _last_velocity_delta_world))
         {
             ++_velocity_rebase_count;
+        }
+
+        if (_use_orbitsim && _orbitsim)
+        {
+            const double dt_s = static_cast<double>(fixed_dt);
+            _orbitsim->sim.step(dt_s);
+
+            const orbitsim::MassiveBody *earth = _orbitsim->sim.body_by_id(_orbitsim->earth_id);
+            const orbitsim::MassiveBody *moon = _orbitsim->sim.body_by_id(_orbitsim->moon_id);
+            const orbitsim::Spacecraft *ship = _orbitsim->sim.spacecraft_by_id(_orbitsim->ship_id);
+            if (earth && ship)
+            {
+                const orbitsim::Vec3 ship_pos_rel_m = ship->state.position_m - earth->state.position_m;
+                const orbitsim::Vec3 ship_vel_rel_mps = ship->state.velocity_mps - earth->state.velocity_mps;
+
+                const WorldVec3 ship_pos_world = _planet_center_world + WorldVec3(ship_pos_rel_m);
+                const glm::dvec3 ship_vel_world_d(ship_vel_rel_mps);
+
+                const WorldVec3 physics_origin_world = _physics_context->origin_world();
+                const glm::dvec3 v_origin_world = _physics_context->velocity_origin_world();
+
+                auto sync_body = [&](EntityId id, const WorldVec3 &pos_world, const glm::dvec3 &vel_world_d) {
+                    Entity *ent = _world.entities().find(id);
+                    if (!ent || !ent->has_physics())
+                    {
+                        return;
+                    }
+
+                    const Physics::BodyId body_id{ent->physics_body_value()};
+                    if (!_physics->is_body_valid(body_id))
+                    {
+                        return;
+                    }
+
+                    const glm::dvec3 p_local = world_to_local_d(pos_world, physics_origin_world);
+                    const glm::vec3 v_local_f = glm::vec3(vel_world_d - v_origin_world);
+
+                    _physics->set_transform(body_id, p_local, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+                    _physics->set_linear_velocity(body_id, v_local_f);
+                    _physics->set_angular_velocity(body_id, glm::vec3(0.0f));
+                    _physics->activate(body_id);
+                };
+
+                sync_body(_ship_entity, ship_pos_world, ship_vel_world_d);
+
+                const WorldVec3 probe_pos_world = ship_pos_world + WorldVec3(_probe_offset_world);
+                sync_body(_probe_entity, probe_pos_world, ship_vel_world_d);
+
+                if (moon)
+                {
+                    const orbitsim::Vec3 moon_pos_rel_m = moon->state.position_m - earth->state.position_m;
+                    const WorldVec3 moon_pos_world = _planet_center_world + WorldVec3(moon_pos_rel_m);
+                    if (Entity *moon_ent = _world.entities().find(_moon_entity))
+                    {
+                        moon_ent->set_position_world(moon_pos_world);
+                        moon_ent->set_rotation(glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+                    }
+                }
+            }
+
+            _world.post_physics_step();
+
+            _trail_sample_accum_s += static_cast<double>(fixed_dt);
+            if (_draw_trail && _trail_sample_interval_s > 0.0 && _trail_sample_accum_s >= _trail_sample_interval_s)
+            {
+                _trail_sample_accum_s = 0.0;
+
+                if (Entity *ship_ent = _world.entities().find(_ship_entity))
+                {
+                    _ship_trail_world.push_back(ship_ent->position_world());
+                    while (_ship_trail_world.size() > _trail_max_points)
+                    {
+                        _ship_trail_world.erase(_ship_trail_world.begin());
+                    }
+                }
+            }
+
+            return;
         }
 
         const double orbit_radius_m = _planet_radius_m + _orbit_altitude_m;
@@ -314,6 +455,8 @@ namespace Game
 
         _ship_entity = EntityId{};
         _probe_entity = EntityId{};
+        _moon_entity = EntityId{};
+        _orbitsim.reset();
         _ship_trail_world.clear();
         _trail_sample_accum_s = 0.0;
         _origin_rebase_count = 0;
@@ -384,11 +527,86 @@ namespace Game
         const double mu = _mu_base_m3ps2 * speed_scale * speed_scale;
         const double v_circ = (orbit_radius_m > 0.0) ? std::sqrt(mu / orbit_radius_m) : 0.0;
 
-        const WorldVec3 ship_pos_world = _planet_center_world + WorldVec3(orbit_radius_m, 0.0, 0.0);
-        const glm::dvec3 ship_vel_world_d(0.0, 0.0, v_circ);
+        WorldVec3 ship_pos_world = _planet_center_world + WorldVec3(orbit_radius_m, 0.0, 0.0);
+        glm::dvec3 ship_vel_world_d(0.0, 0.0, v_circ);
 
-        const WorldVec3 probe_pos_world = ship_pos_world + WorldVec3(_probe_offset_world);
-        const glm::dvec3 probe_vel_world_d = ship_vel_world_d;
+        WorldVec3 probe_pos_world = ship_pos_world + WorldVec3(_probe_offset_world);
+        glm::dvec3 probe_vel_world_d = ship_vel_world_d;
+
+        WorldVec3 moon_pos_world(0.0);
+        bool have_moon = false;
+
+        if (_use_orbitsim)
+        {
+            auto demo = std::make_unique<OrbitsimDemo>();
+
+            orbitsim::GameSimulation::Config cfg;
+            cfg.gravitational_constant = orbitsim::kGravitationalConstant_SI * speed_scale * speed_scale;
+            cfg.softening_length_m = 0.0;
+            cfg.enable_events = false;
+
+            demo->sim = orbitsim::GameSimulation(cfg);
+
+            orbitsim::MassiveBody earth{};
+            earth.mass_kg = 5.972e24;
+            earth.radius_m = _planet_radius_m;
+            earth.atmosphere_top_height_m = 100'000.0;
+            earth.terrain_max_height_m = 8'848.0;
+            earth.soi_radius_m = 9.24e8;
+
+            orbitsim::MassiveBody moon{};
+            moon.mass_kg = 7.342e22;
+            moon.radius_m = 1'737'400.0;
+            moon.soi_radius_m = 6.61e7;
+
+            const double moon_sep_m = std::max(_planet_radius_m * 2.0, _moon_distance_m);
+            const auto em_init = two_body_circular_barycentric_xz(cfg.gravitational_constant,
+                                                                  earth.mass_kg,
+                                                                  moon.mass_kg,
+                                                                  moon_sep_m,
+                                                                  0.0);
+            earth.state = em_init.state_a;
+            moon.state = em_init.state_b;
+
+            const auto earth_h = demo->sim.create_body(earth);
+            const auto moon_h = demo->sim.create_body(moon);
+
+            if (earth_h.valid() && moon_h.valid())
+            {
+                demo->earth_id = earth_h.id;
+                demo->moon_id = moon_h.id;
+
+                orbitsim::Spacecraft ship{};
+                ship.dry_mass_kg = 1'000.0;
+                ship.prop_mass_kg = 500.0;
+                ship.engines.push_back(orbitsim::Engine{10'000.0, 320.0, 0.1});
+
+                const OrbitRelativeState ship_rel =
+                    circular_orbit_relative_state_xz(cfg.gravitational_constant,
+                                                     earth.mass_kg,
+                                                     std::max(1.0, orbit_radius_m),
+                                                     0.0);
+                ship.state = orbitsim::make_state(earth.state.position_m + ship_rel.position_m,
+                                                  earth.state.velocity_mps + ship_rel.velocity_mps);
+
+                const auto ship_h = demo->sim.create_spacecraft(ship);
+                if (ship_h.valid())
+                {
+                    demo->ship_id = ship_h.id;
+
+                    ship_pos_world = _planet_center_world + WorldVec3(ship_rel.position_m);
+                    ship_vel_world_d = glm::dvec3(ship_rel.velocity_mps);
+
+                    probe_pos_world = ship_pos_world + WorldVec3(_probe_offset_world);
+                    probe_vel_world_d = ship_vel_world_d;
+
+                    moon_pos_world = _planet_center_world + WorldVec3(moon.state.position_m - earth.state.position_m);
+                    have_moon = true;
+
+                    _orbitsim = std::move(demo);
+                }
+            }
+        }
 
         if (_enable_velocity_rebasing && _physics_context)
         {
@@ -460,6 +678,22 @@ namespace Game
         spawn_orbiter("ship", ship_pos_world, ship_vel_local_f, glm::vec3(20'000.0f), _ship_entity);
         spawn_orbiter("probe", probe_pos_world, probe_vel_local_f, glm::vec3(12'000.0f), _probe_entity);
 
+        if (have_moon)
+        {
+            Transform tr{};
+            tr.position_world = moon_pos_world;
+            tr.rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            tr.scale = glm::vec3(150'000.0f);
+
+            if (Entity *ent = _world.builder("moon")
+                                   .transform(tr)
+                                   .render_primitive(GameAPI::PrimitiveType::Sphere)
+                                   .build())
+            {
+                _moon_entity = ent->id();
+            }
+        }
+
         if (_ship_entity.is_valid())
         {
             _world.set_rebase_anchor(_ship_entity);
@@ -487,6 +721,8 @@ namespace Game
 
         _world.clear();
         _world.set_physics(nullptr);
+        _orbitsim.reset();
+        _moon_entity = EntityId{};
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (_runtime)
@@ -565,17 +801,28 @@ namespace Game
 
         const double min0 = 0.0;
         bool orbit_changed = false;
+        orbit_changed |= ImGui::Checkbox("Use orbitsim (Earth-Moon)", &_use_orbitsim);
         orbit_changed |= ImGui::DragScalar("Altitude (m)", ImGuiDataType_Double, &_orbit_altitude_m, 10'000.0f, &min0,
                                            nullptr, "%.0f");
         orbit_changed |= ImGui::DragScalar("Speed scale", ImGuiDataType_Double, &_orbit_speed_scale, 0.1f, &min0,
                                            nullptr, "%.2f");
         orbit_changed |= ImGui::DragScalar("Probe offset Y (m)", ImGuiDataType_Double, &_probe_offset_world.y, 1'000.0,
                                            nullptr, nullptr, "%.0f");
+        if (_use_orbitsim)
+        {
+            orbit_changed |= ImGui::DragScalar("Moon distance (m)", ImGuiDataType_Double, &_moon_distance_m, 100'000.0f,
+                                               &min0, nullptr, "%.0f");
+        }
 
         if (orbit_changed)
         {
             _orbit_altitude_m = std::max(0.0, _orbit_altitude_m);
             _orbit_speed_scale = std::max(0.0, _orbit_speed_scale);
+            if (_use_orbitsim)
+            {
+                const double min_sep_m = _planet_radius_m * 2.0;
+                _moon_distance_m = std::max(min_sep_m, _moon_distance_m);
+            }
         }
 
         ImGui::Separator();
@@ -629,6 +876,42 @@ namespace Game
         ImGui::Text("Velocity rebases: %llu (last delta %.1f, %.1f, %.1f)",
                     static_cast<unsigned long long>(_velocity_rebase_count),
                     _last_velocity_delta_world.x, _last_velocity_delta_world.y, _last_velocity_delta_world.z);
+
+        if (_use_orbitsim)
+        {
+            ImGui::Separator();
+            ImGui::TextUnformatted("orbitsim");
+            if (_orbitsim)
+            {
+                ImGui::Text("t (s): %.3f", _orbitsim->sim.time_s());
+
+                const orbitsim::MassiveBody *earth = _orbitsim->sim.body_by_id(_orbitsim->earth_id);
+                const orbitsim::MassiveBody *moon = _orbitsim->sim.body_by_id(_orbitsim->moon_id);
+                const orbitsim::Spacecraft *ship_sc = _orbitsim->sim.spacecraft_by_id(_orbitsim->ship_id);
+                if (earth && moon)
+                {
+                    const orbitsim::Vec3 moon_rel_m = moon->state.position_m - earth->state.position_m;
+                    ImGui::Text("Moon rel (m): %.0f, %.0f, %.0f (|r|=%.0f)",
+                                moon_rel_m.x,
+                                moon_rel_m.y,
+                                moon_rel_m.z,
+                                safe_length(moon_rel_m));
+                }
+                if (earth && ship_sc)
+                {
+                    const orbitsim::Vec3 ship_rel_m = ship_sc->state.position_m - earth->state.position_m;
+                    ImGui::Text("Ship rel (m): %.0f, %.0f, %.0f (|r|=%.0f)",
+                                ship_rel_m.x,
+                                ship_rel_m.y,
+                                ship_rel_m.z,
+                                safe_length(ship_rel_m));
+                }
+            }
+            else
+            {
+                ImGui::TextUnformatted("Not initialized (reset required).");
+            }
+        }
 
         if (Entity *ship = _world.entities().find(_ship_entity))
         {
@@ -686,6 +969,13 @@ namespace Game
 
         api.debug_draw_line(glm::dvec3(_planet_center_world), glm::dvec3(ship_pos_world), COLOR_PLANET_TO_SHIP, ttl_s,
                             true);
+
+        if (Entity *moon = _world.entities().find(_moon_entity))
+        {
+            const WorldVec3 moon_pos_world = moon->get_render_position_world(_runtime->interpolation_alpha());
+            api.debug_draw_line(glm::dvec3(_planet_center_world), glm::dvec3(moon_pos_world), COLOR_PLANET_TO_MOON,
+                                ttl_s, true);
+        }
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (_physics && ship->has_physics() && _velocity_vector_seconds > 0.0)
