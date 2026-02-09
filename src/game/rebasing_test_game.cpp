@@ -23,7 +23,6 @@ namespace Game
         orbitsim::GameSimulation sim{};
         orbitsim::BodyId earth_id{orbitsim::kInvalidBodyId};
         orbitsim::BodyId moon_id{orbitsim::kInvalidBodyId};
-        orbitsim::SpacecraftId ship_id{orbitsim::kInvalidSpacecraftId};
     };
 
     namespace
@@ -102,6 +101,73 @@ namespace Game
             out.state_a = orbitsim::make_state(-frac_a * rel.position_m, -frac_a * rel.velocity_mps);
             out.state_b = orbitsim::make_state(frac_b * rel.position_m, frac_b * rel.velocity_mps);
             return out;
+        }
+
+        glm::dvec3 point_mass_accel(const double gravitational_constant,
+                                    const double mass_kg,
+                                    const glm::dvec3 &r_m,
+                                    const double softening_length2_m2)
+        {
+            if (!(gravitational_constant > 0.0) || !(mass_kg > 0.0))
+            {
+                return glm::dvec3(0.0);
+            }
+
+            const double r2 = glm::dot(r_m, r_m) + softening_length2_m2;
+            if (!std::isfinite(r2) || r2 <= 0.0)
+            {
+                return glm::dvec3(0.0);
+            }
+
+            const double inv_r = 1.0 / std::sqrt(r2);
+            const double inv_r3 = inv_r * inv_r * inv_r;
+            const glm::dvec3 a = (-gravitational_constant * mass_kg) * r_m * inv_r3;
+
+            if (!std::isfinite(a.x) || !std::isfinite(a.y) || !std::isfinite(a.z))
+            {
+                return glm::dvec3(0.0);
+            }
+
+            return a;
+        }
+
+        // Acceleration in a translating Earth-centered frame:
+        //   a_rel = a_sc_bary - a_earth_bary
+        // where barycentric acceleration is computed from all massive bodies.
+        glm::dvec3 orbitsim_nbody_accel_earth_fixed(const OrbitsimDemo &demo, const glm::dvec3 &p_rel_m)
+        {
+            const orbitsim::MassiveBody *earth = demo.sim.body_by_id(demo.earth_id);
+            if (!earth)
+            {
+                return glm::dvec3(0.0);
+            }
+
+            const double G = demo.sim.config().gravitational_constant;
+            const double eps_m = demo.sim.config().softening_length_m;
+            const double eps2 = eps_m * eps_m;
+
+            const glm::dvec3 p_earth_bary = earth->state.position_m;
+            const glm::dvec3 p_sc_bary = p_earth_bary + p_rel_m;
+
+            glm::dvec3 a_sc_bary(0.0);
+            glm::dvec3 a_earth_bary(0.0);
+
+            // Spacecraft acceleration from central Earth.
+            a_sc_bary += point_mass_accel(G, earth->mass_kg, p_rel_m, eps2);
+
+            // Differential acceleration from other bodies (e.g., Moon).
+            for (const orbitsim::MassiveBody &body : demo.sim.massive_bodies())
+            {
+                if (body.id == demo.earth_id)
+                {
+                    continue;
+                }
+
+                a_sc_bary += point_mass_accel(G, body.mass_kg, p_sc_bary - glm::dvec3(body.state.position_m), eps2);
+                a_earth_bary += point_mass_accel(G, body.mass_kg, p_earth_bary - glm::dvec3(body.state.position_m), eps2);
+            }
+
+            return a_sc_bary - a_earth_bary;
         }
     } // namespace
 
@@ -201,82 +267,25 @@ namespace Game
             ++_velocity_rebase_count;
         }
 
-        if (_use_orbitsim && _orbitsim)
+        const bool use_orbitsim_nbody = _use_orbitsim && _orbitsim;
+        if (use_orbitsim_nbody)
         {
             const double dt_s = static_cast<double>(fixed_dt);
             _orbitsim->sim.step(dt_s);
 
+            // Visualize Moon's orbit around Earth (Earth-centered).
             const orbitsim::MassiveBody *earth = _orbitsim->sim.body_by_id(_orbitsim->earth_id);
             const orbitsim::MassiveBody *moon = _orbitsim->sim.body_by_id(_orbitsim->moon_id);
-            const orbitsim::Spacecraft *ship = _orbitsim->sim.spacecraft_by_id(_orbitsim->ship_id);
-            if (earth && ship)
+            if (earth && moon)
             {
-                const orbitsim::Vec3 ship_pos_rel_m = ship->state.position_m - earth->state.position_m;
-                const orbitsim::Vec3 ship_vel_rel_mps = ship->state.velocity_mps - earth->state.velocity_mps;
-
-                const WorldVec3 ship_pos_world = _planet_center_world + WorldVec3(ship_pos_rel_m);
-                const glm::dvec3 ship_vel_world_d(ship_vel_rel_mps);
-
-                const WorldVec3 physics_origin_world = _physics_context->origin_world();
-                const glm::dvec3 v_origin_world = _physics_context->velocity_origin_world();
-
-                auto sync_body = [&](EntityId id, const WorldVec3 &pos_world, const glm::dvec3 &vel_world_d) {
-                    Entity *ent = _world.entities().find(id);
-                    if (!ent || !ent->has_physics())
-                    {
-                        return;
-                    }
-
-                    const Physics::BodyId body_id{ent->physics_body_value()};
-                    if (!_physics->is_body_valid(body_id))
-                    {
-                        return;
-                    }
-
-                    const glm::dvec3 p_local = world_to_local_d(pos_world, physics_origin_world);
-                    const glm::vec3 v_local_f = glm::vec3(vel_world_d - v_origin_world);
-
-                    _physics->set_transform(body_id, p_local, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
-                    _physics->set_linear_velocity(body_id, v_local_f);
-                    _physics->set_angular_velocity(body_id, glm::vec3(0.0f));
-                    _physics->activate(body_id);
-                };
-
-                sync_body(_ship_entity, ship_pos_world, ship_vel_world_d);
-
-                const WorldVec3 probe_pos_world = ship_pos_world + WorldVec3(_probe_offset_world);
-                sync_body(_probe_entity, probe_pos_world, ship_vel_world_d);
-
-                if (moon)
+                const orbitsim::Vec3 moon_pos_rel_m = moon->state.position_m - earth->state.position_m;
+                const WorldVec3 moon_pos_world = _planet_center_world + WorldVec3(moon_pos_rel_m);
+                if (Entity *moon_ent = _world.entities().find(_moon_entity))
                 {
-                    const orbitsim::Vec3 moon_pos_rel_m = moon->state.position_m - earth->state.position_m;
-                    const WorldVec3 moon_pos_world = _planet_center_world + WorldVec3(moon_pos_rel_m);
-                    if (Entity *moon_ent = _world.entities().find(_moon_entity))
-                    {
-                        moon_ent->set_position_world(moon_pos_world);
-                        moon_ent->set_rotation(glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
-                    }
+                    moon_ent->set_position_world(moon_pos_world);
+                    moon_ent->set_rotation(glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
                 }
             }
-
-            _world.post_physics_step();
-
-            _trail_sample_accum_s += static_cast<double>(fixed_dt);
-            if (_draw_trail && _trail_sample_interval_s > 0.0 && _trail_sample_accum_s >= _trail_sample_interval_s)
-            {
-                _trail_sample_accum_s = 0.0;
-
-                if (Entity *ship_ent = _world.entities().find(_ship_entity))
-                {
-                    _ship_trail_world.push_back(ship_ent->position_world());
-                    while (_ship_trail_world.size() > _trail_max_points)
-                    {
-                        _ship_trail_world.erase(_ship_trail_world.begin());
-                    }
-                }
-            }
-
-            return;
         }
 
         const double orbit_radius_m = _planet_radius_m + _orbit_altitude_m;
@@ -284,9 +293,13 @@ namespace Game
         const double mu = _mu_base_m3ps2 * speed_scale * speed_scale;
 
         auto gravity_accel_world_at = [&](const WorldVec3 &p_world) -> glm::dvec3 {
-            const glm::dvec3 r = glm::dvec3(p_world - _planet_center_world);
+            const glm::dvec3 p_rel = glm::dvec3(p_world - _planet_center_world);
+            if (use_orbitsim_nbody)
+            {
+                return orbitsim_nbody_accel_earth_fixed(*_orbitsim, p_rel);
+            }
 
-            const double r_len = safe_length(r);
+            const double r_len = safe_length(p_rel);
             if (r_len <= 1.0 || !std::isfinite(r_len))
             {
                 return glm::dvec3(0.0);
@@ -295,7 +308,7 @@ namespace Game
             // a = -mu * r / |r|^3
             const double inv_r = 1.0 / r_len;
             const double inv_r3 = inv_r * inv_r * inv_r;
-            const glm::dvec3 a_world = (-mu) * r * inv_r3;
+            const glm::dvec3 a_world = (-mu) * p_rel * inv_r3;
 
             if (!std::isfinite(a_world.x) || !std::isfinite(a_world.y) || !std::isfinite(a_world.z))
             {
@@ -390,7 +403,7 @@ namespace Game
             _physics->activate(body_id);
         };
 
-        // Apply central gravity to the orbiting bodies (mass-independent).
+        // Apply gravity to the orbiting bodies (mass-independent).
         if (orbit_radius_m > 0.0)
         {
             apply_gravity_accel(_ship_entity);
@@ -576,35 +589,22 @@ namespace Game
                 demo->earth_id = earth_h.id;
                 demo->moon_id = moon_h.id;
 
-                orbitsim::Spacecraft ship{};
-                ship.dry_mass_kg = 1'000.0;
-                ship.prop_mass_kg = 500.0;
-                ship.engines.push_back(orbitsim::Engine{10'000.0, 320.0, 0.1});
-
                 const OrbitRelativeState ship_rel =
                     circular_orbit_relative_state_xz(cfg.gravitational_constant,
                                                      earth.mass_kg,
                                                      std::max(1.0, orbit_radius_m),
                                                      0.0);
-                ship.state = orbitsim::make_state(earth.state.position_m + ship_rel.position_m,
-                                                  earth.state.velocity_mps + ship_rel.velocity_mps);
 
-                const auto ship_h = demo->sim.create_spacecraft(ship);
-                if (ship_h.valid())
-                {
-                    demo->ship_id = ship_h.id;
+                ship_pos_world = _planet_center_world + WorldVec3(ship_rel.position_m);
+                ship_vel_world_d = glm::dvec3(ship_rel.velocity_mps);
 
-                    ship_pos_world = _planet_center_world + WorldVec3(ship_rel.position_m);
-                    ship_vel_world_d = glm::dvec3(ship_rel.velocity_mps);
+                probe_pos_world = ship_pos_world + WorldVec3(_probe_offset_world);
+                probe_vel_world_d = ship_vel_world_d;
 
-                    probe_pos_world = ship_pos_world + WorldVec3(_probe_offset_world);
-                    probe_vel_world_d = ship_vel_world_d;
+                moon_pos_world = _planet_center_world + WorldVec3(moon.state.position_m - earth.state.position_m);
+                have_moon = true;
 
-                    moon_pos_world = _planet_center_world + WorldVec3(moon.state.position_m - earth.state.position_m);
-                    have_moon = true;
-
-                    _orbitsim = std::move(demo);
-                }
+                _orbitsim = std::move(demo);
             }
         }
 
@@ -887,7 +887,6 @@ namespace Game
 
                 const orbitsim::MassiveBody *earth = _orbitsim->sim.body_by_id(_orbitsim->earth_id);
                 const orbitsim::MassiveBody *moon = _orbitsim->sim.body_by_id(_orbitsim->moon_id);
-                const orbitsim::Spacecraft *ship_sc = _orbitsim->sim.spacecraft_by_id(_orbitsim->ship_id);
                 if (earth && moon)
                 {
                     const orbitsim::Vec3 moon_rel_m = moon->state.position_m - earth->state.position_m;
@@ -896,15 +895,6 @@ namespace Game
                                 moon_rel_m.y,
                                 moon_rel_m.z,
                                 safe_length(moon_rel_m));
-                }
-                if (earth && ship_sc)
-                {
-                    const orbitsim::Vec3 ship_rel_m = ship_sc->state.position_m - earth->state.position_m;
-                    ImGui::Text("Ship rel (m): %.0f, %.0f, %.0f (|r|=%.0f)",
-                                ship_rel_m.x,
-                                ship_rel_m.y,
-                                ship_rel_m.z,
-                                safe_length(ship_rel_m));
                 }
             }
             else
