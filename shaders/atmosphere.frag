@@ -9,6 +9,8 @@ layout(location = 0) out vec4 outColor;
 layout(set = 1, binding = 0) uniform sampler2D hdrInput;
 layout(set = 1, binding = 1) uniform sampler2D posTex;
 layout(set = 1, binding = 2) uniform sampler2D transmittanceLut;
+layout(set = 1, binding = 3) uniform sampler2D cloudNoiseTex;
+layout(set = 1, binding = 4) uniform sampler2D cloudWeatherTex;
 
 layout(push_constant) uniform AtmospherePush
 {
@@ -29,9 +31,10 @@ const float INV_PI = 0.3183098861837907;
 const int FLAG_ATMOSPHERE = 1;
 const int FLAG_CLOUDS = 2;
 
-const float CLOUD_BETA = 2.0e-4;
+const float CLOUD_BETA = 1.0e-3;
 const float CLOUD_AMBIENT_SCALE = 0.25;
-const float CLOUD_PHASE_G = 0.70;
+const float CLOUD_PHASE_G = 0.80;
+const float CLOUD_SCATTER_SCALE = 2.0;
 
 // ── Utility ──────────────────────────────────────────────────────────
 
@@ -43,7 +46,7 @@ vec3 getCameraWorldPosition()
     return -rot * T;
 }
 
-// ── Hash / Noise ─────────────────────────────────────────────────────
+// ── Hash ─────────────────────────────────────────────────────────────
 
 float hash12(vec2 p)
 {
@@ -52,82 +55,19 @@ float hash12(vec2 p)
     return fract((p3.x + p3.y) * p3.z);
 }
 
-float hash13(vec3 p3)
+// ── Geometry / Mapping ───────────────────────────────────────────────
+
+vec2 octa_encode(vec3 n)
 {
-    p3 = fract(p3 * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
-
-float value_noise2(vec2 p)
-{
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-
-    float a = hash12(i);
-    float b = hash12(i + vec2(1.0, 0.0));
-    float c = hash12(i + vec2(0.0, 1.0));
-    float d = hash12(i + vec2(1.0, 1.0));
-
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-
-float fbm2(vec2 p)
-{
-    float sum = 0.0, amp = 0.55, freq = 1.0;
-    for (int i = 0; i < 4; ++i)
+    // Map unit vector -> octahedral UV in [0,1].
+    // (No trig; reasonably uniform sampling for spherical fields.)
+    n /= (abs(n.x) + abs(n.y) + abs(n.z) + 1e-6);
+    vec2 e = n.xz;
+    if (n.y < 0.0)
     {
-        sum += amp * value_noise2(p * freq);
-        freq *= 2.02;
-        amp *= 0.5;
+        e = (1.0 - abs(e.yx)) * sign(e);
     }
-    return clamp(sum, 0.0, 1.0);
-}
-
-float value_noise3(vec3 p)
-{
-    vec3 i = floor(p);
-    vec3 f = fract(p);
-    vec3 u = f * f * (3.0 - 2.0 * f);
-
-    float n000 = hash13(i);
-    float n100 = hash13(i + vec3(1, 0, 0));
-    float n010 = hash13(i + vec3(0, 1, 0));
-    float n110 = hash13(i + vec3(1, 1, 0));
-    float n001 = hash13(i + vec3(0, 0, 1));
-    float n101 = hash13(i + vec3(1, 0, 1));
-    float n011 = hash13(i + vec3(0, 1, 1));
-    float n111 = hash13(i + vec3(1, 1, 1));
-
-    float x00 = mix(n000, n100, u.x);
-    float x10 = mix(n010, n110, u.x);
-    float x01 = mix(n001, n101, u.x);
-    float x11 = mix(n011, n111, u.x);
-
-    return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
-}
-
-float fbm3(vec3 p)
-{
-    float sum = 0.0, amp = 0.55, freq = 1.0;
-    for (int i = 0; i < 4; ++i)
-    {
-        sum += amp * value_noise3(p * freq);
-        freq *= 2.02;
-        amp *= 0.5;
-    }
-    return clamp(sum, 0.0, 1.0);
-}
-
-// ── Geometry ─────────────────────────────────────────────────────────
-
-vec2 dir_to_equirect(vec3 d)
-{
-    d = normalize(d);
-    float u = atan(d.z, d.x) * INV_TWO_PI + 0.5;
-    float v = asin(clamp(d.y, -1.0, 1.0)) * INV_PI + 0.5;
-    return vec2(u, v);
+    return e * 0.5 + 0.5;
 }
 
 bool ray_sphere_intersect(vec3 ro, vec3 rd, vec3 center, float radius, out float t0, out float t1)
@@ -158,7 +98,7 @@ float phase_mie_hg(float cosTheta, float g)
 
 // ── Cloud Density ────────────────────────────────────────────────────
 
-float cloud_density(vec3 p, vec3 center, float planetRadius)
+float cloud_density(vec3 dir, float height, float timeSec, bool cloudsActive, vec2 windHeading, vec2 windSC)
 {
     float baseHeightM  = max(pc.cloud_layer.x, 0.0);
     float thicknessM   = max(pc.cloud_layer.y, 0.0);
@@ -166,45 +106,76 @@ float cloud_density(vec3 p, vec3 center, float planetRadius)
     float coverage     = clamp(pc.cloud_layer.w, 0.0, 0.999);
 
     if (thicknessM <= 0.0 || densityScale <= 0.0) return 0.0;
-
-    float height = length(p - center) - planetRadius;
     if (height < baseHeightM || height > baseHeightM + thicknessM) return 0.0;
 
     float h01 = (height - baseHeightM) / max(thicknessM, 1e-3);
-    float profile = smoothstep(0.0, 0.15, h01) * (1.0 - smoothstep(0.85, 1.0, h01));
+    // Weather-driven vertical profile (type: 0=stratus, 1=cumulus-ish).
+    vec3 dirW = dir;
+    if (cloudsActive)
+    {
+        // Build a stable local tangent frame and advect along it.
+        vec3 east = cross(vec3(0.0, 1.0, 0.0), dir);
+        float eLen2 = dot(east, east);
+        if (eLen2 < 1e-6)
+        {
+            east = cross(vec3(1.0, 0.0, 0.0), dir);
+            eLen2 = dot(east, east);
+        }
+        east *= inversesqrt(max(eLen2, 1e-6));
 
-    vec3 dir = normalize(p - center);
-    vec2 uv = dir_to_equirect(dir);
+        vec3 north = cross(dir, east);
+        vec3 windT = east * windHeading.x + north * windHeading.y;
 
-    float timeSec  = max(pc.jitter_params.z, 0.0);
-    float windSpeed = pc.cloud_params.z;
-    float windAngle = pc.cloud_params.w;
-    uv += vec2(cos(windAngle), sin(windAngle)) * (windSpeed * timeSec);
-    uv.x = fract(uv.x);
-    uv.y = clamp(uv.y, 0.001, 0.999);
+        // Move along a great-circle arc by angle = (windSpeed*time)/R.
+        float s = windSC.x;
+        float c = windSC.y;
+        dirW = dir * c + windT * s;
+    }
+    vec2 uvW = octa_encode(dirW);
+    vec3 weather = textureLod(cloudWeatherTex, uvW, 0.0).rgb;
+
+    float localCov = clamp(weather.r, 0.0, 1.0);
+    float type01   = clamp(weather.g, 0.0, 1.0);
+    float heightVar = clamp(weather.b, 0.0, 1.0);
+
+    float cov = max(0.0, localCov - coverage) / max(1.0 - coverage, 1e-3);
+    cov = pow(cov, 0.65);
+    if (cov <= 0.0) return 0.0;
+
+    float bottom = smoothstep(0.0, mix(0.28, 0.10, type01), h01);
+    float top    = 1.0 - smoothstep(mix(0.62, 0.86, type01), 1.0, h01);
+    float profile = bottom * top;
+    profile = pow(max(profile, 0.0), mix(1.8, 0.9, type01));
+    if (profile <= 0.0) return 0.0;
 
     float noiseScale  = max(pc.cloud_params.x, 0.001);
     float detailScale = max(pc.cloud_params.y, 0.001);
 
-    float covNoise = fbm2(uv * noiseScale);
-    float cov = max(0.0, covNoise - coverage) / max(1.0 - coverage, 1e-3);
+    vec2 flow = vec2(0.007, 0.011) * timeSec;
 
-    float detail = fbm3(dir * detailScale + vec3(uv * 2.0, timeSec * 0.05));
+    // Shape + erosion from a tiling noise texture.
+    float baseN = textureLod(cloudNoiseTex, uvW * noiseScale + flow, 0.0).r;
+    float detailN = textureLod(cloudNoiseTex, uvW * detailScale + flow * 1.7 + vec2(h01 * 3.1, -h01 * 2.7), 0.0).r;
 
-    float d = cov * mix(0.35, 1.0, detail) * profile;
+    float baseShape = smoothstep(0.25, 0.75, baseN);
+
+    // Erode more for flatter cloud types; keep cumulus puffier.
+    float erosion = mix(0.35, 0.15, type01) * mix(0.25, 1.0, detailN);
+    float shape = max(0.0, baseShape - erosion) / max(1.0 - erosion, 1e-3);
+
+    float d = cov * profile * shape;
+    d *= mix(0.75, 1.25, heightVar);
     return max(d, 0.0) * densityScale;
 }
 
 // ── Transmittance LUT ────────────────────────────────────────────────
 
-vec2 sun_optical_depth(vec3 p, vec3 center, float planetRadius, float atmRadius, vec3 sunDir)
+vec2 sun_optical_depth(float r, float muS, float planetRadius, float atmRadius)
 {
-    vec3 radial = p - center;
-    float r = max(length(radial), planetRadius);
-    float muS = dot(radial / r, sunDir);
     float u = clamp(muS * 0.5 + 0.5, 0.0, 1.0);
     float v = clamp((r - planetRadius) / max(atmRadius - planetRadius, 1e-4), 0.0, 1.0);
-    return texture(transmittanceLut, vec2(u, v)).rg;
+    // NOTE: LUT stores optical depth normalized by scale heights (od/H), i.e. unitless air mass.
+    return textureLod(transmittanceLut, vec2(u, v), 0.0).rg;
 }
 
 // ── Ray-March State & Parameters ─────────────────────────────────────
@@ -226,7 +197,12 @@ struct MarchParams
     float phaseM;
     float phaseC;
     float jitter;
+    float timeSec;
     bool  atmActive;
+    bool  cloudsActive;
+    vec2  cloudWindHeading;
+    vec2  cloudWindSC;
+    float cloudRTop;
 };
 
 struct MarchState
@@ -252,17 +228,22 @@ MarchParams mp, inout MarchState s)
     if (steps <= 0 || t1 <= t0) return;
 
     float dt = (t1 - t0) / float(steps);
+    float planetRadius2 = mp.planetRadius * mp.planetRadius;
 
     for (int i = 0; i < steps; ++i)
     {
         float ts = t0 + (float(i) + mp.jitter) * dt;
         vec3 p = mp.camPos + mp.rd * ts;
 
+        vec3 radial = p - mp.center;
+        float r = length(radial);
+        vec3 dir = (r > 0.0) ? (radial / r) : vec3(0.0, 1.0, 0.0);
+        float height = max(r - mp.planetRadius, 0.0);
+
         // Atmosphere density
         float densR = 0.0, densM = 0.0;
         if (mp.atmActive)
         {
-            float height = max(length(p - mp.center) - mp.planetRadius, 0.0);
             densR = exp(-height / max(mp.Hr, 1.0));
             densM = exp(-height / max(mp.Hm, 1.0));
             s.odR += densR * dt;
@@ -273,43 +254,63 @@ MarchParams mp, inout MarchState s)
         float densC = 0.0;
         if (doCloud)
         {
-            densC = cloud_density(p, mp.center, mp.planetRadius);
+            densC = cloud_density(dir, height, mp.timeSec, mp.cloudsActive, mp.cloudWindHeading, mp.cloudWindSC);
             if (densC > 0.0) s.odC += densC * dt;
         }
-
-        // Sun transmittance from LUT
-        vec2 odSun = vec2(0.0);
-        if (mp.atmActive && mp.atmRadius > mp.planetRadius)
-        odSun = sun_optical_depth(p, mp.center, mp.planetRadius, mp.atmRadius, mp.sunDir);
 
         // Camera-to-sample attenuation
         vec3 tauCam = mp.betaR * s.odR + mp.betaM * s.odM + mp.betaA * s.odR + vec3(CLOUD_BETA * s.odC);
         vec3 attenCam = exp(-tauCam);
 
-        // Sun attenuation
-        vec3 attenSun = vec3(1.0);
-        if (mp.atmActive)
-        attenSun = exp(-(mp.betaR * odSun.x + mp.betaM * odSun.y + mp.betaA * odSun.x));
-
-        // Planet shadow test
-        float tp0, tp1;
-        bool inShadow = ray_sphere_intersect(p, mp.sunDir, mp.center, mp.planetRadius, tp0, tp1) && tp1 > 0.0;
-
-        vec3 atten = attenCam * attenSun;
+        // Planet shadow test (cheap; avoids per-step sqrt).
+        float bSun = dot(radial, mp.sunDir);
+        float d2 = r * r - bSun * bSun;
+        bool inShadow = (bSun < 0.0) && (d2 < planetRadius2);
 
         if (!inShadow)
         {
+            vec3 attenSun = vec3(1.0);
+            if (mp.atmActive && mp.atmRadius > mp.planetRadius)
+            {
+                float muS = dot(dir, mp.sunDir);
+                vec2 amSun = sun_optical_depth(r, muS, mp.planetRadius, mp.atmRadius);
+                vec2 odSun = amSun * vec2(mp.Hr, mp.Hm);
+                attenSun = exp(-(mp.betaR * odSun.x + mp.betaM * odSun.y + mp.betaA * odSun.x));
+            }
+
+            vec3 atten = attenCam * attenSun;
+
             if (mp.atmActive)
             {
                 vec3 scatterCoeff = densR * mp.betaR * mp.phaseR + densM * mp.betaM * mp.phaseM;
                 s.scatterAtm += atten * scatterCoeff * dt;
             }
             if (doCloud && densC > 0.0)
-            s.scatterCloudSun += atten * (densC * CLOUD_BETA * mp.phaseC) * dt;
+            {
+                float muS = max(dot(dir, mp.sunDir), 0.0);
+                float pathToTop = max(mp.cloudRTop - r, 0.0) / max(muS, 0.15);
+                float cloudSunTrans = exp(-CLOUD_BETA * densC * pathToTop);
+
+                float powder = 1.0 - exp(-densC * 2.0);
+                float scatterBoost = mix(0.45, 1.0, powder);
+
+                s.scatterCloudSun += atten * cloudSunTrans * (densC * CLOUD_BETA * mp.phaseC) * dt * scatterBoost * CLOUD_SCATTER_SCALE;
+            }
         }
 
         if (doCloud && densC > 0.0)
-        s.scatterCloudAmb += attenCam * (densC * CLOUD_BETA) * dt;
+        {
+            float powder = 1.0 - exp(-densC * 1.25);
+            float scatterBoost = mix(0.25, 1.0, powder);
+            s.scatterCloudAmb += attenCam * (densC * CLOUD_BETA) * dt * scatterBoost * CLOUD_SCATTER_SCALE;
+        }
+
+        // Early-out once the ray is essentially opaque.
+        float transMax = max(attenCam.r, max(attenCam.g, attenCam.b));
+        if (transMax < 1e-3)
+        {
+            break;
+        }
     }
 }
 
@@ -486,7 +487,26 @@ void main()
     mp.phaseM       = phase_mie_hg(cosTheta, mieG);
     mp.phaseC       = phase_mie_hg(cosTheta, CLOUD_PHASE_G);
     mp.jitter       = jitter;
+    mp.timeSec      = max(pc.jitter_params.z, 0.0);
     mp.atmActive    = atmActive;
+    mp.cloudsActive = cloudsActive;
+    mp.cloudWindHeading = vec2(1.0, 0.0);
+    mp.cloudWindSC = vec2(0.0, 1.0);
+    mp.cloudRTop = rTop;
+
+    // Precompute wind parameters (advected in cloud_density via local tangent basis).
+    if (cloudsActive)
+    {
+        float cloudR = planetRadius + cloudBaseM + 0.5 * cloudThicknessM;
+        cloudR = max(cloudR, planetRadius);
+
+        float windSpeedMps = pc.cloud_params.z;
+        float windAngle = pc.cloud_params.w;
+        mp.cloudWindHeading = vec2(cos(windAngle), sin(windAngle));
+
+        float arc = (windSpeedMps * mp.timeSec) / max(cloudR, 1.0);
+        mp.cloudWindSC = vec2(sin(arc), cos(arc));
+    }
 
     // Compute cloud shell intersections (0, 1, or 2 intervals).
     vec2 cloudSeg[2];

@@ -3,6 +3,8 @@
 #include "render/renderpass.h"
 #include "render/graph/types.h"
 
+#include <core/types.h>
+
 class RenderGraph;
 class RGPassResources;
 
@@ -32,10 +34,13 @@ private:
                          RGImageHandle transmittanceLut);
 
     EngineContext *_context = nullptr;
-    VkDescriptorSetLayout _inputSetLayout = VK_NULL_HANDLE; // set=1: hdr input + gbuffer position + transmittance LUT
+    VkDescriptorSetLayout _inputSetLayout = VK_NULL_HANDLE; // set=1: hdr input + gbuffer position + transmittance LUT + cloud textures
 
     VkPipeline _pipeline = VK_NULL_HANDLE;
     VkPipelineLayout _pipelineLayout = VK_NULL_HANDLE;
 
     float _time_sec = 0.0f;
+
+    AllocatedImage _cloudNoiseTex{};
+    AllocatedImage _cloudWeatherTex{};
 };

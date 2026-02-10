@@ -8,6 +8,7 @@
 #include "core/device/resource.h"
 #include "core/device/swapchain.h"
 #include "core/assets/manager.h"
+#include "core/assets/ktx_loader.h"
 #include "core/pipeline/manager.h"
 #include "core/pipeline/sampler.h"
 #include "core/world.h"
@@ -23,6 +24,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <vector>
 
 #include <glm/gtc/packing.hpp>
 
@@ -30,6 +32,145 @@ namespace
 {
     constexpr uint32_t k_transmittance_lut_width = 256;
     constexpr uint32_t k_transmittance_lut_height = 64;
+    constexpr uint32_t k_cloud_weather_map_size = 512;
+
+    static uint32_t hash_u32(uint32_t x)
+    {
+        x ^= x >> 16;
+        x *= 0x7feb352du;
+        x ^= x >> 15;
+        x *= 0x846ca68bu;
+        x ^= x >> 16;
+        return x;
+    }
+
+    static float hash3_to_unit_float(const glm::ivec3 &p, uint32_t seed)
+    {
+        uint32_t h = seed;
+        h ^= hash_u32(static_cast<uint32_t>(p.x) * 73856093u);
+        h ^= hash_u32(static_cast<uint32_t>(p.y) * 19349663u);
+        h ^= hash_u32(static_cast<uint32_t>(p.z) * 83492791u);
+        return float(h & 0x00FFFFFFu) / float(0x01000000u);
+    }
+
+    static float smoothstep01(float x)
+    {
+        x = std::clamp(x, 0.0f, 1.0f);
+        return x * x * (3.0f - 2.0f * x);
+    }
+
+    static float lerp(float a, float b, float t)
+    {
+        return a + (b - a) * t;
+    }
+
+    static float value_noise3(const glm::vec3 &p, uint32_t seed)
+    {
+        glm::ivec3 i0 = glm::ivec3(glm::floor(p));
+        glm::ivec3 i1 = i0 + glm::ivec3(1);
+
+        glm::vec3 f = glm::fract(p);
+        f = glm::vec3(smoothstep01(f.x), smoothstep01(f.y), smoothstep01(f.z));
+
+        float c000 = hash3_to_unit_float(glm::ivec3(i0.x, i0.y, i0.z), seed);
+        float c100 = hash3_to_unit_float(glm::ivec3(i1.x, i0.y, i0.z), seed);
+        float c010 = hash3_to_unit_float(glm::ivec3(i0.x, i1.y, i0.z), seed);
+        float c110 = hash3_to_unit_float(glm::ivec3(i1.x, i1.y, i0.z), seed);
+        float c001 = hash3_to_unit_float(glm::ivec3(i0.x, i0.y, i1.z), seed);
+        float c101 = hash3_to_unit_float(glm::ivec3(i1.x, i0.y, i1.z), seed);
+        float c011 = hash3_to_unit_float(glm::ivec3(i0.x, i1.y, i1.z), seed);
+        float c111 = hash3_to_unit_float(glm::ivec3(i1.x, i1.y, i1.z), seed);
+
+        float x00 = lerp(c000, c100, f.x);
+        float x10 = lerp(c010, c110, f.x);
+        float x01 = lerp(c001, c101, f.x);
+        float x11 = lerp(c011, c111, f.x);
+
+        float y0 = lerp(x00, x10, f.y);
+        float y1 = lerp(x01, x11, f.y);
+
+        return lerp(y0, y1, f.z);
+    }
+
+    static float fbm3(glm::vec3 p, int octaves, uint32_t seed)
+    {
+        float sum = 0.0f;
+        float amp = 0.55f;
+        float freq = 1.0f;
+        for (int i = 0; i < octaves; ++i)
+        {
+            sum += amp * value_noise3(p * freq, seed + static_cast<uint32_t>(i) * 101u);
+            freq *= 2.02f;
+            amp *= 0.5f;
+        }
+        return std::clamp(sum, 0.0f, 1.0f);
+    }
+
+    static glm::vec3 octa_decode(float u, float v)
+    {
+        glm::vec2 e{u * 2.0f - 1.0f, v * 2.0f - 1.0f};
+        glm::vec3 n{e.x, 1.0f - std::abs(e.x) - std::abs(e.y), e.y};
+        if (n.y < 0.0f)
+        {
+            const float x = n.x;
+            const float z = n.z;
+            n.x = (1.0f - std::abs(z)) * ((x >= 0.0f) ? 1.0f : -1.0f);
+            n.z = (1.0f - std::abs(x)) * ((z >= 0.0f) ? 1.0f : -1.0f);
+        }
+
+        const float len2 = glm::dot(n, n);
+        if (len2 > 1.0e-8f)
+        {
+            n *= 1.0f / std::sqrt(len2);
+        }
+        else
+        {
+            n = glm::vec3(0.0f, 1.0f, 0.0f);
+        }
+        return n;
+    }
+
+    static std::vector<uint8_t> generate_cloud_weather_map(uint32_t size)
+    {
+        std::vector<uint8_t> out;
+        out.resize(static_cast<size_t>(size) * static_cast<size_t>(size) * 4u);
+
+        constexpr uint32_t seed_cov = 0x3a2d9f21u;
+        constexpr uint32_t seed_type = 0x91c3b57du;
+        constexpr uint32_t seed_height = 0x5e4a1b33u;
+
+        for (uint32_t y = 0; y < size; ++y)
+        {
+            for (uint32_t x = 0; x < size; ++x)
+            {
+                const float u = (float(x) + 0.5f) / float(size);
+                const float v = (float(y) + 0.5f) / float(size);
+
+                const glm::vec3 dir = octa_decode(u, v);
+
+                const float lat = std::abs(dir.y);
+                const float eq = std::exp(-std::pow(lat / 0.22f, 2.0f));
+                const float mid = std::exp(-std::pow((lat - 0.55f) / 0.18f, 2.0f));
+                const float band = std::clamp(0.65f * eq + 0.35f * mid, 0.0f, 1.0f);
+
+                const float cov_noise = fbm3(dir * 2.2f + glm::vec3(0.0f, 10.0f, 0.0f), 5, seed_cov);
+                const float type_noise = fbm3(dir * 3.7f + glm::vec3(3.0f, 0.0f, 7.0f), 4, seed_type);
+                const float height_noise = fbm3(dir * 5.1f + glm::vec3(11.0f, 2.0f, 5.0f), 4, seed_height);
+
+                const float coverage = std::clamp(0.10f + 0.90f * (cov_noise * 0.75f + band * 0.25f), 0.0f, 1.0f);
+                const float type01 = std::clamp(type_noise * 0.85f + (1.0f - lat) * 0.15f, 0.0f, 1.0f);
+                const float heightVar = std::clamp(height_noise, 0.0f, 1.0f);
+
+                const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(size) + static_cast<size_t>(x)) * 4u;
+                out[idx + 0] = static_cast<uint8_t>(std::clamp(coverage, 0.0f, 1.0f) * 255.0f + 0.5f);
+                out[idx + 1] = static_cast<uint8_t>(std::clamp(type01, 0.0f, 1.0f) * 255.0f + 0.5f);
+                out[idx + 2] = static_cast<uint8_t>(std::clamp(heightVar, 0.0f, 1.0f) * 255.0f + 0.5f);
+                out[idx + 3] = 255u;
+            }
+        }
+
+        return out;
+    }
 
     struct AtmospherePush
     {
@@ -138,6 +279,8 @@ void AtmospherePass::init(EngineContext *context)
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // hdrInput
         builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // posTex
         builder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // transmittanceLut
+        builder.add_binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // cloudNoiseTex
+        builder.add_binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // cloudWeatherTex
         _inputSetLayout = builder.build(
             device,
             VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -185,10 +328,57 @@ void AtmospherePass::init(EngineContext *context)
         _context->pipelines->createComputePipeline("atmosphere.transmittance_lut", ci);
         _context->pipelines->createComputeInstance("atmosphere.transmittance_lut", "atmosphere.transmittance_lut");
     }
+
+    // Cloud textures (tiling noise + generated global weather map).
+    if (ResourceManager *rm = _context->getResources())
+    {
+        if (_cloudNoiseTex.image == VK_NULL_HANDLE)
+        {
+            const std::string noisePath = _context->getAssets()->assetPath("vfx/simplex.ktx2");
+            ktxutil::Ktx2D ktx{};
+            if (!noisePath.empty() && ktxutil::load_ktx2_2d(noisePath.c_str(), ktx))
+            {
+                _cloudNoiseTex = rm->create_image_compressed_layers(
+                    ktx.bytes.data(),
+                    ktx.bytes.size(),
+                    ktx.fmt,
+                    ktx.mipLevels,
+                    1,
+                    ktx.copies,
+                    VK_IMAGE_USAGE_SAMPLED_BIT);
+            }
+        }
+
+        if (_cloudWeatherTex.image == VK_NULL_HANDLE)
+        {
+            std::vector<uint8_t> weather = generate_cloud_weather_map(k_cloud_weather_map_size);
+            _cloudWeatherTex = rm->create_image(
+                weather.data(),
+                VkExtent3D{k_cloud_weather_map_size, k_cloud_weather_map_size, 1},
+                VK_FORMAT_R8G8B8A8_UNORM,
+                VK_IMAGE_USAGE_SAMPLED_BIT,
+                false);
+        }
+    }
 }
 
 void AtmospherePass::cleanup()
 {
+    if (_context && _context->getResources())
+    {
+        ResourceManager *rm = _context->getResources();
+        if (_cloudNoiseTex.image != VK_NULL_HANDLE)
+        {
+            rm->destroy_image(_cloudNoiseTex);
+            _cloudNoiseTex = {};
+        }
+        if (_cloudWeatherTex.image != VK_NULL_HANDLE)
+        {
+            rm->destroy_image(_cloudWeatherTex);
+            _cloudWeatherTex = {};
+        }
+    }
+
     if (_context && _context->pipelines)
     {
         _context->pipelines->destroyComputeInstance("atmosphere.transmittance_lut");
@@ -221,7 +411,7 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
     // Transmittance / optical-depth LUT (Rayleigh + Mie), written by a small compute pass.
     RGImageDesc lutDesc{};
     lutDesc.name = "atmosphere.lut.transmittance";
-    lutDesc.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    lutDesc.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     lutDesc.extent = VkExtent2D{k_transmittance_lut_width, k_transmittance_lut_height};
     lutDesc.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     RGImageHandle transmittanceLut = graph->create_image(lutDesc);
@@ -325,6 +515,18 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
     VkImageView lutView = resources.image_view(transmittanceLut);
     if (hdrView == VK_NULL_HANDLE || posView == VK_NULL_HANDLE || lutView == VK_NULL_HANDLE) return;
 
+    VkImageView noiseView = _cloudNoiseTex.imageView;
+    VkImageView weatherView = _cloudWeatherTex.imageView;
+    if (noiseView == VK_NULL_HANDLE || weatherView == VK_NULL_HANDLE)
+    {
+        if (AssetManager *assets = ctxLocal->getAssets())
+        {
+            if (noiseView == VK_NULL_HANDLE) noiseView = assets->fallback_black_view();
+            if (weatherView == VK_NULL_HANDLE) weatherView = assets->fallback_black_view();
+        }
+    }
+    if (noiseView == VK_NULL_HANDLE || weatherView == VK_NULL_HANDLE) return;
+
     // Global scene UBO (set = 0).
     AllocatedBuffer gpuSceneDataBuffer = resourceManager->create_buffer(
         sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -356,7 +558,11 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.write_image(1, posView, ctxLocal->getSamplers()->defaultNearest(),
                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.write_image(2, lutView, ctxLocal->getSamplers()->nearestClampEdge(),
+        writer.write_image(2, lutView, ctxLocal->getSamplers()->linearClampEdge(),
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.write_image(3, noiseView, ctxLocal->getSamplers()->defaultLinear(),
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.write_image(4, weatherView, ctxLocal->getSamplers()->linearClampEdge(),
                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.update_set(deviceManager->device(), inputSet);
     }

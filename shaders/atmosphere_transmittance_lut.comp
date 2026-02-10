@@ -7,10 +7,14 @@ layout(local_size_x = 16, local_size_y = 16) in;
 // the angle between the direction and the local up vector.
 //
 // Output:
-//   R: rayleigh optical depth (meters)
-//   G: mie optical depth (meters)
+//   R: rayleigh optical depth / Hr (unitless "air mass")
+//   G: mie optical depth / Hm (unitless "air mass")
 //   B/A: unused
-layout(rgba32f, set = 0, binding = 0) uniform image2D out_lut;
+//
+// NOTE:
+// We store OD normalized by the scale heights so the values stay in a small,
+// filter-friendly range (enables RGBA16F + linear filtering without overflow).
+layout(rgba16f, set = 0, binding = 0) uniform image2D out_lut;
 
 layout(push_constant) uniform AtmosphereLutPush
 {
@@ -77,8 +81,8 @@ void main()
         // the planet (or starts on the surface heading inward), so sunlight is blocked.
         if (tP1 > 0.0 && tP0 < tEnd)
         {
-            const float MAX_OD = 1.0e9;
-            imageStore(out_lut, coord, vec4(MAX_OD, MAX_OD, 0.0, 0.0));
+            const float MAX_AIRMASS = 65504.0; // max finite FP16
+            imageStore(out_lut, coord, vec4(MAX_AIRMASS, MAX_AIRMASS, 0.0, 0.0));
             return;
         }
     }
@@ -98,9 +102,13 @@ void main()
         odM += exp(-height / Hm) * dt;
     }
 
-    const float MAX_OD = 1.0e9;
-    odR = min(odR, MAX_OD);
-    odM = min(odM, MAX_OD);
+    // Normalize into unitless air mass so the LUT is representable in FP16.
+    float amR = odR / Hr;
+    float amM = odM / Hm;
 
-    imageStore(out_lut, coord, vec4(odR, odM, 0.0, 0.0));
+    const float MAX_AIRMASS = 65504.0; // max finite FP16
+    amR = min(amR, MAX_AIRMASS);
+    amM = min(amM, MAX_AIRMASS);
+
+    imageStore(out_lut, coord, vec4(amR, amM, 0.0, 0.0));
 }
