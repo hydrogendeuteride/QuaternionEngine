@@ -148,8 +148,11 @@ High‑level game‑side controls:
   - `RTOnly` – ray‑traced shadows only (no raster maps).
 - `void set_hybrid_ray_cascade_mask(uint32_t mask);`
 - `void set_hybrid_ray_threshold(float threshold);`
+- `void set_shadow_min_visibility(float min_visibility);`
+- `float get_shadow_min_visibility() const;`
+  - `min_visibility` (0.0–1.0): Minimum sun shadow brightness floor. Raises the darkest parts of CSM, RT, and planet shadows so fully-shadowed areas are not pitch black. 0 = original behavior (full dark), 0.2 = keep 20% light in shadow.
 
-These map directly onto `EngineContext::shadowSettings` and are also visualized in the ImGui “Shadows / Ray Query” tab.
+These map directly onto `EngineContext::shadowSettings` and are also visualized in the ImGui "Shadows / Ray Query" tab.
 
 #### Shadow Map Resolution (`kShadowMapResolution`)
 

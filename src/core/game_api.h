@@ -183,6 +183,24 @@ struct AtmosphereSettings
     int lightSteps{8};
 };
 
+// Planet cloud layer settings (rendered by the Atmosphere pass).
+struct PlanetCloudSettings
+{
+    float baseHeightM{2000.0f};
+    float thicknessM{8000.0f};
+
+    float densityScale{1.0f};
+    float coverage{0.45f};
+
+    float noiseScale{1.5f};
+    float detailScale{12.0f};
+
+    float windSpeed{20.0f};
+    float windAngleRad{0.0f};
+
+    int cloudSteps{32};
+};
+
 // Planet quadtree (terrain LOD) settings
 struct PlanetQuadtreeSettings
 {
@@ -775,6 +793,21 @@ public:
 
     // Reset atmosphere to Earth-like defaults.
     void reset_atmosphere_to_earth();
+
+    // ------------------------------------------------------------------------
+    // Planet Clouds
+    // ------------------------------------------------------------------------
+
+    // Enable/disable planet cloud layer (integrated in Atmosphere pass).
+    void set_planet_clouds_enabled(bool enabled);
+    bool get_planet_clouds_enabled() const;
+
+    // Get/set planet cloud settings.
+    void set_planet_clouds_settings(const PlanetCloudSettings &settings);
+    PlanetCloudSettings get_planet_clouds_settings() const;
+
+    // Reset planet clouds to defaults.
+    void reset_planet_clouds_defaults();
 
     // ------------------------------------------------------------------------
     // Sun Shadow (Penumbra)

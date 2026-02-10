@@ -181,6 +181,32 @@ struct AtmosphereSettings
     int lightSteps = 8;
 };
 
+struct PlanetCloudSettings
+{
+    // Base height above planet radius (meters).
+    float baseHeightM = 2000.0f;
+
+    // Thickness of the cloud layer (meters).
+    float thicknessM = 8000.0f;
+
+    // Density scale (unitless). Higher = thicker clouds.
+    float densityScale = 1.0f;
+
+    // Coverage threshold (0..1). Higher = emptier.
+    float coverage = 0.45f;
+
+    // Procedural noise controls.
+    float noiseScale = 1.5f;
+    float detailScale = 12.0f;
+
+    // Wind speed along cloud layer (m/s).
+    float windSpeed = 20.0f;
+    float windAngleRad = 0.0f;
+
+    // Cloud raymarch steps inside the shell.
+    int cloudSteps = 32;
+};
+
 class EngineContext
 {
 public:
@@ -250,6 +276,9 @@ public:
 
     bool enableAtmosphere = false;               // optional atmosphere scattering toggle
     AtmosphereSettings atmosphere{};
+
+    bool enablePlanetClouds = false;             // optional planet cloud layer toggle
+    PlanetCloudSettings planetClouds{};
 
     // Ray tracing manager (optional, nullptr if unsupported)
     RayTracingManager* ray = nullptr;

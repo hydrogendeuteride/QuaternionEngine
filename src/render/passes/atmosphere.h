@@ -36,4 +36,6 @@ private:
 
     VkPipeline _pipeline = VK_NULL_HANDLE;
     VkPipelineLayout _pipelineLayout = VK_NULL_HANDLE;
+
+    float _time_sec = 0.0f;
 };

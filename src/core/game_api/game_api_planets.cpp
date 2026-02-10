@@ -471,6 +471,62 @@ void Engine::reset_atmosphere_to_earth()
 }
 
 // ----------------------------------------------------------------------------
+// Planet Clouds
+// ----------------------------------------------------------------------------
+
+void Engine::set_planet_clouds_enabled(bool enabled)
+{
+    if (!_engine || !_engine->_context) return;
+    _engine->_context->enablePlanetClouds = enabled;
+}
+
+bool Engine::get_planet_clouds_enabled() const
+{
+    if (!_engine || !_engine->_context) return false;
+    return _engine->_context->enablePlanetClouds;
+}
+
+void Engine::set_planet_clouds_settings(const PlanetCloudSettings &settings)
+{
+    if (!_engine || !_engine->_context) return;
+
+    ::PlanetCloudSettings &dst = _engine->_context->planetClouds;
+    dst.baseHeightM = settings.baseHeightM;
+    dst.thicknessM = settings.thicknessM;
+    dst.densityScale = settings.densityScale;
+    dst.coverage = settings.coverage;
+    dst.noiseScale = settings.noiseScale;
+    dst.detailScale = settings.detailScale;
+    dst.windSpeed = settings.windSpeed;
+    dst.windAngleRad = settings.windAngleRad;
+    dst.cloudSteps = settings.cloudSteps;
+}
+
+PlanetCloudSettings Engine::get_planet_clouds_settings() const
+{
+    PlanetCloudSettings out{};
+    if (!_engine || !_engine->_context) return out;
+
+    const ::PlanetCloudSettings &src = _engine->_context->planetClouds;
+    out.baseHeightM = src.baseHeightM;
+    out.thicknessM = src.thicknessM;
+    out.densityScale = src.densityScale;
+    out.coverage = src.coverage;
+    out.noiseScale = src.noiseScale;
+    out.detailScale = src.detailScale;
+    out.windSpeed = src.windSpeed;
+    out.windAngleRad = src.windAngleRad;
+    out.cloudSteps = src.cloudSteps;
+    return out;
+}
+
+void Engine::reset_planet_clouds_defaults()
+{
+    if (!_engine || !_engine->_context) return;
+    _engine->_context->planetClouds = ::PlanetCloudSettings{};
+}
+
+// ----------------------------------------------------------------------------
 // Sun Shadow (Penumbra)
 // ----------------------------------------------------------------------------
 

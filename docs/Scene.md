@@ -175,7 +175,8 @@ You can query the world transform of a specific glTF node within an instance. Th
 ### GPU Scene Data
 
 - `GPUSceneData` carries camera matrices, lighting constants, shadow cascades, RT options, and planet occluders for the frame.
-- Key fields: `view`, `proj`, `viewproj`, `sunlightDirection`, `sunlightColor`, `ambientColor`, `lightViewProj`, `lightViewProjCascades[4]`, `cascadeSplitsView`, `punctualLights[]`, `spotLights[]`, `planetOccluders[4]`, `lightCounts`, `rtOptions`, `rtParams`.
+- Key fields: `view`, `proj`, `viewproj`, `sunlightDirection`, `sunlightColor`, `ambientColor`, `lightViewProj`, `lightViewProjCascades[4]`, `cascadeSplitsView`, `punctualLights[]`, `spotLights[]`, `planetOccluders[4]`, `lightCounts`, `rtOptions`, `rtParams`, `shadowTuning`.
+  - `shadowTuning.x` = minimum sun shadow visibility (0..1). Controls how dark fully-shadowed areas can be; populated from `ShadowSettings::shadowMinVisibility`.
 - Passes map and fill it into a per-frame UBO, bindable with `DescriptorManager::gpuSceneDataLayout()`.
 
 ### Cascaded Shadow Maps

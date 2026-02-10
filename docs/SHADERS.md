@@ -53,6 +53,6 @@ GLSL Includes
 
 | File | Purpose |
 |------|---------|
-| `input_structures.glsl` | SceneData UBO, material bindings, light structs |
+| `input_structures.glsl` | SceneData UBO (camera, lights, shadow cascades, `shadowTuning`, RT options), material bindings, light structs |
 | `lighting_common.glsl` | BRDF evaluation, point light helpers |
 | `ibl_common.glsl` | IBL split-sum, SH irradiance |

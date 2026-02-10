@@ -1370,7 +1370,7 @@ void VulkanEngine::draw()
             }
 
             // Optional atmosphere scattering pass: reads hdrTarget + gbufferPosition and outputs a new HDR target.
-            if (_context && _context->enableAtmosphere)
+            if (_context && (_context->enableAtmosphere || _context->enablePlanetClouds))
             {
                 if (auto *atmosphere = _renderPassManager->getPass<AtmospherePass>())
                 {

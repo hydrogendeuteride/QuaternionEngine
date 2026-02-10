@@ -1768,6 +1768,53 @@ namespace
         ImGui::SliderInt("Light Steps", &atm.lightSteps, 2, 32);
 
         ImGui::Separator();
+        ImGui::TextUnformatted("Planet Clouds");
+        bool planetCloudsEnabled = ctx->enablePlanetClouds;
+        if (ImGui::Checkbox("Enable Planet Clouds", &planetCloudsEnabled))
+        {
+            ctx->enablePlanetClouds = planetCloudsEnabled;
+        }
+
+        PlanetCloudSettings &clouds = ctx->planetClouds;
+        if (ImGui::Button("Reset Cloud Params"))
+        {
+            clouds = PlanetCloudSettings{};
+        }
+
+        float baseKm = clouds.baseHeightM / 1000.0f;
+        float thickKm = clouds.thicknessM / 1000.0f;
+        if (ImGui::SliderFloat("Base Height (km)", &baseKm, 0.0f, 50.0f, "%.2f"))
+        {
+            clouds.baseHeightM = std::max(0.0f, baseKm * 1000.0f);
+        }
+        if (ImGui::SliderFloat("Thickness (km)", &thickKm, 0.1f, 50.0f, "%.2f"))
+        {
+            clouds.thicknessM = std::max(0.0f, thickKm * 1000.0f);
+        }
+
+        ImGui::SliderFloat("Density Scale", &clouds.densityScale, 0.0f, 8.0f, "%.2f");
+        clouds.densityScale = std::max(0.0f, clouds.densityScale);
+
+        ImGui::SliderFloat("Coverage", &clouds.coverage, 0.0f, 0.99f, "%.3f");
+        clouds.coverage = std::clamp(clouds.coverage, 0.0f, 0.999f);
+
+        ImGui::SliderFloat("Noise Scale", &clouds.noiseScale, 0.05f, 32.0f, "%.3f");
+        clouds.noiseScale = std::max(0.001f, clouds.noiseScale);
+
+        ImGui::SliderFloat("Detail Scale", &clouds.detailScale, 0.05f, 64.0f, "%.3f");
+        clouds.detailScale = std::max(0.001f, clouds.detailScale);
+
+        ImGui::SliderFloat("Wind Speed (m/s)", &clouds.windSpeed, -200.0f, 200.0f, "%.1f");
+        float windDeg = glm::degrees(clouds.windAngleRad);
+        if (ImGui::SliderFloat("Wind Angle (deg)", &windDeg, 0.0f, 360.0f, "%.1f"))
+        {
+            clouds.windAngleRad = glm::radians(windDeg);
+        }
+
+        ImGui::SliderInt("Cloud Steps", &clouds.cloudSteps, 4, 128);
+        clouds.cloudSteps = std::clamp(clouds.cloudSteps, 4, 128);
+
+        ImGui::Separator();
         if (auto *tm = eng->_renderPassManager ? eng->_renderPassManager->getPass<TonemapPass>() : nullptr)
         {
             AutoExposurePass *ae = eng->_renderPassManager->getPass<AutoExposurePass>();

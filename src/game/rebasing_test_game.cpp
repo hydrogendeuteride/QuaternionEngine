@@ -190,10 +190,10 @@ namespace Game
         if (renderer->_assetManager)
         {
             GameAPI::IBLPaths ibl{};
-            ibl.specularCube = renderer->_assetManager->assetPath("ibl/starmap.ktx2");
-            ibl.diffuseCube = renderer->_assetManager->assetPath("ibl/starmap.ktx2");
+            ibl.specularCube = renderer->_assetManager->assetPath("ibl/darkstar.ktx2");
+            ibl.diffuseCube = renderer->_assetManager->assetPath("ibl/darkstar.ktx2");
             ibl.brdfLut = renderer->_assetManager->assetPath("ibl/brdf_lut.ktx2");
-            ibl.background = renderer->_assetManager->assetPath("ibl/starmap.ktx2");
+            ibl.background = renderer->_assetManager->assetPath("ibl/darkstar.ktx2");
             api.load_global_ibl(ibl);
         }
 

@@ -72,6 +72,8 @@ addPass(std::move(myPass));
 - Lighting (deferred): Reads G‑Buffer as sampled images and writes to `drawImage`. Applies AO to indirect lighting and adds emissive contribution.
 - Shadows: Cascaded shadow maps render to per-frame transient depth images (four cascades). If Ray Query is enabled,
   the lighting pass additionally samples TLAS to evaluate shadow visibility according to the selected mode.
+  A minimum shadow visibility floor (`shadowSettings.shadowMinVisibility` → `sceneData.shadowTuning.x`) is applied in
+  the lighting shaders to prevent fully-shadowed areas from being pitch-black.
 - SSR (Screen Space Reflections): Reads HDR lighting result + G-Buffer and outputs reflections blended with the scene.
   Two variants: `ssr.nort` (screen-space only) and `ssr.rt` (SSR + RT fallback using TLAS ray queries).
 - Tonemap + Bloom: Converts HDR to LDR with exposure control and optional bloom. Supports Reinhard and ACES tonemapping.

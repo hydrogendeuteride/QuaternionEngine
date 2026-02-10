@@ -31,10 +31,12 @@ namespace
     {
         glm::vec4 planet_center_radius; // xyz: planet center (local), w: planet radius (m)
         glm::vec4 atmosphere_params;    // x: atmosphere radius (m), y: rayleigh H (m), z: mie H (m), w: mie g
-        glm::vec4 beta_rayleigh;        // rgb: betaR (1/m), w: intensity
+        glm::vec4 beta_rayleigh;        // rgb: betaR (1/m), w: atmosphere intensity
         glm::vec4 beta_mie;             // rgb: betaM (1/m), w: sun disk intensity
-        glm::vec4 jitter_params;        // x: jitter strength (0..1), yzw: reserved
-        glm::ivec4 misc;                // x: view steps, y: light steps, z/w: reserved
+        glm::vec4 jitter_params;        // x: jitter strength (0..1), y: planet snap (m), z: time (sec), w: reserved
+        glm::vec4 cloud_layer;          // x: base height (m), y: thickness (m), z: densityScale, w: coverage
+        glm::vec4 cloud_params;         // x: noiseScale, y: detailScale, z: windSpeedMps, w: windAngleRad
+        glm::ivec4 misc;                // x: view steps, y: light steps, z: cloud steps, w: flags
     };
 
     struct AtmosphereLutPush
@@ -44,6 +46,7 @@ namespace
     };
 
     static_assert(sizeof(AtmospherePush) % 16 == 0);
+    static_assert(sizeof(AtmospherePush) == 128);
     static_assert(sizeof(AtmosphereLutPush) % 16 == 0);
 
     static bool vec3_finite(const glm::vec3 &v)
@@ -206,7 +209,7 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
     {
         return hdrInput;
     }
-    if (!_context || !_context->enableAtmosphere)
+    if (!_context || !(_context->enableAtmosphere || _context->enablePlanetClouds))
     {
         return hdrInput;
     }
@@ -371,32 +374,71 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
     }
 
     const AtmosphereSettings &s = ctxLocal->atmosphere;
+    const PlanetCloudSettings &c = ctxLocal->planetClouds;
+
+    const float dt_sec = (ctxLocal->scene) ? std::clamp(ctxLocal->scene->getDeltaTime(), 0.0f, 0.1f) : 0.0f;
+    if (std::isfinite(dt_sec) && dt_sec > 0.0f)
+    {
+        _time_sec += dt_sec;
+        if (!std::isfinite(_time_sec))
+        {
+            _time_sec = 0.0f;
+        }
+        else if (_time_sec > 1.0e6f)
+        {
+            _time_sec = std::fmod(_time_sec, 1.0e6f);
+        }
+    }
 
     float atm_height = std::max(0.0f, s.atmosphereHeightM);
-    float atm_radius = (planet_radius_m > 0.0f && atm_height > 0.0f) ? (planet_radius_m + atm_height) : 0.0f;
+    const bool atmosphereEnabled = ctxLocal->enableAtmosphere;
+    float atm_radius = (atmosphereEnabled && planet_radius_m > 0.0f && atm_height > 0.0f) ? (planet_radius_m + atm_height) : 0.0f;
 
     float Hr = std::max(1.0f, s.rayleighScaleHeightM);
     float Hm = std::max(1.0f, s.mieScaleHeightM);
 
-    glm::vec3 betaR = vec3_finite(s.rayleighScattering) ? glm::max(s.rayleighScattering, glm::vec3(0.0f)) : glm::vec3(0.0f);
-    glm::vec3 betaM = vec3_finite(s.mieScattering) ? glm::max(s.mieScattering, glm::vec3(0.0f)) : glm::vec3(0.0f);
+    glm::vec3 betaR = atmosphereEnabled && vec3_finite(s.rayleighScattering) ? glm::max(s.rayleighScattering, glm::vec3(0.0f)) : glm::vec3(0.0f);
+    glm::vec3 betaM = atmosphereEnabled && vec3_finite(s.mieScattering) ? glm::max(s.mieScattering, glm::vec3(0.0f)) : glm::vec3(0.0f);
 
     float mieG = std::clamp(s.mieG, -0.99f, 0.99f);
-    float intensity = std::max(0.0f, s.intensity);
-    float sunDisk = std::max(0.0f, s.sunDiskIntensity);
+    float intensity = atmosphereEnabled ? std::max(0.0f, s.intensity) : 0.0f;
+    float sunDisk = atmosphereEnabled ? std::max(0.0f, s.sunDiskIntensity) : 0.0f;
     float jitterStrength = std::clamp(s.jitterStrength, 0.0f, 1.0f);
     float planetSnapM = std::max(0.0f, s.planetSurfaceSnapM);
 
     int viewSteps = std::clamp(s.viewSteps, 4, 64);
     int lightSteps = std::clamp(s.lightSteps, 2, 32);
 
+    const bool cloudsEnabled = ctxLocal->enablePlanetClouds;
+    float cloudBaseM = std::max(0.0f, c.baseHeightM);
+    float cloudThicknessM = std::max(0.0f, c.thicknessM);
+    float cloudDensityScale = std::max(0.0f, c.densityScale);
+    float cloudCoverage = std::clamp(c.coverage, 0.0f, 0.999f);
+    float cloudNoiseScale = std::max(0.001f, c.noiseScale);
+    float cloudDetailScale = std::max(0.001f, c.detailScale);
+    float cloudWindSpeed = c.windSpeed;
+    float cloudWindAngle = c.windAngleRad;
+    int cloudSteps = std::clamp(c.cloudSteps, 4, 128);
+
+    uint32_t flags = 0u;
+    if (atmosphereEnabled)
+    {
+        flags |= 1u;
+    }
+    if (cloudsEnabled)
+    {
+        flags |= 2u;
+    }
+
     AtmospherePush pc{};
     pc.planet_center_radius = glm::vec4(planet_center_local, planet_radius_m);
     pc.atmosphere_params = glm::vec4(atm_radius, Hr, Hm, mieG);
     pc.beta_rayleigh = glm::vec4(betaR, intensity);
     pc.beta_mie = glm::vec4(betaM, sunDisk);
-    pc.jitter_params = glm::vec4(jitterStrength, planetSnapM, 0.0f, 0.0f);
-    pc.misc = glm::ivec4(viewSteps, lightSteps, 0, 0);
+    pc.jitter_params = glm::vec4(jitterStrength, planetSnapM, _time_sec, 0.0f);
+    pc.cloud_layer = glm::vec4(cloudBaseM, cloudThicknessM, cloudDensityScale, cloudCoverage);
+    pc.cloud_params = glm::vec4(cloudNoiseScale, cloudDetailScale, cloudWindSpeed, cloudWindAngle);
+    pc.misc = glm::ivec4(viewSteps, lightSteps, cloudSteps, static_cast<int>(flags));
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &globalDescriptor, 0, nullptr);
