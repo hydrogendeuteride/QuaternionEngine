@@ -419,6 +419,8 @@ void Engine::set_atmosphere_settings(const AtmosphereSettings &settings)
     dst.mieScaleHeightM = settings.mieScaleHeightM;
     dst.rayleighScattering = settings.rayleighScattering;
     dst.mieScattering = settings.mieScattering;
+    dst.absorptionColor = settings.absorptionColor;
+    dst.absorptionStrength = settings.absorptionStrength;
     dst.mieG = settings.mieG;
     dst.intensity = settings.intensity;
     dst.sunDiskIntensity = settings.sunDiskIntensity;
@@ -446,6 +448,8 @@ AtmosphereSettings Engine::get_atmosphere_settings() const
     out.mieScaleHeightM = src.mieScaleHeightM;
     out.rayleighScattering = src.rayleighScattering;
     out.mieScattering = src.mieScattering;
+    out.absorptionColor = src.absorptionColor;
+    out.absorptionStrength = src.absorptionStrength;
     out.mieG = src.mieG;
     out.intensity = src.intensity;
     out.sunDiskIntensity = src.sunDiskIntensity;

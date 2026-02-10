@@ -15,11 +15,11 @@ layout(push_constant) uniform AtmospherePush
     vec4 planet_center_radius;// xyz: planet center (local), w: planet radius (m)
     vec4 atmosphere_params;// x: atmosphere radius (m), y: rayleigh H (m), z: mie H (m), w: mie g
     vec4 beta_rayleigh;// rgb: betaR (1/m), w: atmosphere intensity
-    vec4 beta_mie;// rgb: betaM (1/m), w: sun disk intensity
+    vec4 beta_mie;// rgb: betaM (1/m), w: absorption strength (1/m)
     vec4 jitter_params;// x: jitter strength (0..1), y: planet snap (m), z: time_sec, w: reserved
     vec4 cloud_layer;// x: base height (m), y: thickness (m), z: densityScale, w: coverage
     vec4 cloud_params;// x: noiseScale, y: detailScale, z: windSpeed, w: windAngleRad
-    ivec4 misc;// x: view steps, y: light steps, z: cloud steps, w: flags
+    ivec4 misc;// x: view steps, y: packed absorption color (RGBA8), z: cloud steps, w: flags
 } pc;
 
 const float PI = 3.14159265359;
@@ -220,6 +220,7 @@ struct MarchParams
     float Hm;
     vec3  betaR;
     vec3  betaM;
+    vec3  betaA;
     vec3  sunDir;
     float phaseR;
     float phaseM;
@@ -282,13 +283,13 @@ MarchParams mp, inout MarchState s)
         odSun = sun_optical_depth(p, mp.center, mp.planetRadius, mp.atmRadius, mp.sunDir);
 
         // Camera-to-sample attenuation
-        vec3 tauCam = mp.betaR * s.odR + mp.betaM * s.odM + vec3(CLOUD_BETA * s.odC);
+        vec3 tauCam = mp.betaR * s.odR + mp.betaM * s.odM + mp.betaA * s.odR + vec3(CLOUD_BETA * s.odC);
         vec3 attenCam = exp(-tauCam);
 
         // Sun attenuation
         vec3 attenSun = vec3(1.0);
         if (mp.atmActive)
-        attenSun = exp(-(mp.betaR * odSun.x + mp.betaM * odSun.y));
+        attenSun = exp(-(mp.betaR * odSun.x + mp.betaM * odSun.y + mp.betaA * odSun.x));
 
         // Planet shadow test
         float tp0, tp1;
@@ -384,8 +385,12 @@ void main()
     vec3  betaM = max(pc.beta_mie.rgb, vec3(0.0));
     float atmIntensity = max(pc.beta_rayleigh.w, 0.0);
 
+    vec3 absorptionColor = clamp(unpackUnorm4x8(uint(pc.misc.y)).rgb, vec3(0.0), vec3(1.0));
+    float absorptionStrength = max(pc.beta_mie.w, 0.0);
+    vec3 betaA = absorptionColor * absorptionStrength;
+
     bool atmActive = wantAtmosphere && (atmRadius > planetRadius) && (atmIntensity > 0.0)
-    && any(greaterThan(betaR + betaM, vec3(0.0)));
+    && any(greaterThan(betaR + betaM + betaA, vec3(0.0)));
 
     float cloudBaseM      = max(pc.cloud_layer.x, 0.0);
     float cloudThicknessM = max(pc.cloud_layer.y, 0.0);
@@ -396,6 +401,7 @@ void main()
 
     vec3  betaR_eff    = atmActive ? betaR : vec3(0.0);
     vec3  betaM_eff    = atmActive ? betaM : vec3(0.0);
+    vec3  betaA_eff    = atmActive ? betaA : vec3(0.0);
     float atmRadius_eff = atmActive ? atmRadius : 0.0;
 
     if (!atmActive && !cloudsActive) { outColor = vec4(baseColor, 1.0); return; }
@@ -474,6 +480,7 @@ void main()
     mp.Hm           = Hm;
     mp.betaR        = betaR_eff;
     mp.betaM        = betaM_eff;
+    mp.betaA        = betaA_eff;
     mp.sunDir       = sunDir;
     mp.phaseR       = phase_rayleigh(cosTheta);
     mp.phaseM       = phase_mie_hg(cosTheta, mieG);
@@ -588,7 +595,7 @@ void main()
     }
 
     // Final compositing
-    vec3 transmittance = exp(-(betaR_eff * state.odR + betaM_eff * state.odM + vec3(CLOUD_BETA * state.odC)));
+    vec3 transmittance = exp(-(betaR_eff * state.odR + betaM_eff * state.odM + betaA_eff * state.odR + vec3(CLOUD_BETA * state.odC)));
     vec3 outRgb = baseColor * transmittance;
     if (atmActive) outRgb += state.scatterAtm * (sunCol * atmIntensity);
     outRgb += state.scatterCloudSun * sunCol;

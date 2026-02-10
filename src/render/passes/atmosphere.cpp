@@ -20,7 +20,11 @@
 #include "scene/planet/planet_system.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <cstdint>
+
+#include <glm/gtc/packing.hpp>
 
 namespace
 {
@@ -32,11 +36,11 @@ namespace
         glm::vec4 planet_center_radius; // xyz: planet center (local), w: planet radius (m)
         glm::vec4 atmosphere_params;    // x: atmosphere radius (m), y: rayleigh H (m), z: mie H (m), w: mie g
         glm::vec4 beta_rayleigh;        // rgb: betaR (1/m), w: atmosphere intensity
-        glm::vec4 beta_mie;             // rgb: betaM (1/m), w: sun disk intensity
+        glm::vec4 beta_mie;             // rgb: betaM (1/m), w: absorption strength (1/m)
         glm::vec4 jitter_params;        // x: jitter strength (0..1), y: planet snap (m), z: time (sec), w: reserved
         glm::vec4 cloud_layer;          // x: base height (m), y: thickness (m), z: densityScale, w: coverage
         glm::vec4 cloud_params;         // x: noiseScale, y: detailScale, z: windSpeedMps, w: windAngleRad
-        glm::ivec4 misc;                // x: view steps, y: light steps, z: cloud steps, w: flags
+        glm::ivec4 misc;                // x: view steps, y: packed absorption color (RGBA8), z: cloud steps, w: flags
     };
 
     struct AtmosphereLutPush
@@ -402,12 +406,10 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
 
     float mieG = std::clamp(s.mieG, -0.99f, 0.99f);
     float intensity = atmosphereEnabled ? std::max(0.0f, s.intensity) : 0.0f;
-    float sunDisk = atmosphereEnabled ? std::max(0.0f, s.sunDiskIntensity) : 0.0f;
     float jitterStrength = std::clamp(s.jitterStrength, 0.0f, 1.0f);
     float planetSnapM = std::max(0.0f, s.planetSurfaceSnapM);
 
     int viewSteps = std::clamp(s.viewSteps, 4, 64);
-    int lightSteps = std::clamp(s.lightSteps, 2, 32);
 
     const bool cloudsEnabled = ctxLocal->enablePlanetClouds;
     float cloudBaseM = std::max(0.0f, c.baseHeightM);
@@ -430,15 +432,25 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
         flags |= 2u;
     }
 
+    glm::vec3 absorptionColor = vec3_finite(s.absorptionColor)
+        ? glm::clamp(s.absorptionColor, glm::vec3(0.0f), glm::vec3(1.0f))
+        : glm::vec3(1.0f);
+    float absorptionStrength = (atmosphereEnabled && std::isfinite(s.absorptionStrength))
+        ? std::max(0.0f, s.absorptionStrength)
+        : 0.0f;
+
+    const uint32_t packed_absorption_color = glm::packUnorm4x8(glm::vec4(absorptionColor, 1.0f));
+    const int packed_absorption_color_bits = std::bit_cast<int32_t>(packed_absorption_color);
+
     AtmospherePush pc{};
     pc.planet_center_radius = glm::vec4(planet_center_local, planet_radius_m);
     pc.atmosphere_params = glm::vec4(atm_radius, Hr, Hm, mieG);
     pc.beta_rayleigh = glm::vec4(betaR, intensity);
-    pc.beta_mie = glm::vec4(betaM, sunDisk);
+    pc.beta_mie = glm::vec4(betaM, absorptionStrength);
     pc.jitter_params = glm::vec4(jitterStrength, planetSnapM, _time_sec, 0.0f);
     pc.cloud_layer = glm::vec4(cloudBaseM, cloudThicknessM, cloudDensityScale, cloudCoverage);
     pc.cloud_params = glm::vec4(cloudNoiseScale, cloudDetailScale, cloudWindSpeed, cloudWindAngle);
-    pc.misc = glm::ivec4(viewSteps, lightSteps, cloudSteps, static_cast<int>(flags));
+    pc.misc = glm::ivec4(viewSteps, packed_absorption_color_bits, cloudSteps, static_cast<int>(flags));
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &globalDescriptor, 0, nullptr);

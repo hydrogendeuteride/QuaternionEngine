@@ -157,6 +157,11 @@ struct AtmosphereSettings
     glm::vec3 rayleighScattering{5.802e-6f, 13.558e-6f, 33.1e-6f};
     glm::vec3 mieScattering{21.0e-6f};
 
+    // Colored absorption/extinction coefficient (1/m).
+    // Final absorption used by the shader: betaA = absorptionColor * absorptionStrength.
+    glm::vec3 absorptionColor{1.0f, 1.0f, 1.0f};
+    float absorptionStrength{0.0f};
+
     // Henyey-Greenstein phase g (forward scattering).
     float mieG{0.76f};
 

@@ -1748,6 +1748,12 @@ namespace
 
         ImGui::SliderFloat("Mie g", &atm.mieG, -0.2f, 0.99f, "%.3f");
         ImGui::SliderFloat("Intensity", &atm.intensity, 0.0f, 4.0f, "%.2f");
+        ImGui::ColorEdit3("Absorption Color", &atm.absorptionColor.x);
+        float absMicro = atm.absorptionStrength * 1.0e6f;
+        if (ImGui::SliderFloat("Absorption Strength (x1e-6 1/m)", &absMicro, 0.0f, 100.0f, "%.2f"))
+        {
+            atm.absorptionStrength = std::max(0.0f, absMicro) * 1.0e-6f;
+        }
         ImGui::SliderFloat("Sun Disk", &atm.sunDiskIntensity, 0.0f, 10.0f, "%.2f");
         ImGui::SliderFloat("Sun Halo", &atm.sunHaloIntensity, 0.0f, 4.0f, "%.2f");
         ImGui::SliderFloat("Halo Radius (deg)", &atm.sunHaloRadiusDeg, 0.0f, 20.0f, "%.2f");
