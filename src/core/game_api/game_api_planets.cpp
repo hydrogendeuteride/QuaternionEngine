@@ -499,6 +499,9 @@ void Engine::set_planet_clouds_settings(const PlanetCloudSettings &settings)
     dst.thicknessM = settings.thicknessM;
     dst.densityScale = settings.densityScale;
     dst.coverage = settings.coverage;
+    dst.overlayTexturePath = settings.overlayTexturePath;
+    dst.overlayRotationRad = settings.overlayRotationRad;
+    dst.overlayFlipV = settings.overlayFlipV;
     dst.noiseScale = settings.noiseScale;
     dst.detailScale = settings.detailScale;
     dst.windSpeed = settings.windSpeed;
@@ -516,6 +519,9 @@ PlanetCloudSettings Engine::get_planet_clouds_settings() const
     out.thicknessM = src.thicknessM;
     out.densityScale = src.densityScale;
     out.coverage = src.coverage;
+    out.overlayTexturePath = src.overlayTexturePath;
+    out.overlayRotationRad = src.overlayRotationRad;
+    out.overlayFlipV = src.overlayFlipV;
     out.noiseScale = src.noiseScale;
     out.detailScale = src.detailScale;
     out.windSpeed = src.windSpeed;

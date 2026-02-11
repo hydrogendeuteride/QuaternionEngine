@@ -9,8 +9,7 @@ layout(location = 0) out vec4 outColor;
 layout(set = 1, binding = 0) uniform sampler2D hdrInput;
 layout(set = 1, binding = 1) uniform sampler2D posTex;
 layout(set = 1, binding = 2) uniform sampler2D transmittanceLut;
-layout(set = 1, binding = 3) uniform sampler2D cloudNoiseTex;
-layout(set = 1, binding = 4) uniform sampler2D cloudWeatherTex;
+layout(set = 1, binding = 3) uniform sampler2D cloudOverlayTex;
 
 layout(push_constant) uniform AtmospherePush
 {
@@ -18,7 +17,7 @@ layout(push_constant) uniform AtmospherePush
     vec4 atmosphere_params;// x: atmosphere radius (m), y: rayleigh H (m), z: mie H (m), w: mie g
     vec4 beta_rayleigh;// rgb: betaR (1/m), w: atmosphere intensity
     vec4 beta_mie;// rgb: betaM (1/m), w: absorption strength (1/m)
-    vec4 jitter_params;// x: jitter strength (0..1), y: planet snap (m), z: time_sec, w: reserved
+    vec4 jitter_params;// x: jitter strength (0..1), y: planet snap (m), z: time_sec, w: cloud overlay rotation (rad)
     vec4 cloud_layer;// x: base height (m), y: thickness (m), z: densityScale, w: coverage
     vec4 cloud_params;// x: noiseScale, y: detailScale, z: windSpeed, w: windAngleRad
     ivec4 misc;// x: view steps, y: packed absorption color (RGBA8), z: cloud steps, w: flags
@@ -30,6 +29,7 @@ const float INV_PI = 0.3183098861837907;
 
 const int FLAG_ATMOSPHERE = 1;
 const int FLAG_CLOUDS = 2;
+const int FLAG_CLOUD_FLIP_V = 4;
 
 const float CLOUD_BETA = 1.0e-3;
 const float CLOUD_AMBIENT_SCALE = 0.25;
@@ -57,17 +57,20 @@ float hash12(vec2 p)
 
 // ── Geometry / Mapping ───────────────────────────────────────────────
 
-vec2 octa_encode(vec3 n)
+vec3 rotate_y(vec3 v, float angleRad)
 {
-    // Map unit vector -> octahedral UV in [0,1].
-    // (No trig; reasonably uniform sampling for spherical fields.)
-    n /= (abs(n.x) + abs(n.y) + abs(n.z) + 1e-6);
-    vec2 e = n.xz;
-    if (n.y < 0.0)
-    {
-        e = (1.0 - abs(e.yx)) * sign(e);
-    }
-    return e * 0.5 + 0.5;
+    float s = sin(angleRad);
+    float c = cos(angleRad);
+    return vec3(c * v.x + s * v.z, v.y, -s * v.x + c * v.z);
+}
+
+vec2 dir_to_equirect(vec3 d, bool flipV)
+{
+    d = normalize(d);
+    float u = atan(d.z, d.x) * INV_TWO_PI + 0.5;
+    float v = 0.5 - asin(clamp(d.y, -1.0, 1.0)) * INV_PI;
+    if (flipV) v = 1.0 - v;
+    return vec2(fract(u), clamp(v, 0.001, 0.999));
 }
 
 bool ray_sphere_intersect(vec3 ro, vec3 rd, vec3 center, float radius, out float t0, out float t1)
@@ -98,7 +101,13 @@ float phase_mie_hg(float cosTheta, float g)
 
 // ── Cloud Density ────────────────────────────────────────────────────
 
-float cloud_density(vec3 dir, float height, float timeSec, bool cloudsActive, vec2 windHeading, vec2 windSC)
+float cloud_density(vec3 dir,
+                    float height,
+                    bool cloudsActive,
+                    bool flipV,
+                    float overlayRotRad,
+                    vec2 windHeading,
+                    vec2 windSC)
 {
     float baseHeightM  = max(pc.cloud_layer.x, 0.0);
     float thicknessM   = max(pc.cloud_layer.y, 0.0);
@@ -109,7 +118,13 @@ float cloud_density(vec3 dir, float height, float timeSec, bool cloudsActive, ve
     if (height < baseHeightM || height > baseHeightM + thicknessM) return 0.0;
 
     float h01 = (height - baseHeightM) / max(thicknessM, 1e-3);
-    // Weather-driven vertical profile (type: 0=stratus, 1=cumulus-ish).
+
+    // Base vertical profile (smooth fade-in/out across the layer thickness).
+    float bottom = smoothstep(0.0, 0.15, h01);
+    float top    = 1.0 - smoothstep(0.85, 1.0, h01);
+    float profile = bottom * top;
+    if (profile <= 0.0) return 0.0;
+
     vec3 dirW = dir;
     if (cloudsActive)
     {
@@ -131,40 +146,19 @@ float cloud_density(vec3 dir, float height, float timeSec, bool cloudsActive, ve
         float c = windSC.y;
         dirW = dir * c + windT * s;
     }
-    vec2 uvW = octa_encode(dirW);
-    vec3 weather = textureLod(cloudWeatherTex, uvW, 0.0).rgb;
 
-    float localCov = clamp(weather.r, 0.0, 1.0);
-    float type01   = clamp(weather.g, 0.0, 1.0);
-    float heightVar = clamp(weather.b, 0.0, 1.0);
+    // Rotate texture-space orientation around +Y to align the overlay seam.
+    dirW = rotate_y(dirW, overlayRotRad);
 
+    vec2 uvE = dir_to_equirect(dirW, flipV);
+    vec4 ov = textureLod(cloudOverlayTex, uvE, 0.0);
+    float lum = dot(ov.rgb, vec3(0.299, 0.587, 0.114));
+    float localCov = clamp(lum * ov.a, 0.0, 1.0);
     float cov = max(0.0, localCov - coverage) / max(1.0 - coverage, 1e-3);
     cov = pow(cov, 0.65);
     if (cov <= 0.0) return 0.0;
 
-    float bottom = smoothstep(0.0, mix(0.28, 0.10, type01), h01);
-    float top    = 1.0 - smoothstep(mix(0.62, 0.86, type01), 1.0, h01);
-    float profile = bottom * top;
-    profile = pow(max(profile, 0.0), mix(1.8, 0.9, type01));
-    if (profile <= 0.0) return 0.0;
-
-    float noiseScale  = max(pc.cloud_params.x, 0.001);
-    float detailScale = max(pc.cloud_params.y, 0.001);
-
-    vec2 flow = vec2(0.007, 0.011) * timeSec;
-
-    // Shape + erosion from a tiling noise texture.
-    float baseN = textureLod(cloudNoiseTex, uvW * noiseScale + flow, 0.0).r;
-    float detailN = textureLod(cloudNoiseTex, uvW * detailScale + flow * 1.7 + vec2(h01 * 3.1, -h01 * 2.7), 0.0).r;
-
-    float baseShape = smoothstep(0.25, 0.75, baseN);
-
-    // Erode more for flatter cloud types; keep cumulus puffier.
-    float erosion = mix(0.35, 0.15, type01) * mix(0.25, 1.0, detailN);
-    float shape = max(0.0, baseShape - erosion) / max(1.0 - erosion, 1e-3);
-
-    float d = cov * profile * shape;
-    d *= mix(0.75, 1.25, heightVar);
+    float d = cov * profile;
     return max(d, 0.0) * densityScale;
 }
 
@@ -200,9 +194,11 @@ struct MarchParams
     float timeSec;
     bool  atmActive;
     bool  cloudsActive;
+    bool  cloudFlipV;
     vec2  cloudWindHeading;
     vec2  cloudWindSC;
     float cloudRTop;
+    float cloudOverlayRotRad;
 };
 
 struct MarchState
@@ -254,7 +250,13 @@ MarchParams mp, inout MarchState s)
         float densC = 0.0;
         if (doCloud)
         {
-            densC = cloud_density(dir, height, mp.timeSec, mp.cloudsActive, mp.cloudWindHeading, mp.cloudWindSC);
+            densC = cloud_density(dir,
+                                  height,
+                                  mp.cloudsActive,
+                                  mp.cloudFlipV,
+                                  mp.cloudOverlayRotRad,
+                                  mp.cloudWindHeading,
+                                  mp.cloudWindSC);
             if (densC > 0.0) s.odC += densC * dt;
         }
 
@@ -376,6 +378,7 @@ void main()
     int flags = pc.misc.w;
     bool wantAtmosphere = (flags & FLAG_ATMOSPHERE) != 0;
     bool wantClouds     = (flags & FLAG_CLOUDS) != 0;
+    bool cloudFlipV = (flags & FLAG_CLOUD_FLIP_V) != 0;
 
     float atmRadius = pc.atmosphere_params.x;
     float Hr = max(pc.atmosphere_params.y, 1.0);
@@ -490,9 +493,11 @@ void main()
     mp.timeSec      = max(pc.jitter_params.z, 0.0);
     mp.atmActive    = atmActive;
     mp.cloudsActive = cloudsActive;
+    mp.cloudFlipV = cloudFlipV;
     mp.cloudWindHeading = vec2(1.0, 0.0);
     mp.cloudWindSC = vec2(0.0, 1.0);
     mp.cloudRTop = rTop;
+    mp.cloudOverlayRotRad = cloudsActive ? pc.jitter_params.w : 0.0;
 
     // Precompute wind parameters (advected in cloud_density via local tangent basis).
     if (cloudsActive)

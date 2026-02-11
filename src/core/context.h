@@ -2,6 +2,7 @@
 
 #include <array>
 #include <memory>
+#include <string>
 #include <core/types.h>
 #include <core/world.h>
 #include <core/descriptor/descriptors.h>
@@ -202,12 +203,21 @@ struct PlanetCloudSettings
     // Coverage threshold (0..1). Higher = emptier.
     float coverage = 0.45f;
 
+    // Relative to assets/ (KTX2 recommended). If empty or missing, the cloud layer is disabled.
+    std::string overlayTexturePath = "planets/earth/cloud/earth_clouds_4k.ktx2";
+
+    // Rotate the overlay around +Y (radians) to align the texture seam/orientation.
+    float overlayRotationRad = 0.0f;
+
+    // Flip the overlay V coordinate (useful if the source texture is upside-down).
+    bool overlayFlipV = false;
+
     // Procedural noise controls.
     float noiseScale = 1.5f;
     float detailScale = 12.0f;
 
     // Wind speed along cloud layer (m/s).
-    float windSpeed = 20.0f;
+    float windSpeed = 0.0f;
     float windAngleRad = 0.0f;
 
     // Cloud raymarch steps inside the shell.

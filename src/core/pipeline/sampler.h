@@ -16,6 +16,7 @@ public:
     VkSampler shadowLinearClamp() const { return _shadowLinearClamp; }
     VkSampler linearClampEdge() const { return _linearClampEdge; }
     VkSampler nearestClampEdge() const { return _nearestClampEdge; }
+    VkSampler linearRepeatClampEdge() const { return _linearRepeatClampEdge; }
 
 
 private:
@@ -25,4 +26,5 @@ private:
     VkSampler _shadowLinearClamp = VK_NULL_HANDLE;
     VkSampler _linearClampEdge = VK_NULL_HANDLE;
     VkSampler _nearestClampEdge = VK_NULL_HANDLE;
+    VkSampler _linearRepeatClampEdge = VK_NULL_HANDLE;
 };

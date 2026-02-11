@@ -1787,6 +1787,25 @@ namespace
             clouds = PlanetCloudSettings{};
         }
 
+        static char overlayPathBuf[256]{};
+        const std::string &pathRef = clouds.overlayTexturePath;
+        if (std::strncmp(overlayPathBuf, pathRef.c_str(), sizeof(overlayPathBuf)) != 0)
+        {
+            std::snprintf(overlayPathBuf, sizeof(overlayPathBuf), "%s", pathRef.c_str());
+        }
+
+        if (ImGui::InputText("Overlay Path (assets/)", overlayPathBuf, sizeof(overlayPathBuf)))
+        {
+            clouds.overlayTexturePath = overlayPathBuf;
+        }
+
+        float rotDeg = glm::degrees(clouds.overlayRotationRad);
+        if (ImGui::SliderFloat("Overlay Rotation (deg)", &rotDeg, -180.0f, 180.0f, "%.1f"))
+        {
+            clouds.overlayRotationRad = glm::radians(rotDeg);
+        }
+        ImGui::Checkbox("Overlay Flip V", &clouds.overlayFlipV);
+
         float baseKm = clouds.baseHeightM / 1000.0f;
         float thickKm = clouds.thicknessM / 1000.0f;
         if (ImGui::SliderFloat("Base Height (km)", &baseKm, 0.0f, 50.0f, "%.2f"))
@@ -1803,12 +1822,6 @@ namespace
 
         ImGui::SliderFloat("Coverage", &clouds.coverage, 0.0f, 0.99f, "%.3f");
         clouds.coverage = std::clamp(clouds.coverage, 0.0f, 0.999f);
-
-        ImGui::SliderFloat("Noise Scale", &clouds.noiseScale, 0.05f, 32.0f, "%.3f");
-        clouds.noiseScale = std::max(0.001f, clouds.noiseScale);
-
-        ImGui::SliderFloat("Detail Scale", &clouds.detailScale, 0.05f, 64.0f, "%.3f");
-        clouds.detailScale = std::max(0.001f, clouds.detailScale);
 
         ImGui::SliderFloat("Wind Speed (m/s)", &clouds.windSpeed, -200.0f, 200.0f, "%.1f");
         float windDeg = glm::degrees(clouds.windAngleRad);

@@ -197,10 +197,14 @@ struct PlanetCloudSettings
     float densityScale{1.0f};
     float coverage{0.45f};
 
+    std::string overlayTexturePath{"planets/earth/cloud/earth_clouds_4k.ktx2"};
+    float overlayRotationRad{0.0f};
+    bool overlayFlipV{false};
+
     float noiseScale{1.5f};
     float detailScale{12.0f};
 
-    float windSpeed{20.0f};
+    float windSpeed{0.0f};
     float windAngleRad{0.0f};
 
     int cloudSteps{32};
