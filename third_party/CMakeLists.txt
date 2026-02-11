@@ -89,3 +89,51 @@ target_link_libraries(orbitsim INTERFACE glm)
 # MikkTSpace (optional)
 add_library(mikktspace STATIC MikkTSpace/mikktspace.c)
 target_include_directories(mikktspace PUBLIC MikkTSpace)
+
+# miniaudio
+set(MINIAUDIO_BUILD_EXAMPLES OFF CACHE BOOL "Disable miniaudio examples" FORCE)
+set(MINIAUDIO_BUILD_TESTS OFF CACHE BOOL "Disable miniaudio tests" FORCE)
+set(MINIAUDIO_BUILD_TOOLS OFF CACHE BOOL "Disable miniaudio tools" FORCE)
+
+option(VULKAN_ENGINE_ENABLE_AUDIO_VORBIS "Enable libvorbis decoder support for miniaudio" ON)
+option(VULKAN_ENGINE_ENABLE_AUDIO_OPUS "Enable libopus decoder support for miniaudio" ON)
+
+if(VULKAN_ENGINE_ENABLE_AUDIO_VORBIS)
+  set(MINIAUDIO_NO_LIBVORBIS OFF CACHE BOOL "Disable libvorbis decoder in engine build" FORCE)
+else()
+  set(MINIAUDIO_NO_LIBVORBIS ON CACHE BOOL "Disable libvorbis decoder in engine build" FORCE)
+endif()
+
+if(VULKAN_ENGINE_ENABLE_AUDIO_OPUS)
+  set(MINIAUDIO_NO_LIBOPUS OFF CACHE BOOL "Disable libopus decoder in engine build" FORCE)
+else()
+  set(MINIAUDIO_NO_LIBOPUS ON CACHE BOOL "Disable libopus decoder in engine build" FORCE)
+endif()
+
+set(MINIAUDIO_INSTALL OFF CACHE BOOL "Disable miniaudio install rules" FORCE)
+
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/miniaudio/CMakeLists.txt")
+  message(FATAL_ERROR "third_party/miniaudio is missing. Run: git submodule update --init --recursive")
+endif()
+
+# miniaudio expects optional decoder targets named exactly `vorbisfile` and `opusfile`.
+# On Windows+vcpkg these are often exposed as namespaced imported targets.
+if(WIN32)
+  if(VULKAN_ENGINE_ENABLE_AUDIO_VORBIS AND NOT TARGET vorbisfile)
+    find_package(Vorbis CONFIG QUIET)
+    if(TARGET Vorbis::vorbisfile)
+      add_library(vorbisfile INTERFACE IMPORTED)
+      target_link_libraries(vorbisfile INTERFACE Vorbis::vorbisfile)
+    endif()
+  endif()
+
+  if(VULKAN_ENGINE_ENABLE_AUDIO_OPUS AND NOT TARGET opusfile)
+    find_package(OpusFile CONFIG QUIET)
+    if(TARGET OpusFile::opusfile)
+      add_library(opusfile INTERFACE IMPORTED)
+      target_link_libraries(opusfile INTERFACE OpusFile::opusfile)
+    endif()
+  endif()
+endif()
+
+add_subdirectory(miniaudio EXCLUDE_FROM_ALL)

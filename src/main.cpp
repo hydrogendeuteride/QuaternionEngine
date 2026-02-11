@@ -12,6 +12,7 @@
 
 #if USE_GAME_RUNTIME
 #include "runtime/game_runtime.h"
+#include "audio/miniaudio_system.h"
 
 #if USE_ENTITY_SYSTEM
 #include "game/example_game.h"
@@ -30,7 +31,11 @@ int main(int argc, char *argv[])
 
 #if USE_GAME_RUNTIME
     {
+        Audio::MiniAudioSystem audio;
+        audio.init();
+
         GameRuntime::Runtime runtime(&engine);
+        runtime.set_audio_system(&audio);
 #if USE_ENTITY_SYSTEM
         std::string game_name = "example";
         for (int i = 1; i < argc; ++i)

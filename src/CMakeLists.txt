@@ -178,6 +178,9 @@ add_executable (vulkan_engine
   physics/jolt/jolt_physics_world.h
   physics/jolt/jolt_physics_world.cpp
   physics/jolt/jolt_query_filters.h
+  # audio
+  audio/miniaudio_system.h
+  audio/miniaudio_system.cpp
   # game
   game/entity.h
   game/entity.cpp
@@ -346,11 +349,20 @@ target_include_directories(vulkan_engine PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
   "${CMAKE_CURRENT_SOURCE_DIR}/physics"
   "${CMAKE_CURRENT_SOURCE_DIR}/game"
+  "${CMAKE_CURRENT_SOURCE_DIR}/audio"
 )
 
 option(ENABLE_MIKKTS "Use MikkTSpace for tangent generation" ON)
 
-target_link_libraries(vulkan_engine PUBLIC vma glm Vulkan::Vulkan fmt::fmt stb_image SDL2::SDL2 vkbootstrap imgui fastgltf::fastgltf ImGuizmo BVH2 orbitsim)
+target_link_libraries(vulkan_engine PUBLIC vma glm Vulkan::Vulkan fmt::fmt stb_image SDL2::SDL2 vkbootstrap imgui fastgltf::fastgltf ImGuizmo BVH2 orbitsim miniaudio)
+if (TARGET miniaudio_libvorbis)
+  target_link_libraries(vulkan_engine PUBLIC miniaudio_libvorbis)
+  target_compile_definitions(vulkan_engine PUBLIC VULKAN_ENGINE_AUDIO_LIBVORBIS=1)
+endif()
+if (TARGET miniaudio_libopus)
+  target_link_libraries(vulkan_engine PUBLIC miniaudio_libopus)
+  target_compile_definitions(vulkan_engine PUBLIC VULKAN_ENGINE_AUDIO_LIBOPUS=1)
+endif()
 if (VULKAN_ENGINE_USE_JOLT)
   target_link_libraries(vulkan_engine PUBLIC Jolt::Jolt)
   target_compile_definitions(vulkan_engine PUBLIC VULKAN_ENGINE_USE_JOLT=1)

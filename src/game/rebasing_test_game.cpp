@@ -204,6 +204,11 @@ namespace Game
         {
             renderer->ui()->add_draw_callback([this]() { draw_ui(); });
         }
+
+        if (auto* audio = runtime.audio())
+        {
+            // audio->play_3d();
+        }
     }
 
     void RebasingTestGame::on_update(float dt)
