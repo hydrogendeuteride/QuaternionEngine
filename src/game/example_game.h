@@ -5,6 +5,7 @@
 #include "physics/physics_world.h"
 #include "physics/physics_context.h"
 #include "core/world.h"
+#include "core/game_api.h"
 
 #include <memory>
 #include <vector>
@@ -117,6 +118,9 @@ private:
     bool _contact_print_console{false};
     bool _contact_callbacks_all_bodies{false};
     bool _contact_callbacks_installed_all_bodies{false};
+    // Minimal ImGui image example state.
+    GameAPI::TextureHandle _imgui_example_texture{GameAPI::InvalidTexture};
+    void *_imgui_example_texture_id{nullptr};
 
     // Constants
     static constexpr float SPHERE_RADIUS = 0.5f;

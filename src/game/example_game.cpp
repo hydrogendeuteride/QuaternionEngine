@@ -71,6 +71,16 @@ namespace Game
             }
         }
 
+        // Minimal ImGui image sample: load a texture from assets/textures.
+        GameAPI::TextureLoadParams ui_tex_params{};
+        ui_tex_params.srgb = true;
+        ui_tex_params.mipmapped = false;
+        _imgui_example_texture = api.load_texture("grass_albedo.png", ui_tex_params);
+        if (_imgui_example_texture != GameAPI::InvalidTexture)
+        {
+            api.pin_texture(_imgui_example_texture);
+        }
+
         _fixed_time = 0.0f;
         _sphere_launched = false;
     }
@@ -154,6 +164,22 @@ namespace Game
 
     void ExampleGame::on_shutdown()
     {
+        if (_runtime)
+        {
+            auto &api = _runtime->api();
+            if (_imgui_example_texture_id != nullptr)
+            {
+                api.free_imgui_texture(_imgui_example_texture_id);
+                _imgui_example_texture_id = nullptr;
+            }
+            if (_imgui_example_texture != GameAPI::InvalidTexture)
+            {
+                api.unpin_texture(_imgui_example_texture);
+                api.unload_texture(_imgui_example_texture);
+                _imgui_example_texture = GameAPI::InvalidTexture;
+            }
+        }
+
         _world.clear_rebase_anchor();
 
         _world.clear();
@@ -678,6 +704,34 @@ namespace Game
         if (_contact_callbacks_installed_all_bodies != _contact_callbacks_all_bodies)
         {
             install_contact_callbacks();
+        }
+
+        ImGui::Separator();
+        if (ImGui::CollapsingHeader("ImGui Texture Example", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::TextUnformatted("Texture: assets/textures/grass_albedo.png");
+
+            if (_runtime && _imgui_example_texture != GameAPI::InvalidTexture)
+            {
+                auto &api = _runtime->api();
+                if (_imgui_example_texture_id == nullptr && api.is_texture_loaded(_imgui_example_texture))
+                {
+                    _imgui_example_texture_id = api.create_imgui_texture(_imgui_example_texture);
+                }
+
+                if (_imgui_example_texture_id != nullptr)
+                {
+                    ImGui::Image(_imgui_example_texture_id, ImVec2(256.0f, 256.0f));
+                }
+                else
+                {
+                    ImGui::TextUnformatted("Loading texture...");
+                }
+            }
+            else
+            {
+                ImGui::TextUnformatted("Texture handle is invalid.");
+            }
         }
 
         ImGui::Separator();
