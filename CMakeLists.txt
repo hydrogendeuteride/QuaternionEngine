@@ -66,7 +66,8 @@ if(VULKAN_ENGINE_BUILD_SHADERS)
         set(SPIRV "${GLSL}.spv")
         add_custom_command(
             OUTPUT "${SPIRV}"
-            COMMAND "${GLSL_VALIDATOR}" -V --target-env vulkan1.2 "${GLSL}" -o "${SPIRV}"
+            # Force SPIR-V 1.5 output for broader driver compatibility (some drivers crash on SPIR-V 1.6 modules).
+            COMMAND "${GLSL_VALIDATOR}" -V --target-env vulkan1.2 --target-env spirv1.5 "${GLSL}" -o "${SPIRV}"
             DEPENDS "${GLSL}"
             VERBATIM
         )

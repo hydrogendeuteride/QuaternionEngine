@@ -45,7 +45,8 @@ namespace Physics {
 struct ShadowSettings
 {
     // 0 = Clipmap only, 1 = Clipmap + RT assist, 2 = RT only
-    uint32_t mode = 2;
+    // Default to non-RT for broader driver compatibility; RT can be enabled at runtime.
+    uint32_t mode = 0;
     // Global enable/disable for all shadowing (raster + RT).
     bool enabled = true;
     // Shadow brightness control: minimum visibility applied to sun shadows (0..1).

@@ -8,18 +8,43 @@ bool vkutil::load_shader_module(const char *filePath, VkDevice device, VkShaderM
 
     if (!file.is_open())
     {
+        fmt::println(stderr, "Failed to open shader file: {}", filePath ? filePath : "(null)");
         return false;
     }
 
-    size_t fileSize = (size_t) file.tellg();
+    const std::streamsize fileSize = file.tellg();
+    if (fileSize <= 0)
+    {
+        fmt::println(stderr, "Shader file is empty or unreadable: {}", filePath);
+        return false;
+    }
+    if ((fileSize % std::streamsize(sizeof(uint32_t))) != 0)
+    {
+        // SPIR-V binaries must be a multiple of 4 bytes. Without this guard we'd
+        // overflow the buffer in the read() below.
+        fmt::println(stderr, "Shader file size is not a multiple of 4 bytes ({}): {}", (long long)fileSize, filePath);
+        return false;
+    }
 
-    std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+    std::vector<uint32_t> buffer(static_cast<size_t>(fileSize) / sizeof(uint32_t));
 
     file.seekg(0);
 
-    file.read((char *) buffer.data(), fileSize);
+    file.read(reinterpret_cast<char *>(buffer.data()), fileSize);
+    if (!file)
+    {
+        fmt::println(stderr, "Failed to read shader file: {}", filePath);
+        return false;
+    }
 
     file.close();
+
+    // Validate SPIR-V magic number early; corrupted .spv files can cause driver crashes later.
+    if (buffer.empty() || buffer[0] != 0x07230203u)
+    {
+        fmt::println(stderr, "Invalid SPIR-V magic in shader file: {}", filePath);
+        return false;
+    }
 
     VkShaderModuleCreateInfo createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -29,8 +54,10 @@ bool vkutil::load_shader_module(const char *filePath, VkDevice device, VkShaderM
     createInfo.pCode = buffer.data();
 
     VkShaderModule shaderModule;
-    if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS)
+    const VkResult res = vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule);
+    if (res != VK_SUCCESS)
     {
+        fmt::println(stderr, "vkCreateShaderModule failed ({}): {}", string_VkResult(res), filePath);
         return false;
     }
 
@@ -75,6 +102,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device)
     colorBlending.logicOp = VK_LOGIC_OP_COPY;
     // For multiple color attachments (e.g., G-Buffer), we must provide one blend state per attachment.
     // Depth-only pipelines are allowed (0 color attachments).
+
     std::vector<VkPipelineColorBlendAttachmentState> blendAttachments;
     uint32_t colorAttachmentCount = (uint32_t)_colorAttachmentFormats.size();
     if (colorAttachmentCount > 0)
@@ -88,6 +116,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device)
         colorBlending.attachmentCount = 0;
         colorBlending.pAttachments = nullptr;
     }
+
     VkPipelineVertexInputStateCreateInfo _vertexInputInfo = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
 
     VkGraphicsPipelineCreateInfo pipelineInfo = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
@@ -112,11 +141,11 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device)
     pipelineInfo.pDynamicState = &dynamicInfo;
 
     VkPipeline newPipeline;
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
-                                  nullptr, &newPipeline)
-        != VK_SUCCESS)
+    const VkResult res = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
+                                  nullptr, &newPipeline);
+    if (res != VK_SUCCESS)
     {
-        fmt::println("failed to create pipeline");
+        fmt::println(stderr, "failed to create pipeline: {}", string_VkResult(res));
         return VK_NULL_HANDLE;
     }
     else

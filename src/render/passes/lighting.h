@@ -35,6 +35,7 @@ private:
     VkPipelineLayout _pipelineLayout = VK_NULL_HANDLE;
     VkPipeline _pipeline = VK_NULL_HANDLE;
     VkDescriptorSetLayout _emptySetLayout = VK_NULL_HANDLE; // placeholder if IBL layout missing
+    bool _rtPipelineCreateAttempted = false; // create deferred_lighting.rt lazily
 
     void draw_lighting(VkCommandBuffer cmd,
                        EngineContext *context,

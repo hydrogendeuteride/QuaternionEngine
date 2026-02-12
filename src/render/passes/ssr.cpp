@@ -24,6 +24,9 @@ void SSRPass::init(EngineContext *context)
     }
 
     VkDevice device = _context->getDevice()->device();
+    const bool rtCapable =
+        _context->getDevice()->supportsRayQuery() &&
+        _context->getDevice()->supportsAccelerationStructure();
 
     // Set 1 layout: HDR + G-Buffer inputs (all sampled images).
     {
@@ -67,9 +70,25 @@ void SSRPass::init(EngineContext *context)
     _context->pipelines->createGraphicsPipeline("ssr.nort", infoNoRT);
 
     // RT-assisted variant (SSR + ray-query fallback using TLAS).
-    GraphicsPipelineCreateInfo infoRT = baseInfo;
-    infoRT.fragmentShaderPath = _context->getAssets()->shaderPath("ssr_rt.frag.spv");
-    _context->pipelines->createGraphicsPipeline("ssr.rt", infoRT);
+    const bool wantRTAtStartup = rtCapable && (_context->reflectionMode != 0u);
+    if (wantRTAtStartup)
+    {
+        _rtPipelineCreateAttempted = true;
+        GraphicsPipelineCreateInfo infoRT = baseInfo;
+        infoRT.fragmentShaderPath = _context->getAssets()->shaderPath("ssr_rt.frag.spv");
+        _context->pipelines->createGraphicsPipeline("ssr.rt", infoRT);
+    }
+    else
+    {
+        if (!rtCapable)
+        {
+            fmt::println("[SSRPass] Ray-query not supported; skipping ssr.rt pipeline.");
+        }
+        else
+        {
+            fmt::println("[SSRPass] RT pipeline deferred (reflection mode = SSR only).");
+        }
+    }
 }
 
 void SSRPass::cleanup()
@@ -157,10 +176,58 @@ void SSRPass::draw_ssr(VkCommandBuffer cmd,
     }
 
     // Choose RT variant only if TLAS is valid; otherwise fall back to non-RT.
-    const bool haveRTFeatures = deviceManager->supportsAccelerationStructure();
+    const bool haveRTFeatures =
+        deviceManager->supportsRayQuery() &&
+        deviceManager->supportsAccelerationStructure();
     const VkAccelerationStructureKHR tlas = (ctxLocal->ray ? ctxLocal->ray->tlas() : VK_NULL_HANDLE);
     const VkDeviceAddress tlasAddr = (ctxLocal->ray ? ctxLocal->ray->tlasAddress() : 0);
-    const bool useRT = haveRTFeatures && (tlas != VK_NULL_HANDLE) && (tlasAddr != 0);
+    bool useRT =
+        haveRTFeatures &&
+        (ctxLocal->reflectionMode != 0u) &&
+        (tlas != VK_NULL_HANDLE) &&
+        (tlasAddr != 0);
+
+    // Lazily build the RT pipeline only when RT reflections are actually enabled.
+    if (useRT)
+    {
+        VkPipeline p = VK_NULL_HANDLE;
+        VkPipelineLayout l = VK_NULL_HANDLE;
+        if (!pipelineManager->getGraphics("ssr.rt", p, l))
+        {
+            if (!_rtPipelineCreateAttempted)
+            {
+                _rtPipelineCreateAttempted = true;
+
+                GraphicsPipelineCreateInfo baseInfo{};
+                baseInfo.vertexShaderPath = ctxLocal->getAssets()->shaderPath("fullscreen.vert.spv");
+                baseInfo.setLayouts = {
+                    descriptorLayouts->gpuSceneDataLayout(), // set = 0 (sceneData UBO + optional TLAS)
+                    _inputSetLayout                           // set = 1 (HDR + GBuffer)
+                };
+
+                baseInfo.configure = [ctxLocal](PipelineBuilder &b)
+                {
+                    b.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+                    b.set_polygon_mode(VK_POLYGON_MODE_FILL);
+                    b.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+                    b.set_multisampling_none();
+                    b.disable_depthtest();
+                    b.disable_blending();
+                    if (ctxLocal && ctxLocal->getSwapchain())
+                    {
+                        b.set_color_attachment_format(ctxLocal->getSwapchain()->drawImage().imageFormat);
+                    }
+                };
+
+                GraphicsPipelineCreateInfo infoRT = baseInfo;
+                infoRT.fragmentShaderPath = ctxLocal->getAssets()->shaderPath("ssr_rt.frag.spv");
+                if (!pipelineManager->createGraphicsPipeline("ssr.rt", infoRT))
+                {
+                    fmt::println(stderr, "[SSRPass] Failed to build ssr.rt; falling back to non-RT.");
+                }
+            }
+        }
+    }
 
     const char *pipeName = useRT ? "ssr.rt" : "ssr.nort";
     if (!pipelineManager->getGraphics(pipeName, _pipeline, _pipelineLayout))

@@ -3,6 +3,17 @@
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_vulkan.h"
 
+#include <cstdlib>
+#include <cstring>
+
+static bool env_truthy(const char *name)
+{
+    const char *v = std::getenv(name);
+    if (!v) return false;
+    if (!*v) return true;
+    return std::strcmp(v, "0") != 0 && std::strcmp(v, "false") != 0 && std::strcmp(v, "FALSE") != 0;
+}
+
 // Create Vulkan instance/device, enable debug/validation (in Debug), pick a GPU,
 // and set up VMA with buffer device address. If available, enable Ray Query and
 // Acceleration Structure extensions + features.
@@ -56,6 +67,8 @@ void DeviceManager::init_vulkan(SDL_Window *window)
     // Enable ray tracing extensions on the physical device if supported (before creating the DeviceBuilder)
     // Query ray tracing capability on the chosen physical device
     {
+        const bool forceDisableRayQuery = env_truthy("VKG_DISABLE_RAY_QUERY") || env_truthy("VE_DISABLE_RAY_QUERY");
+
         VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeat{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
         VkPhysicalDeviceRayQueryFeaturesKHR rayqFeat{
@@ -63,11 +76,26 @@ void DeviceManager::init_vulkan(SDL_Window *window)
             .pNext = &accelFeat };
         VkPhysicalDeviceFeatures2 feats2{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &rayqFeat };
         vkGetPhysicalDeviceFeatures2(physicalDevice.physical_device, &feats2);
-        _rayQuerySupported      = (rayqFeat.rayQuery == VK_TRUE);
-        _accelStructSupported   = (accelFeat.accelerationStructure == VK_TRUE);
+        const bool rayQueryCapable = (rayqFeat.rayQuery == VK_TRUE);
+        const bool accelCapable = (accelFeat.accelerationStructure == VK_TRUE);
+
+        _rayQuerySupported = rayQueryCapable;
+        _accelStructSupported = accelCapable;
+
+        if (forceDisableRayQuery)
+        {
+            _rayQuerySupported = false;
+            _accelStructSupported = false;
+        }
+
         fmt::print("[Device] RayQuery support: {} | AccelStruct: {}\n",
-                   _rayQuerySupported ? "yes" : "no",
-                   _accelStructSupported ? "yes" : "no");
+                   rayQueryCapable ? "yes" : "no",
+                   accelCapable ? "yes" : "no");
+
+        if (forceDisableRayQuery && rayQueryCapable && accelCapable)
+        {
+            fmt::print("[Device] VKG_DISABLE_RAY_QUERY is set; forcing RayQuery/AccelStruct OFF for compatibility.\n");
+        }
 
         if (_rayQuerySupported && _accelStructSupported)
         {

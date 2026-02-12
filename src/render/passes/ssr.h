@@ -36,6 +36,7 @@ private:
     VkDescriptorSetLayout _inputSetLayout = VK_NULL_HANDLE; // set=1: HDR + GBuffer inputs
     VkPipeline _pipeline = VK_NULL_HANDLE;
     VkPipelineLayout _pipelineLayout = VK_NULL_HANDLE;
+    bool _rtPipelineCreateAttempted = false; // create ssr.rt lazily
 
     void draw_ssr(VkCommandBuffer cmd,
                   EngineContext *context,

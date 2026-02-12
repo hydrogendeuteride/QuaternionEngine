@@ -25,12 +25,17 @@
 void LightingPass::init(EngineContext *context)
 {
     _context = context;
+    if (!_context || !_context->getDevice() || !_context->getDescriptorLayouts() || !_context->pipelines ||
+        !_context->getSwapchain() || !_context->getAssets() || !_context->getResources())
+    {
+        return;
+    }
 
     // Placeholder empty set layout to keep array sizes stable if needed
     {
         VkDescriptorSetLayoutCreateInfo info{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
         info.bindingCount = 0; info.pBindings = nullptr;
-        vkCreateDescriptorSetLayout(_context->getDevice()->device(), &info, nullptr, &_emptySetLayout);
+        VK_CHECK(vkCreateDescriptorSetLayout(_context->getDevice()->device(), &info, nullptr, &_emptySetLayout));
     }
 
     // Build descriptor layout for GBuffer inputs
@@ -85,10 +90,32 @@ void LightingPass::init(EngineContext *context)
     infoNoRT.fragmentShaderPath = _context->getAssets()->shaderPath("deferred_lighting_nort.frag.spv");
     _context->pipelines->createGraphicsPipeline("deferred_lighting.nort", infoNoRT);
 
-    // RT variant (requires GL_EXT_ray_query and TLAS bound at set=0,binding=1)
-    auto infoRT = baseInfo;
-    infoRT.fragmentShaderPath = _context->getAssets()->shaderPath("deferred_lighting.frag.spv");
-    _context->pipelines->createGraphicsPipeline("deferred_lighting.rt", infoRT);
+	    // RT variant (requires GL_EXT_ray_query and TLAS bound at set=0,binding=1)
+	    const bool rtCapable =
+	        _context->getDevice()->supportsRayQuery() &&
+	        _context->getDevice()->supportsAccelerationStructure();
+
+	    const bool wantRTAtStartup = rtCapable && _context->shadowSettings.enabled && (_context->shadowSettings.mode != 0u);
+	    if (wantRTAtStartup)
+	    {
+	        _rtPipelineCreateAttempted = true;
+	        auto infoRT = baseInfo;
+	        infoRT.fragmentShaderPath = _context->getAssets()->shaderPath("deferred_lighting.frag.spv");
+	        _context->pipelines->createGraphicsPipeline("deferred_lighting.rt", infoRT);
+
+	    }
+	    else
+	    {
+	        if (!rtCapable)
+	        {
+	            fmt::println("[LightingPass] Ray-query not supported; skipping deferred_lighting.rt pipeline.");
+	        }
+	        else
+	        {
+	            fmt::println("[LightingPass] RT pipeline deferred (shadow mode = Clipmap only).");
+	        }
+
+	    }
 
     _deletionQueue.push_function([&]() {
         // Pipelines are owned by PipelineManager; only destroy our local descriptor set layout
@@ -105,6 +132,7 @@ void LightingPass::init(EngineContext *context)
                                                                 VK_FORMAT_R8G8B8A8_UNORM,
                                                                 VK_IMAGE_USAGE_SAMPLED_BIT);
     }
+
     {
         // 1x1 RG UNORM for BRDF LUT fallback
         const uint16_t rg = 0x0000u; // R=0,G=0
@@ -186,21 +214,70 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
     }
 
     // Choose RT only if TLAS is valid; otherwise fall back to non-RT.
-    const bool haveRTFeatures = ctxLocal->getDevice()->supportsAccelerationStructure();
-    const VkAccelerationStructureKHR tlas = (ctxLocal->ray ? ctxLocal->ray->tlas() : VK_NULL_HANDLE);
-    const VkDeviceAddress tlasAddr = (ctxLocal->ray ? ctxLocal->ray->tlasAddress() : 0);
-    const bool useRT =
-        haveRTFeatures &&
-        ctxLocal->shadowSettings.enabled &&
-        (ctxLocal->shadowSettings.mode != 0u) &&
-        (tlas != VK_NULL_HANDLE) &&
-        (tlasAddr != 0);
+	    const bool haveRTFeatures =
+	        ctxLocal->getDevice()->supportsRayQuery() &&
+	        ctxLocal->getDevice()->supportsAccelerationStructure();
+	    const VkAccelerationStructureKHR tlas = (ctxLocal->ray ? ctxLocal->ray->tlas() : VK_NULL_HANDLE);
+	    const VkDeviceAddress tlasAddr = (ctxLocal->ray ? ctxLocal->ray->tlasAddress() : 0);
+	    bool useRT =
+	        haveRTFeatures &&
+	        ctxLocal->shadowSettings.enabled &&
+	        (ctxLocal->shadowSettings.mode != 0u) &&
+	        (tlas != VK_NULL_HANDLE) &&
+	        (tlasAddr != 0);
 
-    const char* pipeName = useRT ? "deferred_lighting.rt" : "deferred_lighting.nort";
-    if (!pipelineManager->getGraphics(pipeName, _pipeline, _pipelineLayout))
-    {
-        // Try the other variant as a fallback
-        const char* fallback = useRT ? "deferred_lighting.nort" : "deferred_lighting.rt";
+	    // Lazily build the RT pipeline only when RT shadows are actually enabled.
+	    if (useRT)
+	    {
+	        VkPipeline p = VK_NULL_HANDLE;
+	        VkPipelineLayout l = VK_NULL_HANDLE;
+	        if (!pipelineManager->getGraphics("deferred_lighting.rt", p, l))
+	        {
+	            if (!_rtPipelineCreateAttempted)
+	            {
+	                _rtPipelineCreateAttempted = true;
+
+	                VkDescriptorSetLayout iblLayout = _emptySetLayout;
+	                if (ctxLocal->ibl && ctxLocal->ibl->ensureLayout())
+	                {
+	                    iblLayout = ctxLocal->ibl->descriptorLayout();
+	                }
+
+	                VkDescriptorSetLayout layouts[] = {
+	                    descriptorLayouts->gpuSceneDataLayout(), // set=0
+	                    _gBufferInputDescriptorLayout,           // set=1
+	                    _shadowDescriptorLayout,                 // set=2
+	                    iblLayout                                // set=3
+	                };
+
+	                GraphicsPipelineCreateInfo baseInfo{};
+	                baseInfo.vertexShaderPath = ctxLocal->getAssets()->shaderPath("fullscreen.vert.spv");
+	                baseInfo.setLayouts.assign(std::begin(layouts), std::end(layouts));
+	                baseInfo.configure = [ctxLocal](PipelineBuilder &b) {
+	                    b.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+	                    b.set_polygon_mode(VK_POLYGON_MODE_FILL);
+	                    b.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+	                    b.set_multisampling_none();
+	                    b.enable_blending_alphablend();
+	                    b.disable_depthtest();
+	                    b.set_color_attachment_format(ctxLocal->getSwapchain()->drawImage().imageFormat);
+	                };
+
+	                auto infoRT = baseInfo;
+	                infoRT.fragmentShaderPath = ctxLocal->getAssets()->shaderPath("deferred_lighting.frag.spv");
+	                if (!pipelineManager->createGraphicsPipeline("deferred_lighting.rt", infoRT))
+	                {
+	                    fmt::println(stderr, "[LightingPass] Failed to build deferred_lighting.rt; falling back to non-RT.");
+	                }
+	            }
+	        }
+	    }
+
+	    const char* pipeName = useRT ? "deferred_lighting.rt" : "deferred_lighting.nort";
+	    if (!pipelineManager->getGraphics(pipeName, _pipeline, _pipelineLayout))
+	    {
+	        // Try the other variant as a fallback
+	        const char* fallback = useRT ? "deferred_lighting.nort" : "deferred_lighting.rt";
         if (!pipelineManager->getGraphics(fallback, _pipeline, _pipelineLayout))
             return; // Neither pipeline is ready
     }
