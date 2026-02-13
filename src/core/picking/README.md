@@ -62,7 +62,7 @@ cleanup()
 
 ```cpp
 // Run once per-frame after InputSystem::pump_events()
-const bool ui_capture_mouse = engine->ui() && engine->ui()->want_capture_mouse();
+const bool ui_capture_mouse = engine->ui() && engine->ui()->wantCaptureMouse();
 picking.process_input(*engine->input(), ui_capture_mouse);
 picking.update_hover(ui_capture_mouse);
 

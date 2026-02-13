@@ -16,23 +16,23 @@ public:
     void init(EngineContext *context);
     void cleanup();
 
-    void process_event(const SDL_Event &event);
+    void processEvent(const SDL_Event &event);
 
-    void begin_frame();
-    void end_frame();
+    void beginFrame();
+    void endFrame();
 
-    void add_draw_callback(DrawCallback callback);
-    void clear_draw_callbacks();
+    void addDrawCallback(DrawCallback callback);
+    void clearDrawCallbacks();
 
-    bool want_capture_mouse() const;
-    bool want_capture_keyboard() const;
+    bool wantCaptureMouse() const;
+    bool wantCaptureKeyboard() const;
 
-    void on_swapchain_recreated();
+    void onSwapchainRecreated();
 
 private:
-    float compute_dpi_scale() const;
-    void update_framebuffer_scale();
-    void rebuild_fonts(float dpi_scale);
+    float computeDpiScale() const;
+    void updateFramebufferScale();
+    void rebuildFonts(float dpi_scale);
 
     EngineContext *_context = nullptr;
     std::vector<DrawCallback> _draw_callbacks;

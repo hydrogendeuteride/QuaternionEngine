@@ -35,16 +35,16 @@ init(EngineContext*)
   ├─ initializes ImGui SDL2 + Vulkan backends (dynamic rendering)
   └─ uploads font texture
 
-begin_frame()
+beginFrame()
   ├─ ImGui_ImplVulkan_NewFrame / ImGui_ImplSDL2_NewFrame
   ├─ updates framebuffer scale & detects DPI changes (rebuilds fonts if needed)
   ├─ ImGui::NewFrame()
   └─ invokes all registered draw callbacks
 
-end_frame()
+endFrame()
   └─ ImGui::Render()
 
-on_swapchain_recreated()
+onSwapchainRecreated()
   └─ updates min image count & framebuffer scale
 
 cleanup()
@@ -58,7 +58,7 @@ cleanup()
 ### Registering draw callbacks
 
 ```cpp
-engine->ui()->add_draw_callback([]() {
+engine->ui()->addDrawCallback([]() {
     ImGui::Begin("Debug");
     ImGui::Text("Hello from UI callback");
     ImGui::End();
@@ -69,13 +69,13 @@ engine->ui()->add_draw_callback([]() {
 
 ```cpp
 // In event loop
-engine->ui()->process_event(sdl_event);
+engine->ui()->processEvent(sdl_event);
 
 // Guard game input when ImGui wants focus
-if (!engine->ui()->want_capture_mouse()) {
+if (!engine->ui()->wantCaptureMouse()) {
     // handle game mouse input
 }
-if (!engine->ui()->want_capture_keyboard()) {
+if (!engine->ui()->wantCaptureKeyboard()) {
     // handle game keyboard input
 }
 ```
@@ -87,7 +87,7 @@ accessed via `VulkanEngine::ui()`. It is **not** exposed through `EngineContext`
 
 During engine initialization, the built-in debug UI callback is registered:
 ```cpp
-_ui->add_draw_callback([this]() { vk_engine_draw_debug_ui(this); });
+_ui->addDrawCallback([this]() { vk_engine_draw_debug_ui(this); });
 ```
 
 The ImGui render pass records `ImGui_ImplVulkan_RenderDrawData` into the

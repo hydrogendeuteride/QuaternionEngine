@@ -144,7 +144,7 @@ static void dump_vma_json(DeviceManager* dev, const char* tag)
     }
 }
 
-size_t VulkanEngine::query_texture_budget_bytes() const
+size_t VulkanEngine::queryTextureBudgetBytes() const
 {
     DeviceManager *dev = _deviceManager.get();
     if (!dev) return kTextureBudgetFallbackBytes; // fallback
@@ -376,11 +376,11 @@ void VulkanEngine::init()
     _textureCache->init(_context.get());
     _context->textures = _textureCache.get();
     // Conservative defaults to avoid CPU/RAM/VRAM spikes during heavy glTF loads.
-    _textureCache->set_max_loads_per_pump(3);
-    _textureCache->set_keep_source_bytes(false);
-    _textureCache->set_cpu_source_budget(64ull * 1024ull * 1024ull); // 64 MiB
-    _textureCache->set_max_bytes_per_pump(128ull * 1024ull * 1024ull); // 128 MiB/frame
-    _textureCache->set_max_upload_dimension(4096);
+    _textureCache->setMaxLoadsPerPump(3);
+    _textureCache->setKeepSourceBytes(false);
+    _textureCache->setCpuSourceBudget(64ull * 1024ull * 1024ull); // 64 MiB
+    _textureCache->setMaxBytesPerPump(128ull * 1024ull * 1024ull); // 128 MiB/frame
+    _textureCache->setMaxUploadDimension(4096);
 
     // Async asset loader for background glTF + texture jobs
     _asyncLoader = std::make_unique<AsyncAssetLoader>();
@@ -417,7 +417,7 @@ void VulkanEngine::init()
     _iblManager->init(_context.get());
     if (_textureCache)
     {
-        _iblManager->set_texture_cache(_textureCache.get());
+        _iblManager->setTextureCache(_textureCache.get());
     }
     // Publish to context for passes and pipeline layout assembly
     _context->ibl = _iblManager.get();
@@ -437,7 +437,7 @@ void VulkanEngine::init()
         _hasGlobalIBL = false;
         if (_iblManager)
         {
-            if (_iblManager->load_async(ibl))
+            if (_iblManager->loadAsync(ibl))
             {
                 _pendingIBLRequest.active = true;
                 _pendingIBLRequest.targetVolume = -1;
@@ -452,12 +452,12 @@ void VulkanEngine::init()
         }
     }
 
-    init_frame_resources();
+    initFrameResources();
 
     // Build material pipelines early so materials can be created
     metalRoughMaterial.build_pipelines(this);
 
-    init_default_data();
+    initDefaultData();
 
     _renderPassManager = std::make_unique<RenderPassManager>();
     _renderPassManager->init(_context.get());
@@ -467,7 +467,7 @@ void VulkanEngine::init()
 
     _ui = std::make_unique<ImGuiSystem>();
     _ui->init(_context.get());
-    _ui->add_draw_callback([this]() { vk_engine_draw_debug_ui(this); });
+    _ui->addDrawCallback([this]() { vk_engine_draw_debug_ui(this); });
 
     _resourceManager->set_deferred_uploads(true);
 
@@ -477,7 +477,7 @@ void VulkanEngine::init()
     _isInitialized = true;
 }
 
-void VulkanEngine::set_window_mode(WindowMode mode, int display_index)
+void VulkanEngine::setWindowMode(WindowMode mode, int display_index)
 {
     if (!_window) return;
 
@@ -586,7 +586,7 @@ void VulkanEngine::set_window_mode(WindowMode mode, int display_index)
         _swapchainManager->resize_swapchain(_window);
         if (_ui)
         {
-            _ui->on_swapchain_recreated();
+            _ui->onSwapchainRecreated();
         }
         if (_swapchainManager->resize_requested)
         {
@@ -600,7 +600,7 @@ void VulkanEngine::set_window_mode(WindowMode mode, int display_index)
     }
 }
 
-void VulkanEngine::set_logical_render_extent(VkExtent2D extent)
+void VulkanEngine::setLogicalRenderExtent(VkExtent2D extent)
 {
     extent = clamp_nonzero_extent(extent);
     if (_logicalRenderExtent.width == extent.width && _logicalRenderExtent.height == extent.height)
@@ -621,7 +621,7 @@ void VulkanEngine::set_logical_render_extent(VkExtent2D extent)
     }
 }
 
-void VulkanEngine::set_render_scale(float scale)
+void VulkanEngine::setRenderScale(float scale)
 {
     if (!std::isfinite(scale)) scale = 1.0f;
     scale = std::clamp(scale, 0.1f, 4.0f);
@@ -639,7 +639,7 @@ void VulkanEngine::set_render_scale(float scale)
     }
 }
 
-void VulkanEngine::init_default_data()
+void VulkanEngine::initDefaultData()
 {
     //> default_img
     //3 default textures, white, grey, black. 1 pixel each
@@ -841,7 +841,7 @@ uint32_t VulkanEngine::loadGLTFAsync(const std::string &sceneName,
         return 0;
     }
 
-    return _asyncLoader->load_gltf_async(sceneName, resolvedPath, transform, preloadTextures);
+    return _asyncLoader->loadGltfAsync(sceneName, resolvedPath, transform, preloadTextures);
 }
 
 uint32_t VulkanEngine::loadGLTFAsync(const std::string &sceneName,
@@ -866,7 +866,7 @@ uint32_t VulkanEngine::loadGLTFAsync(const std::string &sceneName,
         return 0;
     }
 
-    return _asyncLoader->load_gltf_async(sceneName,
+    return _asyncLoader->loadGltfAsync(sceneName,
                                          resolvedPath,
                                          translationWorld,
                                          rotation,
@@ -1041,7 +1041,7 @@ void VulkanEngine::draw()
     // Integrate any completed async asset jobs into the scene before updating.
     if (_asyncLoader && _sceneManager)
     {
-        _asyncLoader->pump_main_thread(*_sceneManager);
+        _asyncLoader->pumpMainThread(*_sceneManager);
     }
 
     // Apply any completed async pipeline rebuilds before using pipelines this frame.
@@ -1138,7 +1138,7 @@ void VulkanEngine::draw()
                 }
                 *paths = resolved;
 
-                if (_iblManager->load_async(resolved))
+                if (_iblManager->loadAsync(resolved))
                 {
                     _pendingIBLRequest.active = true;
                     _pendingIBLRequest.targetVolume = newVolume;
@@ -1156,7 +1156,7 @@ void VulkanEngine::draw()
 
     if (_picking)
     {
-        const bool ui_capture_mouse = _ui && _ui->want_capture_mouse();
+        const bool ui_capture_mouse = _ui && _ui->wantCaptureMouse();
         _picking->update_hover(ui_capture_mouse);
     }
 
@@ -1265,8 +1265,8 @@ void VulkanEngine::draw()
         // Prior to building passes, pump texture loads for this frame.
         if (_textureCache)
         {
-            size_t budget = query_texture_budget_bytes();
-            _textureCache->set_gpu_budget_bytes(budget);
+            size_t budget = queryTextureBudgetBytes();
+            _textureCache->setGpuBudgetBytes(budget);
             _textureCache->evictToBudget(budget);
             _textureCache->pumpLoads(*_resourceManager, get_current_frame());
         }
@@ -1522,7 +1522,7 @@ namespace
 
         if (ctx->engine->ui())
         {
-            ctx->engine->ui()->process_event(e);
+            ctx->engine->ui()->processEvent(e);
         }
     }
 } // namespace
@@ -1556,8 +1556,8 @@ void VulkanEngine::run()
             }
         }
 
-        const bool ui_capture_mouse = _ui && _ui->want_capture_mouse();
-        const bool ui_capture_keyboard = _ui && _ui->want_capture_keyboard();
+        const bool ui_capture_mouse = _ui && _ui->wantCaptureMouse();
+        const bool ui_capture_keyboard = _ui && _ui->wantCaptureKeyboard();
 
         if (_input)
         {
@@ -1590,7 +1590,7 @@ void VulkanEngine::run()
                 _swapchainManager->resize_swapchain(_window);
                 if (_ui)
                 {
-                    _ui->on_swapchain_recreated();
+                    _ui->onSwapchainRecreated();
                 }
                 resize_requested = false;
             }
@@ -1610,7 +1610,7 @@ void VulkanEngine::run()
         // Commit any completed async IBL load now that the GPU is idle.
         if (_iblManager && _pendingIBLRequest.active)
         {
-            IBLManager::AsyncResult iblRes = _iblManager->pump_async();
+            IBLManager::AsyncResult iblRes = _iblManager->pumpAsync();
             if (iblRes.completed)
             {
                 if (iblRes.success)
@@ -1648,8 +1648,8 @@ void VulkanEngine::run()
 
         if (_ui)
         {
-            _ui->begin_frame();
-            _ui->end_frame();
+            _ui->beginFrame();
+            _ui->endFrame();
         }
         draw();
 
@@ -1661,7 +1661,7 @@ void VulkanEngine::run()
     }
 }
 
-void VulkanEngine::init_frame_resources()
+void VulkanEngine::initFrameResources()
 {
     // descriptor pool sizes per-frame
     std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> frame_sizes = {
@@ -1678,7 +1678,7 @@ void VulkanEngine::init_frame_resources()
     }
 }
 
-void VulkanEngine::init_pipelines()
+void VulkanEngine::initPipelines()
 {
     metalRoughMaterial.build_pipelines(this);
 }

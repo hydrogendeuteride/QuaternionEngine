@@ -121,10 +121,10 @@ public:
                                                               MaterialPass pass = MaterialPass::MainColor);
 
     // Access engine-provided fallback textures for procedural systems.
-    VkImageView fallback_checkerboard_view() const;
-    VkImageView fallback_white_view() const;
-    VkImageView fallback_flat_normal_view() const;
-    VkImageView fallback_black_view() const;
+    VkImageView fallbackCheckerboardView() const;
+    VkImageView fallbackWhiteView() const;
+    VkImageView fallbackFlatNormalView() const;
+    VkImageView fallbackBlackView() const;
 
     const AssetPaths &paths() const { return _locator.paths(); }
     void setPaths(const AssetPaths &p) { _locator.setPaths(p); }

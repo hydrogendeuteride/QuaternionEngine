@@ -16,18 +16,18 @@ Data Flow
   - Call `request(key, sampler)` → returns a stable `TextureHandle`, deduplicated by a 64‑bit FNV‑1a hash. For FilePath keys the path plus the sRGB bit are hashed; for Bytes keys the payload hash is XOR’d with a constant when `srgb=true`.
   - Register target descriptors via `watchBinding(handle, set, binding, sampler, fallbackView)`.
 - Visibility‑gated scheduling
-  - `pumpLoads(...)` looks for entries in `Unloaded` or `Evicted` state that were seen recently (`now == 0` or `now - lastUsed <= 1`) and starts at most `max_loads_per_pump` decodes per call, while enforcing a byte budget for uploads per frame.
+  - `pumpLoads(...)` looks for entries in `Unloaded` or `Evicted` state that were seen recently (`now == 0` or `now - lastUsed <= 1`) and starts at most `maxLoadsPerPump` decodes per call, while enforcing a byte budget for uploads per frame.
   - Render passes mark used sets each frame with `markSetUsed(...)` (or specific handles via `markUsed(...)`).
 - Decode
   - FilePath: if the path ends with `.ktx2` or a sibling exists, we load via libktx (and transcode to BCn if needed). Otherwise, decode to RGBA8 via stb_image.
   - Bytes: always decode via stb_image (no sibling discovery possible).
 - Admission & Upload
-  - Before upload, an expected resident size is computed (exact for KTX2 by summing level byte lengths; estimated for raster by format×area×mip‑factor). A per‑frame byte budget (`max_bytes_per_pump`) throttles uploads.
+  - Before upload, an expected resident size is computed (exact for KTX2 by summing level byte lengths; estimated for raster by format×area×mip‑factor). A per‑frame byte budget (`maxBytesPerPump`) throttles uploads.
   - If a GPU texture budget is set, the cache evicts least‑recently‑used textures not used this frame. If it still cannot fit, the decode is deferred or dropped with backoff.
   - Raster: `ResourceManager::create_image(...)` stages a single region, then optionally generates mips on GPU.
   - KTX2: `ResourceManager::create_image_compressed(...)` allocates an image with the file’s `VkFormat` (from libktx) and records one `VkBufferImageCopy` per mip level (no GPU mip gen). Immediate path transitions to `SHADER_READ_ONLY_OPTIMAL`; the RenderGraph path transitions after copy when no mip gen.
   - If the device cannot sample the KTX2 format, the cache falls back to raster decode.
-  - After upload: state → `Resident`, descriptors recorded via `watchBinding` are rewritten to the new image view with the chosen sampler and `SHADER_READ_ONLY_OPTIMAL` layout. For Bytes‑backed keys, compressed source bytes are dropped unless `keep_source_bytes` is enabled.
+  - After upload: state → `Resident`, descriptors recorded via `watchBinding` are rewritten to the new image view with the chosen sampler and `SHADER_READ_ONLY_OPTIMAL` layout. For Bytes‑backed keys, compressed source bytes are dropped unless `keepSourceBytes` is enabled.
 - Eviction & Reload
   - `evictToBudget(bytes)` rewrites watchers to fallbacks, destroys images, and marks entries `Evicted`. Evicted entries can reload automatically when seen again and a short cooldown has passed (default ~2 frames), avoiding immediate thrash.
 
@@ -43,14 +43,14 @@ Key APIs (src/core/assets/texture_cache.h)
 - `void markSetUsed(VkDescriptorSet, uint32_t frameIndex)` and `void markUsed(TextureHandle, uint32_t frameIndex)`
 - `void pumpLoads(ResourceManager&, FrameResources&)`
 - `void evictToBudget(size_t bytes)`
-- Controls: `set_max_loads_per_pump`, `set_keep_source_bytes`, `set_cpu_source_budget`, `set_gpu_budget_bytes`
+- Controls: `setMaxLoadsPerPump`, `setKeepSourceBytes`, `setCpuSourceBudget`, `setGpuBudgetBytes`
 
 Defaults & Budgets
 - Worker threads: 1–4 decode threads depending on hardware.
 - Loads per pump: default 4.
 - Upload byte budget: default 128 MiB per frame.
-- GPU budget: unlimited until the engine sets one each frame. The engine queries ~35% of device‑local memory (via VMA) and calls `set_gpu_budget_bytes(...)`, then runs `evictToBudget(...)` and `pumpLoads(...)` during the frame loop (`src/core/engine.cpp`).
-- CPU source bytes: default budget 64 MiB; `keep_source_bytes` defaults to false. Retention only applies to entries created from Bytes keys.
+- GPU budget: unlimited until the engine sets one each frame. The engine queries ~35% of device‑local memory (via VMA) and calls `setGpuBudgetBytes(...)`, then runs `evictToBudget(...)` and `pumpLoads(...)` during the frame loop (`src/core/engine.cpp`).
+- CPU source bytes: default budget 64 MiB; `keepSourceBytes` defaults to false. Retention only applies to entries created from Bytes keys.
 
 Examples
 - Asset materials (`src/core/assets/manager.cpp`)
@@ -79,13 +79,13 @@ Limitations / Future Work
 - Linear‑blit capability check
   - `vkutil::generate_mipmaps` / `generate_mipmaps_levels` always use `VK_FILTER_LINEAR` for blits without checking `VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT`. Add a per‑format capability check and a fallback path (nearest or compute downsample) for formats that do not support linear filtering (especially some compressed formats).
 - Texture formats
-  - Raster path: limited to 8‑bit R/RG/RGBA via `stbi_load`. KTX2 path in `TextureCache::worker_loop` currently accepts only BCn/BC6H formats and rejects other VkFormats returned by libktx (e.g., uncompressed `R16G16B16A16_SFLOAT`). Future work: ASTC/ETC2, specialized R8/RG8 parsing, and float HDR support (`stbi_loadf` → `R16G16B16A16_SFLOAT`) so HDR albedo/lighting data can stream through the generic cache (today HDR IBL uses the separate `IBLManager` path).
+  - Raster path: limited to 8‑bit R/RG/RGBA via `stbi_load`. KTX2 path in `TextureCache::workerLoop` currently accepts only BCn/BC6H formats and rejects other VkFormats returned by libktx (e.g., uncompressed `R16G16B16A16_SFLOAT`). Future work: ASTC/ETC2, specialized R8/RG8 parsing, and float HDR support (`stbi_loadf` → `R16G16B16A16_SFLOAT`) so HDR albedo/lighting data can stream through the generic cache (today HDR IBL uses the separate `IBLManager` path).
 - Normal‑map mip quality
   - Normal maps share the same linear blit pipeline as color textures; no renormalization pass runs after mip generation. Consider a compute or fragment pass to renormalize normal map mips (or a dedicated normal‑aware downsample) to improve shading at grazing angles and distant LODs.
 - Samplers
   - Anisotropy is currently disabled in `SamplerManager` (`anisotropyEnable = VK_FALSE`). Enable it when the feature is present, expose a knob in the Debug UI, and consider per‑material/per‑texture anisotropy settings.
 - Minor robustness
-  - `enqueue_decode()` computes the handle from the entry pointer (`&e - _entries.data()`) and passes it to worker threads. This is safe as long as `_entries` is not resized during enqueue, but storing the index explicitly when the entry is created (in `request()`) would make the relationship clearer and robust against future refactors.
+  - `enqueueDecode()` computes the handle from the entry pointer (`&e - _entries.data()`) and passes it to worker threads. This is safe as long as `_entries` is not resized during enqueue, but storing the index explicitly when the entry is created (in `request()`) would make the relationship clearer and robust against future refactors.
 
 Operational Tips
 - Keep deferred uploads enabled (`ResourceManager::set_deferred_uploads(true)`) to coalesce copies per frame (engine does this during init).
@@ -101,7 +101,7 @@ Image‑Based Lighting (IBL) Textures
   - Specular:
     - If `specularCube` is a cubemap `.ktx2`, `IBLManager` uses `ktxutil::load_ktx2_cubemap` and uploads via `ResourceManager::create_image_compressed_layers`, preserving the file’s format and mip chain.
     - If cubemap load fails, it falls back to 2D `.ktx2` via `ktxutil::load_ktx2_2d` + `ResourceManager::create_image_compressed`. The image is treated as equirectangular with prefiltered mips and sampled with explicit LOD in shaders.
-    - If the format is float HDR (`R16G16B16A16_SFLOAT` or `R32G32B32A32_SFLOAT`) and the aspect ratio is 2:1, `IBLManager` additionally computes 2nd‑order SH coefficients (9×`vec3`) on a worker thread and uploads them to a UBO (`_shBuffer`) when `pump_async()` is called on the main thread.
+    - If the format is float HDR (`R16G16B16A16_SFLOAT` or `R32G32B32A32_SFLOAT`) and the aspect ratio is 2:1, `IBLManager` additionally computes 2nd‑order SH coefficients (9×`vec3`) on a worker thread and uploads them to a UBO (`_shBuffer`) when `pumpAsync()` is called on the main thread.
   - Diffuse (optional):
     - If `diffuseCube` is provided and valid, it is uploaded as a cubemap using `create_image_compressed_layers`. Current shaders use the SH buffer for diffuse; this cubemap can be wired into a future path if you want to sample it directly.
   - BRDF LUT:

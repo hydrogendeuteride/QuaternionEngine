@@ -77,8 +77,8 @@ void ImGuiSystem::init(EngineContext *context)
 
     _swapchain_format = _context->getSwapchain()->swapchainImageFormat();
 
-    _dpi_scale = std::clamp(compute_dpi_scale(), 0.5f, 4.0f);
-    rebuild_fonts(_dpi_scale);
+    _dpi_scale = std::clamp(computeDpiScale(), 0.5f, 4.0f);
+    rebuildFonts(_dpi_scale);
 
     _imgui_pool = create_imgui_descriptor_pool(device);
 
@@ -139,7 +139,7 @@ void ImGuiSystem::cleanup()
     _initialized = false;
 }
 
-void ImGuiSystem::process_event(const SDL_Event &event)
+void ImGuiSystem::processEvent(const SDL_Event &event)
 {
     if (!_initialized)
     {
@@ -148,7 +148,7 @@ void ImGuiSystem::process_event(const SDL_Event &event)
     ImGui_ImplSDL2_ProcessEvent(const_cast<SDL_Event *>(&event));
 }
 
-void ImGuiSystem::begin_frame()
+void ImGuiSystem::beginFrame()
 {
     if (!_initialized)
     {
@@ -158,12 +158,12 @@ void ImGuiSystem::begin_frame()
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplSDL2_NewFrame();
 
-    update_framebuffer_scale();
+    updateFramebufferScale();
 
-    const float new_scale = std::clamp(compute_dpi_scale(), 0.5f, 4.0f);
+    const float new_scale = std::clamp(computeDpiScale(), 0.5f, 4.0f);
     if (std::isfinite(new_scale) && std::abs(new_scale - _dpi_scale) > 0.05f)
     {
-        rebuild_fonts(new_scale);
+        rebuildFonts(new_scale);
         _dpi_scale = new_scale;
     }
 
@@ -175,7 +175,7 @@ void ImGuiSystem::begin_frame()
     }
 }
 
-void ImGuiSystem::end_frame()
+void ImGuiSystem::endFrame()
 {
     if (!_initialized)
     {
@@ -184,29 +184,29 @@ void ImGuiSystem::end_frame()
     ImGui::Render();
 }
 
-void ImGuiSystem::add_draw_callback(DrawCallback callback)
+void ImGuiSystem::addDrawCallback(DrawCallback callback)
 {
     _draw_callbacks.push_back(std::move(callback));
 }
 
-void ImGuiSystem::clear_draw_callbacks()
+void ImGuiSystem::clearDrawCallbacks()
 {
     _draw_callbacks.clear();
 }
 
-bool ImGuiSystem::want_capture_mouse() const
+bool ImGuiSystem::wantCaptureMouse() const
 {
     if (!_initialized) return false;
     return ImGui::GetIO().WantCaptureMouse;
 }
 
-bool ImGuiSystem::want_capture_keyboard() const
+bool ImGuiSystem::wantCaptureKeyboard() const
 {
     if (!_initialized) return false;
     return ImGui::GetIO().WantCaptureKeyboard;
 }
 
-void ImGuiSystem::on_swapchain_recreated()
+void ImGuiSystem::onSwapchainRecreated()
 {
     if (!_initialized || _context == nullptr || _context->getSwapchain() == nullptr)
     {
@@ -217,10 +217,10 @@ void ImGuiSystem::on_swapchain_recreated()
     uint32_t image_count = images.empty() ? 3u : clamp_imgui_image_count(static_cast<uint32_t>(images.size()));
     ImGui_ImplVulkan_SetMinImageCount(image_count);
 
-    update_framebuffer_scale();
+    updateFramebufferScale();
 }
 
-float ImGuiSystem::compute_dpi_scale() const
+float ImGuiSystem::computeDpiScale() const
 {
     if (_context == nullptr || _context->window == nullptr || _context->getSwapchain() == nullptr)
     {
@@ -251,7 +251,7 @@ float ImGuiSystem::compute_dpi_scale() const
     return 0.5f * (sx + sy);
 }
 
-void ImGuiSystem::update_framebuffer_scale()
+void ImGuiSystem::updateFramebufferScale()
 {
     if (_context == nullptr || _context->window == nullptr || _context->getSwapchain() == nullptr)
     {
@@ -275,11 +275,11 @@ void ImGuiSystem::update_framebuffer_scale()
     io.DisplayFramebufferScale = ImVec2(static_cast<float>(swap.width) / static_cast<float>(win_w),
                                         static_cast<float>(swap.height) / static_cast<float>(win_h));
 
-    const float scale = std::clamp(compute_dpi_scale(), 0.5f, 4.0f);
+    const float scale = std::clamp(computeDpiScale(), 0.5f, 4.0f);
     io.FontGlobalScale = (scale > 0.0f) ? (1.0f / scale) : 1.0f;
 }
 
-void ImGuiSystem::rebuild_fonts(float dpi_scale)
+void ImGuiSystem::rebuildFonts(float dpi_scale)
 {
     if (_initialized)
     {

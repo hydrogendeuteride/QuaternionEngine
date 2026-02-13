@@ -206,16 +206,16 @@ public:
 	void run();
 
     // Window controls (runtime)
-    void set_window_mode(WindowMode mode, int display_index);
+    void setWindowMode(WindowMode mode, int display_index);
 
     // Rendering resolution controls:
     // - logicalRenderExtent controls camera aspect and picking (letterboxed view).
     // - renderScale controls the internal render target pixel count (logical * scale).
-    void set_logical_render_extent(VkExtent2D extent);
-    void set_render_scale(float scale);
+    void setLogicalRenderExtent(VkExtent2D extent);
+    void setRenderScale(float scale);
 
     // Query a conservative streaming texture budget for the texture cache.
-    size_t query_texture_budget_bytes() const;
+    size_t queryTextureBudgetBytes() const;
 
     // Convenience helper: load a glTF from assets/models and add it as a runtime instance.
     // modelRelativePath is relative to the AssetManager model root.
@@ -271,13 +271,13 @@ private:
         bool valid{false};
     } _windowedRect;
 
-    void init_frame_resources();
+    void initFrameResources();
 
-    void init_pipelines();
+    void initPipelines();
 
-    void init_mesh_pipeline();
+    void initMeshPipeline();
 
-    void init_default_data();
+    void initDefaultData();
 
     // Debounce swapchain recreation during live window resizing.
     uint32_t _last_resize_event_ms{0};

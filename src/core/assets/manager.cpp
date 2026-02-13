@@ -750,22 +750,22 @@ std::shared_ptr<GLTFMaterial> AssetManager::createMaterialFromConstants(
     return createMaterial(pass, res);
 }
 
-VkImageView AssetManager::fallback_checkerboard_view() const
+VkImageView AssetManager::fallbackCheckerboardView() const
 {
     return (_engine) ? _engine->_errorCheckerboardImage.imageView : VK_NULL_HANDLE;
 }
 
-VkImageView AssetManager::fallback_white_view() const
+VkImageView AssetManager::fallbackWhiteView() const
 {
     return (_engine) ? _engine->_whiteImage.imageView : VK_NULL_HANDLE;
 }
 
-VkImageView AssetManager::fallback_flat_normal_view() const
+VkImageView AssetManager::fallbackFlatNormalView() const
 {
     return (_engine) ? _engine->_flatNormalImage.imageView : VK_NULL_HANDLE;
 }
 
-VkImageView AssetManager::fallback_black_view() const
+VkImageView AssetManager::fallbackBlackView() const
 {
     return (_engine) ? _engine->_blackImage.imageView : VK_NULL_HANDLE;
 }

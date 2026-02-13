@@ -940,10 +940,10 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state, const Plan
         return;
     }
 
-    VkImageView checker = assets->fallback_checkerboard_view();
-    VkImageView white = assets->fallback_white_view();
-    VkImageView flatNormal = assets->fallback_flat_normal_view();
-    VkImageView black = assets->fallback_black_view();
+    VkImageView checker = assets->fallbackCheckerboardView();
+    VkImageView white = assets->fallbackWhiteView();
+    VkImageView flatNormal = assets->fallbackFlatNormalView();
+    VkImageView black = assets->fallbackBlackView();
 
     if (checker == VK_NULL_HANDLE) checker = white;
     if (white == VK_NULL_HANDLE) white = checker;

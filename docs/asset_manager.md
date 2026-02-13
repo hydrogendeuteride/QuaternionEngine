@@ -225,7 +225,7 @@ The `AsyncAssetLoader` class provides asynchronous glTF loading with worker thre
 auto *loader = ctx->async_loader;
 
 // Queue a model to load in the background
-auto jobID = loader->load_gltf_async(
+auto jobID = loader->loadGltfAsync(
     "spaceship_01",                      // scene instance name
     "models/spaceship.glb",              // model path (resolved via AssetManager)
     glm::translate(glm::mat4(1.f), glm::vec3(0, 5, -10)), // transform
@@ -236,7 +236,7 @@ auto jobID = loader->load_gltf_async(
 JobState state;
 float progress;
 std::string error;
-if (loader->get_job_status(jobID, state, progress, &error)) {
+if (loader->getJobStatus(jobID, state, progress, &error)) {
     if (state == JobState::Completed) {
         fmt::println("Model loaded successfully!");
     } else if (state == JobState::Failed) {
@@ -245,10 +245,10 @@ if (loader->get_job_status(jobID, state, progress, &error)) {
 }
 
 // Commit completed jobs to the scene (call once per frame)
-loader->pump_main_thread(*ctx->scene);
+loader->pumpMainThread(*ctx->scene);
 
 // Alternative: use WorldVec3 for large-world coordinates
-auto jobID2 = loader->load_gltf_async(
+auto jobID2 = loader->loadGltfAsync(
     "distant_building",
     "models/building.glb",
     WorldVec3{1000000.0, 0.0, 500000.0}, // world position

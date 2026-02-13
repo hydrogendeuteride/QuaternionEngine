@@ -24,7 +24,7 @@ void TextureCache::init(EngineContext *ctx)
     _decodeThreads.reserve(threads);
     for (unsigned int i = 0; i < threads; ++i)
     {
-        _decodeThreads.emplace_back([this]() { worker_loop(); });
+        _decodeThreads.emplace_back([this]() { workerLoop(); });
     }
 }
 
@@ -233,7 +233,7 @@ void TextureCache::unpin(TextureHandle handle)
     _entries[handle].pinned = false;
 }
 
-bool TextureCache::is_pinned(TextureHandle handle) const
+bool TextureCache::isPinned(TextureHandle handle) const
 {
     if (handle == InvalidHandle) return false;
     if (handle >= _entries.size()) return false;
@@ -336,13 +336,13 @@ static std::vector<uint8_t> downscale_half(const unsigned char* src, int w, int 
     return out;
 }
 
-void TextureCache::start_load(Entry &e, ResourceManager &rm)
+void TextureCache::startLoad(Entry &e, ResourceManager &rm)
 {
     // Legacy synchronous path retained for completeness but not used by pumpLoads now.
-    enqueue_decode(e);
+    enqueueDecode(e);
 }
 
-void TextureCache::patch_ready_entry(const Entry &e)
+void TextureCache::patchReadyEntry(const Entry &e)
 {
     if (!_context || !_context->getDevice()) return;
     if (e.state != EntryState::Resident) return;
@@ -360,7 +360,7 @@ void TextureCache::patch_ready_entry(const Entry &e)
     }
 }
 
-void TextureCache::patch_to_fallback(const Entry &e)
+void TextureCache::patchToFallback(const Entry &e)
 {
     if (!_context || !_context->getDevice()) return;
     DescriptorWriter writer;
@@ -382,7 +382,7 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
     int started = 0;
     const uint32_t now = _context ? _context->frameIndex : 0u;
     // First, drain decoded results with a byte budget.
-    size_t admitted = drain_ready_uploads(rm, _maxBytesPerPump);
+    size_t admitted = drainReadyUploads(rm, _maxBytesPerPump);
 
     // If we exhausted the budget, avoid scheduling more decodes this frame.
     bool budgetRemaining = (admitted < _maxBytesPerPump);
@@ -405,7 +405,7 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
             bool cooldownPassed = (now >= e.nextAttemptFrame);
             if (recentlyUsed && cooldownPassed && budgetRemaining)
             {
-                enqueue_decode(e);
+                enqueueDecode(e);
                 if (++started >= _maxLoadsPerPump) break;
             }
         }
@@ -414,7 +414,7 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
     // Drain any remaining decoded results if we still have headroom.
     if (budgetRemaining)
     {
-        drain_ready_uploads(rm, _maxBytesPerPump - admitted);
+        drainReadyUploads(rm, _maxBytesPerPump - admitted);
     }
 
     // Optionally trim retained compressed sources to CPU budget.
@@ -451,7 +451,7 @@ void TextureCache::evictToBudget(size_t budgetBytes)
         if (e.lastUsedFrame == now) continue;
 
         // Rewrite watchers back to fallback before destroying
-        patch_to_fallback(e);
+        patchToFallback(e);
 
         fmt::println("[TextureCache] evictToBudget destroy handle={} path='{}' bytes={} residentBytesBefore={}",
                      h,
@@ -510,7 +510,7 @@ bool TextureCache::unload(TextureHandle handle, bool drop_source_bytes)
     // If resident, patch watchers back to fallback and destroy the image.
     if (e.state == EntryState::Resident && e.image.image != VK_NULL_HANDLE)
     {
-        patch_to_fallback(e);
+        patchToFallback(e);
 
         if (_context && _context->getResources())
         {
@@ -532,13 +532,13 @@ bool TextureCache::unload(TextureHandle handle, bool drop_source_bytes)
 
     if (drop_source_bytes)
     {
-        this->drop_source_bytes(e);
+        this->dropSourceBytes(e);
     }
 
     return true;
 }
 
-void TextureCache::enqueue_decode(Entry &e)
+void TextureCache::enqueueDecode(Entry &e)
 {
     if (e.state != EntryState::Unloaded && e.state != EntryState::Evicted) return;
     e.state = EntryState::Loading;
@@ -554,7 +554,7 @@ void TextureCache::enqueue_decode(Entry &e)
     _qCV.notify_one();
 }
 
-void TextureCache::worker_loop()
+void TextureCache::workerLoop()
 {
     while (_running)
     {
@@ -734,7 +734,7 @@ void TextureCache::worker_loop()
     }
 }
 
-size_t TextureCache::drain_ready_uploads(ResourceManager &rm, size_t budgetBytes)
+size_t TextureCache::drainReadyUploads(ResourceManager &rm, size_t budgetBytes)
 {
     std::deque<DecodedResult> local;
     {
@@ -819,7 +819,7 @@ size_t TextureCache::drain_ready_uploads(ResourceManager &rm, size_t budgetBytes
             if (_residentBytes + expectedBytes > _gpuBudgetBytes)
             {
                 size_t need = (_residentBytes + expectedBytes) - _gpuBudgetBytes;
-                (void)try_make_space(need, now);
+                (void)tryMakeSpace(need, now);
             }
             if (_residentBytes + expectedBytes > _gpuBudgetBytes)
             {
@@ -951,7 +951,7 @@ size_t TextureCache::drain_ready_uploads(ResourceManager &rm, size_t budgetBytes
         // Drop source bytes if policy says so (only for Bytes-backed keys).
         if (!_keepSourceBytes && e.key.kind == TextureKey::SourceKind::Bytes)
         {
-            drop_source_bytes(e);
+            dropSourceBytes(e);
         }
 
         // Free temporary decode heap if present
@@ -961,13 +961,13 @@ size_t TextureCache::drain_ready_uploads(ResourceManager &rm, size_t budgetBytes
         }
 
         // Patch descriptors now; data becomes valid before sampling due to RG upload pass
-        patch_ready_entry(e);
+        patchReadyEntry(e);
         admitted += expectedBytes;
     }
     return admitted;
 }
 
-void TextureCache::drop_source_bytes(Entry &e)
+void TextureCache::dropSourceBytes(Entry &e)
 {
     if (e.bytes.empty()) return;
     if (e.key.kind != TextureKey::SourceKind::Bytes) return;
@@ -998,11 +998,11 @@ void TextureCache::evictCpuToBudget()
     for (TextureHandle h : cands)
     {
         if (_cpuSourceBytes <= _cpuSourceBudget) break;
-        drop_source_bytes(_entries[h]);
+        dropSourceBytes(_entries[h]);
     }
 }
 
-bool TextureCache::try_make_space(size_t bytesNeeded, uint32_t now)
+bool TextureCache::tryMakeSpace(size_t bytesNeeded, uint32_t now)
 {
     if (bytesNeeded == 0) return true;
     if (_residentBytes == 0) return false;
@@ -1030,8 +1030,8 @@ bool TextureCache::try_make_space(size_t bytesNeeded, uint32_t now)
         // Never evict pinned textures
         if (e.pinned) continue;
 
-        patch_to_fallback(e);
-        fmt::println("[TextureCache] try_make_space destroy handle={} path='{}' bytes={} residentBytesBefore={}",
+        patchToFallback(e);
+        fmt::println("[TextureCache] tryMakeSpace destroy handle={} path='{}' bytes={} residentBytesBefore={}",
                      h,
                      e.path.empty() ? "<bytes>" : e.path,
                      e.sizeBytes,
@@ -1047,7 +1047,7 @@ bool TextureCache::try_make_space(size_t bytesNeeded, uint32_t now)
     return freed >= bytesNeeded;
 }
 
-void TextureCache::debug_snapshot(std::vector<DebugRow> &outRows, DebugStats &outStats) const
+void TextureCache::debugSnapshot(std::vector<DebugRow> &outRows, DebugStats &outStats) const
 {
     outRows.clear();
     outStats = DebugStats{};
@@ -1095,7 +1095,7 @@ TextureCache::EntryState TextureCache::state(TextureHandle handle) const
     return _entries[handle].state;
 }
 
-VkImageView TextureCache::image_view(TextureHandle handle) const
+VkImageView TextureCache::imageView(TextureHandle handle) const
 {
     if (handle == InvalidHandle) return VK_NULL_HANDLE;
     if (handle >= _entries.size()) return VK_NULL_HANDLE;

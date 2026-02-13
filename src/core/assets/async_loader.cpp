@@ -23,19 +23,19 @@ void AsyncAssetLoader::init(VulkanEngine *engine, AssetManager *assets, TextureC
     {
         worker_count = 1;
     }
-    start_workers(worker_count);
+    startWorkers(worker_count);
 }
 
 void AsyncAssetLoader::shutdown()
 {
-    stop_workers();
+    stopWorkers();
 
     std::lock_guard<std::mutex> lock(_jobs_mutex);
     _jobs.clear();
     _queue.clear();
 }
 
-void AsyncAssetLoader::start_workers(uint32_t count)
+void AsyncAssetLoader::startWorkers(uint32_t count)
 {
     if (_running.load(std::memory_order_acquire))
     {
@@ -46,11 +46,11 @@ void AsyncAssetLoader::start_workers(uint32_t count)
     _workers.reserve(count);
     for (uint32_t i = 0; i < count; ++i)
     {
-        _workers.emplace_back([this]() { worker_loop(); });
+        _workers.emplace_back([this]() { workerLoop(); });
     }
 }
 
-void AsyncAssetLoader::stop_workers()
+void AsyncAssetLoader::stopWorkers()
 {
     if (!_running.exchange(false, std::memory_order_acq_rel))
     {
@@ -68,10 +68,10 @@ void AsyncAssetLoader::stop_workers()
     _workers.clear();
 }
 
-AsyncAssetLoader::JobID AsyncAssetLoader::load_gltf_async(const std::string &scene_name,
-                                                          const std::string &model_relative_path,
-                                                          const glm::mat4 &transform,
-                                                          bool preload_textures)
+AsyncAssetLoader::JobID AsyncAssetLoader::loadGltfAsync(const std::string &scene_name,
+                                                        const std::string &model_relative_path,
+                                                        const glm::mat4 &transform,
+                                                        bool preload_textures)
 {
     if (!_assets)
     {
@@ -104,14 +104,14 @@ AsyncAssetLoader::JobID AsyncAssetLoader::load_gltf_async(const std::string &sce
     return id;
 }
 
-AsyncAssetLoader::JobID AsyncAssetLoader::load_gltf_async(const std::string &scene_name,
-                                                          const std::string &model_relative_path,
-                                                          const WorldVec3 &translation_world,
-                                                          const glm::quat &rotation,
-                                                          const glm::vec3 &scale,
-                                                          bool preload_textures)
+AsyncAssetLoader::JobID AsyncAssetLoader::loadGltfAsync(const std::string &scene_name,
+                                                        const std::string &model_relative_path,
+                                                        const WorldVec3 &translation_world,
+                                                        const glm::quat &rotation,
+                                                        const glm::vec3 &scale,
+                                                        bool preload_textures)
 {
-    JobID id = load_gltf_async(scene_name, model_relative_path, glm::mat4(1.0f), preload_textures);
+    JobID id = loadGltfAsync(scene_name, model_relative_path, glm::mat4(1.0f), preload_textures);
     if (id == 0)
     {
         return 0;
@@ -130,7 +130,7 @@ AsyncAssetLoader::JobID AsyncAssetLoader::load_gltf_async(const std::string &sce
     return id;
 }
 
-bool AsyncAssetLoader::get_job_status(JobID id, JobState &out_state, float &out_progress, std::string *out_error)
+bool AsyncAssetLoader::getJobStatus(JobID id, JobState &out_state, float &out_progress, std::string *out_error)
 {
     std::lock_guard<std::mutex> lock(_jobs_mutex);
     auto it = _jobs.find(id);
@@ -185,7 +185,7 @@ bool AsyncAssetLoader::get_job_status(JobID id, JobState &out_state, float &out_
     return true;
 }
 
-void AsyncAssetLoader::debug_snapshot(std::vector<DebugJob> &out_jobs)
+void AsyncAssetLoader::debugSnapshot(std::vector<DebugJob> &out_jobs)
 {
     out_jobs.clear();
 
@@ -244,7 +244,7 @@ void AsyncAssetLoader::debug_snapshot(std::vector<DebugJob> &out_jobs)
     }
 }
 
-void AsyncAssetLoader::pump_main_thread(SceneManager &scene)
+void AsyncAssetLoader::pumpMainThread(SceneManager &scene)
 {
     std::lock_guard<std::mutex> lock(_jobs_mutex);
 
@@ -298,7 +298,7 @@ void AsyncAssetLoader::pump_main_thread(SceneManager &scene)
     }
 }
 
-void AsyncAssetLoader::worker_loop()
+void AsyncAssetLoader::workerLoop()
 {
     while (true)
     {

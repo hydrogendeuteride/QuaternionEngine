@@ -30,21 +30,21 @@ void cleanup();
 **Frame Lifecycle:**
 
 ```cpp
-void begin_frame();  // NewFrame + invoke draw callbacks
-void end_frame();    // ImGui::Render()
+void beginFrame();  // NewFrame + invoke draw callbacks
+void endFrame();    // ImGui::Render()
 ```
 
 **Event Processing:**
 
 ```cpp
-void process_event(const SDL_Event &event);
+void processEvent(const SDL_Event &event);
 ```
 
 **Draw Callbacks:**
 
 ```cpp
-void add_draw_callback(DrawCallback callback);
-void clear_draw_callbacks();
+void addDrawCallback(DrawCallback callback);
+void clearDrawCallbacks();
 
 // DrawCallback type
 using DrawCallback = std::function<void()>;
@@ -53,14 +53,14 @@ using DrawCallback = std::function<void()>;
 **Input Capture Queries:**
 
 ```cpp
-bool want_capture_mouse() const;
-bool want_capture_keyboard() const;
+bool wantCaptureMouse() const;
+bool wantCaptureKeyboard() const;
 ```
 
 **Swapchain Events:**
 
 ```cpp
-void on_swapchain_recreated();  // Update image count after resize
+void onSwapchainRecreated();  // Update image count after resize
 ```
 
 ### Usage Examples
@@ -72,7 +72,7 @@ void on_swapchain_recreated();  // Update image count after resize
 _imgui_system.init(&_context);
 
 // Register debug UI callback
-_imgui_system.add_draw_callback([this]() {
+_imgui_system.addDrawCallback([this]() {
     vk_engine_draw_debug_ui(this);
 });
 ```
@@ -83,7 +83,7 @@ _imgui_system.add_draw_callback([this]() {
 // In event loop
 for (const SDL_Event& event : events)
 {
-    _imgui_system.process_event(event);
+    _imgui_system.processEvent(event);
 }
 ```
 
@@ -91,12 +91,12 @@ for (const SDL_Event& event : events)
 
 ```cpp
 // Start of frame (after input processing)
-_imgui_system.begin_frame();
+_imgui_system.beginFrame();
 
 // ... game update, scene rendering ...
 
 // End of frame (before RenderGraph execution)
-_imgui_system.end_frame();
+_imgui_system.endFrame();
 ```
 
 **Custom UI Callback:**
@@ -104,7 +104,7 @@ _imgui_system.end_frame();
 ```cpp
 void Game::init()
 {
-    engine.imgui_system().add_draw_callback([this]() {
+    engine.imgui_system().addDrawCallback([this]() {
         draw_game_ui();
     });
 }
@@ -131,12 +131,12 @@ void Game::draw_game_ui()
 void Game::update()
 {
     // Don't process game input when ImGui wants it
-    if (!engine.imgui_system().want_capture_mouse())
+    if (!engine.imgui_system().wantCaptureMouse())
     {
         handle_mouse_input();
     }
 
-    if (!engine.imgui_system().want_capture_keyboard())
+    if (!engine.imgui_system().wantCaptureKeyboard())
     {
         handle_keyboard_input();
     }
@@ -242,10 +242,10 @@ The engine provides comprehensive debug widgets in `engine_ui.cpp`:
 
 ### Draw Callback Order
 
-Callbacks are invoked in registration order during `begin_frame()`:
+Callbacks are invoked in registration order during `beginFrame()`:
 
 ```cpp
-void ImGuiSystem::begin_frame()
+void ImGuiSystem::beginFrame()
 {
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplSDL2_NewFrame();
@@ -262,13 +262,13 @@ void ImGuiSystem::begin_frame()
 Register order-dependent callbacks carefully:
 ```cpp
 // Engine debug UI first
-imgui.add_draw_callback([]{ draw_engine_ui(); });
+imgui.addDrawCallback([]{ draw_engine_ui(); });
 
 // Game UI on top
-imgui.add_draw_callback([]{ draw_game_ui(); });
+imgui.addDrawCallback([]{ draw_game_ui(); });
 
 // Editor overlays last
-imgui.add_draw_callback([]{ draw_editor_overlays(); });
+imgui.addDrawCallback([]{ draw_editor_overlays(); });
 ```
 
 ### ImGuizmo Integration
@@ -301,19 +301,19 @@ void draw_object_gizmo(const glm::mat4& view, const glm::mat4& proj,
 
 ### Tips
 
-- Always check `want_capture_mouse()` before processing game mouse input.
-- Use `want_capture_keyboard()` before processing game keyboard input.
+- Always check `wantCaptureMouse()` before processing game mouse input.
+- Use `wantCaptureKeyboard()` before processing game keyboard input.
 - Register draw callbacks during initialization, not every frame.
-- Call `on_swapchain_recreated()` after window resize/mode change.
+- Call `onSwapchainRecreated()` after window resize/mode change.
 - The descriptor pool is sized for 1000 sets of each type — sufficient for most debug UIs.
 - For production games, consider conditionally compiling out debug UI.
 - ImGui windows are persistent between frames — state is preserved automatically.
 
 ### Frame Flow
 
-1. **Event Processing**: `process_event()` for each SDL event.
-2. **Begin Frame**: `begin_frame()` starts new ImGui frame and invokes callbacks.
+1. **Event Processing**: `processEvent()` for each SDL event.
+2. **Begin Frame**: `beginFrame()` starts new ImGui frame and invokes callbacks.
 3. **UI Building**: All `ImGui::*` calls happen inside draw callbacks.
-4. **End Frame**: `end_frame()` calls `ImGui::Render()` to finalize draw data.
+4. **End Frame**: `endFrame()` calls `ImGui::Render()` to finalize draw data.
 5. **RenderGraph**: `ImGuiPass` executes, recording draw commands to GPU.
 6. **Present**: Swapchain presents the final image with ImGui overlay.

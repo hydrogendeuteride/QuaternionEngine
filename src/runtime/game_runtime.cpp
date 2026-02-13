@@ -82,8 +82,8 @@ namespace GameRuntime
             }
 
             // --- Process UI and input capture --- //
-            const bool ui_capture_mouse = _renderer->ui() && _renderer->ui()->want_capture_mouse();
-            const bool ui_capture_keyboard = _renderer->ui() && _renderer->ui()->want_capture_keyboard();
+            const bool ui_capture_mouse = _renderer->ui() && _renderer->ui()->wantCaptureMouse();
+            const bool ui_capture_keyboard = _renderer->ui() && _renderer->ui()->wantCaptureKeyboard();
 
             // Native events to UI and picking
             if (input)
@@ -102,7 +102,7 @@ namespace GameRuntime
                     const SDL_Event &e = *static_cast<const SDL_Event *>(view.data);
                     if (c->engine->ui())
                     {
-                        c->engine->ui()->process_event(e);
+                        c->engine->ui()->processEvent(e);
                     }
                 }, &ctx);
             }
@@ -133,7 +133,7 @@ namespace GameRuntime
                     _renderer->_swapchainManager->resize_swapchain(_renderer->_window);
                     if (_renderer->ui())
                     {
-                        _renderer->ui()->on_swapchain_recreated();
+                        _renderer->ui()->onSwapchainRecreated();
                     }
                     _renderer->resize_requested = false;
                 }
@@ -173,7 +173,7 @@ namespace GameRuntime
             // Commit any completed async IBL load now that the GPU is idle.
             if (_renderer->_iblManager && _renderer->_pendingIBLRequest.active)
             {
-                IBLManager::AsyncResult iblRes = _renderer->_iblManager->pump_async();
+                IBLManager::AsyncResult iblRes = _renderer->_iblManager->pumpAsync();
                 if (iblRes.completed)
                 {
                     if (iblRes.success)
@@ -208,8 +208,8 @@ namespace GameRuntime
             // --- ImGui --- //
             if (_renderer->ui())
             {
-                _renderer->ui()->begin_frame();
-                _renderer->ui()->end_frame();
+                _renderer->ui()->beginFrame();
+                _renderer->ui()->endFrame();
             }
 
             // --- Draw --- //

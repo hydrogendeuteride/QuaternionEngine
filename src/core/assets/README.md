@@ -56,14 +56,14 @@ IBLManager::init(ctx)
 
 ── per frame ──
 TextureCache::pumpLoads(rm, frame)
-  ├─ drain_ready_uploads()  — upload decoded images to GPU (budget-gated)
-  ├─ patch_ready_entry()    — rewrite watched descriptors to new image views
+  ├─ drainReadyUploads()  — upload decoded images to GPU (budget-gated)
+  ├─ patchReadyEntry()    — rewrite watched descriptors to new image views
   └─ evictCpuToBudget()     — trim retained CPU source bytes
 
-AsyncAssetLoader::pump_main_thread(scene)
+AsyncAssetLoader::pumpMainThread(scene)
   └─ commit completed jobs into SceneManager
 
-IBLManager::pump_async()
+IBLManager::pumpAsync()
   └─ finalize background IBL load (GPU upload + SH buffer)
 
 ── shutdown ──
@@ -91,12 +91,12 @@ auto jobId = engine.load_gltf_async("main_scene", "models/city.glb",
                                      transform, /*preloadTextures=*/true);
 
 // Each frame:
-asyncLoader->pump_main_thread(scene);
+asyncLoader->pumpMainThread(scene);
 
 // Query progress:
 AsyncAssetLoader::JobState state;
 float progress;
-asyncLoader->get_job_status(jobId, state, progress);
+asyncLoader->getJobStatus(jobId, state, progress);
 ```
 
 ### Texture streaming
@@ -135,10 +135,10 @@ IBLPaths paths;
 paths.specularCube = "env/sky_specular.ktx2";
 paths.diffuseCube  = "env/sky_diffuse.ktx2";
 paths.brdfLut2D    = "env/brdf_lut.ktx2";
-ctx->ibl->load_async(paths);
+ctx->ibl->loadAsync(paths);
 
 // Each frame:
-auto result = ctx->ibl->pump_async();
+auto result = ctx->ibl->pumpAsync();
 if (result.completed && result.success)
     rebuild_ibl_descriptors();
 ```

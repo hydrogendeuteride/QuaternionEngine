@@ -69,7 +69,7 @@ public:
     // Unpin a texture, allowing it to be evicted normally.
     void unpin(TextureHandle handle);
     // Check if a texture is currently pinned.
-    bool is_pinned(TextureHandle handle) const;
+    bool isPinned(TextureHandle handle) const;
 
     // Schedule pending loads and patch descriptors for newly created images.
     void pumpLoads(ResourceManager &rm, FrameResources &frame);
@@ -98,44 +98,44 @@ public:
         size_t countEvicted{0};
         size_t countUnloaded{0};
     };
-    void debug_snapshot(std::vector<DebugRow>& outRows, DebugStats& outStats) const;
+    void debugSnapshot(std::vector<DebugRow>& outRows, DebugStats& outStats) const;
     // Read-only per-handle state query (main-thread only).
     EntryState state(TextureHandle handle) const;
     // Returns the default image view for a Resident texture, otherwise VK_NULL_HANDLE.
-    VkImageView image_view(TextureHandle handle) const;
-    size_t resident_bytes() const { return _residentBytes; }
+    VkImageView imageView(TextureHandle handle) const;
+    size_t residentBytes() const { return _residentBytes; }
     // CPU-side source bytes currently retained (compressed image payloads kept
     // for potential re-decode). Only applies to entries created with Bytes keys.
-    size_t cpu_source_bytes() const { return _cpuSourceBytes; }
+    size_t cpuSourceBytes() const { return _cpuSourceBytes; }
 
     // Runtime controls
-    void set_max_loads_per_pump(int n) { _maxLoadsPerPump = (n > 0) ? n : 1; }
-    int  max_loads_per_pump() const { return _maxLoadsPerPump; }
+    void setMaxLoadsPerPump(int n) { _maxLoadsPerPump = (n > 0) ? n : 1; }
+    int  maxLoadsPerPump() const { return _maxLoadsPerPump; }
     // Limit total bytes admitted for uploads per pump (frame).
-    void set_max_bytes_per_pump(size_t bytes) { _maxBytesPerPump = bytes; }
-    size_t max_bytes_per_pump() const { return _maxBytesPerPump; }
+    void setMaxBytesPerPump(size_t bytes) { _maxBytesPerPump = bytes; }
+    size_t maxBytesPerPump() const { return _maxBytesPerPump; }
     // Clamp decoded image dimensions before upload (progressive resolution).
     // 0 disables clamping. When >0, images larger than this dimension on any axis
     // are downscaled by powers of 2 on the decode thread until within limit.
-    void set_max_upload_dimension(uint32_t dim) { _maxUploadDimension = dim; }
-    uint32_t max_upload_dimension() const { return _maxUploadDimension; }
+    void setMaxUploadDimension(uint32_t dim) { _maxUploadDimension = dim; }
+    uint32_t maxUploadDimension() const { return _maxUploadDimension; }
 
     // If false (default), compressed source bytes are dropped once an image is
     // uploaded to the GPU and descriptors patched. Set true to retain sources
     // for potential re-decode after eviction.
-    void set_keep_source_bytes(bool keep) { _keepSourceBytes = keep; }
-    bool keep_source_bytes() const { return _keepSourceBytes; }
+    void setKeepSourceBytes(bool keep) { _keepSourceBytes = keep; }
+    bool keepSourceBytes() const { return _keepSourceBytes; }
 
     // Set a soft CPU budget (in bytes) for retained compressed sources. After
     // each upload drain, the cache will try to free source bytes for Resident
     // entries until under budget.
-    void set_cpu_source_budget(size_t bytes) { _cpuSourceBudget = bytes; }
-    size_t cpu_source_budget() const { return _cpuSourceBudget; }
+    void setCpuSourceBudget(size_t bytes) { _cpuSourceBudget = bytes; }
+    size_t cpuSourceBudget() const { return _cpuSourceBudget; }
 
     // Optional GPU residency budget, used to avoid immediate thrashing when
     // accepting new uploads. The engine should refresh this each frame.
-    void set_gpu_budget_bytes(size_t bytes) { _gpuBudgetBytes = bytes; }
-    size_t gpu_budget_bytes() const { return _gpuBudgetBytes; }
+    void setGpuBudgetBytes(size_t bytes) { _gpuBudgetBytes = bytes; }
+    size_t gpuBudgetBytes() const { return _gpuBudgetBytes; }
 
 private:
     struct Patch
@@ -181,9 +181,9 @@ private:
     size_t _maxBytesPerPump{128ull * 1024ull * 1024ull}; // 128 MiB/frame upload budget
     uint32_t _maxUploadDimension{4096};                   // progressive downscale cap
 
-    void start_load(Entry &e, ResourceManager &rm);
-    void patch_ready_entry(const Entry &e);
-    void patch_to_fallback(const Entry &e);
+    void startLoad(Entry &e, ResourceManager &rm);
+    void patchReadyEntry(const Entry &e);
+    void patchToFallback(const Entry &e);
 
     // --- Async decode backend ---
     struct DecodeRequest
@@ -223,17 +223,17 @@ private:
         } ktx;
     };
 
-    void worker_loop();
-    void enqueue_decode(Entry &e);
+    void workerLoop();
+    void enqueueDecode(Entry &e);
     // Returns total resident bytes admitted this pump (after GPU budget gate).
-    size_t drain_ready_uploads(ResourceManager &rm, size_t budgetBytes);
-    void drop_source_bytes(Entry &e);
+    size_t drainReadyUploads(ResourceManager &rm, size_t budgetBytes);
+    void dropSourceBytes(Entry &e);
     void evictCpuToBudget();
 
     // Try to free at least 'bytesNeeded' by evicting least-recently-used
     // Resident entries that were not used in the current frame. Returns true
     // if enough space was reclaimed. Does not evict textures used this frame.
-    bool try_make_space(size_t bytesNeeded, uint32_t now);
+    bool tryMakeSpace(size_t bytesNeeded, uint32_t now);
 
     std::vector<std::thread> _decodeThreads;
     std::mutex _qMutex;

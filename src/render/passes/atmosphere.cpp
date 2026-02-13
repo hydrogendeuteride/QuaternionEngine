@@ -394,7 +394,7 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
     VkImageView overlayView = _cloudOverlayTex.imageView;
     if (AssetManager *assets = ctxLocal->getAssets())
     {
-        if (overlayView == VK_NULL_HANDLE) overlayView = assets->fallback_black_view();
+        if (overlayView == VK_NULL_HANDLE) overlayView = assets->fallbackBlackView();
     }
     if (overlayView == VK_NULL_HANDLE) return;
 

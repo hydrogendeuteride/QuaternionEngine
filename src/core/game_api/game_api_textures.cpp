@@ -19,79 +19,79 @@ namespace GameAPI
 
 size_t Engine::get_texture_budget() const
 {
-    return _engine->query_texture_budget_bytes();
+    return _engine->queryTextureBudgetBytes();
 }
 
 void Engine::set_texture_loads_per_frame(int count)
 {
     if (_engine->_textureCache)
     {
-        _engine->_textureCache->set_max_loads_per_pump(count);
+        _engine->_textureCache->setMaxLoadsPerPump(count);
     }
 }
 
 int Engine::get_texture_loads_per_frame() const
 {
-    return _engine->_textureCache ? _engine->_textureCache->max_loads_per_pump() : 0;
+    return _engine->_textureCache ? _engine->_textureCache->maxLoadsPerPump() : 0;
 }
 
 void Engine::set_texture_upload_budget(size_t bytes)
 {
     if (_engine->_textureCache)
     {
-        _engine->_textureCache->set_max_bytes_per_pump(bytes);
+        _engine->_textureCache->setMaxBytesPerPump(bytes);
     }
 }
 
 size_t Engine::get_texture_upload_budget() const
 {
-    return _engine->_textureCache ? _engine->_textureCache->max_bytes_per_pump() : 0;
+    return _engine->_textureCache ? _engine->_textureCache->maxBytesPerPump() : 0;
 }
 
 void Engine::set_cpu_source_budget(size_t bytes)
 {
     if (_engine->_textureCache)
     {
-        _engine->_textureCache->set_cpu_source_budget(bytes);
+        _engine->_textureCache->setCpuSourceBudget(bytes);
     }
 }
 
 size_t Engine::get_cpu_source_budget() const
 {
-    return _engine->_textureCache ? _engine->_textureCache->cpu_source_budget() : 0;
+    return _engine->_textureCache ? _engine->_textureCache->cpuSourceBudget() : 0;
 }
 
 void Engine::set_max_upload_dimension(uint32_t dim)
 {
     if (_engine->_textureCache)
     {
-        _engine->_textureCache->set_max_upload_dimension(dim);
+        _engine->_textureCache->setMaxUploadDimension(dim);
     }
 }
 
 uint32_t Engine::get_max_upload_dimension() const
 {
-    return _engine->_textureCache ? _engine->_textureCache->max_upload_dimension() : 0;
+    return _engine->_textureCache ? _engine->_textureCache->maxUploadDimension() : 0;
 }
 
 void Engine::set_keep_source_bytes(bool keep)
 {
     if (_engine->_textureCache)
     {
-        _engine->_textureCache->set_keep_source_bytes(keep);
+        _engine->_textureCache->setKeepSourceBytes(keep);
     }
 }
 
 bool Engine::get_keep_source_bytes() const
 {
-    return _engine->_textureCache ? _engine->_textureCache->keep_source_bytes() : false;
+    return _engine->_textureCache ? _engine->_textureCache->keepSourceBytes() : false;
 }
 
 void Engine::evict_textures_to_budget()
 {
     if (_engine->_textureCache)
     {
-        size_t budget = _engine->query_texture_budget_bytes();
+        size_t budget = _engine->queryTextureBudgetBytes();
         _engine->_textureCache->evictToBudget(budget);
     }
 }
@@ -226,7 +226,7 @@ void* Engine::get_texture_image_view(TextureHandle handle) const
     }
 
     auto cacheHandle = static_cast<TextureCache::TextureHandle>(handle);
-    VkImageView view = _engine->_textureCache->image_view(cacheHandle);
+    VkImageView view = _engine->_textureCache->imageView(cacheHandle);
     return reinterpret_cast<void*>(view);
 }
 
@@ -260,7 +260,7 @@ bool Engine::is_texture_pinned(TextureHandle handle) const
     }
 
     auto cacheHandle = static_cast<TextureCache::TextureHandle>(handle);
-    return _engine->_textureCache->is_pinned(cacheHandle);
+    return _engine->_textureCache->isPinned(cacheHandle);
 }
 
 void Engine::unload_texture(TextureHandle handle)
@@ -282,7 +282,7 @@ void* Engine::create_imgui_texture(TextureHandle handle, void* sampler)
     }
 
     auto cacheHandle = static_cast<TextureCache::TextureHandle>(handle);
-    VkImageView imageView = _engine->_textureCache->image_view(cacheHandle);
+    VkImageView imageView = _engine->_textureCache->imageView(cacheHandle);
 
     if (imageView == VK_NULL_HANDLE)
     {

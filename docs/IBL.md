@@ -47,26 +47,26 @@ Data Flow
 
 Asynchronous Loading
 - Overview:
-  - `IBLManager` provides an asynchronous loading path via `load_async()` + `pump_async()` to avoid blocking the main/game loop during IBL environment switches or initial loading.
+  - `IBLManager` provides an asynchronous loading path via `loadAsync()` + `pumpAsync()` to avoid blocking the main/game loop during IBL environment switches or initial loading.
   - Heavy CPU work (KTX2 file I/O, decompression, SH coefficient baking) runs on a dedicated worker thread.
-  - GPU resource creation (image uploads, buffer allocation) is deferred to the main thread via `pump_async()`.
+  - GPU resource creation (image uploads, buffer allocation) is deferred to the main thread via `pumpAsync()`.
 - API:
-  - `bool load_async(const IBLPaths &paths)`:
+  - `bool loadAsync(const IBLPaths &paths)`:
     - Queues an asynchronous IBL load job.
     - Returns `false` if the job could not be queued (e.g., context not initialized).
     - If called while a previous job is still pending, the new request supersedes the old one (the old result is discarded when ready).
   - `struct AsyncResult { bool completed; bool success; }`:
-    - `completed`: `true` when an async job finished since the last `pump_async()` call.
+    - `completed`: `true` when an async job finished since the last `pumpAsync()` call.
     - `success`: `true` when the finished job successfully produced new GPU IBL resources.
-  - `AsyncResult pump_async()`:
+  - `AsyncResult pumpAsync()`:
     - Must be called on the main thread, typically once per frame after the previous frame's GPU work is idle.
     - If a completed async job is pending:
-      - Destroys old IBL images and SH buffer via `destroy_images_and_sh()`.
+      - Destroys old IBL images and SH buffer via `destroyImagesAndSh()`.
       - Creates new GPU images with `create_image_compressed(_layers)` and uploads the SH buffer.
     - Returns `AsyncResult` indicating whether a job completed and its success status.
 - Internal Architecture:
   - `IBLManager::init()` spawns a persistent worker thread that waits on a condition variable.
-  - When `load_async()` is called:
+  - When `loadAsync()` is called:
     - The request paths and a unique job ID are stored in `AsyncStateData`.
     - The worker thread is signaled via condition variable.
     - Any previous pending result is invalidated (superseded by the new job ID).
@@ -75,9 +75,9 @@ Asynchronous Loading
     - Stores the prepared data (`PreparedIBLData`) in `AsyncStateData`.
     - Marks the result as ready with the corresponding job ID.
     - If the job ID no longer matches (superseded), the result is discarded.
-  - Main thread integration (`pump_async()`):
+  - Main thread integration (`pumpAsync()`):
     - Checks if a result is ready.
-    - If ready, calls `commit_prepared()` to create GPU resources from the prepared CPU data.
+    - If ready, calls `commitPrepared()` to create GPU resources from the prepared CPU data.
     - Clears the ready flag and returns the result status.
 - Thread Safety:
   - All shared state in `AsyncStateData` is protected by a mutex.
@@ -87,14 +87,14 @@ Asynchronous Loading
 - Usage Example:
   ```cpp
   // Queue async IBL load (non-blocking)
-  iblManager->load_async(IBLPaths{
+  iblManager->loadAsync(IBLPaths{
       .specularCube = "assets/ibl/studio_spec.ktx2",
       .brdfLut2D = "assets/ibl/brdf_lut.ktx2",
       .background2D = "assets/ibl/studio_bg.ktx2"
   });
 
   // In main loop, after waiting for previous frame:
-  auto result = iblManager->pump_async();
+  auto result = iblManager->pumpAsync();
   if (result.completed) {
       if (result.success) {
           // New IBL environment is now active
@@ -109,7 +109,7 @@ Asynchronous Loading
   - SH baking (CPU-intensive) happens off the main thread.
 - Cleanup:
   - `IBLManager::unload()` shuts down the async worker thread (joins) and releases all GPU resources.
-  - The destructor also calls `shutdown_async()` to ensure clean termination.
+  - The destructor also calls `shutdownAsync()` to ensure clean termination.
 
 Shader Side (`shaders/ibl_common.glsl`)
 - Bindings:

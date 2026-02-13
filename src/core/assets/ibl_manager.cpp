@@ -287,7 +287,7 @@ struct IBLManager::AsyncStateData
 
 IBLManager::~IBLManager()
 {
-    shutdown_async();
+    shutdownAsync();
 }
 
 void IBLManager::init(EngineContext *ctx)
@@ -360,10 +360,10 @@ bool IBLManager::load(const IBLPaths &paths)
         return false;
     }
 
-    return commit_prepared(data);
+    return commitPrepared(data);
 }
 
-bool IBLManager::load_async(const IBLPaths &paths)
+bool IBLManager::loadAsync(const IBLPaths &paths)
 {
     if (_ctx == nullptr || _ctx->getResources() == nullptr)
     {
@@ -388,7 +388,7 @@ bool IBLManager::load_async(const IBLPaths &paths)
     return true;
 }
 
-IBLManager::AsyncResult IBLManager::pump_async()
+IBLManager::AsyncResult IBLManager::pumpAsync()
 {
     AsyncResult out{};
 
@@ -426,18 +426,18 @@ IBLManager::AsyncResult IBLManager::pump_async()
     }
 
     // Commit GPU resources on the main thread.
-    out.success = commit_prepared(data);
+    out.success = commitPrepared(data);
     return out;
 }
 
 void IBLManager::unload()
 {
-    shutdown_async();
+    shutdownAsync();
 
     if (_ctx == nullptr || _ctx->getResources() == nullptr) return;
 
     // Destroy images and SH buffer first.
-    destroy_images_and_sh();
+    destroyImagesAndSh();
 
     // Then release descriptor layout.
     if (_iblSetLayout && _ctx && _ctx->getDevice())
@@ -467,7 +467,7 @@ bool IBLManager::ensureLayout()
     return _iblSetLayout != VK_NULL_HANDLE;
 }
 
-void IBLManager::destroy_images_and_sh()
+void IBLManager::destroyImagesAndSh()
 {
     if (_ctx == nullptr || _ctx->getResources() == nullptr) return;
     auto *rm = _ctx->getResources();
@@ -505,7 +505,7 @@ void IBLManager::destroy_images_and_sh()
     _brdf = {};
 }
 
-void IBLManager::shutdown_async()
+void IBLManager::shutdownAsync()
 {
     if (_async == nullptr) return;
 
@@ -525,7 +525,7 @@ void IBLManager::shutdown_async()
     _async = nullptr;
 }
 
-bool IBLManager::commit_prepared(const PreparedIBLData &data)
+bool IBLManager::commitPrepared(const PreparedIBLData &data)
 {
     if (_ctx == nullptr || _ctx->getResources() == nullptr)
     {
@@ -539,7 +539,7 @@ bool IBLManager::commit_prepared(const PreparedIBLData &data)
         rm->process_queued_uploads_immediate();
     }
 
-    destroy_images_and_sh();
+    destroyImagesAndSh();
     ensureLayout();
 
     if (data.has_spec)

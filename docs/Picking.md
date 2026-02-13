@@ -315,7 +315,7 @@ The picking system respects ImGui's input capture:
 
 ```cpp
 // In main loop (after InputSystem::pump_events())
-bool ui_capture = imgui_system.want_capture_mouse();
+bool ui_capture = imgui_system.wantCaptureMouse();
 picking_system.process_input(input_system, ui_capture);
 picking_system.update_hover(ui_capture);
 ```

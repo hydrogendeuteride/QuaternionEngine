@@ -67,7 +67,7 @@ namespace Game
         {
             if (renderer->ui())
             {
-                renderer->ui()->add_draw_callback([this]() { draw_contact_debug_ui(); });
+                renderer->ui()->addDrawCallback([this]() { draw_contact_debug_ui(); });
             }
         }
 

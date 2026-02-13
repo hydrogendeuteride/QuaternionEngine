@@ -162,7 +162,7 @@ bool Engine::load_global_ibl(const IBLPaths& paths)
     ::IBLPaths internal = to_internal_ibl_paths(paths);
     _engine->_globalIBLPaths = internal;
 
-    if (_engine->_iblManager->load_async(internal))
+    if (_engine->_iblManager->loadAsync(internal))
     {
         _engine->_pendingIBLRequest.active = true;
         _engine->_pendingIBLRequest.targetVolume = -1;

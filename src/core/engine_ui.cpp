@@ -118,7 +118,7 @@ namespace
         if (ImGui::Button("Apply"))
         {
             auto mode = static_cast<VulkanEngine::WindowMode>(std::clamp(pending_mode, 0, 2));
-            eng->set_window_mode(mode, pending_display);
+            eng->setWindowMode(mode, pending_display);
 
             // Re-sync pending selections with what SDL actually applied.
             pending_display = SDL_GetWindowDisplayIndex(eng->_window);
@@ -242,7 +242,7 @@ namespace
         {
             uint32_t w = static_cast<uint32_t>(pendingLogicalW > 0 ? pendingLogicalW : 1);
             uint32_t h = static_cast<uint32_t>(pendingLogicalH > 0 ? pendingLogicalH : 1);
-            eng->set_logical_render_extent(VkExtent2D{w, h});
+            eng->setLogicalRenderExtent(VkExtent2D{w, h});
         }
         ImGui::SameLine();
         if (ImGui::Button("720p"))
@@ -274,7 +274,7 @@ namespace
         applyScale = ImGui::Button("Apply Scale") || applyScale;
         if (applyScale)
         {
-            eng->set_render_scale(pendingScale);
+            eng->setRenderScale(pendingScale);
         }
     }
 
@@ -755,7 +755,7 @@ namespace
                 if (eng->_iblManager && vol.enabled)
                 {
                     vol.paths = resolve_ibl_paths(eng, vol.paths);
-                    if (eng->_iblManager->load_async(vol.paths))
+                    if (eng->_iblManager->loadAsync(vol.paths))
                     {
                         eng->_pendingIBLRequest.active = true;
                         eng->_pendingIBLRequest.targetVolume = static_cast<int>(i);
@@ -770,7 +770,7 @@ namespace
                 eng->_globalIBLPaths = vol.paths;
                 if (eng->_iblManager)
                 {
-                    if (eng->_iblManager->load_async(eng->_globalIBLPaths))
+                    if (eng->_iblManager->loadAsync(eng->_globalIBLPaths))
                     {
                         eng->_pendingIBLRequest.active = true;
                         eng->_pendingIBLRequest.targetVolume = -1;
@@ -1125,10 +1125,10 @@ namespace
             }
         }
 
-        const size_t texBudget = eng->query_texture_budget_bytes();
-        eng->_textureCache->set_gpu_budget_bytes(texBudget);
-        const size_t resBytes = eng->_textureCache->resident_bytes();
-        const size_t cpuSrcBytes = eng->_textureCache->cpu_source_bytes();
+        const size_t texBudget = eng->queryTextureBudgetBytes();
+        eng->_textureCache->setGpuBudgetBytes(texBudget);
+        const size_t resBytes = eng->_textureCache->residentBytes();
+        const size_t cpuSrcBytes = eng->_textureCache->cpuSourceBytes();
         ImGui::Text("Device local: %.1f / %.1f MiB",
                     (double) devLocalUsage / 1048576.0,
                     (double) devLocalBudget / 1048576.0);
@@ -1143,39 +1143,39 @@ namespace
 
         // Controls
         static int loadsPerPump = 4;
-        loadsPerPump = eng->_textureCache->max_loads_per_pump();
+        loadsPerPump = eng->_textureCache->maxLoadsPerPump();
         if (ImGui::SliderInt("Loads/Frame", &loadsPerPump, 1, 16))
         {
-            eng->_textureCache->set_max_loads_per_pump(loadsPerPump);
+            eng->_textureCache->setMaxLoadsPerPump(loadsPerPump);
         }
         static int uploadBudgetMiB = 128;
-        uploadBudgetMiB = (int) (eng->_textureCache->max_bytes_per_pump() / 1048576ull);
+        uploadBudgetMiB = (int) (eng->_textureCache->maxBytesPerPump() / 1048576ull);
         if (ImGui::SliderInt("Upload Budget (MiB)", &uploadBudgetMiB, 16, 2048))
         {
-            eng->_textureCache->set_max_bytes_per_pump((size_t) uploadBudgetMiB * 1048576ull);
+            eng->_textureCache->setMaxBytesPerPump((size_t) uploadBudgetMiB * 1048576ull);
         }
         static bool keepSources = false;
-        keepSources = eng->_textureCache->keep_source_bytes();
+        keepSources = eng->_textureCache->keepSourceBytes();
         if (ImGui::Checkbox("Keep Source Bytes", &keepSources))
         {
-            eng->_textureCache->set_keep_source_bytes(keepSources);
+            eng->_textureCache->setKeepSourceBytes(keepSources);
         }
         static int cpuBudgetMiB = 64;
-        cpuBudgetMiB = (int) (eng->_textureCache->cpu_source_budget() / 1048576ull);
+        cpuBudgetMiB = (int) (eng->_textureCache->cpuSourceBudget() / 1048576ull);
         if (ImGui::SliderInt("CPU Source Budget (MiB)", &cpuBudgetMiB, 0, 2048))
         {
-            eng->_textureCache->set_cpu_source_budget((size_t) cpuBudgetMiB * 1048576ull);
+            eng->_textureCache->setCpuSourceBudget((size_t) cpuBudgetMiB * 1048576ull);
         }
         static int maxUploadDim = 4096;
-        maxUploadDim = (int) eng->_textureCache->max_upload_dimension();
+        maxUploadDim = (int) eng->_textureCache->maxUploadDimension();
         if (ImGui::SliderInt("Max Upload Dimension", &maxUploadDim, 0, 8192))
         {
-            eng->_textureCache->set_max_upload_dimension((uint32_t) std::max(0, maxUploadDim));
+            eng->_textureCache->setMaxUploadDimension((uint32_t) std::max(0, maxUploadDim));
         }
 
         TextureCache::DebugStats stats{};
         std::vector<TextureCache::DebugRow> rows;
-        eng->_textureCache->debug_snapshot(rows, stats);
+        eng->_textureCache->debugSnapshot(rows, stats);
         ImGui::Text("Counts  R:%zu  U:%zu  E:%zu",
                     stats.countResident,
                     stats.countUnloaded,
@@ -1230,7 +1230,7 @@ namespace
         }
 
         std::vector<AsyncAssetLoader::DebugJob> jobs;
-        eng->_asyncLoader->debug_snapshot(jobs);
+        eng->_asyncLoader->debugSnapshot(jobs);
 
         ImGui::Text("Active jobs: %zu", jobs.size());
         ImGui::Separator();

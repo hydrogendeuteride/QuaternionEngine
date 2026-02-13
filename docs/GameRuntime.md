@@ -231,8 +231,8 @@ Runtime::run(IGameCallbacks* game)
       │   └─ frameDescriptors.clear_pools()
       │
       ├─ ImGui Frame
-      │   ├─ ui->begin_frame()
-      │   └─ ui->end_frame()
+      │   ├─ ui->beginFrame()
+      │   └─ ui->endFrame()
       │
       ├─ Rendering
       │   └─ renderer->draw()

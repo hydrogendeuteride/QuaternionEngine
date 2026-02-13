@@ -73,5 +73,5 @@ See `PipelineManager.md` for a full compute quick start using the unified API.
 
 - Use per-frame allocator (`currentFrame->_frameDescriptors`) for transient sets to avoid lifetime pitfalls.
 - Keep `DescriptorLayoutBuilder` small and local; free custom layouts in your pass/module `cleanup()`.
-- Tune pool ratios to match workload; see how frames are initialized in `VulkanEngine::init_frame_resources()`.
+- Tune pool ratios to match workload; see how frames are initialized in `VulkanEngine::initFrameResources()`.
 - For persistent compute resources, prefer `ComputeManager` instances over manual descriptor lifecycle.

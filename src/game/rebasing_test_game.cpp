@@ -202,7 +202,7 @@ namespace Game
         // Game ImGui panel
         if (renderer->ui())
         {
-            renderer->ui()->add_draw_callback([this]() { draw_ui(); });
+            renderer->ui()->addDrawCallback([this]() { draw_ui(); });
         }
 
         if (auto* audio = runtime.audio())

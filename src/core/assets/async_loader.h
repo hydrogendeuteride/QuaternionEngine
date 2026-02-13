@@ -39,22 +39,22 @@ public:
     void init(VulkanEngine *engine, AssetManager *assets, TextureCache *textures, uint32_t worker_count = 1);
     void shutdown();
 
-    JobID load_gltf_async(const std::string &scene_name,
-                          const std::string &model_relative_path,
-                          const glm::mat4 &transform,
-                          bool preload_textures = false);
+    JobID loadGltfAsync(const std::string &scene_name,
+                        const std::string &model_relative_path,
+                        const glm::mat4 &transform,
+                        bool preload_textures = false);
 
-    JobID load_gltf_async(const std::string &scene_name,
-                          const std::string &model_relative_path,
-                          const WorldVec3 &translation_world,
-                          const glm::quat &rotation,
-                          const glm::vec3 &scale,
-                          bool preload_textures = false);
+    JobID loadGltfAsync(const std::string &scene_name,
+                        const std::string &model_relative_path,
+                        const WorldVec3 &translation_world,
+                        const glm::quat &rotation,
+                        const glm::vec3 &scale,
+                        bool preload_textures = false);
 
-    bool get_job_status(JobID id, JobState &out_state, float &out_progress, std::string *out_error = nullptr);
+    bool getJobStatus(JobID id, JobState &out_state, float &out_progress, std::string *out_error = nullptr);
 
     // Main-thread integration: commit completed jobs into the SceneManager.
-    void pump_main_thread(SceneManager &scene);
+    void pumpMainThread(SceneManager &scene);
 
     struct DebugJob
     {
@@ -67,7 +67,7 @@ public:
         size_t textures_resident{0};
     };
     // Debug-only snapshot of current jobs for UI/tools (main-thread only).
-    void debug_snapshot(std::vector<DebugJob> &out_jobs);
+    void debugSnapshot(std::vector<DebugJob> &out_jobs);
 
 private:
     struct Job
@@ -94,9 +94,9 @@ private:
         std::vector<TextureCache::TextureHandle> texture_handles;
     };
 
-    void start_workers(uint32_t count);
-    void stop_workers();
-    void worker_loop();
+    void startWorkers(uint32_t count);
+    void stopWorkers();
+    void workerLoop();
 
     VulkanEngine *_engine{nullptr};
     AssetManager *_assets{nullptr};
