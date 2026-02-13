@@ -107,7 +107,7 @@ public:
     void hotReloadChanged();
 
     // Apply any completed async rebuilds on the main thread.
-    void pump_main_thread();
+    void pumpMainThread();
 
     // Debug helpers (graphics only)
     struct GraphicsPipelineDebugInfo
@@ -117,7 +117,7 @@ public:
         std::string fragmentShaderPath;
         bool valid = false;
     };
-    void debug_get_graphics(std::vector<GraphicsPipelineDebugInfo>& out) const;
+    void debugGetGraphics(std::vector<GraphicsPipelineDebugInfo>& out) const;
 
 private:
     struct GraphicsPipelineRecord
@@ -154,9 +154,9 @@ private:
 
     void destroyGraphics(GraphicsPipelineRecord &rec);
 
-    void start_worker();
+    void startWorker();
 
-    void stop_worker();
+    void stopWorker();
 
-    void worker_loop();
+    void workerLoop();
 };

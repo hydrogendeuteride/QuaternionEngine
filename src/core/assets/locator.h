@@ -35,10 +35,9 @@ public:
     std::string modelPath(std::string_view name) const { return assetPath(name); }
 
 private:
-    static bool file_exists(const std::filesystem::path &p);
+    static bool fileExists(const std::filesystem::path &p);
 
-    static std::string resolve_in(const std::filesystem::path &base, std::string_view name);
+    static std::string resolveIn(const std::filesystem::path &base, std::string_view name);
 
     AssetPaths _paths{};
 };
-

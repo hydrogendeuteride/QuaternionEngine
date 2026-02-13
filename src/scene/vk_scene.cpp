@@ -419,7 +419,7 @@ void SceneManager::update_scene()
             const float u = glm::dot(centerTarget, right);
             const float v = glm::dot(centerTarget, up);
 
-            const uint32_t shadowRes = _context ? _context->get_shadow_map_resolution() : kShadowMapResolution;
+            const uint32_t shadowRes = _context ? _context->getShadowMapResolution() : kShadowMapResolution;
             const float texel = (2.0f * cover) / static_cast<float>(shadowRes);
             // Snap the center in light-space to texel increments for stable shadows (reduced shimmering).
             const float uSnapped = std::round(u / texel) * texel;

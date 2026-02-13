@@ -72,17 +72,17 @@ void AssetLocator::init()
     _paths = AssetPaths::detect();
 }
 
-bool AssetLocator::file_exists(const path &p)
+bool AssetLocator::fileExists(const path &p)
 {
     std::error_code ec;
     return !p.empty() && std::filesystem::exists(p, ec) && std::filesystem::is_regular_file(p, ec);
 }
 
-std::string AssetLocator::resolve_in(const path &base, std::string_view name)
+std::string AssetLocator::resolveIn(const path &base, std::string_view name)
 {
     if (name.empty()) return {};
     path in = base / std::string(name);
-    if (file_exists(in)) return in.string();
+    if (fileExists(in)) return in.string();
     return {};
 }
 
@@ -91,16 +91,16 @@ std::string AssetLocator::shaderPath(std::string_view name) const
     if (name.empty()) return {};
     path np = std::string(name);
 
-    if (np.is_absolute() && file_exists(np)) return np.string();
-    if (file_exists(np)) return np.string();
+    if (np.is_absolute() && fileExists(np)) return np.string();
+    if (fileExists(np)) return np.string();
 
     if (!_paths.shaders.empty())
     {
-        if (auto r = resolve_in(_paths.shaders, name); !r.empty()) return r;
+        if (auto r = resolveIn(_paths.shaders, name); !r.empty()) return r;
     }
 
-    if (auto r = resolve_in(std::filesystem::current_path() / "shaders", name); !r.empty()) return r;
-    if (auto r = resolve_in(std::filesystem::current_path() / ".." / "shaders", name); !r.empty()) return r;
+    if (auto r = resolveIn(std::filesystem::current_path() / "shaders", name); !r.empty()) return r;
+    if (auto r = resolveIn(std::filesystem::current_path() / ".." / "shaders", name); !r.empty()) return r;
 
     return np.string();
 }
@@ -109,17 +109,16 @@ std::string AssetLocator::assetPath(std::string_view name) const
 {
     if (name.empty()) return {};
     path np = std::string(name);
-    if (np.is_absolute() && file_exists(np)) return np.string();
-    if (file_exists(np)) return np.string();
+    if (np.is_absolute() && fileExists(np)) return np.string();
+    if (fileExists(np)) return np.string();
 
     if (!_paths.assets.empty())
     {
-        if (auto r = resolve_in(_paths.assets, name); !r.empty()) return r;
+        if (auto r = resolveIn(_paths.assets, name); !r.empty()) return r;
     }
 
-    if (auto r = resolve_in(std::filesystem::current_path() / "assets", name); !r.empty()) return r;
-    if (auto r = resolve_in(std::filesystem::current_path() / ".." / "assets", name); !r.empty()) return r;
+    if (auto r = resolveIn(std::filesystem::current_path() / "assets", name); !r.empty()) return r;
+    if (auto r = resolveIn(std::filesystem::current_path() / ".." / "assets", name); !r.empty()) return r;
 
     return np.string();
 }
-

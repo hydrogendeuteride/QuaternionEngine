@@ -167,7 +167,7 @@ namespace GameRuntime
             if (_renderer->_rayManager)
             {
                 _renderer->_rayManager->flushPendingDeletes();
-                _renderer->_rayManager->pump_blas_builds(1);
+                _renderer->_rayManager->pumpBlasBuilds(1);
             }
 
             // Commit any completed async IBL load now that the GPU is idle.

@@ -1337,7 +1337,7 @@ namespace
             static constexpr uint32_t kResValues[] = {256u, 512u, 1024u, 2048u, 4096u, 8192u};
             static const char *kResLabels[] = {"256", "512", "1024", "2048", "4096", "8192"};
 
-            const uint32_t effective = eng->_context ? eng->_context->get_shadow_map_resolution() : ss.shadowMapResolution;
+            const uint32_t effective = eng->_context ? eng->_context->getShadowMapResolution() : ss.shadowMapResolution;
             int currentIdx = -1;
             for (int i = 0; i < static_cast<int>(IM_ARRAYSIZE(kResValues)); ++i)
             {
@@ -1351,14 +1351,14 @@ namespace
             int idx = (currentIdx >= 0) ? currentIdx : 3; // default to 2048 when custom
             if (ImGui::Combo("Preset", &idx, kResLabels, IM_ARRAYSIZE(kResLabels)))
             {
-                if (eng->_context) eng->_context->set_shadow_map_resolution(kResValues[idx]);
+                if (eng->_context) eng->_context->setShadowMapResolution(kResValues[idx]);
                 else ss.shadowMapResolution = kResValues[idx];
             }
 
             int custom = static_cast<int>(ss.shadowMapResolution);
             if (ImGui::InputInt("Custom", &custom, 256, 1024, ImGuiInputTextFlags_EnterReturnsTrue))
             {
-                if (eng->_context) eng->_context->set_shadow_map_resolution(static_cast<uint32_t>(custom));
+                if (eng->_context) eng->_context->setShadowMapResolution(static_cast<uint32_t>(custom));
                 else ss.shadowMapResolution = static_cast<uint32_t>(custom);
             }
             ImGui::Text("Effective: %u", effective);
@@ -1540,7 +1540,7 @@ namespace
             return;
         }
         std::vector<PipelineManager::GraphicsPipelineDebugInfo> pipes;
-        eng->_pipelineManager->debug_get_graphics(pipes);
+        eng->_pipelineManager->debugGetGraphics(pipes);
         if (ImGui::Button("Reload Changed")) { eng->_pipelineManager->hotReloadChanged(); }
         ImGui::SameLine();
         ImGui::Text("%zu graphics pipelines", pipes.size());

@@ -14,7 +14,7 @@ const DrawContext &EngineContext::getMainDrawContext() const
     return const_cast<SceneManager *>(scene)->getMainDrawContext();
 }
 
-uint32_t EngineContext::get_shadow_map_resolution() const
+uint32_t EngineContext::getShadowMapResolution() const
 {
     uint32_t res = shadowSettings.shadowMapResolution;
     if (res == 0)
@@ -38,9 +38,9 @@ uint32_t EngineContext::get_shadow_map_resolution() const
     return res;
 }
 
-void EngineContext::set_shadow_map_resolution(uint32_t resolution)
+void EngineContext::setShadowMapResolution(uint32_t resolution)
 {
     shadowSettings.shadowMapResolution = resolution;
     // Normalize/clamp immediately so other systems see a valid value.
-    shadowSettings.shadowMapResolution = get_shadow_map_resolution();
+    shadowSettings.shadowMapResolution = getShadowMapResolution();
 }

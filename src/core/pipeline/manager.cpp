@@ -16,13 +16,13 @@ PipelineManager::~PipelineManager()
 void PipelineManager::init(EngineContext *ctx)
 {
     _context = ctx;
-    start_worker();
+    startWorker();
 }
 
 void PipelineManager::cleanup()
 {
     // Stop async worker first so no background thread touches the device/context.
-    stop_worker();
+    stopWorker();
 
     for (auto &kv: _graphicsPipelines)
     {
@@ -144,7 +144,7 @@ void PipelineManager::hotReloadChanged()
     _jobs_cv.notify_all();
 }
 
-void PipelineManager::pump_main_thread()
+void PipelineManager::pumpMainThread()
 {
     // Move completed jobs to a local queue so we don't hold the mutex while doing Vulkan work.
     std::deque<ReloadJob> completed;
@@ -187,7 +187,7 @@ void PipelineManager::pump_main_thread()
     }
 }
 
-void PipelineManager::debug_get_graphics(std::vector<GraphicsPipelineDebugInfo> &out) const
+void PipelineManager::debugGetGraphics(std::vector<GraphicsPipelineDebugInfo> &out) const
 {
     out.clear();
     out.reserve(_graphicsPipelines.size());
@@ -288,7 +288,7 @@ void PipelineManager::destroyGraphics(GraphicsPipelineRecord &rec)
     }
 }
 
-void PipelineManager::start_worker()
+void PipelineManager::startWorker()
 {
     bool expected = false;
     if (!_running.compare_exchange_strong(expected, true))
@@ -297,10 +297,10 @@ void PipelineManager::start_worker()
         return;
     }
 
-    _worker = std::thread(&PipelineManager::worker_loop, this);
+    _worker = std::thread(&PipelineManager::workerLoop, this);
 }
 
-void PipelineManager::stop_worker()
+void PipelineManager::stopWorker()
 {
     bool expected = true;
     if (!_running.compare_exchange_strong(expected, false))
@@ -323,7 +323,7 @@ void PipelineManager::stop_worker()
     }
 }
 
-void PipelineManager::worker_loop()
+void PipelineManager::workerLoop()
 {
     while (true)
     {

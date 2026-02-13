@@ -44,7 +44,7 @@ getMaterialPipeline(name) → MaterialPipeline
 hotReloadChanged()
   └─ checks shader file timestamps, enqueues async rebuild jobs for changed pipelines
 
-pump_main_thread()
+pumpMainThread()
   └─ applies completed async rebuilds (swap old pipeline → new pipeline)
 
 unregisterGraphics(name)
@@ -97,7 +97,7 @@ if (ctx->pipelineManager->getGraphics("deferred_geo", pipeline, layout)) {
 
 ```cpp
 ctx->pipelineManager->hotReloadChanged();   // enqueue changed shaders
-ctx->pipelineManager->pump_main_thread();   // apply completed rebuilds
+ctx->pipelineManager->pumpMainThread();   // apply completed rebuilds
 ```
 
 ### Compute forwarding
@@ -130,7 +130,7 @@ VkSampler shadow = ctx->samplerManager->shadowLinearClamp();
 `PipelineManager` is owned by `VulkanEngine` and exposed via `EngineContext::pipelineManager`.
 Render passes register their graphics pipelines at setup time and retrieve handles
 during recording. The async hot-reload worker runs on a background thread; only
-`pump_main_thread()` touches Vulkan state and must be called from the main thread.
+`pumpMainThread()` touches Vulkan state and must be called from the main thread.
 
 `SamplerManager` is owned by `VulkanEngine` and exposed via `EngineContext::samplerManager`.
 It is initialized early (requires only `DeviceManager`) and provides read-only

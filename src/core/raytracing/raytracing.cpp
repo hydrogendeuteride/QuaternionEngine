@@ -132,12 +132,12 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     _blasPendingMeshes.insert(key);
     _blasBuildQueue.push_back(PendingBlasBuild{key});
 
-    // BLAS will be built asynchronously by pump_blas_builds(); until then,
+    // BLAS will be built asynchronously by pumpBlasBuilds(); until then,
     // callers should treat the empty handle as "not ready yet".
     return {};
 }
 
-AccelStructureHandle RayTracingManager::build_blas_for_mesh(const MeshAsset *mesh)
+AccelStructureHandle RayTracingManager::buildBlasForMesh(const MeshAsset *mesh)
 {
     if (!mesh || !_resources || !_device) return {};
 
@@ -145,7 +145,7 @@ AccelStructureHandle RayTracingManager::build_blas_for_mesh(const MeshAsset *mes
     // before building a BLAS that reads from those GPU buffers.
     if (_resources->deferred_uploads() && _resources->has_pending_uploads())
     {
-        fmt::println("[RT] build_blas_for_mesh: flushing pending resource uploads before BLAS build");
+        fmt::println("[RT] buildBlasForMesh: flushing pending resource uploads before BLAS build");
         _resources->process_queued_uploads_immediate();
     }
 
@@ -160,7 +160,7 @@ AccelStructureHandle RayTracingManager::build_blas_for_mesh(const MeshAsset *mes
     const uint32_t vcount = mesh->meshBuffers.vertexCount;
     VkBuffer vb = mesh->meshBuffers.vertexBuffer.buffer;
 
-    fmt::println("[RT] build_blas_for_mesh mesh='{}' surfaces={} vcount={}", mesh->name,
+    fmt::println("[RT] buildBlasForMesh mesh='{}' surfaces={} vcount={}", mesh->name,
                  mesh->surfaces.size(), vcount);
 
     for (const auto &s: mesh->surfaces)
@@ -199,7 +199,7 @@ AccelStructureHandle RayTracingManager::build_blas_for_mesh(const MeshAsset *mes
     // If no valid geometries, record an empty sentinel to avoid re-queuing.
     if (geoms.empty())
     {
-        fmt::println("[RT] build_blas_for_mesh: mesh='{}' has no primitives; skipping BLAS", mesh->name);
+        fmt::println("[RT] buildBlasForMesh: mesh='{}' has no primitives; skipping BLAS", mesh->name);
         _blasByMesh.emplace(mesh, AccelStructureHandle{});
         return {};
     }
@@ -271,7 +271,7 @@ AccelStructureHandle RayTracingManager::build_blas_for_mesh(const MeshAsset *mes
     return blas;
 }
 
-void RayTracingManager::pump_blas_builds(uint32_t max_builds_per_frame)
+void RayTracingManager::pumpBlasBuilds(uint32_t max_builds_per_frame)
 {
     if (max_builds_per_frame == 0 || _blasBuildQueue.empty())
     {
@@ -296,7 +296,7 @@ void RayTracingManager::pump_blas_builds(uint32_t max_builds_per_frame)
             // Skip if a BLAS was already created meanwhile.
             if (_blasByMesh.find(mesh) == _blasByMesh.end())
             {
-                AccelStructureHandle blas = build_blas_for_mesh(mesh);
+                AccelStructureHandle blas = buildBlasForMesh(mesh);
                 if (blas.handle)
                 {
                     ++built;
@@ -311,14 +311,14 @@ void RayTracingManager::pump_blas_builds(uint32_t max_builds_per_frame)
     }
 }
 
-void RayTracingManager::ensure_tlas_storage(VkDeviceSize requiredASSize, VkDeviceSize /*requiredScratch*/, DeletionQueue& dq)
+void RayTracingManager::ensureTlasStorage(VkDeviceSize requiredASSize, VkDeviceSize /*requiredScratch*/, DeletionQueue& dq)
 {
     // Recreate TLAS storage if size grows. Defer destruction to the frame DQ to
     // avoid freeing while referenced by in-flight frames.
     if (_tlas.handle || _tlas.storage.buffer)
     {
         AccelStructureHandle old = _tlas;
-        fmt::println("[RT] ensure_tlas_storage: scheduling old TLAS destroy handle={} buffer={} size={}",
+        fmt::println("[RT] ensureTlasStorage: scheduling old TLAS destroy handle={} buffer={} size={}",
                      static_cast<const void *>(old.handle),
                      static_cast<const void *>(old.storage.buffer),
                      old.storage.info.size);
@@ -341,7 +341,7 @@ void RayTracingManager::ensure_tlas_storage(VkDeviceSize requiredASSize, VkDevic
     asci.size = requiredASSize;
     VK_CHECK(_vkCreateAccelerationStructureKHR(_device->device(), &asci, nullptr, &_tlas.handle));
 
-    fmt::println("[RT] ensure_tlas_storage: created TLAS handle={} buffer={} size={}",
+    fmt::println("[RT] ensureTlasStorage: created TLAS handle={} buffer={} size={}",
                  static_cast<const void *>(_tlas.handle),
                  static_cast<const void *>(_tlas.storage.buffer),
                  requiredASSize);
@@ -374,7 +374,7 @@ VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const Dra
             {
                 // Queue an async BLAS build if the mesh is still alive
                 // (non-owning shared_ptr wrapper). The BLAS will be built
-                // over subsequent frames by pump_blas_builds(); until then,
+                // over subsequent frames by pumpBlasBuilds(); until then,
                 // this instance will be skipped.
                 std::shared_ptr<MeshAsset> nonOwning(const_cast<MeshAsset *>(r.sourceMesh), [](MeshAsset *) {});
                 blas = getOrBuildBLAS(nonOwning);
@@ -469,7 +469,7 @@ VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const Dra
     _vkGetAccelerationStructureBuildSizesKHR(_device->device(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                                              &buildInfo, &primCount, &sizes);
 
-    ensure_tlas_storage(sizes.accelerationStructureSize, sizes.buildScratchSize, dq);
+    ensureTlasStorage(sizes.accelerationStructureSize, sizes.buildScratchSize, dq);
 
     buildInfo.dstAccelerationStructure = _tlas.handle;
     const VkDeviceSize align2 = _minScratchAlignment;

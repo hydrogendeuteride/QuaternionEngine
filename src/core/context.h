@@ -318,8 +318,8 @@ public:
     RenderGraph* getRenderGraph() const { return renderGraph; }
 
     // Shadow map resolution utilities (clamped to device limits).
-    uint32_t get_shadow_map_resolution() const;
-    void set_shadow_map_resolution(uint32_t resolution);
+    uint32_t getShadowMapResolution() const;
+    void setShadowMapResolution(uint32_t resolution);
 
     // Streaming subsystems (engine-owned)
     TextureCache* textures = nullptr;            // texture streaming + cache

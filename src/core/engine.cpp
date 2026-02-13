@@ -1047,7 +1047,7 @@ void VulkanEngine::draw()
     // Apply any completed async pipeline rebuilds before using pipelines this frame.
     if (_pipelineManager)
     {
-        _pipelineManager->pump_main_thread();
+        _pipelineManager->pumpMainThread();
     }
 
     _sceneManager->update_scene();
@@ -1253,7 +1253,7 @@ void VulkanEngine::draw()
         RGImageHandle hDebugColor = hDraw;
 
         // Create transient depth targets for cascaded shadow maps (even if RT-only / disabled, to keep descriptors stable)
-        const uint32_t shadowRes = _context ? _context->get_shadow_map_resolution() : kShadowMapResolution;
+        const uint32_t shadowRes = _context ? _context->getShadowMapResolution() : kShadowMapResolution;
         const VkExtent2D shadowExtent{shadowRes, shadowRes};
         std::array<RGImageHandle, kShadowCascadeCount> hShadowCascades{};
         for (int i = 0; i < kShadowCascadeCount; ++i)
@@ -1605,7 +1605,7 @@ void VulkanEngine::run()
 
         // Progress queued BLAS builds over multiple frames to avoid large
         // stalls when many meshes require ray tracing structures at once.
-        if (_rayManager) { _rayManager->pump_blas_builds(1); }
+        if (_rayManager) { _rayManager->pumpBlasBuilds(1); }
 
         // Commit any completed async IBL load now that the GPU is idle.
         if (_iblManager && _pendingIBLRequest.active)

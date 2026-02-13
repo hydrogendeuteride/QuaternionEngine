@@ -186,7 +186,7 @@ You can query the world transform of a specific glTF node within an instance. Th
 - `kShadowCascadeCount` cascade levels (default 4), each covering a square region around the camera with radius `R_i = kShadowClipBaseRadius * 2^i`.
 - The clipmap center is biased slightly in the camera's forward direction (per‑cascade blend factor) to spend more resolution in the visible area.
 - Centers are snapped to the light‑space texel grid for stable, shimmer‑free shadows.
-- Shadow resolution is queried from `EngineContext::get_shadow_map_resolution()`.
+- Shadow resolution is queried from `EngineContext::getShadowMapResolution()`.
 - Depth uses forward 0..1 mapping (`glm::orthoRH_ZO`) paired with a GREATER depth test.
 
 ### Point Lights

@@ -33,7 +33,7 @@ public:
     // Progress asynchronous BLAS builds. Call once per frame after waiting
     // for the previous frame's GPU fence. max_builds_per_frame controls how
     // many BLAS are built in this pump to spread work over multiple frames.
-    void pump_blas_builds(uint32_t max_builds_per_frame = 1);
+    void pumpBlasBuilds(uint32_t max_builds_per_frame = 1);
  
     // Rebuild TLAS from current draw context; returns TLAS handle (or null if unavailable)
     // Destruction of previous TLAS resources is deferred via the provided frame deletion queue
@@ -87,7 +87,7 @@ private:
     // Properties
     VkDeviceSize _minScratchAlignment{256};
  
-    void ensure_tlas_storage(VkDeviceSize requiredASSize, VkDeviceSize requiredScratch, DeletionQueue& frameDQ);
-    AccelStructureHandle build_blas_for_mesh(const MeshAsset* mesh);
+    void ensureTlasStorage(VkDeviceSize requiredASSize, VkDeviceSize requiredScratch, DeletionQueue& frameDQ);
+    AccelStructureHandle buildBlasForMesh(const MeshAsset* mesh);
 };
  

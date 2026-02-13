@@ -68,13 +68,13 @@ void Engine::set_shadow_map_resolution(uint32_t resolution)
 {
     if (_engine->_context)
     {
-        _engine->_context->set_shadow_map_resolution(resolution);
+        _engine->_context->setShadowMapResolution(resolution);
     }
 }
 
 uint32_t Engine::get_shadow_map_resolution() const
 {
-    return _engine->_context ? _engine->_context->get_shadow_map_resolution() : 0u;
+    return _engine->_context ? _engine->_context->getShadowMapResolution() : 0u;
 }
 
 void Engine::set_hybrid_ray_cascade_mask(uint32_t mask)
