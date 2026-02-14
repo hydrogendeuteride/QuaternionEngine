@@ -192,8 +192,8 @@ add_executable (vulkan_engine
   game/example_game.cpp
   game/rebasing_test_game.h
   game/rebasing_test_game.cpp
-  game/space_combat_game.h
-  game/space_combat_game.cpp
+        game/main_game.h
+        game/main_game.cpp
   game/state/game_state.h
   game/state/game_state.cpp
   game/state/game_state_manager.h

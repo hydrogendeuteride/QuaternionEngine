@@ -1,11 +1,11 @@
-#include "space_combat_game.h"
+#include "main_game.h"
 #include "state/title_screen_state.h"
 #include "runtime/game_runtime.h"
 #include "core/engine.h"
 
 namespace Game
 {
-    void SpaceCombatGame::on_init(GameRuntime::Runtime &runtime)
+    void MainGame::on_init(GameRuntime::Runtime &runtime)
     {
         _runtime = &runtime;
 
@@ -33,17 +33,17 @@ namespace Game
         _state_manager.push(std::make_unique<TitleScreenState>());
     }
 
-    void SpaceCombatGame::on_update(float dt)
+    void MainGame::on_update(float dt)
     {
         _state_manager.update(dt);
     }
 
-    void SpaceCombatGame::on_fixed_update(float fixed_dt)
+    void MainGame::on_fixed_update(float fixed_dt)
     {
         _state_manager.fixed_update(fixed_dt);
     }
 
-    void SpaceCombatGame::on_shutdown()
+    void MainGame::on_shutdown()
     {
         _state_manager.shutdown();
         _runtime = nullptr;

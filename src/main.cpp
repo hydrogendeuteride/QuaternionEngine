@@ -17,7 +17,7 @@
 #if USE_ENTITY_SYSTEM
 #include "game/example_game.h"
 #include "game/rebasing_test_game.h"
-#include "game/space_combat_game.h"
+#include "game/main_game.h"
 #else
 #endif // USE_ENTITY_SYSTEM
 #endif // USE_GAME_RUNTIME
@@ -78,7 +78,7 @@ int main(int argc, char *argv[])
         std::unique_ptr<GameRuntime::IGameCallbacks> game;
         if (options.game_name == "space_combat" || options.game_name == "sc")
         {
-            game = std::make_unique<Game::SpaceCombatGame>();
+            game = std::make_unique<Game::MainGame>();
         }
         else if (options.game_name == "rebase" || options.game_name == "rebasing" ||
                  options.game_name == "rebasing_test")

@@ -13,11 +13,11 @@ namespace Game
     // active IGameState (TitleScreen, Gameplay, Pause, Settings, etc.)
     // ============================================================================
 
-    class SpaceCombatGame : public GameRuntime::IGameCallbacks
+    class MainGame : public GameRuntime::IGameCallbacks
     {
     public:
-        SpaceCombatGame() = default;
-        ~SpaceCombatGame() override = default;
+        MainGame() = default;
+        ~MainGame() override = default;
 
         // IGameCallbacks
         void on_init(GameRuntime::Runtime &runtime) override;
