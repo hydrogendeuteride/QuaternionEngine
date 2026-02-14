@@ -5,6 +5,8 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
+#include <string>
 
 static bool env_truthy(const char *name)
 {
@@ -19,7 +21,7 @@ static bool env_truthy(const char *name)
 // Acceleration Structure extensions + features.
 void DeviceManager::init_vulkan(SDL_Window *window)
 {
-   vkb::InstanceBuilder builder;
+    vkb::InstanceBuilder builder;
 
     //make the vulkan instance, with basic debug features
     auto inst_ret = builder.set_app_name("Example Vulkan Application")
@@ -28,13 +30,20 @@ void DeviceManager::init_vulkan(SDL_Window *window)
             .require_api_version(1, 3, 0)
             .build();
 
+    if (!inst_ret)
+    {
+        throw std::runtime_error("[Device] Failed to create Vulkan instance: " + inst_ret.error().message());
+    }
     vkb::Instance vkb_inst = inst_ret.value();
 
     //grab the instance
     _instance = vkb_inst.instance;
     _debug_messenger = vkb_inst.debug_messenger;
 
-    SDL_Vulkan_CreateSurface(window, _instance, &_surface);
+    if (SDL_Vulkan_CreateSurface(window, _instance, &_surface) != SDL_TRUE)
+    {
+        throw std::runtime_error(std::string("[Device] Failed to create Vulkan surface: ") + SDL_GetError());
+    }
 
     VkPhysicalDeviceVulkan13Features features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     features.dynamicRendering = true;
@@ -55,13 +64,17 @@ void DeviceManager::init_vulkan(SDL_Window *window)
     //use vkbootstrap to select a gpu.
     //We want a gpu that can write to the SDL surface and supports vulkan 1.3
     vkb::PhysicalDeviceSelector selector{vkb_inst};
-    vkb::PhysicalDevice physicalDevice = selector
+    auto physical_device_ret = selector
             .set_minimum_version(1, 3)
             .set_required_features_13(features)
             .set_required_features_12(features12)
             .set_surface(_surface)
-            .select()
-            .value();
+            .select();
+    if (!physical_device_ret)
+    {
+        throw std::runtime_error("[Device] Failed to select physical device: " + physical_device_ret.error().message());
+    }
+    vkb::PhysicalDevice physicalDevice = physical_device_ret.value();
 
     //physicalDevice.features.
     // Enable ray tracing extensions on the physical device if supported (before creating the DeviceBuilder)
@@ -121,16 +134,32 @@ void DeviceManager::init_vulkan(SDL_Window *window)
         deviceBuilder.add_pNext(&rayqReq);
     }
 
-    vkb::Device vkbDevice = deviceBuilder.build().value();
+    auto device_ret = deviceBuilder.build();
+    if (!device_ret)
+    {
+        throw std::runtime_error("[Device] Failed to create logical device: " + device_ret.error().message());
+    }
+    vkb::Device vkbDevice = device_ret.value();
 
     // Get the VkDevice handle used in the rest of a vulkan application
     _device = vkbDevice.device;
     _chosenGPU = physicalDevice.physical_device;
 
     // use vkbootstrap to get a Graphics queue
-    _graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
+    auto graphics_queue_ret = vkbDevice.get_queue(vkb::QueueType::graphics);
+    if (!graphics_queue_ret)
+    {
+        throw std::runtime_error("[Device] Failed to get graphics queue: " + graphics_queue_ret.error().message());
+    }
+    _graphicsQueue = graphics_queue_ret.value();
 
-    _graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+    auto graphics_queue_index_ret = vkbDevice.get_queue_index(vkb::QueueType::graphics);
+    if (!graphics_queue_index_ret)
+    {
+        throw std::runtime_error("[Device] Failed to get graphics queue family: " +
+                                 graphics_queue_index_ret.error().message());
+    }
+    _graphicsQueueFamily = graphics_queue_index_ret.value();
 
     //> vma_init
     //initialize the memory allocator

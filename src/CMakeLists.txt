@@ -192,6 +192,20 @@ add_executable (vulkan_engine
   game/example_game.cpp
   game/rebasing_test_game.h
   game/rebasing_test_game.cpp
+  game/space_combat_game.h
+  game/space_combat_game.cpp
+  game/state/game_state.h
+  game/state/game_state.cpp
+  game/state/game_state_manager.h
+  game/state/game_state_manager.cpp
+  game/state/title_screen_state.h
+  game/state/title_screen_state.cpp
+  game/state/gameplay_state.h
+  game/state/gameplay_state.cpp
+  game/state/pause_state.h
+  game/state/pause_state.cpp
+  game/state/settings_state.h
+  game/state/settings_state.cpp
         physics/collider_mesh_instance.h
 )
 

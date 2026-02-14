@@ -118,6 +118,14 @@ private:
     bool _contact_print_console{false};
     bool _contact_callbacks_all_bodies{false};
     bool _contact_callbacks_installed_all_bodies{false};
+
+    // Audio playback test state (assets/sounds/dripping.mp3).
+    std::string _audio_test_event{"assets/sounds/dripping.mp3"};
+    float _audio_test_volume{1.0f};
+    float _audio_test_pitch{1.0f};
+    bool _audio_test_preloaded{false};
+    std::string _audio_test_last_status;
+
     // Minimal ImGui image example state.
     GameAPI::TextureHandle _imgui_example_texture{GameAPI::InvalidTexture};
     void *_imgui_example_texture_id{nullptr};

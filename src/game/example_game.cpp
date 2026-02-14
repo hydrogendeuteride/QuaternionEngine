@@ -14,25 +14,25 @@
 
 namespace Game
 {
-    namespace
+    const char *contact_event_type_name(Physics::ContactEventType t)
     {
-        const char *contact_event_type_name(Physics::ContactEventType t)
+        switch (t)
         {
-            switch (t)
-            {
-                case Physics::ContactEventType::Begin: return "Begin";
-                case Physics::ContactEventType::Stay: return "Stay";
-                case Physics::ContactEventType::End: return "End";
-            }
-            return "Unknown";
+            case Physics::ContactEventType::Begin: return "Begin";
+            case Physics::ContactEventType::Stay: return "Stay";
+            case Physics::ContactEventType::End: return "End";
         }
-    } // namespace
+        return "Unknown";
+    }
 
     void ExampleGame::on_init(GameRuntime::Runtime &runtime)
     {
         _runtime = &runtime;
         auto &api = runtime.api();
         _world.set_api(&api);
+        _audio_test_event = "assets/sounds/dripping.mp3";
+        _audio_test_preloaded = false;
+        _audio_test_last_status.clear();
 
         // Setup camera
         VulkanEngine *renderer = runtime.renderer();
@@ -44,6 +44,8 @@ namespace Game
             ibl.brdfLut = renderer->_assetManager->assetPath("ibl/brdf_lut.ktx2");
             ibl.background = renderer->_assetManager->assetPath("ibl/sky.ktx2");
             api.load_global_ibl(ibl);
+
+            _audio_test_event = renderer->_assetManager->assetPath("sounds/dripping.mp3");
         }
 
         api.set_camera_position(glm::vec3(-15.0f, 6.0f, 0.0f));
@@ -79,6 +81,31 @@ namespace Game
         if (_imgui_example_texture != GameAPI::InvalidTexture)
         {
             api.pin_texture(_imgui_example_texture);
+        }
+
+        if (auto *audio = runtime.audio())
+        {
+            _audio_test_preloaded = audio->preload(_audio_test_event);
+            if (_audio_test_preloaded)
+            {
+                const auto sound = audio->play_2d(_audio_test_event,
+                                                  GameRuntime::IAudioSystem::Bus::Sfx,
+                                                  _audio_test_volume,
+                                                  _audio_test_pitch,
+                                                  false);
+                _audio_test_last_status = (sound != GameRuntime::IAudioSystem::INVALID_SOUND_HANDLE)
+                                              ? "Init: played dripping.mp3"
+                                              : "Init: play failed";
+            }
+            else
+            {
+                _audio_test_last_status = "Init: preload failed";
+                fmt::println("[ExampleGame] Failed to preload audio test '{}'", _audio_test_event);
+            }
+        }
+        else
+        {
+            _audio_test_last_status = "Audio system not available";
         }
 
         _fixed_time = 0.0f;
@@ -178,7 +205,17 @@ namespace Game
                 api.unload_texture(_imgui_example_texture);
                 _imgui_example_texture = GameAPI::InvalidTexture;
             }
+
+            if (auto *audio = _runtime->audio())
+            {
+                if (_audio_test_preloaded)
+                {
+                    audio->unload(_audio_test_event);
+                }
+            }
         }
+        _audio_test_preloaded = false;
+        _audio_test_last_status.clear();
 
         _world.clear_rebase_anchor();
 
@@ -460,7 +497,7 @@ namespace Game
             if (_physics)
             {
                 const WorldVec3 physics_origin_world =
-                    (_physics_context ? _physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0});
+                        (_physics_context ? _physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0});
                 entities.teleport(id, pos_world, rot, *_physics, physics_origin_world);
             }
             else
@@ -731,6 +768,73 @@ namespace Game
             else
             {
                 ImGui::TextUnformatted("Texture handle is invalid.");
+            }
+        }
+
+        ImGui::Separator();
+        if (ImGui::CollapsingHeader("Audio Playback Test", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::Text("Sound: %s", _audio_test_event.c_str());
+            ImGui::SliderFloat("Audio Volume", &_audio_test_volume, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Audio Pitch", &_audio_test_pitch, 0.25f, 2.0f, "%.2f");
+
+            GameRuntime::IAudioSystem *audio = (_runtime != nullptr) ? _runtime->audio() : nullptr;
+            if (audio != nullptr)
+            {
+                if (ImGui::Button("Preload##dripping"))
+                {
+                    _audio_test_preloaded = audio->preload(_audio_test_event);
+                    _audio_test_last_status = _audio_test_preloaded ? "Preload succeeded" : "Preload failed";
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Unload##dripping"))
+                {
+                    audio->unload(_audio_test_event);
+                    _audio_test_preloaded = false;
+                    _audio_test_last_status = "Unloaded";
+                }
+
+                if (ImGui::Button("Play 2D##dripping"))
+                {
+                    const auto sound = audio->play_2d(_audio_test_event,
+                                                      GameRuntime::IAudioSystem::Bus::Sfx,
+                                                      _audio_test_volume,
+                                                      _audio_test_pitch,
+                                                      false);
+                    _audio_test_last_status = (sound != GameRuntime::IAudioSystem::INVALID_SOUND_HANDLE)
+                                                  ? "Played 2D"
+                                                  : "Play 2D failed";
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Play 3D @ Sphere##dripping"))
+                {
+                    glm::vec3 sound_pos = SPHERE_SPAWN_POS;
+                    if (const Entity *sphere = _world.entities().find(_sphere_entity))
+                    {
+                        const WorldVec3 p = sphere->position_world();
+                        sound_pos = glm::vec3(static_cast<float>(p.x),
+                                              static_cast<float>(p.y),
+                                              static_cast<float>(p.z));
+                    }
+
+                    const auto sound = audio->play_3d(_audio_test_event,
+                                                      sound_pos,
+                                                      GameRuntime::IAudioSystem::Bus::Sfx,
+                                                      _audio_test_volume,
+                                                      _audio_test_pitch);
+                    _audio_test_last_status = (sound != GameRuntime::IAudioSystem::INVALID_SOUND_HANDLE)
+                                                  ? "Played 3D at sphere"
+                                                  : "Play 3D failed";
+                }
+            }
+            else
+            {
+                ImGui::TextUnformatted("Audio system not available.");
+            }
+
+            if (!_audio_test_last_status.empty())
+            {
+                ImGui::Text("Status: %s", _audio_test_last_status.c_str());
             }
         }
 
