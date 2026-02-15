@@ -304,7 +304,10 @@ MarchParams mp, inout MarchState s)
         {
             float powder = 1.0 - exp(-densC * 1.25);
             float scatterBoost = mix(0.25, 1.0, powder);
-            s.scatterCloudAmb += attenCam * (densC * CLOUD_BETA) * dt * scatterBoost * CLOUD_SCATTER_SCALE;
+            float muS = dot(dir, mp.sunDir);
+            float dayMask = smoothstep(-0.02, 0.12, muS);
+            if (inShadow) dayMask = 0.0;
+            s.scatterCloudAmb += attenCam * (densC * CLOUD_BETA) * dt * scatterBoost * CLOUD_SCATTER_SCALE * dayMask;
         }
 
         // Early-out once the ray is essentially opaque.

@@ -263,7 +263,9 @@ void main(){
     {
         float NdotL = max(dot(N, Lsun), 0.0);
         float nightFactor = 1.0 - smoothstep(0.0, 0.15, NdotL);
-        emissive *= nightFactor;
+        float emissiveLuma = dot(emissive, vec3(0.2126, 0.7152, 0.0722));
+        float brightMask = smoothstep(0.08, 0.30, emissiveLuma);
+        emissive *= nightFactor * brightMask;
     }
     float sunVis = calcShadowVisibility(pos, N, Lsun);
     vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
