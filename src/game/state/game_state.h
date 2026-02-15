@@ -17,6 +17,7 @@ namespace GameAPI
 } // namespace GameAPI
 
 class VulkanEngine;
+class InputState;
 
 namespace Game
 {
@@ -76,6 +77,7 @@ namespace Game
         GameAPI::Engine *api{nullptr};
         GameRuntime::IAudioSystem *audio{nullptr};
         VulkanEngine *renderer{nullptr};
+        const InputState *input{nullptr};
 
         // Request application exit
         void quit();

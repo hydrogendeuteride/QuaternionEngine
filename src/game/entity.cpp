@@ -195,4 +195,53 @@ namespace Game
     {
         return get_render_local_matrix(alpha, origin_world) * att.get_local_matrix();
     }
+    // ============================================================================
+    // Component lifecycle
+    // ============================================================================
+
+    void Entity::init_components(ComponentContext &ctx)
+    {
+        for (auto &comp : _components)
+        {
+            if (comp && comp->is_enabled())
+            {
+                comp->on_init(ctx);
+            }
+        }
+    }
+
+    void Entity::update_components(ComponentContext &ctx, float dt)
+    {
+        for (auto &comp : _components)
+        {
+            if (comp && comp->is_enabled())
+            {
+                comp->on_update(ctx, dt);
+            }
+        }
+    }
+
+    void Entity::fixed_update_components(ComponentContext &ctx, float fixed_dt)
+    {
+        for (auto &comp : _components)
+        {
+            if (comp && comp->is_enabled())
+            {
+                comp->on_fixed_update(ctx, fixed_dt);
+            }
+        }
+    }
+
+    void Entity::destroy_components(ComponentContext &ctx)
+    {
+        for (auto &comp : _components)
+        {
+            if (comp)
+            {
+                comp->on_destroy(ctx);
+            }
+        }
+        _components.clear();
+        _component_map.clear();
+    }
 } // namespace Game

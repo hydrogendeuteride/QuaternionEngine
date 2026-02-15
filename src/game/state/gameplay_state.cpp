@@ -3,6 +3,7 @@
 #include "runtime/game_runtime.h"
 #include "core/engine.h"
 #include "core/game_api.h"
+#include "core/input/input_system.h"
 
 #include "imgui.h"
 
@@ -47,20 +48,27 @@ void GameplayState::on_update(GameStateContext &ctx, float dt)
     _elapsed += dt;
 
     // ESC to pause
-    // TODO: Use InputSystem properly once integrated
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+    if (ctx.input && ctx.input->key_pressed(Key::Escape))
     {
         _pending = StateTransition::push<PauseState>();
         return;
     }
 
-    // Sync entities to render
+    // Update components (variable timestep)
     const float alpha = ctx.interpolation_alpha();
+    ComponentContext comp_ctx = build_component_context(ctx, alpha);
+    _world.entities().update_components(comp_ctx, dt);
+
+    // Sync entities to render
     _world.entities().sync_to_render(*ctx.api, alpha);
 }
 
 void GameplayState::on_fixed_update(GameStateContext &ctx, float fixed_dt)
 {
+    // Fixed update components (input → forces, game logic)
+    ComponentContext comp_ctx = build_component_context(ctx);
+    _world.entities().fixed_update_components(comp_ctx, fixed_dt);
+
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
     if (!_physics)
     {
@@ -70,9 +78,6 @@ void GameplayState::on_fixed_update(GameStateContext &ctx, float fixed_dt)
     _world.pre_physics_step();
     _physics->step(fixed_dt);
     _world.post_physics_step();
-#else
-    (void)ctx;
-    (void)fixed_dt;
 #endif
 }
 
@@ -123,6 +128,17 @@ void GameplayState::setup_scene(GameStateContext &ctx)
 
     // TODO: Spawn initial game entities (ships, celestial bodies, etc.)
     // This will be filled in as we build the orbital mechanics and ship systems.
+}
+
+ComponentContext GameplayState::build_component_context(GameStateContext &ctx, float alpha)
+{
+    ComponentContext comp_ctx{};
+    comp_ctx.world = &_world;
+    comp_ctx.api = ctx.api;
+    comp_ctx.input = ctx.input;
+    comp_ctx.physics = _physics.get();
+    comp_ctx.interpolation_alpha = alpha;
+    return comp_ctx;
 }
 
 } // namespace Game

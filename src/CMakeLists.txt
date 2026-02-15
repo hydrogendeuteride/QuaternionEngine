@@ -188,6 +188,7 @@ add_executable (vulkan_engine
   game/entity_manager.cpp
   game/game_world.h
   game/game_world.cpp
+  game/component/component.h
   game/example_game.h
   game/example_game.cpp
   game/rebasing_test_game.h

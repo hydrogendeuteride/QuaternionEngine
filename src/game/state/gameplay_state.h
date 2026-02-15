@@ -2,6 +2,7 @@
 
 #include "game_state.h"
 #include "game/game_world.h"
+#include "game/component/component.h"
 #include "physics/physics_world.h"
 #include "physics/physics_context.h"
 
@@ -31,6 +32,7 @@ public:
 
 private:
     void setup_scene(GameStateContext &ctx);
+    ComponentContext build_component_context(GameStateContext &ctx, float alpha = 0.0f);
 
     // Game world (entities + resource lifetime)
     GameWorld _world;

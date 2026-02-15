@@ -6,8 +6,12 @@
 #include <core/world.h>
 #include <string>
 #include <vector>
+#include <memory>
 #include <optional>
+#include <unordered_map>
+#include <typeindex>
 #include <cstdint>
+#include <algorithm>
 
 // Forward declarations
 namespace Physics
@@ -18,6 +22,9 @@ namespace Physics
 
 namespace Game
 {
+    class IComponent;
+    struct ComponentContext;
+
     // ============================================================================
     // EntityId: Strongly-typed entity identifier
     // ============================================================================
@@ -200,6 +207,27 @@ namespace Game
         glm::mat4 get_attachment_local_matrix(const Attachment &att, float alpha, const WorldVec3 &origin_world) const;
 
         // ------------------------------------------------------------------------
+        // Components
+        // ------------------------------------------------------------------------
+
+        template<typename T, typename... Args>
+        T *add_component(Args &&...args);
+
+        template<typename T>
+        T *get_component();
+
+        template<typename T>
+        const T *get_component() const;
+
+        template<typename T>
+        bool has_component() const;
+
+        template<typename T>
+        bool remove_component();
+
+        const std::vector<std::unique_ptr<IComponent>> &components() const { return _components; }
+
+        // ------------------------------------------------------------------------
         // Flags
         // ------------------------------------------------------------------------
 
@@ -210,6 +238,14 @@ namespace Game
         void set_visible(bool visible) { _visible = visible; }
 
     private:
+        // Component lifecycle (called by EntityManager/GameWorld)
+        void init_components(ComponentContext &ctx);
+        void update_components(ComponentContext &ctx, float dt);
+        void fixed_update_components(ComponentContext &ctx, float fixed_dt);
+        void destroy_components(ComponentContext &ctx);
+
+        friend class EntityManager;
+        friend class GameWorld;
         EntityId _id;
         std::string _name;
 
@@ -227,8 +263,86 @@ namespace Game
         // Child attachments
         std::vector<Attachment> _attachments;
 
+        // Components
+        std::vector<std::unique_ptr<IComponent>> _components;
+        std::unordered_map<std::type_index, IComponent *> _component_map;
+
         // Flags
         bool _active{true};
         bool _visible{true};
     };
+
+    // ============================================================================
+    // Template implementations (require IComponent definition)
+    // ============================================================================
+
+} // namespace Game
+
+// Include full IComponent definition for template bodies
+#include "component/component.h"
+
+namespace Game
+{
+    template<typename T, typename... Args>
+    T *Entity::add_component(Args &&...args)
+    {
+        static_assert(std::is_base_of_v<IComponent, T>,
+                      "T must derive from IComponent");
+
+        std::type_index idx = std::type_index(typeid(T));
+        if (_component_map.find(idx) != _component_map.end())
+        {
+            return nullptr; // duplicate type
+        }
+
+        auto comp = std::make_unique<T>(std::forward<Args>(args)...);
+        T *ptr = comp.get();
+        ptr->_entity = this;
+
+        _component_map[idx] = ptr;
+        _components.push_back(std::move(comp));
+        return ptr;
+    }
+
+    template<typename T>
+    T *Entity::get_component()
+    {
+        auto it = _component_map.find(std::type_index(typeid(T)));
+        return it != _component_map.end() ? static_cast<T *>(it->second) : nullptr;
+    }
+
+    template<typename T>
+    const T *Entity::get_component() const
+    {
+        auto it = _component_map.find(std::type_index(typeid(T)));
+        return it != _component_map.end() ? static_cast<const T *>(it->second) : nullptr;
+    }
+
+    template<typename T>
+    bool Entity::has_component() const
+    {
+        return _component_map.find(std::type_index(typeid(T))) != _component_map.end();
+    }
+
+    template<typename T>
+    bool Entity::remove_component()
+    {
+        auto map_it = _component_map.find(std::type_index(typeid(T)));
+        if (map_it == _component_map.end())
+        {
+            return false;
+        }
+
+        IComponent *raw = map_it->second;
+        _component_map.erase(map_it);
+
+        auto vec_it = std::find_if(_components.begin(), _components.end(),
+            [raw](const std::unique_ptr<IComponent> &c) { return c.get() == raw; });
+
+        if (vec_it != _components.end())
+        {
+            _components.erase(vec_it);
+        }
+        return true;
+    }
 } // namespace Game

@@ -5,6 +5,8 @@
 
 #include <string>
 #include <vector>
+#include <functional>
+#include <memory>
 
 namespace Physics
 {
@@ -117,6 +119,9 @@ namespace Game
                                bool use_interpolation = true,
                                bool override_user_data = true);
 
+        template<typename T, typename... Args>
+        EntityBuilder &component(Args &&...args);
+
         Entity *build();
 
     private:
@@ -140,5 +145,22 @@ namespace Game
         Physics::BodySettings _physics_settings{};
         bool _use_interpolation{true};
         bool _override_user_data{true};
+
+        // Deferred component factories (executed in build())
+        std::vector<std::function<void(Entity &)>> _component_factories;
     };
+
+    // ============================================================================
+    // Template implementations
+    // ============================================================================
+
+    template<typename T, typename... Args>
+    GameWorld::EntityBuilder &GameWorld::EntityBuilder::component(Args &&...args)
+    {
+        _component_factories.push_back(
+            [... captured = std::forward<Args>(args)](Entity &entity) mutable {
+                entity.add_component<T>(std::move(captured)...);
+            });
+        return *this;
+    }
 } // namespace Game

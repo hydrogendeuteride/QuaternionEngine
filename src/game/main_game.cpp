@@ -2,6 +2,7 @@
 #include "state/title_screen_state.h"
 #include "runtime/game_runtime.h"
 #include "core/engine.h"
+#include "core/input/input_system.h"
 
 namespace Game
 {
@@ -15,6 +16,14 @@ namespace Game
         ctx.api = &runtime.api();
         ctx.audio = runtime.audio();
         ctx.renderer = runtime.renderer();
+
+        if (VulkanEngine *r = runtime.renderer())
+        {
+            if (r->input())
+            {
+                ctx.input = &r->input()->state();
+            }
+        }
 
         _state_manager.init(ctx);
 

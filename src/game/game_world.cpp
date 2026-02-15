@@ -1,4 +1,5 @@
 #include "game_world.h"
+#include "component/component.h"
 
 #include "core/game_api.h"
 #include "physics/physics_world.h"
@@ -243,6 +244,21 @@ namespace Game
             }
         }
 
+        // Add and initialize components
+        for (auto &factory : _component_factories)
+        {
+            factory(entity);
+        }
+
+        if (!entity.components().empty())
+        {
+            ComponentContext ctx{};
+            ctx.world = _world;
+            ctx.api = world._api;
+            ctx.physics = world._physics;
+            entity.init_components(ctx);
+        }
+
         return &entity;
     }
 
@@ -287,6 +303,16 @@ namespace Game
 
     void GameWorld::destroy_entity_resources(Entity &entity)
     {
+        // Destroy components first (they may reference render/physics resources)
+        if (!entity.components().empty())
+        {
+            ComponentContext ctx{};
+            ctx.world = this;
+            ctx.api = _api;
+            ctx.physics = _physics;
+            entity.destroy_components(ctx);
+        }
+
         if (_api)
         {
             if (entity.has_render())

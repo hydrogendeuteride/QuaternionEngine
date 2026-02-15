@@ -284,6 +284,32 @@ namespace Game
     }
 
     // ============================================================================
+    // Component Lifecycle
+    // ============================================================================
+
+    void EntityManager::update_components(ComponentContext &ctx, float dt)
+    {
+        for (auto &[id, entity] : _entities)
+        {
+            if (entity.is_active())
+            {
+                entity.update_components(ctx, dt);
+            }
+        }
+    }
+
+    void EntityManager::fixed_update_components(ComponentContext &ctx, float fixed_dt)
+    {
+        for (auto &[id, entity] : _entities)
+        {
+            if (entity.is_active())
+            {
+                entity.fixed_update_components(ctx, fixed_dt);
+            }
+        }
+    }
+
+    // ============================================================================
     // Bulk Operations
     // ============================================================================
 

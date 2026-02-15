@@ -132,6 +132,16 @@ namespace Game
         Entity *find_by_render_name(const std::string &render_name);
 
         // ============================================================================
+        // Component Lifecycle
+        // ============================================================================
+
+        // Update all entity components (variable timestep)
+        void update_components(ComponentContext &ctx, float dt);
+
+        // Fixed update all entity components (physics timestep)
+        void fixed_update_components(ComponentContext &ctx, float fixed_dt);
+
+        // ============================================================================
         // Bulk Operations
         // ============================================================================
 
