@@ -223,13 +223,13 @@ namespace Game
             const float jitter_z = 0.02f * std::sin(_elapsed * 14.0f + 0.7f);
 
             GameAPI::Transform outer_tr{};
-            outer_tr.position = nozzle + glm::vec3(jitter_x, -0.95f * throttle, jitter_z);
+            outer_tr.position = nozzle;
             outer_tr.scale = glm::vec3(0.34f + 0.05f * throttle,
                                        1.35f + 1.05f * throttle,
                                        0.34f + 0.05f * throttle);
 
             GameAPI::Transform inner_tr{};
-            inner_tr.position = nozzle + glm::vec3(-jitter_x * 0.6f, -0.72f * throttle, -jitter_z * 0.6f);
+            inner_tr.position = nozzle;
             inner_tr.scale = glm::vec3(0.16f + 0.025f * throttle,
                                        1.0f + 0.82f * throttle,
                                        0.16f + 0.025f * throttle);

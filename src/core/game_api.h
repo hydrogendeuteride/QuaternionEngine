@@ -198,11 +198,14 @@ struct PlanetCloudSettings
     float coverage{0.45f};
 
     std::string overlayTexturePath{"planets/earth/cloud/earth_clouds_4k.ktx2"};
+    std::string noiseTexturePath{"vfx/perlin.ktx2"};
     float overlayRotationRad{0.0f};
     bool overlayFlipV{false};
 
     float noiseScale{1.5f};
     float detailScale{12.0f};
+    float noiseBlend{0.65f};
+    float detailErode{0.75f};
 
     float windSpeed{0.0f};
     float windAngleRad{0.0f};

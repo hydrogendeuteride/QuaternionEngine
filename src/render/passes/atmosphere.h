@@ -35,7 +35,7 @@ private:
                          RGImageHandle transmittanceLut);
 
     EngineContext *_context = nullptr;
-    VkDescriptorSetLayout _inputSetLayout = VK_NULL_HANDLE; // set=1: hdr input + gbuffer position + transmittance LUT + cloud overlay tex
+    VkDescriptorSetLayout _inputSetLayout = VK_NULL_HANDLE; // set=1: hdr input + gbuffer position + transmittance LUT + cloud overlay/noise tex
 
     VkPipeline _pipeline = VK_NULL_HANDLE;
     VkPipelineLayout _pipelineLayout = VK_NULL_HANDLE;
@@ -44,4 +44,6 @@ private:
 
     AllocatedImage _cloudOverlayTex{};
     std::string _cloudOverlayLoadedPath;
+    AllocatedImage _cloudNoiseTex{};
+    std::string _cloudNoiseLoadedPath;
 };

@@ -1799,6 +1799,17 @@ namespace
             clouds.overlayTexturePath = overlayPathBuf;
         }
 
+        static char noisePathBuf[256]{};
+        const std::string &noisePathRef = clouds.noiseTexturePath;
+        if (std::strncmp(noisePathBuf, noisePathRef.c_str(), sizeof(noisePathBuf)) != 0)
+        {
+            std::snprintf(noisePathBuf, sizeof(noisePathBuf), "%s", noisePathRef.c_str());
+        }
+        if (ImGui::InputText("Noise Path (assets/)", noisePathBuf, sizeof(noisePathBuf)))
+        {
+            clouds.noiseTexturePath = noisePathBuf;
+        }
+
         float rotDeg = glm::degrees(clouds.overlayRotationRad);
         if (ImGui::SliderFloat("Overlay Rotation (deg)", &rotDeg, -180.0f, 180.0f, "%.1f"))
         {
@@ -1822,6 +1833,15 @@ namespace
 
         ImGui::SliderFloat("Coverage", &clouds.coverage, 0.0f, 0.99f, "%.3f");
         clouds.coverage = std::clamp(clouds.coverage, 0.0f, 0.999f);
+
+        ImGui::SliderFloat("Noise Scale", &clouds.noiseScale, 0.05f, 16.0f, "%.3f");
+        clouds.noiseScale = std::max(0.001f, clouds.noiseScale);
+        ImGui::SliderFloat("Detail Scale", &clouds.detailScale, 0.25f, 64.0f, "%.3f");
+        clouds.detailScale = std::max(0.001f, clouds.detailScale);
+        ImGui::SliderFloat("Noise Blend", &clouds.noiseBlend, 0.0f, 1.0f, "%.3f");
+        clouds.noiseBlend = std::clamp(clouds.noiseBlend, 0.0f, 1.0f);
+        ImGui::SliderFloat("Detail Erode", &clouds.detailErode, 0.0f, 1.0f, "%.3f");
+        clouds.detailErode = std::clamp(clouds.detailErode, 0.0f, 1.0f);
 
         ImGui::SliderFloat("Wind Speed (m/s)", &clouds.windSpeed, -200.0f, 200.0f, "%.1f");
         float windDeg = glm::degrees(clouds.windAngleRad);

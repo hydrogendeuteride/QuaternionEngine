@@ -31,6 +31,9 @@ namespace
 {
     constexpr uint32_t k_transmittance_lut_width = 256;
     constexpr uint32_t k_transmittance_lut_height = 64;
+    constexpr uint32_t k_misc_flags_mask = 0xFFu;
+    constexpr uint32_t k_misc_noise_blend_shift = 8u;
+    constexpr uint32_t k_misc_detail_erode_shift = 16u;
 
     struct AtmospherePush
     {
@@ -41,7 +44,7 @@ namespace
         glm::vec4 jitter_params;        // x: jitter strength (0..1), y: planet snap (m), z: time (sec), w: cloud overlay rotation (rad)
         glm::vec4 cloud_layer;          // x: base height (m), y: thickness (m), z: densityScale, w: coverage
         glm::vec4 cloud_params;         // x: noiseScale, y: detailScale, z: windSpeedMps, w: windAngleRad
-        glm::ivec4 misc;                // x: view steps, y: packed absorption color (RGBA8), z: cloud steps, w: flags
+        glm::ivec4 misc;                // x: view steps, y: packed absorption color (RGBA8), z: cloud steps, w: packed flags/noise params
     };
 
     struct AtmosphereLutPush
@@ -133,13 +136,14 @@ void AtmospherePass::init(EngineContext *context)
 
     VkDevice device = _context->getDevice()->device();
 
-    // Set 1 layout: HDR input + gbuffer position + transmittance LUT + cloud overlay texture.
+    // Set 1 layout: HDR input + gbuffer position + transmittance LUT + cloud overlay/noise textures.
     {
         DescriptorLayoutBuilder builder;
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // hdrInput
         builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // posTex
         builder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // transmittanceLut
         builder.add_binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // cloudOverlayTex
+        builder.add_binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // cloudNoiseTex
         _inputSetLayout = builder.build(
             device,
             VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -188,18 +192,21 @@ void AtmospherePass::init(EngineContext *context)
         _context->pipelines->createComputeInstance("atmosphere.transmittance_lut", "atmosphere.transmittance_lut");
     }
 
-    // Cloud overlay texture (coverage map).
+    // Cloud textures (coverage + noise maps).
     if (ResourceManager *rm = _context->getResources())
     {
-        // Loaded lazily again in register_graph() if the path changes at runtime.
-        if (_cloudOverlayTex.image == VK_NULL_HANDLE)
+        auto load_cloud_tex = [&](AllocatedImage &dst, std::string &loadedPath, const std::string &relPath)
         {
-            _cloudOverlayLoadedPath = _context->planetClouds.overlayTexturePath;
-            const std::string overlayAbs = _context->getAssets()->assetPath(_cloudOverlayLoadedPath);
-            ktxutil::Ktx2D ktx{};
-            if (!overlayAbs.empty() && ktxutil::load_ktx2_2d(overlayAbs.c_str(), ktx))
+            if (dst.image != VK_NULL_HANDLE)
             {
-                _cloudOverlayTex = rm->create_image_compressed_layers(
+                return;
+            }
+            loadedPath = relPath;
+            const std::string abs = _context->getAssets()->assetPath(loadedPath);
+            ktxutil::Ktx2D ktx{};
+            if (!abs.empty() && ktxutil::load_ktx2_2d(abs.c_str(), ktx))
+            {
+                dst = rm->create_image_compressed_layers(
                     ktx.bytes.data(),
                     ktx.bytes.size(),
                     ktx.fmt,
@@ -208,7 +215,11 @@ void AtmospherePass::init(EngineContext *context)
                     ktx.copies,
                     VK_IMAGE_USAGE_SAMPLED_BIT);
             }
-        }
+        };
+
+        // Loaded lazily again in draw_atmosphere() if the path changes at runtime.
+        load_cloud_tex(_cloudOverlayTex, _cloudOverlayLoadedPath, _context->planetClouds.overlayTexturePath);
+        load_cloud_tex(_cloudNoiseTex, _cloudNoiseLoadedPath, _context->planetClouds.noiseTexturePath);
     }
 }
 
@@ -222,8 +233,14 @@ void AtmospherePass::cleanup()
             rm->destroy_image(_cloudOverlayTex);
             _cloudOverlayTex = {};
         }
+        if (_cloudNoiseTex.image != VK_NULL_HANDLE)
+        {
+            rm->destroy_image(_cloudNoiseTex);
+            _cloudNoiseTex = {};
+        }
     }
     _cloudOverlayLoadedPath.clear();
+    _cloudNoiseLoadedPath.clear();
 
     if (_context && _context->pipelines)
     {
@@ -361,25 +378,26 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
     VkImageView lutView = resources.image_view(transmittanceLut);
     if (hdrView == VK_NULL_HANDLE || posView == VK_NULL_HANDLE || lutView == VK_NULL_HANDLE) return;
 
-    // Reload overlay texture on demand if the user changed the path.
+    // Reload cloud textures on demand if the user changed paths.
     if (ctxLocal->enablePlanetClouds)
     {
-        const std::string &wantRel = ctxLocal->planetClouds.overlayTexturePath;
-        if (wantRel != _cloudOverlayLoadedPath)
+        auto reload_cloud_tex = [&](AllocatedImage &dst, std::string &loadedPath, const std::string &wantRel)
         {
-            if (_cloudOverlayTex.image != VK_NULL_HANDLE)
+            if (wantRel == loadedPath)
             {
-                resourceManager->destroy_image(_cloudOverlayTex);
-                _cloudOverlayTex = {};
+                return;
             }
-
-            _cloudOverlayLoadedPath = wantRel;
-
+            if (dst.image != VK_NULL_HANDLE)
+            {
+                resourceManager->destroy_image(dst);
+                dst = {};
+            }
+            loadedPath = wantRel;
             const std::string wantAbs = ctxLocal->getAssets()->assetPath(wantRel);
             ktxutil::Ktx2D ktx{};
             if (!wantAbs.empty() && ktxutil::load_ktx2_2d(wantAbs.c_str(), ktx))
             {
-                _cloudOverlayTex = resourceManager->create_image_compressed_layers(
+                dst = resourceManager->create_image_compressed_layers(
                     ktx.bytes.data(),
                     ktx.bytes.size(),
                     ktx.fmt,
@@ -388,15 +406,20 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
                     ktx.copies,
                     VK_IMAGE_USAGE_SAMPLED_BIT);
             }
-        }
+        };
+
+        reload_cloud_tex(_cloudOverlayTex, _cloudOverlayLoadedPath, ctxLocal->planetClouds.overlayTexturePath);
+        reload_cloud_tex(_cloudNoiseTex, _cloudNoiseLoadedPath, ctxLocal->planetClouds.noiseTexturePath);
     }
 
     VkImageView overlayView = _cloudOverlayTex.imageView;
+    VkImageView noiseView = _cloudNoiseTex.imageView;
     if (AssetManager *assets = ctxLocal->getAssets())
     {
         if (overlayView == VK_NULL_HANDLE) overlayView = assets->fallbackBlackView();
+        if (noiseView == VK_NULL_HANDLE) noiseView = assets->fallbackWhiteView();
     }
-    if (overlayView == VK_NULL_HANDLE) return;
+    if (overlayView == VK_NULL_HANDLE || noiseView == VK_NULL_HANDLE) return;
 
     // Global scene UBO (set = 0).
     AllocatedBuffer gpuSceneDataBuffer = resourceManager->create_buffer(
@@ -432,6 +455,8 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
         writer.write_image(2, lutView, ctxLocal->getSamplers()->linearClampEdge(),
                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.write_image(3, overlayView, ctxLocal->getSamplers()->linearRepeatClampEdge(),
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.write_image(4, noiseView, ctxLocal->getSamplers()->linearRepeatClampEdge(),
                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.update_set(deviceManager->device(), inputSet);
     }
@@ -487,6 +512,7 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
     int viewSteps = std::clamp(s.viewSteps, 4, 64);
 
     const bool cloudsEnabled = ctxLocal->enablePlanetClouds && (_cloudOverlayTex.imageView != VK_NULL_HANDLE);
+    const bool cloudNoiseAvailable = (_cloudNoiseTex.imageView != VK_NULL_HANDLE);
     float cloudBaseM = std::max(0.0f, c.baseHeightM);
     float cloudThicknessM = std::max(0.0f, c.thicknessM);
     float cloudDensityScale = std::max(0.0f, c.densityScale);
@@ -494,6 +520,8 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
     float cloudOverlayRot = cloudsEnabled ? c.overlayRotationRad : 0.0f;
     float cloudNoiseScale = std::max(0.001f, c.noiseScale);
     float cloudDetailScale = std::max(0.001f, c.detailScale);
+    float cloudNoiseBlend = (cloudsEnabled && cloudNoiseAvailable) ? std::clamp(c.noiseBlend, 0.0f, 1.0f) : 0.0f;
+    float cloudDetailErode = (cloudsEnabled && cloudNoiseAvailable) ? std::clamp(c.detailErode, 0.0f, 1.0f) : 0.0f;
     float cloudWindSpeed = c.windSpeed;
     float cloudWindAngle = c.windAngleRad;
     int cloudSteps = std::clamp(c.cloudSteps, 4, 128);
@@ -521,6 +549,11 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
 
     const uint32_t packed_absorption_color = glm::packUnorm4x8(glm::vec4(absorptionColor, 1.0f));
     const int packed_absorption_color_bits = std::bit_cast<int32_t>(packed_absorption_color);
+    const uint32_t packed_noise_blend = static_cast<uint32_t>(std::lround(cloudNoiseBlend * 255.0f));
+    const uint32_t packed_detail_erode = static_cast<uint32_t>(std::lround(cloudDetailErode * 255.0f));
+    uint32_t packed_misc_w = (flags & k_misc_flags_mask);
+    packed_misc_w |= ((packed_noise_blend & 0xFFu) << k_misc_noise_blend_shift);
+    packed_misc_w |= ((packed_detail_erode & 0xFFu) << k_misc_detail_erode_shift);
 
     AtmospherePush pc{};
     pc.planet_center_radius = glm::vec4(planet_center_local, planet_radius_m);
@@ -530,7 +563,7 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
     pc.jitter_params = glm::vec4(jitterStrength, planetSnapM, _time_sec, cloudOverlayRot);
     pc.cloud_layer = glm::vec4(cloudBaseM, cloudThicknessM, cloudDensityScale, cloudCoverage);
     pc.cloud_params = glm::vec4(cloudNoiseScale, cloudDetailScale, cloudWindSpeed, cloudWindAngle);
-    pc.misc = glm::ivec4(viewSteps, packed_absorption_color_bits, cloudSteps, static_cast<int>(flags));
+    pc.misc = glm::ivec4(viewSteps, packed_absorption_color_bits, cloudSteps, std::bit_cast<int32_t>(packed_misc_w));
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &globalDescriptor, 0, nullptr);

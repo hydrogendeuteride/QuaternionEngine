@@ -10,6 +10,7 @@ layout(set = 1, binding = 0) uniform sampler2D hdrInput;
 layout(set = 1, binding = 1) uniform sampler2D posTex;
 layout(set = 1, binding = 2) uniform sampler2D transmittanceLut;
 layout(set = 1, binding = 3) uniform sampler2D cloudOverlayTex;
+layout(set = 1, binding = 4) uniform sampler2D cloudNoiseTex;
 
 layout(push_constant) uniform AtmospherePush
 {
@@ -20,7 +21,7 @@ layout(push_constant) uniform AtmospherePush
     vec4 jitter_params;// x: jitter strength (0..1), y: planet snap (m), z: time_sec, w: cloud overlay rotation (rad)
     vec4 cloud_layer;// x: base height (m), y: thickness (m), z: densityScale, w: coverage
     vec4 cloud_params;// x: noiseScale, y: detailScale, z: windSpeed, w: windAngleRad
-    ivec4 misc;// x: view steps, y: packed absorption color (RGBA8), z: cloud steps, w: flags
+    ivec4 misc;// x: view steps, y: packed absorption color (RGBA8), z: cloud steps, w: packed flags/noise params
 } pc;
 
 const float PI = 3.14159265359;
@@ -30,11 +31,20 @@ const float INV_PI = 0.3183098861837907;
 const int FLAG_ATMOSPHERE = 1;
 const int FLAG_CLOUDS = 2;
 const int FLAG_CLOUD_FLIP_V = 4;
+const uint MISC_FLAGS_MASK = 0xFFu;
+const uint MISC_NOISE_BLEND_SHIFT = 8u;
+const uint MISC_DETAIL_ERODE_SHIFT = 16u;
 
 const float CLOUD_BETA = 1.0e-3;
 const float CLOUD_AMBIENT_SCALE = 0.25;
 const float CLOUD_PHASE_G = 0.80;
 const float CLOUD_SCATTER_SCALE = 2.0;
+const float CLOUD_SUN_WHITEN = 0.65;
+const float CLOUD_AMBIENT_WHITEN = 0.85;
+const float CLOUD_AMBIENT_MIN_LUMA = 0.30;
+const float CLOUD_HEIGHT_SHIFT = 0.30;
+const float CLOUD_THICKNESS_MIN = 0.55;
+const float CLOUD_THICKNESS_MAX = 1.35;
 
 // ── Utility ──────────────────────────────────────────────────────────
 
@@ -53,6 +63,11 @@ float hash12(vec2 p)
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
     p3 += dot(p3, p3.yzx + 33.33);
     return fract((p3.x + p3.y) * p3.z);
+}
+
+float luminance(vec3 c)
+{
+    return dot(c, vec3(0.299, 0.587, 0.114));
 }
 
 // ── Geometry / Mapping ───────────────────────────────────────────────
@@ -84,6 +99,13 @@ bool ray_sphere_intersect(vec3 ro, vec3 rd, vec3 center, float radius, out float
     t0 = -b - h;
     t1 = -b + h;
     return true;
+}
+
+float sample_cloud_noise(vec2 uvE, float scale, vec2 offset)
+{
+    vec2 uv = fract(uvE * scale + offset);
+    vec3 n = textureLod(cloudNoiseTex, uv, 0.0).rgb;
+    return luminance(n);
 }
 
 // ── Phase Functions ──────────────────────────────────────────────────
@@ -119,12 +141,6 @@ float cloud_density(vec3 dir,
 
     float h01 = (height - baseHeightM) / max(thicknessM, 1e-3);
 
-    // Base vertical profile (smooth fade-in/out across the layer thickness).
-    float bottom = smoothstep(0.0, 0.15, h01);
-    float top    = 1.0 - smoothstep(0.85, 1.0, h01);
-    float profile = bottom * top;
-    if (profile <= 0.0) return 0.0;
-
     vec3 dirW = dir;
     if (cloudsActive)
     {
@@ -152,13 +168,51 @@ float cloud_density(vec3 dir,
 
     vec2 uvE = dir_to_equirect(dirW, flipV);
     vec4 ov = textureLod(cloudOverlayTex, uvE, 0.0);
-    float lum = dot(ov.rgb, vec3(0.299, 0.587, 0.114));
+    float lum = luminance(ov.rgb);
     float localCov = clamp(lum * ov.a, 0.0, 1.0);
-    float cov = max(0.0, localCov - coverage) / max(1.0 - coverage, 1e-3);
-    cov = pow(cov, 0.65);
+
+    uint miscPacked = uint(pc.misc.w);
+    float weatherBlend = float((miscPacked >> MISC_NOISE_BLEND_SHIFT) & 0xFFu) * (1.0 / 255.0);
+    float detailErode = float((miscPacked >> MISC_DETAIL_ERODE_SHIFT) & 0xFFu) * (1.0 / 255.0);
+
+    float lowScale = max(pc.cloud_params.x, 0.001);
+    float detailScale = max(pc.cloud_params.y, 0.001);
+    float weatherNoise = sample_cloud_noise(uvE, lowScale, vec2(0.173, 0.547));
+    float detailNoise = sample_cloud_noise(uvE, detailScale, vec2(0.619, 0.281));
+
+    // Weather field drives local cloud deck height/thickness variation.
+    weatherNoise = clamp((weatherNoise - 0.5) * 1.25 + 0.5, 0.0, 1.0);
+    float weatherField = clamp(mix(localCov, weatherNoise, weatherBlend), 0.0, 1.0);
+
+    float centerShift = (weatherField - 0.5) * CLOUD_HEIGHT_SHIFT;
+    float halfSpan = 0.5 * mix(CLOUD_THICKNESS_MIN, CLOUD_THICKNESS_MAX, weatherField);
+    float localBottom01 = clamp(0.5 + centerShift - halfSpan, 0.0, 1.0);
+    float localTop01 = clamp(0.5 + centerShift + halfSpan, 0.0, 1.0);
+    float localSpan = max(localTop01 - localBottom01, 1e-3);
+
+    if (h01 < localBottom01 || h01 > localTop01) return 0.0;
+    float hLocal = (h01 - localBottom01) / localSpan;
+
+    // Vertical profile now varies per-location (reduces uniform shell look).
+    float bottomEdge = mix(0.22, 0.10, weatherField);
+    float topEdgeStart = mix(0.60, 0.82, weatherField);
+    float bottom = smoothstep(0.0, bottomEdge, hLocal);
+    float top = 1.0 - smoothstep(topEdgeStart, 1.0, hLocal);
+    float profile = bottom * top;
+    if (profile <= 0.0) return 0.0;
+
+    float weatherCov = mix(localCov, weatherField, 0.50);
+    float cov = max(0.0, weatherCov - coverage) / max(1.0 - coverage, 1e-3);
+    cov = pow(cov, mix(1.45, 0.75, weatherField));
     if (cov <= 0.0) return 0.0;
 
-    float d = cov * profile;
+    // High-frequency erosion for less "painted" cloud edges.
+    detailNoise = clamp((detailNoise - 0.5) * 1.55 + 0.5, 0.0, 1.0);
+    float erosion = smoothstep(0.25, 0.85, detailNoise);
+    float erosionMask = mix(0.40, 1.00, erosion);
+    float detailMask = mix(1.0, erosionMask, detailErode);
+
+    float d = cov * profile * detailMask;
     return max(d, 0.0) * densityScale;
 }
 
@@ -378,7 +432,8 @@ void main()
     float planetRadius = pc.planet_center_radius.w;
     if (planetRadius <= 0.0) { outColor = vec4(baseColor, 1.0); return; }
 
-    int flags = pc.misc.w;
+    uint miscPacked = uint(pc.misc.w);
+    int flags = int(miscPacked & MISC_FLAGS_MASK);
     bool wantAtmosphere = (flags & FLAG_ATMOSPHERE) != 0;
     bool wantClouds     = (flags & FLAG_CLOUDS) != 0;
     bool cloudFlipV = (flags & FLAG_CLOUD_FLIP_V) != 0;
@@ -473,6 +528,14 @@ void main()
     vec3 sunDir = normalize(-sceneData.sunlightDirection.xyz);
     vec3 sunCol = sceneData.sunlightColor.rgb * sceneData.sunlightColor.a;
     vec3 ambCol = sceneData.ambientColor.rgb;
+
+    // Keep cloud lighting closer to neutral-white so overcast regions do not look gray.
+    float sunLuma = luminance(sunCol);
+    vec3 cloudSunCol = mix(sunCol, vec3(max(sunLuma, 1e-3)), CLOUD_SUN_WHITEN);
+
+    float ambLuma = luminance(ambCol);
+    vec3 cloudAmbNeutral = vec3(max(ambLuma, CLOUD_AMBIENT_MIN_LUMA));
+    vec3 cloudAmbCol = mix(ambCol, cloudAmbNeutral, CLOUD_AMBIENT_WHITEN);
 
     float cosTheta = dot(rd, sunDir);
 
@@ -626,8 +689,8 @@ void main()
     vec3 transmittance = exp(-(betaR_eff * state.odR + betaM_eff * state.odM + betaA_eff * state.odR + vec3(CLOUD_BETA * state.odC)));
     vec3 outRgb = baseColor * transmittance;
     if (atmActive) outRgb += state.scatterAtm * (sunCol * atmIntensity);
-    outRgb += state.scatterCloudSun * sunCol;
-    outRgb += state.scatterCloudAmb * (ambCol * CLOUD_AMBIENT_SCALE);
+    outRgb += state.scatterCloudSun * cloudSunCol;
+    outRgb += state.scatterCloudAmb * (cloudAmbCol * CLOUD_AMBIENT_SCALE);
 
     outColor = vec4(outRgb, 1.0);
 }
