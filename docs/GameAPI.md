@@ -48,6 +48,7 @@ while (engine.running()) {
 - **[Post-Processing](gameapi/PostProcessing.md)** — Tonemapping, bloom, FXAA, SSR
 
 ### Effects
+- **[Mesh VFX](gameapi/MeshVFX.md)** — Animated procedural effects (exhaust, beams, shields) with noise scrolling, gradients, and fresnel
 - **[Particles](gameapi/Particles.md)** — GPU particle systems with flipbook animation
 - **[Volumetrics](gameapi/Volumetrics.md)** — Voxel-based clouds, smoke, and flame
 - **[Planets](gameapi/Planets.md)** — Procedural planets, terrain, atmosphere, clouds
@@ -81,6 +82,7 @@ These systems are accessed separately from `GameAPI::Engine`:
   - `game_api_volumetrics.cpp` — Voxel volumes
   - `game_api_planets.cpp` — Planet system
   - `game_api_postfx.cpp` — Post-processing
+  - `game_api_mesh_vfx.cpp` — Mesh VFX materials
   - `game_api_debug.cpp` — Debug drawing
 
 ## Design Philosophy

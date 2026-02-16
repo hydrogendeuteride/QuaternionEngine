@@ -38,6 +38,9 @@ auto chairPath = assets->modelPath("models/chair.glb");
   - `void cleanup()` — releases meshes, material buffers, and any images owned by the manager
 - Materials
   - `std::shared_ptr<GLTFMaterial> createMaterialFromConstants(const std::string &name, const GLTFMetallic_Roughness::MaterialConstants &constants, MaterialPass pass = MaterialPass::MainColor)` — create PBR material from constants using engine default textures
+- Mesh VFX Materials
+  - `bool createOrUpdateMeshVfxMaterial(const std::string &name, const MeshVfxSettings &settings)` — create or hot-update a VFX material with noise scrolling, gradient, and fresnel parameters. Textures are streamed via `TextureCache` watch bindings (albedo → slot 1, noise1 → slot 2, noise2 → slot 3).
+  - See [Mesh VFX documentation](gameapi/MeshVFX.md) for full parameter reference and usage examples.
 
 ### Mesh Creation Model
 

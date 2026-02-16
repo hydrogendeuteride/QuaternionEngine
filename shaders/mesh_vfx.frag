@@ -21,26 +21,59 @@ vec3 get_camera_world_position()
 
 void main()
 {
+    // --- Unpack material parameters ---
+    float opacity        = clamp(materialData.extra[3].x, 0.0, 1.0);
+    float fresnelPower   = max(materialData.extra[3].y, 0.001);
+    float fresnelStrength = max(materialData.extra[3].z, 0.0);
+    vec3  tint           = materialData.extra[4].rgb;
+
+    vec2  scrollVelocity1    = materialData.extra[5].xy;
+    vec2  scrollVelocity2    = materialData.extra[5].zw;
+    float distortionStrength = materialData.extra[6].x;
+    float noiseBlend         = materialData.extra[6].y;
+    float gradientAxis       = materialData.extra[6].z;
+    float emissionStrength   = materialData.extra[6].w;
+    vec3  coreColor          = materialData.extra[7].rgb;
+    float gradientStart      = materialData.extra[7].w;
+    vec3  edgeColor          = materialData.extra[8].rgb;
+    float gradientEnd        = materialData.extra[8].w;
+
+    float time = sceneData.timeParams.x;
+
+    // --- Base texture ---
     vec4 baseTex = texture(colorTex, inUV);
     float alphaCutoff = materialData.extra[2].x;
-
-    float opacity = clamp(materialData.extra[3].x, 0.0, 1.0);
-    float alpha = clamp(baseTex.a * materialData.colorFactors.a * opacity, 0.0, 1.0);
-    if (alphaCutoff > 0.0 && alpha < alphaCutoff)
+    float baseAlpha = baseTex.a * materialData.colorFactors.a;
+    if (alphaCutoff > 0.0 && baseAlpha < alphaCutoff)
     {
         discard;
     }
 
-    vec3 tint = materialData.extra[4].rgb;
     vec3 baseColor = inColor * baseTex.rgb * materialData.colorFactors.rgb * tint;
 
+    // --- Noise UV scrolling ---
+    vec2 uv1 = inUV + scrollVelocity1 * time;
+    vec2 uv2 = inUV + scrollVelocity2 * time;
+
+    // --- Noise sampling with cross-distortion ---
+    float noise1 = texture(metalRoughTex, uv1).r;
+    vec2 uv2d = uv2 + (noise1 - 0.5) * distortionStrength;
+    float noise2 = texture(normalMap, uv2d).r;
+    float noise = mix(noise1, noise2, noiseBlend);
+
+    // --- UV-axis gradient ---
+    float gc = mix(inUV.x, inUV.y, gradientAxis);
+    float grad = smoothstep(gradientStart, gradientEnd, gc);
+    vec3 gradColor = mix(coreColor, edgeColor, grad);
+
+    // --- Fresnel ---
     vec3 N = normalize(inNormal);
     vec3 V = normalize(get_camera_world_position() - inWorldPos);
-    float fresnelPower = max(materialData.extra[3].y, 0.001);
-    float fresnelStrength = max(materialData.extra[3].z, 0.0);
     float fresnel = pow(1.0 - max(dot(N, V), 0.0), fresnelPower);
 
-    vec3 color = baseColor * (1.0 + fresnel * fresnelStrength);
+    // --- Composite ---
+    vec3 color = baseColor * gradColor * noise * (1.0 + fresnel * fresnelStrength) * emissionStrength;
+    float alpha = clamp(baseAlpha * opacity * (1.0 - grad) * noise, 0.0, 1.0);
+
     outFragColor = vec4(color, alpha);
 }
-

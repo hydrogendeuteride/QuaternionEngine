@@ -779,6 +779,14 @@ bool AssetManager::createOrUpdateMeshVfxMaterial(const std::string &name, const 
     clamped.fresnelPower = std::max(clamped.fresnelPower, 0.001f);
     clamped.fresnelStrength = std::max(clamped.fresnelStrength, 0.0f);
     clamped.tint = glm::max(clamped.tint, glm::vec3(0.0f));
+    clamped.distortionStrength = std::max(clamped.distortionStrength, 0.0f);
+    clamped.noiseBlend = std::clamp(clamped.noiseBlend, 0.0f, 1.0f);
+    clamped.gradientAxis = std::clamp(clamped.gradientAxis, 0.0f, 1.0f);
+    clamped.gradientStart = std::clamp(clamped.gradientStart, 0.0f, 1.0f);
+    clamped.gradientEnd = std::clamp(clamped.gradientEnd, 0.0f, 1.0f);
+    clamped.emissionStrength = std::max(clamped.emissionStrength, 0.0f);
+    clamped.coreColor = glm::max(clamped.coreColor, glm::vec3(0.0f));
+    clamped.edgeColor = glm::max(clamped.edgeColor, glm::vec3(0.0f));
 
     GLTFMetallic_Roughness::MaterialConstants constants{};
     constants.colorFactors = glm::vec4(1.0f);
@@ -788,19 +796,24 @@ bool AssetManager::createOrUpdateMeshVfxMaterial(const std::string &name, const 
     constants.extra[3].y = clamped.fresnelPower;
     constants.extra[3].z = clamped.fresnelStrength;
     constants.extra[4] = glm::vec4(clamped.tint, 0.0f);
+    constants.extra[5] = glm::vec4(clamped.scrollVelocity1, clamped.scrollVelocity2);
+    constants.extra[6] = glm::vec4(clamped.distortionStrength, clamped.noiseBlend, clamped.gradientAxis, clamped.emissionStrength);
+    constants.extra[7] = glm::vec4(clamped.coreColor, clamped.gradientStart);
+    constants.extra[8] = glm::vec4(clamped.edgeColor, clamped.gradientEnd);
 
-    auto patch_albedo_watch = [&](const std::shared_ptr<GLTFMaterial> &materialPtr) {
+    auto patch_texture_watches = [&](const std::shared_ptr<GLTFMaterial> &materialPtr) {
         if (!_engine->_textureCache || !materialPtr)
         {
             return;
         }
         _engine->_textureCache->unwatchSet(materialPtr->data.materialSet);
-        if (!clamped.albedoPath.empty())
-        {
+
+        auto watchVfxBinding = [&](const std::string &path, bool srgb, uint32_t binding, VkImageView fallback) {
+            if (path.empty()) return;
             TextureCache::TextureKey key{};
             key.kind = TextureCache::TextureKey::SourceKind::FilePath;
-            key.path = assetPath(clamped.albedoPath);
-            key.srgb = clamped.albedoSRGB;
+            key.path = assetPath(path);
+            key.srgb = srgb;
             key.mipmapped = true;
             std::string id = std::string("VFX:") + key.path + (key.srgb ? "#sRGB" : "#UNORM");
             key.hash = texcache::fnv1a64(id);
@@ -808,10 +821,14 @@ bool AssetManager::createOrUpdateMeshVfxMaterial(const std::string &name, const 
             auto handle = _engine->_textureCache->request(key, sampler);
             _engine->_textureCache->watchBinding(handle,
                                                  materialPtr->data.materialSet,
-                                                 1u,
+                                                 binding,
                                                  sampler,
-                                                 _engine->_whiteImage.imageView);
-        }
+                                                 fallback);
+        };
+
+        watchVfxBinding(clamped.albedoPath, clamped.albedoSRGB, 1u, _engine->_whiteImage.imageView);
+        watchVfxBinding(clamped.noise1Path, clamped.noise1SRGB, 2u, _engine->_whiteImage.imageView);
+        watchVfxBinding(clamped.noise2Path, clamped.noise2SRGB, 3u, _engine->_flatNormalImage.imageView);
     };
 
     auto it = _meshVfxMaterials.find(name);
@@ -837,7 +854,7 @@ bool AssetManager::createOrUpdateMeshVfxMaterial(const std::string &name, const 
                            sizeof(GLTFMetallic_Roughness::MaterialConstants));
 
         rec.settings = clamped;
-        patch_albedo_watch(rec.material);
+        patch_texture_watches(rec.material);
         return true;
     }
 
@@ -869,7 +886,7 @@ bool AssetManager::createOrUpdateMeshVfxMaterial(const std::string &name, const 
     rec.material = mat;
     rec.constantsBuffer = constantsBuffer;
     _meshVfxMaterials.emplace(name, std::move(rec));
-    patch_albedo_watch(mat);
+    patch_texture_watches(mat);
     return true;
 }
 

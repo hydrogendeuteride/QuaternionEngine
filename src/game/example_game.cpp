@@ -11,6 +11,7 @@
 
 #include <fmt/core.h>
 #include <glm/gtx/transform.hpp>
+#include <algorithm>
 #include <cmath>
 
 namespace Game
@@ -58,31 +59,86 @@ namespace Game
         // Setup game scene (entities + render/physics resources)
         setup_scene();
 
-        // Simple mesh-based VFX demo: create a named MeshVFX material profile,
-        // spawn a primitive sphere, and route it to the dedicated MeshVFX pass.
+        // Rocket-plume style Mesh VFX demo:
+        // - no albedo texture (falls back to white)
+        // - two layered capsule instances (outer cone + bright core)
+        // - scrolling dual-noise + UV gradient + fresnel
         {
-            GameAPI::MeshVfxMaterialSettings vfx{};
-            vfx.tint = glm::vec3(0.15f, 0.95f, 1.0f);
-            vfx.opacity = 0.45f;
-            vfx.fresnelPower = 3.5f;
-            vfx.fresnelStrength = 2.0f;
+            GameAPI::MeshVfxMaterialSettings outer{};
+            outer.albedoPath = ""; // intentionally empty: no albedo texture
+            outer.noise1Path = "vfx/perlin.ktx2";
+            outer.noise2Path = "vfx/simplex.ktx2";
+            outer.noise1SRGB = false;
+            outer.noise2SRGB = false;
+            outer.tint = glm::vec3(1.0f, 0.92f, 0.86f);
+            outer.opacity = 0.72f;
+            outer.fresnelPower = 2.2f;
+            outer.fresnelStrength = 1.35f;
+            outer.scrollVelocity1 = glm::vec2(0.02f, -2.6f);
+            outer.scrollVelocity2 = glm::vec2(-0.03f, -1.35f);
+            outer.distortionStrength = 0.19f;
+            outer.noiseBlend = 0.35f;
+            outer.coreColor = glm::vec3(0.95f, 0.98f, 1.05f);
+            outer.edgeColor = glm::vec3(1.0f, 0.38f, 0.06f);
+            outer.gradientAxis = 1.0f;
+            outer.gradientStart = 0.04f;
+            outer.gradientEnd = 0.92f;
+            outer.emissionStrength = 3.8f;
 
-            const bool material_ok = api.create_or_update_mesh_vfx_material(_mesh_vfx_material_name, vfx);
-            if (material_ok)
+            GameAPI::MeshVfxMaterialSettings inner{};
+            inner.albedoPath = ""; // intentionally empty: no albedo texture
+            inner.noise1Path = "vfx/simplex.ktx2";
+            inner.noise2Path = "vfx/perlin.ktx2";
+            inner.noise1SRGB = false;
+            inner.noise2SRGB = false;
+            inner.tint = glm::vec3(0.88f, 0.98f, 1.2f);
+            inner.opacity = 0.95f;
+            inner.fresnelPower = 1.35f;
+            inner.fresnelStrength = 0.6f;
+            inner.scrollVelocity1 = glm::vec2(-0.01f, -3.8f);
+            inner.scrollVelocity2 = glm::vec2(0.01f, -2.1f);
+            inner.distortionStrength = 0.08f;
+            inner.noiseBlend = 0.58f;
+            inner.coreColor = glm::vec3(1.2f, 1.45f, 1.9f);
+            inner.edgeColor = glm::vec3(0.62f, 0.9f, 1.35f);
+            inner.gradientAxis = 1.0f;
+            inner.gradientStart = 0.02f;
+            inner.gradientEnd = 0.68f;
+            inner.emissionStrength = 6.2f;
+
+            const bool outer_ok = api.create_or_update_mesh_vfx_material(_plume_outer_material_name, outer);
+            const bool inner_ok = api.create_or_update_mesh_vfx_material(_plume_inner_material_name, inner);
+            if (outer_ok && inner_ok)
             {
-                GameAPI::Transform tr{};
-                tr.position = glm::vec3(_mesh_vfx_base_pos);
-                tr.scale = glm::vec3(1.6f);
+                const glm::vec3 nozzle = glm::vec3(_plume_nozzle_pos);
 
-                const bool spawned = api.add_primitive_instance(_mesh_vfx_instance_name,
-                                                                GameAPI::PrimitiveType::Sphere,
-                                                                tr);
-                const bool applied = spawned
-                    && api.apply_mesh_vfx_material_to_primitive(_mesh_vfx_instance_name, _mesh_vfx_material_name);
-                _mesh_vfx_spawned = spawned && applied;
-                if (!_mesh_vfx_spawned && spawned)
+                GameAPI::Transform outer_tr{};
+                outer_tr.position = nozzle + glm::vec3(0.0f, -1.1f, 0.0f);
+                outer_tr.scale = glm::vec3(0.34f, 1.55f, 0.34f);
+
+                GameAPI::Transform inner_tr{};
+                inner_tr.position = nozzle + glm::vec3(0.0f, -0.85f, 0.0f);
+                inner_tr.scale = glm::vec3(0.18f, 1.1f, 0.18f);
+
+                const bool spawned_outer = api.add_primitive_instance(_plume_outer_instance_name,
+                                                                       GameAPI::PrimitiveType::Capsule,
+                                                                       outer_tr);
+                const bool applied_outer = spawned_outer && api.apply_mesh_vfx_material_to_primitive(
+                    _plume_outer_instance_name,
+                    _plume_outer_material_name);
+
+                const bool spawned_inner = api.add_primitive_instance(_plume_inner_instance_name,
+                                                                       GameAPI::PrimitiveType::Capsule,
+                                                                       inner_tr);
+                const bool applied_inner = spawned_inner && api.apply_mesh_vfx_material_to_primitive(
+                    _plume_inner_instance_name,
+                    _plume_inner_material_name);
+
+                _plume_spawned = applied_outer && applied_inner;
+                if (!_plume_spawned)
                 {
-                    api.remove_mesh_instance(_mesh_vfx_instance_name);
+                    if (spawned_outer) api.remove_mesh_instance(_plume_outer_instance_name);
+                    if (spawned_inner) api.remove_mesh_instance(_plume_inner_instance_name);
                 }
             }
         }
@@ -154,16 +210,32 @@ namespace Game
         const float alpha = _runtime->interpolation_alpha();
         auto &api = _runtime->api();
 
-        if (_mesh_vfx_spawned)
+        if (_plume_spawned)
         {
-            // Lightweight motion so the demo effect is visibly "alive".
-            const float bob = 0.2f * std::sin(_elapsed * 1.35f);
-            const float pulse = 1.45f + 0.15f * std::sin(_elapsed * 2.1f);
+            // Throttle-like pulse on geometry while shader time drives UV/noise animation.
+            float throttle = 0.82f
+                + 0.16f * std::sin(_elapsed * 2.9f)
+                + 0.08f * std::sin(_elapsed * 11.0f);
+            throttle = std::clamp(throttle, 0.35f, 1.2f);
 
-            GameAPI::Transform tr{};
-            tr.position = glm::vec3(_mesh_vfx_base_pos) + glm::vec3(0.0f, bob, 0.0f);
-            tr.scale = glm::vec3(pulse);
-            api.set_mesh_instance_transform(_mesh_vfx_instance_name, tr);
+            const glm::vec3 nozzle = glm::vec3(_plume_nozzle_pos);
+            const float jitter_x = 0.02f * std::sin(_elapsed * 17.0f);
+            const float jitter_z = 0.02f * std::sin(_elapsed * 14.0f + 0.7f);
+
+            GameAPI::Transform outer_tr{};
+            outer_tr.position = nozzle + glm::vec3(jitter_x, -0.95f * throttle, jitter_z);
+            outer_tr.scale = glm::vec3(0.34f + 0.05f * throttle,
+                                       1.35f + 1.05f * throttle,
+                                       0.34f + 0.05f * throttle);
+
+            GameAPI::Transform inner_tr{};
+            inner_tr.position = nozzle + glm::vec3(-jitter_x * 0.6f, -0.72f * throttle, -jitter_z * 0.6f);
+            inner_tr.scale = glm::vec3(0.16f + 0.025f * throttle,
+                                       1.0f + 0.82f * throttle,
+                                       0.16f + 0.025f * throttle);
+
+            api.set_mesh_instance_transform(_plume_outer_instance_name, outer_tr);
+            api.set_mesh_instance_transform(_plume_inner_instance_name, inner_tr);
         }
 
         // Sync all entities to render (world-space, double precision)
@@ -247,12 +319,14 @@ namespace Game
                 api.unload_texture(_imgui_example_texture);
                 _imgui_example_texture = GameAPI::InvalidTexture;
             }
-            if (_mesh_vfx_spawned)
+            if (_plume_spawned)
             {
-                api.remove_mesh_instance(_mesh_vfx_instance_name);
-                _mesh_vfx_spawned = false;
+                api.remove_mesh_instance(_plume_outer_instance_name);
+                api.remove_mesh_instance(_plume_inner_instance_name);
+                _plume_spawned = false;
             }
-            (void)api.remove_mesh_vfx_material(_mesh_vfx_material_name);
+            (void)api.remove_mesh_vfx_material(_plume_outer_material_name);
+            (void)api.remove_mesh_vfx_material(_plume_inner_material_name);
 
             if (auto *audio = _runtime->audio())
             {

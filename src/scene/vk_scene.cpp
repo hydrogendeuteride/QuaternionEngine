@@ -215,6 +215,7 @@ void SceneManager::update_scene()
         dt = 0.1f;
     }
     _deltaTime = dt;
+    _elapsedTime = std::fmod(_elapsedTime + dt, 10000.0f);
 
     cameraRig.update(*this, mainCamera, dt);
 
@@ -539,6 +540,8 @@ void SceneManager::update_scene()
         sceneData.shadowTuning = glm::vec4(std::clamp(ss.shadowMinVisibility, 0.0f, 1.0f),
                                            0.0f, 0.0f, 0.0f);
     }
+
+    sceneData.timeParams = glm::vec4(_elapsedTime, _deltaTime, 0.0f, 0.0f);
 
     if (_planetSystem)
     {

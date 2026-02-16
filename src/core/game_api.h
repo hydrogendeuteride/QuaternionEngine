@@ -265,6 +265,26 @@ struct MeshVfxMaterialSettings
     // Texture path relative to assets/ (for example: "textures/noise/smoke.png")
     std::string albedoPath;
     bool albedoSRGB{true};
+
+    // Noise textures (binding 2 = metalRoughTex, binding 3 = normalMap reused)
+    std::string noise1Path;
+    std::string noise2Path;
+    bool noise1SRGB{false};
+    bool noise2SRGB{false};
+    // Noise UV scroll velocities (units/sec)
+    glm::vec2 scrollVelocity1{0.f, -1.f};
+    glm::vec2 scrollVelocity2{0.f, -0.5f};
+    // Noise control
+    float distortionStrength{0.1f};
+    float noiseBlend{0.5f};
+    // UV gradient
+    glm::vec3 coreColor{1.f};
+    glm::vec3 edgeColor{1.f, 0.5f, 0.f};
+    float gradientAxis{1.f};   // 0=U, 1=V
+    float gradientStart{0.f};
+    float gradientEnd{1.f};
+    // Emission
+    float emissionStrength{1.f};
 };
 
 // Point light data

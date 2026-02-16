@@ -300,6 +300,7 @@ private:
     double _floating_origin_recenter_threshold = 1000.0;
     double _floating_origin_snap_size = 100.0;
     float _deltaTime = 0.0f;
+    float _elapsedTime = 0.0f;
     std::chrono::steady_clock::time_point _lastFrameTime{};
 
     std::unordered_map<std::string, MeshInstance> dynamicMeshInstances;

@@ -58,6 +58,10 @@ layout(set = 0, binding = 0) uniform  SceneData{
     // Shadow tuning:
     // shadowTuning.x = minimum sun shadow visibility (0..1)
     vec4 shadowTuning;
+
+    // Time parameters for animated effects:
+    // timeParams.x = elapsed time (seconds), timeParams.y = delta time (seconds)
+    vec4 timeParams;
 } sceneData;
 
 layout(set = 1, binding = 0) uniform GLTFMaterialData{
@@ -77,6 +81,10 @@ layout(set = 1, binding = 0) uniform GLTFMaterialData{
 // - extra[3].y: mesh VFX fresnel power
 // - extra[3].z: mesh VFX fresnel strength
 // - extra[4].rgb: mesh VFX tint
+// - extra[5]: (scrollVelocity1.xy, scrollVelocity2.xy) — noise UV scroll speeds
+// - extra[6]: (distortionStrength, noiseBlend, gradientAxis, emissionStrength)
+// - extra[7]: (coreColor.rgb, gradientStart)
+// - extra[8]: (edgeColor.rgb, gradientEnd)
 
 layout(set = 1, binding = 1) uniform sampler2D colorTex;
 layout(set = 1, binding = 2) uniform sampler2D metalRoughTex;

@@ -164,6 +164,10 @@ struct GPUSceneData {
     // Shadow tuning (match shaders/input_structures.glsl)
     // shadowTuning.x = minimum sun shadow visibility (0..1)
     glm::vec4 shadowTuning;
+
+    // Time parameters for animated effects (match shaders/input_structures.glsl)
+    // timeParams.x = elapsed time (seconds), timeParams.y = delta time (seconds)
+    glm::vec4 timeParams;
 };
 
 enum class MaterialPass :uint8_t {

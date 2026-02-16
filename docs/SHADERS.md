@@ -48,11 +48,12 @@ Shader File Reference
 | `sky.comp` | Compute | Procedural sky background |
 | `gradient_color.comp` | Compute | Gradient background |
 | `background_env.frag` | Fragment | Environment map background |
+| `mesh_vfx.frag` | Fragment | Mesh VFX forward pass — animated noise, UV gradient, fresnel |
 
 GLSL Includes
 
 | File | Purpose |
 |------|---------|
-| `input_structures.glsl` | SceneData UBO (camera, lights, shadow cascades, `shadowTuning`, RT options), material bindings, light structs |
+| `input_structures.glsl` | SceneData UBO (camera, lights, shadow cascades, `shadowTuning`, `timeParams`, RT options), material bindings, light structs |
 | `lighting_common.glsl` | BRDF evaluation, point light helpers |
 | `ibl_common.glsl` | IBL split-sum, SH irradiance |

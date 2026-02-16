@@ -31,6 +31,21 @@ public:
         float fresnelStrength{1.0f};
         std::string albedoPath;
         bool albedoSRGB = true;
+
+        std::string noise1Path;
+        std::string noise2Path;
+        bool noise1SRGB = false;
+        bool noise2SRGB = false;
+        glm::vec2 scrollVelocity1{0.f, -1.f};
+        glm::vec2 scrollVelocity2{0.f, -0.5f};
+        float distortionStrength{0.1f};
+        float noiseBlend{0.5f};
+        glm::vec3 coreColor{1.f};
+        glm::vec3 edgeColor{1.f, 0.5f, 0.f};
+        float gradientAxis{1.f};
+        float gradientStart{0.f};
+        float gradientEnd{1.f};
+        float emissionStrength{1.f};
     };
 
     struct MaterialOptions
