@@ -194,6 +194,7 @@ void SceneManager::update_scene()
 
     mainDrawContext.OpaqueSurfaces.clear();
     mainDrawContext.TransparentSurfaces.clear();
+    mainDrawContext.MeshVfxSurfaces.clear();
     mainDrawContext.nextID = 1;
     mainDrawContext.gltfNodeLocalOverrides = nullptr;
 
@@ -242,7 +243,7 @@ void SceneManager::update_scene()
     _camera_position_local = world_to_local(mainCamera.position_world, origin_world);
 
     auto tagOwner = [&](RenderObject::OwnerType type, const std::string &name,
-                        size_t opaqueBegin, size_t transpBegin)
+                        size_t opaqueBegin, size_t transpBegin, size_t meshVfxBegin)
     {
         for (size_t i = opaqueBegin; i < mainDrawContext.OpaqueSurfaces.size(); ++i)
         {
@@ -253,6 +254,11 @@ void SceneManager::update_scene()
         {
             mainDrawContext.TransparentSurfaces[i].ownerType = type;
             mainDrawContext.TransparentSurfaces[i].ownerName = name;
+        }
+        for (size_t i = meshVfxBegin; i < mainDrawContext.MeshVfxSurfaces.size(); ++i)
+        {
+            mainDrawContext.MeshVfxSurfaces[i].ownerType = type;
+            mainDrawContext.MeshVfxSurfaces[i].ownerName = name;
         }
     };
 
@@ -272,6 +278,7 @@ void SceneManager::update_scene()
 
         const size_t opaqueStart = mainDrawContext.OpaqueSurfaces.size();
         const size_t transpStart = mainDrawContext.TransparentSurfaces.size();
+        const size_t meshVfxStart = mainDrawContext.MeshVfxSurfaces.size();
         // Enable per-instance node pose overrides while drawing this instance.
         if (!inst.nodeLocalOverrides.empty())
         {
@@ -285,7 +292,7 @@ void SceneManager::update_scene()
         glm::mat4 instanceTransform = make_trs_matrix(tLocal, inst.rotation, inst.scale);
         inst.scene->Draw(instanceTransform, mainDrawContext);
         mainDrawContext.gltfNodeLocalOverrides = nullptr;
-        tagOwner(RenderObject::OwnerType::GLTFInstance, kv.first, opaqueStart, transpStart);
+        tagOwner(RenderObject::OwnerType::GLTFInstance, kv.first, opaqueStart, transpStart, meshVfxStart);
     }
 
     // Synchronize physics collider transforms after animation updates
@@ -324,6 +331,10 @@ void SceneManager::update_scene()
             if (obj.material->passType == MaterialPass::Transparent)
             {
                 mainDrawContext.TransparentSurfaces.push_back(obj);
+            }
+            else if (obj.material->passType == MaterialPass::MeshVFX)
+            {
+                mainDrawContext.MeshVfxSurfaces.push_back(obj);
             }
             else
             {
@@ -765,6 +776,39 @@ bool SceneManager::setMeshInstanceTRSWorld(const std::string &name,
     inst.translation_world = translationWorld;
     inst.rotation = rotation;
     inst.scale = scale;
+    return true;
+}
+
+bool SceneManager::setMeshInstanceMaterial(const std::string &name, std::shared_ptr<GLTFMaterial> material)
+{
+    if (!material)
+    {
+        return false;
+    }
+    auto it = dynamicMeshInstances.find(name);
+    if (it == dynamicMeshInstances.end())
+    {
+        return false;
+    }
+
+    MeshInstance &inst = it->second;
+    if (!inst.mesh || inst.mesh->surfaces.empty())
+    {
+        return false;
+    }
+    if (inst.mesh->name.rfind("Primitive.", 0) != 0)
+    {
+        return false;
+    }
+
+    // Keep primitive mesh buffers shared, but isolate surface material pointers
+    // so changing one instance does not retarget all instances sharing the same cache key.
+    auto uniqueMesh = std::make_shared<MeshAsset>(*inst.mesh);
+    for (auto &surf : uniqueMesh->surfaces)
+    {
+        surf.material = material;
+    }
+    inst.mesh = std::move(uniqueMesh);
     return true;
 }
 

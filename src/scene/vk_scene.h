@@ -55,6 +55,7 @@ struct DrawContext
 {
     std::vector<RenderObject> OpaqueSurfaces;
     std::vector<RenderObject> TransparentSurfaces;
+    std::vector<RenderObject> MeshVfxSurfaces;
     // Monotonic counter used to assign stable per-frame object IDs.
     uint32_t nextID = 1;
     // Optional per-instance glTF node local overrides (additive layer in local space).
@@ -126,6 +127,7 @@ public:
     bool setMeshInstanceTransformLocal(const std::string &name, const glm::mat4 &transformLocal);
     bool getMeshInstanceTRSWorld(const std::string &name, WorldVec3 &outTranslationWorld, glm::quat &outRotation, glm::vec3 &outScale) const;
     bool setMeshInstanceTRSWorld(const std::string &name, const WorldVec3 &translationWorld, const glm::quat &rotation, const glm::vec3 &scale);
+    bool setMeshInstanceMaterial(const std::string &name, std::shared_ptr<GLTFMaterial> material);
     bool removeMeshInstance(const std::string &name);
     void clearMeshInstances();
 

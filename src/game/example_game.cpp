@@ -11,6 +11,7 @@
 
 #include <fmt/core.h>
 #include <glm/gtx/transform.hpp>
+#include <cmath>
 
 namespace Game
 {
@@ -56,6 +57,35 @@ namespace Game
 
         // Setup game scene (entities + render/physics resources)
         setup_scene();
+
+        // Simple mesh-based VFX demo: create a named MeshVFX material profile,
+        // spawn a primitive sphere, and route it to the dedicated MeshVFX pass.
+        {
+            GameAPI::MeshVfxMaterialSettings vfx{};
+            vfx.tint = glm::vec3(0.15f, 0.95f, 1.0f);
+            vfx.opacity = 0.45f;
+            vfx.fresnelPower = 3.5f;
+            vfx.fresnelStrength = 2.0f;
+
+            const bool material_ok = api.create_or_update_mesh_vfx_material(_mesh_vfx_material_name, vfx);
+            if (material_ok)
+            {
+                GameAPI::Transform tr{};
+                tr.position = glm::vec3(_mesh_vfx_base_pos);
+                tr.scale = glm::vec3(1.6f);
+
+                const bool spawned = api.add_primitive_instance(_mesh_vfx_instance_name,
+                                                                GameAPI::PrimitiveType::Sphere,
+                                                                tr);
+                const bool applied = spawned
+                    && api.apply_mesh_vfx_material_to_primitive(_mesh_vfx_instance_name, _mesh_vfx_material_name);
+                _mesh_vfx_spawned = spawned && applied;
+                if (!_mesh_vfx_spawned && spawned)
+                {
+                    api.remove_mesh_instance(_mesh_vfx_instance_name);
+                }
+            }
+        }
 
         _world.set_rebase_anchor(_sphere_entity);
         _world.set_rebase_settings(GameWorld::RebaseSettings{
@@ -123,6 +153,18 @@ namespace Game
 
         const float alpha = _runtime->interpolation_alpha();
         auto &api = _runtime->api();
+
+        if (_mesh_vfx_spawned)
+        {
+            // Lightweight motion so the demo effect is visibly "alive".
+            const float bob = 0.2f * std::sin(_elapsed * 1.35f);
+            const float pulse = 1.45f + 0.15f * std::sin(_elapsed * 2.1f);
+
+            GameAPI::Transform tr{};
+            tr.position = glm::vec3(_mesh_vfx_base_pos) + glm::vec3(0.0f, bob, 0.0f);
+            tr.scale = glm::vec3(pulse);
+            api.set_mesh_instance_transform(_mesh_vfx_instance_name, tr);
+        }
 
         // Sync all entities to render (world-space, double precision)
         _world.entities().sync_to_render(api, alpha);
@@ -205,6 +247,12 @@ namespace Game
                 api.unload_texture(_imgui_example_texture);
                 _imgui_example_texture = GameAPI::InvalidTexture;
             }
+            if (_mesh_vfx_spawned)
+            {
+                api.remove_mesh_instance(_mesh_vfx_instance_name);
+                _mesh_vfx_spawned = false;
+            }
+            (void)api.remove_mesh_vfx_material(_mesh_vfx_material_name);
 
             if (auto *audio = _runtime->audio())
             {

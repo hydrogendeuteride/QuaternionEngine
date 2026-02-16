@@ -130,6 +130,12 @@ private:
     GameAPI::TextureHandle _imgui_example_texture{GameAPI::InvalidTexture};
     void *_imgui_example_texture_id{nullptr};
 
+    // Mesh VFX demo object (uses MeshVFX render pass).
+    std::string _mesh_vfx_material_name{"example.mesh_vfx.glow"};
+    std::string _mesh_vfx_instance_name{"example.mesh_vfx.sphere"};
+    bool _mesh_vfx_spawned{false};
+    WorldVec3 _mesh_vfx_base_pos{2.5, 1.25, -2.0};
+
     // Constants
     static constexpr float SPHERE_RADIUS = 0.5f;
     static inline const glm::vec3 BOX_HALF_EXTENTS{0.5f, 0.5f, 0.5f};

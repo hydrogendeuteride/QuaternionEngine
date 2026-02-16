@@ -256,6 +256,17 @@ struct PrimitiveMaterial
     float roughness{0.5f};         // Roughness factor (0-1)
 };
 
+struct MeshVfxMaterialSettings
+{
+    glm::vec3 tint{1.0f, 1.0f, 1.0f};
+    float opacity{0.5f};
+    float fresnelPower{3.0f};
+    float fresnelStrength{1.0f};
+    // Texture path relative to assets/ (for example: "textures/noise/smoke.png")
+    std::string albedoPath;
+    bool albedoSRGB{true};
+};
+
 // Point light data
 struct PointLight
 {
@@ -727,6 +738,15 @@ public:
                                 PrimitiveType type,
                                 const PrimitiveMaterial& material,
                                 const TransformD& transform);
+
+    // Mesh VFX material profiles (procedural/primitive meshes).
+    bool create_or_update_mesh_vfx_material(const std::string& materialName,
+                                            const MeshVfxMaterialSettings& settings);
+    bool get_mesh_vfx_material(const std::string& materialName,
+                               MeshVfxMaterialSettings& out) const;
+    bool remove_mesh_vfx_material(const std::string& materialName);
+    bool apply_mesh_vfx_material_to_primitive(const std::string& primitiveName,
+                                              const std::string& materialName);
 
     // Remove mesh instance (primitives or custom meshes)
     bool remove_mesh_instance(const std::string& name);

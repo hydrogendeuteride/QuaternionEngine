@@ -1,5 +1,6 @@
 #include "manager.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 
@@ -75,10 +76,22 @@ void AssetManager::cleanup()
                 _engine->_resourceManager->destroy_image(img);
             }
         }
+        for (auto &kv: _meshVfxMaterials)
+        {
+            if (kv.second.constantsBuffer.buffer != VK_NULL_HANDLE)
+            {
+                _engine->_resourceManager->destroy_buffer(kv.second.constantsBuffer);
+            }
+            if (_engine->_textureCache && kv.second.material)
+            {
+                _engine->_textureCache->unwatchSet(kv.second.material->data.materialSet);
+            }
+        }
     }
     _meshCache.clear();
     _meshMaterialBuffers.clear();
     _meshOwnedImages.clear();
+    _meshVfxMaterials.clear();
     {
         std::lock_guard<std::mutex> lock(_gltfMutex);
         _gltfCacheByPath.clear();
@@ -748,6 +761,161 @@ std::shared_ptr<GLTFMaterial> AssetManager::createMaterialFromConstants(
     _meshMaterialBuffers[name] = buf;
 
     return createMaterial(pass, res);
+}
+
+bool AssetManager::createOrUpdateMeshVfxMaterial(const std::string &name, const MeshVfxMaterialSettings &settings)
+{
+    if (!_engine || !_engine->_resourceManager || !_engine->_samplerManager || !_engine->_deviceManager)
+    {
+        return false;
+    }
+    if (name.empty())
+    {
+        return false;
+    }
+
+    MeshVfxMaterialSettings clamped = settings;
+    clamped.opacity = std::clamp(clamped.opacity, 0.0f, 1.0f);
+    clamped.fresnelPower = std::max(clamped.fresnelPower, 0.001f);
+    clamped.fresnelStrength = std::max(clamped.fresnelStrength, 0.0f);
+    clamped.tint = glm::max(clamped.tint, glm::vec3(0.0f));
+
+    GLTFMetallic_Roughness::MaterialConstants constants{};
+    constants.colorFactors = glm::vec4(1.0f);
+    constants.metal_rough_factors = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+    constants.extra[0].x = 1.0f;
+    constants.extra[3].x = clamped.opacity;
+    constants.extra[3].y = clamped.fresnelPower;
+    constants.extra[3].z = clamped.fresnelStrength;
+    constants.extra[4] = glm::vec4(clamped.tint, 0.0f);
+
+    auto patch_albedo_watch = [&](const std::shared_ptr<GLTFMaterial> &materialPtr) {
+        if (!_engine->_textureCache || !materialPtr)
+        {
+            return;
+        }
+        _engine->_textureCache->unwatchSet(materialPtr->data.materialSet);
+        if (!clamped.albedoPath.empty())
+        {
+            TextureCache::TextureKey key{};
+            key.kind = TextureCache::TextureKey::SourceKind::FilePath;
+            key.path = assetPath(clamped.albedoPath);
+            key.srgb = clamped.albedoSRGB;
+            key.mipmapped = true;
+            std::string id = std::string("VFX:") + key.path + (key.srgb ? "#sRGB" : "#UNORM");
+            key.hash = texcache::fnv1a64(id);
+            VkSampler sampler = _engine->_samplerManager->defaultLinear();
+            auto handle = _engine->_textureCache->request(key, sampler);
+            _engine->_textureCache->watchBinding(handle,
+                                                 materialPtr->data.materialSet,
+                                                 1u,
+                                                 sampler,
+                                                 _engine->_whiteImage.imageView);
+        }
+    };
+
+    auto it = _meshVfxMaterials.find(name);
+    if (it != _meshVfxMaterials.end())
+    {
+        MeshVfxMaterialRecord &rec = it->second;
+        if (rec.constantsBuffer.buffer == VK_NULL_HANDLE || rec.material == nullptr)
+        {
+            return false;
+        }
+
+        VmaAllocationInfo allocInfo{};
+        vmaGetAllocationInfo(_engine->_deviceManager->allocator(), rec.constantsBuffer.allocation, &allocInfo);
+        auto *dst = static_cast<GLTFMetallic_Roughness::MaterialConstants *>(allocInfo.pMappedData);
+        if (!dst)
+        {
+            return false;
+        }
+        *dst = constants;
+        vmaFlushAllocation(_engine->_deviceManager->allocator(),
+                           rec.constantsBuffer.allocation,
+                           0,
+                           sizeof(GLTFMetallic_Roughness::MaterialConstants));
+
+        rec.settings = clamped;
+        patch_albedo_watch(rec.material);
+        return true;
+    }
+
+    GLTFMetallic_Roughness::MaterialResources res{};
+    res.colorImage = _engine->_whiteImage;
+    res.colorSampler = _engine->_samplerManager->defaultLinear();
+    res.metalRoughImage = _engine->_whiteImage;
+    res.metalRoughSampler = _engine->_samplerManager->defaultLinear();
+    res.normalImage = _engine->_flatNormalImage;
+    res.normalSampler = _engine->_samplerManager->defaultLinear();
+    res.occlusionImage = _engine->_whiteImage;
+    res.occlusionSampler = _engine->_samplerManager->defaultLinear();
+    res.emissiveImage = _engine->_blackImage;
+    res.emissiveSampler = _engine->_samplerManager->defaultLinear();
+
+    AllocatedBuffer constantsBuffer = createMaterialBufferWithConstants(constants);
+    res.dataBuffer = constantsBuffer.buffer;
+    res.dataBufferOffset = 0;
+
+    auto mat = createMaterial(MaterialPass::MeshVFX, res);
+    if (!mat)
+    {
+        _engine->_resourceManager->destroy_buffer(constantsBuffer);
+        return false;
+    }
+
+    MeshVfxMaterialRecord rec{};
+    rec.settings = clamped;
+    rec.material = mat;
+    rec.constantsBuffer = constantsBuffer;
+    _meshVfxMaterials.emplace(name, std::move(rec));
+    patch_albedo_watch(mat);
+    return true;
+}
+
+bool AssetManager::removeMeshVfxMaterial(const std::string &name)
+{
+    auto it = _meshVfxMaterials.find(name);
+    if (it == _meshVfxMaterials.end())
+    {
+        return false;
+    }
+    if (it->second.material && it->second.material.use_count() > 1)
+    {
+        // In use by one or more meshes.
+        return false;
+    }
+    if (_engine && _engine->_textureCache && it->second.material)
+    {
+        _engine->_textureCache->unwatchSet(it->second.material->data.materialSet);
+    }
+    if (_engine && _engine->_resourceManager && it->second.constantsBuffer.buffer != VK_NULL_HANDLE)
+    {
+        _engine->_resourceManager->destroy_buffer(it->second.constantsBuffer);
+    }
+    _meshVfxMaterials.erase(it);
+    return true;
+}
+
+bool AssetManager::getMeshVfxMaterialSettings(const std::string &name, MeshVfxMaterialSettings &out) const
+{
+    auto it = _meshVfxMaterials.find(name);
+    if (it == _meshVfxMaterials.end())
+    {
+        return false;
+    }
+    out = it->second.settings;
+    return true;
+}
+
+std::shared_ptr<GLTFMaterial> AssetManager::getMeshVfxMaterial(const std::string &name) const
+{
+    auto it = _meshVfxMaterials.find(name);
+    if (it == _meshVfxMaterials.end())
+    {
+        return {};
+    }
+    return it->second.material;
 }
 
 VkImageView AssetManager::fallbackCheckerboardView() const

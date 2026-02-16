@@ -51,6 +51,7 @@
 #include "render/passes/atmosphere.h"
 #include "render/passes/sun_disk.h"
 #include "render/passes/particles.h"
+#include "render/passes/mesh_vfx.h"
 #include "render/passes/transparent.h"
 #include "render/passes/fxaa.h"
 #include "render/passes/tonemap.h"
@@ -1383,6 +1384,11 @@ void VulkanEngine::draw()
                 particles->register_graph(_renderGraph.get(), hdrTarget, hDepth, hGBufferPosition);
             }
 
+            if (auto *meshVfx = _renderPassManager->getPass<MeshVfxPass>())
+            {
+                meshVfx->register_graph(_renderGraph.get(), hdrTarget, hDepth);
+            }
+
             if (auto *transparent = _renderPassManager->getPass<TransparentPass>())
             {
                 transparent->register_graph(_renderGraph.get(), hdrTarget, hDepth);
@@ -1763,6 +1769,10 @@ void MeshNode::Draw(const glm::mat4 &topMatrix, DrawContext &ctx)
         if (s.material->data.passType == MaterialPass::Transparent)
         {
             ctx.TransparentSurfaces.push_back(def);
+        }
+        else if (s.material->data.passType == MaterialPass::MeshVFX)
+        {
+            ctx.MeshVfxSurfaces.push_back(def);
         }
         else
         {

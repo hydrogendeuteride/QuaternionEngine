@@ -23,6 +23,16 @@ class MeshAsset;
 class AssetManager
 {
 public:
+    struct MeshVfxMaterialSettings
+    {
+        glm::vec3 tint{1.0f, 1.0f, 1.0f};
+        float opacity{0.5f};
+        float fresnelPower{3.0f};
+        float fresnelStrength{1.0f};
+        std::string albedoPath;
+        bool albedoSRGB = true;
+    };
+
     struct MaterialOptions
     {
         std::string albedoPath;
@@ -120,6 +130,11 @@ public:
                                                               const GLTFMetallic_Roughness::MaterialConstants &constants,
                                                               MaterialPass pass = MaterialPass::MainColor);
 
+    bool createOrUpdateMeshVfxMaterial(const std::string &name, const MeshVfxMaterialSettings &settings);
+    bool removeMeshVfxMaterial(const std::string &name);
+    bool getMeshVfxMaterialSettings(const std::string &name, MeshVfxMaterialSettings &out) const;
+    std::shared_ptr<GLTFMaterial> getMeshVfxMaterial(const std::string &name) const;
+
     // Access engine-provided fallback textures for procedural systems.
     VkImageView fallbackCheckerboardView() const;
     VkImageView fallbackWhiteView() const;
@@ -138,6 +153,13 @@ private:
     std::unordered_map<std::string, std::shared_ptr<MeshAsset> > _meshCache;
     std::unordered_map<std::string, AllocatedBuffer> _meshMaterialBuffers;
     std::unordered_map<std::string, std::vector<AllocatedImage> > _meshOwnedImages;
+    struct MeshVfxMaterialRecord
+    {
+        MeshVfxMaterialSettings settings{};
+        std::shared_ptr<GLTFMaterial> material;
+        AllocatedBuffer constantsBuffer{};
+    };
+    std::unordered_map<std::string, MeshVfxMaterialRecord> _meshVfxMaterials;
 
     AllocatedBuffer createMaterialBufferWithConstants(const GLTFMetallic_Roughness::MaterialConstants &constants) const;
 

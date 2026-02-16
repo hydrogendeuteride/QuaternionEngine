@@ -169,6 +169,7 @@ struct GPUSceneData {
 enum class MaterialPass :uint8_t {
     MainColor,
     Transparent,
+    MeshVFX,
     Other
 };
 

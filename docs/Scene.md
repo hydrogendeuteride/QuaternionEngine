@@ -1,6 +1,6 @@
 ## Scene System: Cameras, DrawContext, and Instances
 
-Thin scene layer that produces `RenderObject`s for the renderer. It gathers opaque/transparent surfaces, maintains the main camera and camera rig, manages dynamic instances with double‑precision world coordinates and a floating origin, and exposes runtime APIs for lights, animation, picking, and physics collider synchronization.
+Thin scene layer that produces `RenderObject`s for the renderer. It gathers opaque/transparent/mesh‑VFX surfaces, maintains the main camera and camera rig, manages dynamic instances with double‑precision world coordinates and a floating origin, and exposes runtime APIs for lights, animation, picking, and physics collider synchronization.
 
 ### Components
 
@@ -11,7 +11,7 @@ Thin scene layer that produces `RenderObject`s for the renderer. It gathers opaq
   - Integrates `PlanetSystem` for planetary rendering and analytic planet shadow occluders.
 
 - `DrawContext`
-  - Two lists: `OpaqueSurfaces` and `TransparentSurfaces` of `RenderObject`.
+  - Three lists: `OpaqueSurfaces`, `TransparentSurfaces`, and `MeshVfxSurfaces` of `RenderObject`.
   - Monotonic `nextID` counter assigns stable per‑frame object IDs for ID‑buffer picking.
   - Optional `gltfNodeLocalOverrides` pointer enables per‑instance node pose overrides during draw.
   - Populated by drawing all active instances each frame.
@@ -74,6 +74,7 @@ The scene uses a **reversed infinite‑Z perspective** projection (right‑hande
 
 - Opaque (geometry): stable sort by `material` then `indexBuffer` (see `src/render/passes/geometry.cpp`).
 - Transparent: sort by camera‑space depth far→near (see `src/render/passes/transparent.cpp`).
+- Mesh VFX: sort by camera‑space depth far→near in its dedicated pass (see `src/render/passes/mesh_vfx.cpp`).
 - An example frustum test exists in `passes/geometry.cpp` (`is_visible`) and can be enabled to cull meshes.
 
 ### Dynamic Instances
@@ -241,7 +242,7 @@ The scene system exposes CPU ray‑based picking and rectangle selection that th
   - Function: `bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject, WorldVec3 &outWorldPos)`
   - Input: `mousePosPixels` in window coordinates (SDL style), origin at top‑left.
   - Output:
-    - `outObject` – the closest hit `RenderObject` (opaque or transparent) along the camera ray.
+    - `outObject` – the closest hit `RenderObject` (opaque, transparent, or mesh VFX) along the camera ray.
     - `outWorldPos` – world‑space hit position as `WorldVec3` (mesh BVH‑refined when available).
   - Returns `true` when something was hit, `false` otherwise.
   - `PickingDebug` struct records BVH usage stats for the last pick (accessible via `getPickingDebug()`).

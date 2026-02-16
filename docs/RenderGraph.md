@@ -183,7 +183,7 @@ See `usage_info_buffer()` at `src/render/graph/graph.cpp:367`.
 
 ### Built‑In Pass Wiring (Current)
 
-- Resource uploads (if any) → Background (compute) → Geometry (G‑Buffer) → Lighting (deferred) → SSR → Tonemap+Bloom → FXAA → Transparent → CopyToSwapchain → ImGui → PreparePresent.
+- Resource uploads (if any) → Background/SunDisk → Shadow → Geometry (G‑Buffer) → Lighting (deferred) → SSR → Volumetrics → Atmosphere → Particles → MeshVFX → Transparent → AutoExposure → Tonemap+Bloom → FXAA → DebugDraw → CopyToSwapchain → ImGui → PreparePresent.
 - See registrations in `src/core/engine.cpp`.
 
 ### Topological Sorting and Scheduling

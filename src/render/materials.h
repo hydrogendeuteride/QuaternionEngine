@@ -9,6 +9,7 @@ struct GLTFMetallic_Roughness
 {
     MaterialPipeline opaquePipeline;
     MaterialPipeline transparentPipeline;
+    MaterialPipeline meshVfxPipeline;
     MaterialPipeline gBufferPipeline;
 
     VkDescriptorSetLayout materialLayout;

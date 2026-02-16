@@ -28,6 +28,7 @@ add_executable (vulkan_engine
   core/game_api/game_api_camera.cpp
   core/game_api/game_api_postfx.cpp
   core/game_api/game_api_particles.cpp
+  core/game_api/game_api_mesh_vfx.cpp
   core/game_api/game_api_volumetrics.cpp
   core/game_api/game_api_debug.cpp
   # core/device
@@ -102,6 +103,8 @@ add_executable (vulkan_engine
   render/passes/atmosphere.cpp
   render/passes/particles.h
   render/passes/particles.cpp
+  render/passes/mesh_vfx.h
+  render/passes/mesh_vfx.cpp
   render/passes/transparent.h
   render/passes/transparent.cpp
   render/passes/imgui_pass.h

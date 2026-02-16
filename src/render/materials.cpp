@@ -78,6 +78,20 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine *engine)
     };
     engine->_pipelineManager->registerGraphics("mesh.transparent", transparentInfo);
 
+    GraphicsPipelineCreateInfo meshVfxInfo = opaqueInfo;
+    meshVfxInfo.fragmentShaderPath = engine->_context->getAssets()->shaderPath("mesh_vfx.frag.spv");
+    meshVfxInfo.configure = [engine](PipelineBuilder &b) {
+        b.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+        b.set_polygon_mode(VK_POLYGON_MODE_FILL);
+        b.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+        b.set_multisampling_none();
+        b.enable_blending_alphablend();
+        b.enable_depthtest(false, VK_COMPARE_OP_GREATER_OR_EQUAL);
+        b.set_color_attachment_format(engine->_swapchainManager->drawImage().imageFormat);
+        b.set_depth_format(engine->_swapchainManager->depthImage().imageFormat);
+    };
+    engine->_pipelineManager->registerGraphics("mesh.vfx", meshVfxInfo);
+
     GraphicsPipelineCreateInfo gbufferInfo{};
     gbufferInfo.vertexShaderPath = engine->_context->getAssets()->shaderPath("mesh.vert.spv");
     gbufferInfo.fragmentShaderPath = engine->_context->getAssets()->shaderPath("gbuffer.frag.spv");
@@ -107,6 +121,7 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine *engine)
 
     engine->_pipelineManager->getMaterialPipeline("mesh.opaque", opaquePipeline);
     engine->_pipelineManager->getMaterialPipeline("mesh.transparent", transparentPipeline);
+    engine->_pipelineManager->getMaterialPipeline("mesh.vfx", meshVfxPipeline);
     engine->_pipelineManager->getMaterialPipeline("mesh.gbuffer", gBufferPipeline);
 }
 
@@ -125,6 +140,10 @@ MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, Materia
     if (pass == MaterialPass::Transparent)
     {
         matData.pipeline = &transparentPipeline;
+    }
+    else if (pass == MaterialPass::MeshVFX)
+    {
+        matData.pipeline = &meshVfxPipeline;
     }
     else
     {

@@ -23,6 +23,7 @@ passes/
 ├── clouds.h / .cpp          — volumetric voxel clouds/smoke (raymarch SSBO density)
 ├── atmosphere.h / .cpp      — single-scattering Rayleigh/Mie atmosphere
 ├── particles.h / .cpp       — GPU particle system (compute sim + billboard render)
+├── mesh_vfx.h / .cpp        — mesh-based VFX pass (unlit emissive + alpha/fresnel)
 ├── auto_exposure.h / .cpp   — compute average luminance + CPU readback for exposure
 ├── tonemap.h / .cpp         — HDR→LDR tonemap (ACES/Reinhard) with bloom
 ├── fxaa.h / .cpp            — FXAA anti-aliasing on LDR output
@@ -46,13 +47,14 @@ Passes are registered on the `RenderGraph` each frame in this order
 7. Volumetrics     — voxel cloud/smoke raymarch (HDR)
 8. Atmosphere      — Rayleigh/Mie scattering (HDR)
 9. Particles       — GPU particle render (HDR, depth-tested)
-10. AutoExposure   — compute luminance measurement
-11. Tonemap        — HDR → LDR with bloom
-12. FXAA           — anti-aliasing (LDR)
-13. Transparent    — forward alpha-blended objects
-14. DebugDraw      — wireframe overlays
-15. ImGui          — debug UI on swapchain
-16. PresentChain   — letterbox blit + layout transition to PRESENT_SRC
+10. MeshVFX        — mesh-based half-transparent effects (HDR)
+11. Transparent    — forward alpha-blended objects (HDR)
+12. AutoExposure   — compute luminance measurement
+13. Tonemap        — HDR → LDR with bloom
+14. FXAA           — anti-aliasing (LDR)
+15. DebugDraw      — wireframe overlays
+16. ImGui          — debug UI on swapchain
+17. PresentChain   — letterbox blit + layout transition to PRESENT_SRC
 ```
 
 ## Key Types
@@ -70,6 +72,7 @@ Passes are registered on the `RenderGraph` each frame in this order
 | `CloudPass` | Volumetric clouds: raymarch bounded volume with SSBO voxel density grid |
 | `AtmospherePass` | Single-scattering Rayleigh/Mie atmosphere (per-pixel ray integration) |
 | `ParticlePass` | GPU particle system: compute simulation + billboard rendering with flipbook/noise |
+| `MeshVfxPass` | Mesh-based unlit VFX pass with alpha blend and fresnel controls |
 | `AutoExposurePass` | Compute average log-luminance, CPU readback, smooth exposure adaptation |
 | `TonemapPass` | HDR→LDR tonemap (ACES default), bloom threshold/intensity controls |
 | `FxaaPass` | FXAA post-process anti-aliasing with configurable edge thresholds |

@@ -73,6 +73,10 @@ layout(set = 1, binding = 0) uniform GLTFMaterialData{
 // - extra[1].rgb: emissiveFactor
 // - extra[2].x: alphaCutoff (>0 enables alpha test for MASK materials)
 // - extra[2].y: gbuffer flags (planet-style: >0 => force clipmap receiver shadows in RT-only)
+// - extra[3].x: mesh VFX opacity multiplier (0..1)
+// - extra[3].y: mesh VFX fresnel power
+// - extra[3].z: mesh VFX fresnel strength
+// - extra[4].rgb: mesh VFX tint
 
 layout(set = 1, binding = 1) uniform sampler2D colorTex;
 layout(set = 1, binding = 2) uniform sampler2D metalRoughTex;

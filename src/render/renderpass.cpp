@@ -12,6 +12,7 @@
 #include "passes/fxaa.h"
 #include "passes/debug_draw.h"
 #include "passes/transparent.h"
+#include "passes/mesh_vfx.h"
 #include "passes/tonemap.h"
 #include "passes/auto_exposure.h"
 #include "passes/shadow.h"
@@ -70,6 +71,10 @@ void RenderPassManager::init(EngineContext *context)
     auto debugDrawPass = std::make_unique<DebugDrawPass>();
     debugDrawPass->init(context);
     addPass(std::move(debugDrawPass));
+
+    auto meshVfxPass = std::make_unique<MeshVfxPass>();
+    meshVfxPass->init(context);
+    addPass(std::move(meshVfxPass));
 
     auto transparentPass = std::make_unique<TransparentPass>();
     transparentPass->init(context);

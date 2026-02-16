@@ -1810,6 +1810,10 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             {
                 draw_context.TransparentSurfaces.push_back(obj);
             }
+            else if (obj.material && obj.material->passType == MaterialPass::MeshVFX)
+            {
+                draw_context.MeshVfxSurfaces.push_back(obj);
+            }
             else
             {
                 draw_context.OpaqueSurfaces.push_back(obj);

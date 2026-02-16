@@ -31,9 +31,9 @@ render/
 | Subfolder / File | Primary Class | Role |
 |------------------|--------------|------|
 | `graph/` | `RenderGraph`, `RGResourceRegistry`, `RGPassBuilder` | DAG-based pass scheduling with automatic barrier insertion, layout transitions, and transient resource management |
-| `passes/` | `IRenderPass` implementations | 15 render passes: shadow, background, sun disk, geometry, lighting, SSR, volumetrics, atmosphere, particles, auto-exposure, tonemap, FXAA, transparent, debug draw, ImGui |
+| `passes/` | `IRenderPass` implementations | 16 render passes: shadow, background, sun disk, geometry, lighting, SSR, volumetrics, atmosphere, particles, mesh VFX, transparent, auto-exposure, tonemap, FXAA, debug draw, ImGui |
 | `renderpass.h` | `IRenderPass`, `RenderPassManager` | Abstract pass interface (`init`/`cleanup`/`execute`/`getName`) and pass registry with typed lookup |
-| `materials.h` | `GLTFMetallic_Roughness` | PBR metallic-roughness material: opaque/transparent/G-Buffer pipeline variants, descriptor set writing for 5 texture maps + constants |
+| `materials.h` | `GLTFMetallic_Roughness` | PBR metallic-roughness material: opaque/transparent/mesh-VFX/G-Buffer pipeline variants, descriptor set writing for 5 texture maps + constants |
 | `pipelines.h` | `PipelineBuilder` | Fluent builder for `VkGraphicsPipeline`: shader stages, topology, rasterizer, blending, depth, MRT formats |
 | `primitives.h` | `primitives` namespace | CPU mesh generators: `buildCube`, `buildSphere`, `buildPlane`, `buildCapsule` producing `Vertex`/index arrays |
 
@@ -41,8 +41,8 @@ render/
 
 | File | Role |
 |------|------|
-| `renderpass.h/.cpp` | `IRenderPass` — pure virtual interface all passes implement. `RenderPassManager` — constructs, owns, and manages lifecycle of all 15 pass instances + ImGui pass |
-| `materials.h/.cpp` | `GLTFMetallic_Roughness` — builds opaque, transparent, and G-Buffer material pipelines; writes descriptor sets binding color/metallic-roughness/normal/occlusion/emissive textures + material constants buffer |
+| `renderpass.h/.cpp` | `IRenderPass` — pure virtual interface all passes implement. `RenderPassManager` — constructs, owns, and manages lifecycle of all pass instances + ImGui pass |
+| `materials.h/.cpp` | `GLTFMetallic_Roughness` — builds opaque, transparent, mesh-VFX, and G-Buffer material pipelines; writes descriptor sets binding color/metallic-roughness/normal/occlusion/emissive textures + material constants buffer |
 | `pipelines.h/.cpp` | `PipelineBuilder` — wraps `VkGraphicsPipelineCreateInfo` construction with fluent API. `vkutil::load_shader_module` loads SPIR-V binaries |
 | `primitives.h` | Header-only procedural mesh generators in `primitives` namespace: unit cube, sphere (configurable sectors/stacks), XZ plane, Y-axis capsule |
 
@@ -64,12 +64,13 @@ The full deferred PBR pipeline, executed via RenderGraph each frame:
 │ Volumetrics      — voxel cloud/smoke raymarch (HDR)     │
 │ Atmosphere       — Rayleigh/Mie scattering (HDR)        │
 │ Particles        — GPU particle render (HDR)            │
+│ MeshVFX          — unlit mesh VFX (HDR, alpha/fresnel)  │
+│ Transparent      — forward alpha-blended objects (HDR)  │
 ├─────────────────────────────────────────────────────────┤
 │ AutoExposure     — compute luminance measurement        │
 │ Tonemap + Bloom  — HDR → LDR (ACES/Reinhard)           │
 │ FXAA             — post-process AA (LDR)                │
 ├─────────────────────────────────────────────────────────┤
-│ Transparent      — forward alpha-blended objects        │
 │ DebugDraw        — wireframe overlays                   │
 │ ImGui            — debug UI on swapchain                │
 │ PresentChain     — letterbox blit → PRESENT_SRC         │

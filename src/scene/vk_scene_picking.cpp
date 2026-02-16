@@ -606,6 +606,7 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
 
     testList(mainDrawContext.OpaqueSurfaces);
     testList(mainDrawContext.TransparentSurfaces);
+    testList(mainDrawContext.MeshVfxSurfaces);
 
     if (anyHit)
     {
@@ -640,6 +641,10 @@ bool SceneManager::resolveObjectID(uint32_t id, RenderObject &outObject) const
         return true;
     }
     if (findIn(mainDrawContext.TransparentSurfaces))
+    {
+        return true;
+    }
+    if (findIn(mainDrawContext.MeshVfxSurfaces))
     {
         return true;
     }
@@ -732,4 +737,5 @@ void SceneManager::selectRect(const glm::vec2 &p0, const glm::vec2 &p1, std::vec
 
     testList(mainDrawContext.OpaqueSurfaces);
     testList(mainDrawContext.TransparentSurfaces);
+    testList(mainDrawContext.MeshVfxSurfaces);
 }
