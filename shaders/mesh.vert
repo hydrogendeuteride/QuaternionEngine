@@ -43,7 +43,9 @@ void main()
     vec4 worldPos = PushConstants.render_matrix * vec4(v.position, 1.0);
     gl_Position = sceneData.viewproj * worldPos;
 
-    outNormal = normalize(normalMatrix * v.normal);
+    vec3 n = normalMatrix * v.normal;
+    // Planet terrain uses unnormalized stitched-edge midpoint normals; normalize per-fragment.
+    outNormal = (materialData.extra[2].y > 0.5) ? n : normalize(n);
 
     vec3 worldTangent = normalize(normalMatrix * v.tangent.xyz);
     outTangent = vec4(worldTangent, v.tangent.w);

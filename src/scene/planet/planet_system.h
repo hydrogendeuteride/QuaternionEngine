@@ -198,6 +198,7 @@ private:
     {
         planet::PatchKey key{};
         TerrainPatchState state = TerrainPatchState::Allocating;
+        uint8_t edge_stitch_mask = 0;
 
         AllocatedBuffer vertex_buffer{};
         VkDeviceAddress vertex_buffer_address = 0;
@@ -248,7 +249,8 @@ private:
     TerrainPatch *get_or_create_terrain_patch(TerrainState &state,
                                               const PlanetBody &body,
                                               const planet::PatchKey &key,
-                                              uint32_t frame_index);
+                                              uint32_t frame_index,
+                                              uint8_t edge_stitch_mask);
 
     void ensure_earth_patch_index_buffer();
 
