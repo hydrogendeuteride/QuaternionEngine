@@ -101,10 +101,20 @@ namespace
 
             for (uint32_t i = 0; i < res; ++i)
             {
+                const bool is_patch_boundary =
+                        (i == 0u) || (i + 1u == res) || (j == 0u) || (j + 1u == res);
                 const uint32_t il = (i > 0u) ? (i - 1u) : i;
                 const uint32_t ir = (i + 1u < res) ? (i + 1u) : i;
 
                 const uint32_t idx = j * res + i;
+                if (is_patch_boundary)
+                {
+                    // Keep radial normals on patch boundaries to avoid visible seams between
+                    // neighboring patches/faces that do not share derivative samples.
+                    scratch_normals[idx] = vertices[idx].normal;
+                    continue;
+                }
+
                 const glm::vec3 pL = vertices[j * res + il].position;
                 const glm::vec3 pR = vertices[j * res + ir].position;
                 const glm::vec3 pU = vertices[ju * res + i].position;
@@ -1259,9 +1269,62 @@ PlanetSystem::TerrainPatch *PlanetSystem::get_or_create_terrain_patch(TerrainSta
             if (height_face.width > 0 && height_face.height > 0 && !height_face.texels.empty())
             {
                 const float scale = static_cast<float>(body.terrain_height_max_m);
+                constexpr float kFaceEdgeEpsilon = 1e-6f;
                 for (Vertex &v: scratch_vertices)
                 {
-                    const float h01 = planet::sample_height(height_face, v.uv_x, v.uv_y);
+                    float h01 = 0.0f;
+
+                    // On cube-face boundaries (u/v at 0 or 1), sample via direction mapping so
+                    // both neighboring faces resolve to the same boundary samples.
+                    const bool on_cube_face_edge =
+                            (v.uv_x <= kFaceEdgeEpsilon) ||
+                            (v.uv_x >= 1.0f - kFaceEdgeEpsilon) ||
+                            (v.uv_y <= kFaceEdgeEpsilon) ||
+                            (v.uv_y >= 1.0f - kFaceEdgeEpsilon);
+
+                    if (on_cube_face_edge)
+                    {
+                        planet::CubeFace sample_face = key.face;
+                        double sample_u = static_cast<double>(v.uv_x);
+                        double sample_v = static_cast<double>(v.uv_y);
+                        const glm::vec3 n = glm::normalize(v.normal);
+                        const glm::dvec3 dir(static_cast<double>(n.x),
+                                             static_cast<double>(n.y),
+                                             static_cast<double>(n.z));
+                        if (planet::cubesphere_direction_to_face_uv(dir, sample_face, sample_u, sample_v))
+                        {
+                            const uint32_t sample_face_index = static_cast<uint32_t>(sample_face);
+                            if (sample_face_index < state.height_faces.size())
+                            {
+                                const planet::HeightFace &sample_height_face = state.height_faces[sample_face_index];
+                                if (sample_height_face.width > 0 &&
+                                    sample_height_face.height > 0 &&
+                                    !sample_height_face.texels.empty())
+                                {
+                                    h01 = planet::sample_height(sample_height_face,
+                                                                static_cast<float>(sample_u),
+                                                                static_cast<float>(sample_v));
+                                }
+                                else
+                                {
+                                    h01 = planet::sample_height(height_face, v.uv_x, v.uv_y);
+                                }
+                            }
+                            else
+                            {
+                                h01 = planet::sample_height(height_face, v.uv_x, v.uv_y);
+                            }
+                        }
+                        else
+                        {
+                            h01 = planet::sample_height(height_face, v.uv_x, v.uv_y);
+                        }
+                    }
+                    else
+                    {
+                        h01 = planet::sample_height(height_face, v.uv_x, v.uv_y);
+                    }
+
                     const float h_m = h01 * scale;
                     v.position += v.normal * h_m;
                 }

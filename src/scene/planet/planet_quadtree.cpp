@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <unordered_set>
 
 #include <glm/gtc/constants.hpp>
 
@@ -127,6 +128,95 @@ namespace planet
             if (all_out([](const glm::vec4 &v) { return v.z > v.w; })) return false; // far
 
             return true;
+        }
+
+        bool find_leaf_containing(const std::unordered_set<PatchKey, PatchKeyHash> &leaf_set,
+                                  CubeFace face,
+                                  double u01,
+                                  double v01,
+                                  uint32_t max_level,
+                                  PatchKey &out_key)
+        {
+            const double uu = glm::clamp(u01, 0.0, std::nextafter(1.0, 0.0));
+            const double vv = glm::clamp(v01, 0.0, std::nextafter(1.0, 0.0));
+
+            for (int32_t level = static_cast<int32_t>(max_level); level >= 0; --level)
+            {
+                const uint32_t l = static_cast<uint32_t>(level);
+                const uint32_t tiles = (l < 31u) ? (1u << l) : 0u;
+                if (tiles == 0u)
+                {
+                    continue;
+                }
+
+                const uint32_t xi = std::min(tiles - 1u, static_cast<uint32_t>(uu * static_cast<double>(tiles)));
+                const uint32_t yi = std::min(tiles - 1u, static_cast<uint32_t>(vv * static_cast<double>(tiles)));
+
+                const PatchKey key{face, l, xi, yi};
+                if (leaf_set.contains(key))
+                {
+                    out_key = key;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        bool patch_needs_balance_split(const PatchKey &key,
+                                       const std::unordered_set<PatchKey, PatchKeyHash> &leaf_set,
+                                       uint32_t max_level_in_set)
+        {
+            double u0 = 0.0, u1 = 0.0, v0 = 0.0, v1 = 0.0;
+            cubesphere_tile_uv_bounds(key.level, key.x, key.y, u0, u1, v0, v1);
+
+            const double du = std::abs(u1 - u0);
+            const double dv = std::abs(v1 - v0);
+            const double eps_u = glm::max(1e-9, du * 1e-3);
+            const double eps_v = glm::max(1e-9, dv * 1e-3);
+            constexpr std::array<double, 3> samples{0.2, 0.5, 0.8};
+
+            auto sample_neighbor = [&](double u, double v) -> int32_t {
+                const glm::dvec3 dir = cubesphere_unit_direction(key.face, u, v);
+                CubeFace face = CubeFace::PosX;
+                double su = 0.0;
+                double sv = 0.0;
+                if (!cubesphere_direction_to_face_uv(dir, face, su, sv))
+                {
+                    return -1;
+                }
+
+                PatchKey neighbor{};
+                if (!find_leaf_containing(leaf_set, face, su, sv, max_level_in_set, neighbor))
+                {
+                    return -1;
+                }
+                return static_cast<int32_t>(neighbor.level);
+            };
+
+            for (const double t: samples)
+            {
+                const double vmid = glm::mix(v0, v1, t);
+                const double umid = glm::mix(u0, u1, t);
+
+                if (const int32_t l = sample_neighbor(u0 - eps_u, vmid); l > static_cast<int32_t>(key.level + 1u))
+                {
+                    return true;
+                }
+                if (const int32_t l = sample_neighbor(u1 + eps_u, vmid); l > static_cast<int32_t>(key.level + 1u))
+                {
+                    return true;
+                }
+                if (const int32_t l = sample_neighbor(umid, v0 - eps_v); l > static_cast<int32_t>(key.level + 1u))
+                {
+                    return true;
+                }
+                if (const int32_t l = sample_neighbor(umid, v1 + eps_v); l > static_cast<int32_t>(key.level + 1u))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     } // namespace
 
@@ -291,7 +381,97 @@ namespace planet
             _stats.max_level_used = std::max(_stats.max_level_used, k.level);
         }
 
-        _stats.visible_leaves = static_cast<uint32_t>(_visible_leaves.size());
+        // Enforce 2:1 LOD balance so neighboring patches differ by at most one level.
+        // This reduces cracks/popping along LOD boundaries while keeping the leaf set deterministic.
+        if (!_visible_leaves.empty())
+        {
+            constexpr uint32_t kMaxBalancePasses = 8u;
+            for (uint32_t pass = 0u; pass < kMaxBalancePasses; ++pass)
+            {
+                std::unordered_set<PatchKey, PatchKeyHash> leaf_set;
+                leaf_set.reserve(_visible_leaves.size() * 2u);
+                uint32_t max_level_in_set = 0u;
+                for (const PatchKey &k: _visible_leaves)
+                {
+                    leaf_set.insert(k);
+                    max_level_in_set = std::max(max_level_in_set, k.level);
+                }
+
+                std::vector<PatchKey> split_candidates;
+                split_candidates.reserve(_visible_leaves.size() / 8u + 16u);
+                for (const PatchKey &k: _visible_leaves)
+                {
+                    if (k.level >= _settings.max_level)
+                    {
+                        continue;
+                    }
+                    if (patch_needs_balance_split(k, leaf_set, max_level_in_set))
+                    {
+                        split_candidates.push_back(k);
+                    }
+                }
+
+                if (split_candidates.empty())
+                {
+                    break;
+                }
+
+                std::unordered_set<PatchKey, PatchKeyHash> split_set;
+                split_set.reserve(split_candidates.size() * 2u);
+                for (const PatchKey &k: split_candidates)
+                {
+                    split_set.insert(k);
+                }
+
+                size_t split_budget = split_candidates.size();
+                const size_t projected = _visible_leaves.size() + split_budget * 3u;
+                if (projected > max_visible_leaves)
+                {
+                    const size_t excess = projected - max_visible_leaves;
+                    const size_t drop = (excess + 2u) / 3u; // each dropped split removes +3 leaves
+                    if (drop >= split_budget)
+                    {
+                        _stats.splits_budget_limited += static_cast<uint32_t>(split_budget);
+                        break;
+                    }
+                    split_budget -= drop;
+                    _stats.splits_budget_limited += static_cast<uint32_t>(drop);
+                }
+
+                std::vector<PatchKey> balanced;
+                balanced.reserve(_visible_leaves.size() + split_budget * 3u);
+
+                size_t splits_applied = 0u;
+                for (const PatchKey &k: _visible_leaves)
+                {
+                    const bool should_split =
+                            split_set.contains(k) &&
+                            (splits_applied < split_budget) &&
+                            (k.level < _settings.max_level);
+
+                    if (!should_split)
+                    {
+                        balanced.push_back(k);
+                        continue;
+                    }
+
+                    const uint32_t cl = k.level + 1u;
+                    const uint32_t cx = k.x * 2u;
+                    const uint32_t cy = k.y * 2u;
+                    balanced.push_back(PatchKey{k.face, cl, cx + 0u, cy + 0u});
+                    balanced.push_back(PatchKey{k.face, cl, cx + 1u, cy + 0u});
+                    balanced.push_back(PatchKey{k.face, cl, cx + 0u, cy + 1u});
+                    balanced.push_back(PatchKey{k.face, cl, cx + 1u, cy + 1u});
+                    splits_applied++;
+                }
+
+                if (splits_applied == 0u)
+                {
+                    break;
+                }
+                _visible_leaves.swap(balanced);
+            }
+        }
 
         // Keep deterministic order for stability (optional).
         // DFS already stable; sort is useful when culling changes traversal.
@@ -302,5 +482,12 @@ namespace planet
                       if (a.x != b.x) return a.x < b.x;
                       return a.y < b.y;
                   });
+
+        _stats.visible_leaves = static_cast<uint32_t>(_visible_leaves.size());
+        _stats.max_level_used = 0u;
+        for (const PatchKey &k: _visible_leaves)
+        {
+            _stats.max_level_used = std::max(_stats.max_level_used, k.level);
+        }
     }
 } // namespace planet
