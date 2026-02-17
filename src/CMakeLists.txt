@@ -154,8 +154,11 @@ add_executable (vulkan_engine
   scene/planet/planet_heightmap.cpp
   scene/planet/planet_quadtree.h
   scene/planet/planet_quadtree.cpp
+  scene/planet/planet_patch_helpers.h
+  scene/planet/planet_patch_helpers.cpp
   scene/planet/planet_system.h
   scene/planet/planet_system.cpp
+  scene/planet/planet_terrain.cpp
   # compute
   compute/vk_compute.h
   compute/vk_compute.cpp
