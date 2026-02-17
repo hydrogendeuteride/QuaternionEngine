@@ -9,4 +9,24 @@
 /cmake-build-debug-win-clang
 /cmake-build-release-win-clang
 /tmp
-/docs
+
+# Local AI/tooling files
+/.claude/
+/AGENTS.md
+/CLAUDE.md
+
+# Local machine/user config
+/CMakeUserPresets.json
+/__pycache__/
+/imgui.ini
+/vulkan_engine.log
+/nul
+/check_doc_freshness.py
+/game_plans.md
+/plans.md
+
+# Third-party local artifacts
+/third_party/ImGuizmo/.gitignore
+/third_party/ImGuizmo/bin/
+/third_party/ImGuizmo/example/
+/third_party/ImGuizmo/vcpkg-example/
