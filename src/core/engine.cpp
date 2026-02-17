@@ -48,6 +48,7 @@
 #include "render/passes/imgui_pass.h"
 #include "render/passes/lighting.h"
 #include "render/passes/clouds.h"
+#include "render/passes/rocket_plume.h"
 #include "render/passes/atmosphere.h"
 #include "render/passes/sun_disk.h"
 #include "render/passes/particles.h"
@@ -1367,6 +1368,15 @@ void VulkanEngine::draw()
                 if (auto *clouds = _renderPassManager->getPass<CloudPass>())
                 {
                     hdrTarget = clouds->register_graph(_renderGraph.get(), hdrTarget, hGBufferPosition);
+                }
+            }
+
+            // Optional analytic rocket plume pass: reads hdrTarget + gbufferPosition and outputs a new HDR target.
+            if (_context && _context->enableRocketPlumes)
+            {
+                if (auto *plumes = _renderPassManager->getPass<RocketPlumePass>())
+                {
+                    hdrTarget = plumes->register_graph(_renderGraph.get(), hdrTarget, hGBufferPosition);
                 }
             }
 

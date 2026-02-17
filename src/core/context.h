@@ -137,6 +137,48 @@ struct VoxelVolumeSettings
     float emissionStrength = 0.0f;
 };
 
+// Analytic rocket plume settings: raymarch a bounded procedural density field in plume-local space.
+// The plume coordinate system is defined by worldToPlume:
+// - +Z points along exhaust direction
+// - z = 0 is the nozzle exit plane
+// - units are render-local units (same as scene rendering)
+struct RocketPlumeSettings
+{
+    bool enabled = false;
+
+    // World -> plume local transform. Expected to be a rigid transform for best results.
+    glm::mat4 worldToPlume{1.0f};
+
+    // Shape
+    float length = 20.0f;              // plume length along +Z (units)
+    float nozzleRadius = 0.15f;        // base radius at z=0 (units)
+    float expansionAngleRad = 0.22f;   // cone half-angle (radians)
+    float radiusExp = 1.0f;            // radius curve exponent (1 = linear)
+
+    // Emission
+    float intensity = 8.0f;            // overall emission multiplier
+    glm::vec3 coreColor{1.0f, 0.8f, 0.6f};
+    glm::vec3 plumeColor{0.6f, 0.7f, 1.0f};
+    float coreLength = 2.0f;           // core length near nozzle (units)
+    float coreStrength = 2.5f;         // extra boost for core region
+
+    // Density falloffs (exponents; higher = tighter)
+    float radialFalloff = 4.0f;
+    float axialFalloff = 1.5f;
+
+    // Procedural turbulence
+    float noiseStrength = 0.35f;
+    float noiseScale = 1.8f;
+    float noiseSpeed = 1.2f;
+
+    // Shock diamonds (0 disables)
+    float shockStrength = 0.0f;
+    float shockFrequency = 10.0f;      // cycles along length (approx)
+
+    // Optional absorption (vacuum default: 0)
+    float softAbsorption = 0.0f;
+};
+
 struct AtmosphereSettings
 {
     // If non-empty, selects the named PlanetSystem body for atmosphere rendering.
@@ -234,6 +276,7 @@ class EngineContext
 {
 public:
     static constexpr uint32_t MAX_VOXEL_VOLUMES = 4;
+    static constexpr uint32_t MAX_ROCKET_PLUMES = 16;
 
     // Owned shared resources
     std::shared_ptr<DeviceManager> device;
@@ -296,6 +339,10 @@ public:
 
     bool enableVolumetrics = false;              // optional voxel volumetrics toggle (cloud/smoke/flame)
     std::array<VoxelVolumeSettings, MAX_VOXEL_VOLUMES> voxelVolumes{};
+
+    bool enableRocketPlumes = false;             // optional analytic rocket plume raymarch pass
+    int rocketPlumeSteps = 96;                   // global raymarch steps for plume rendering
+    std::array<RocketPlumeSettings, MAX_ROCKET_PLUMES> rocketPlumes{};
 
     bool enableAtmosphere = false;               // optional atmosphere scattering toggle
     AtmosphereSettings atmosphere{};

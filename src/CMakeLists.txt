@@ -30,6 +30,7 @@ add_executable (vulkan_engine
   core/game_api/game_api_particles.cpp
   core/game_api/game_api_mesh_vfx.cpp
   core/game_api/game_api_volumetrics.cpp
+  core/game_api/game_api_rocket_plumes.cpp
   core/game_api/game_api_debug.cpp
   # core/device
   core/device/device.h
@@ -99,6 +100,8 @@ add_executable (vulkan_engine
   render/passes/ssr.cpp
   render/passes/clouds.h
   render/passes/clouds.cpp
+  render/passes/rocket_plume.h
+  render/passes/rocket_plume.cpp
   render/passes/atmosphere.h
   render/passes/atmosphere.cpp
   render/passes/particles.h

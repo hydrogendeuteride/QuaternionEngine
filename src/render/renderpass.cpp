@@ -7,6 +7,7 @@
 #include "passes/lighting.h"
 #include "passes/ssr.h"
 #include "passes/clouds.h"
+#include "passes/rocket_plume.h"
 #include "passes/atmosphere.h"
 #include "passes/particles.h"
 #include "passes/fxaa.h"
@@ -52,6 +53,11 @@ void RenderPassManager::init(EngineContext *context)
     auto cloudPass = std::make_unique<CloudPass>();
     cloudPass->init(context);
     addPass(std::move(cloudPass));
+
+    // Analytic rocket plume raymarching pass (vacuum-focused emission).
+    auto plumePass = std::make_unique<RocketPlumePass>();
+    plumePass->init(context);
+    addPass(std::move(plumePass));
 
     // Single-scattering atmosphere post-process (HDR, before transparents/tonemap).
     auto atmospherePass = std::make_unique<AtmospherePass>();

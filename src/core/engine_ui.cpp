@@ -1688,6 +1688,61 @@ namespace
         }
 
         ImGui::Separator();
+        ImGui::TextUnformatted("Rocket Plumes");
+        bool plumesEnabled = ctx->enableRocketPlumes;
+        if (ImGui::Checkbox("Enable Rocket Plumes (Analytic Raymarch)", &plumesEnabled))
+        {
+            ctx->enableRocketPlumes = plumesEnabled;
+        }
+
+        ImGui::SliderInt("Plume Steps##rocketplume", &ctx->rocketPlumeSteps, 8, 256);
+
+        for (uint32_t i = 0; i < EngineContext::MAX_ROCKET_PLUMES; ++i)
+        {
+            RocketPlumeSettings &ps = ctx->rocketPlumes[i];
+
+            std::string header = "Rocket Plume " + std::to_string(i);
+            if (!ImGui::TreeNode(header.c_str()))
+            {
+                continue;
+            }
+
+            std::string id = "##rplume" + std::to_string(i);
+
+            ImGui::Checkbox(("Enabled" + id).c_str(), &ps.enabled);
+
+            ImGui::SliderFloat(("Length" + id).c_str(), &ps.length, 0.1f, 250.0f);
+            ImGui::SliderFloat(("Nozzle Radius" + id).c_str(), &ps.nozzleRadius, 0.0f, 5.0f);
+
+            float angDeg = glm::degrees(ps.expansionAngleRad);
+            if (ImGui::SliderFloat(("Expansion Angle (deg)" + id).c_str(), &angDeg, 0.0f, 89.0f))
+            {
+                ps.expansionAngleRad = glm::radians(angDeg);
+            }
+            ImGui::SliderFloat(("Radius Exp" + id).c_str(), &ps.radiusExp, 0.0f, 4.0f);
+
+            ImGui::SliderFloat(("Intensity" + id).c_str(), &ps.intensity, 0.0f, 50.0f);
+            ImGui::ColorEdit3(("Core Color" + id).c_str(), &ps.coreColor.x);
+            ImGui::ColorEdit3(("Plume Color" + id).c_str(), &ps.plumeColor.x);
+            ImGui::SliderFloat(("Core Length" + id).c_str(), &ps.coreLength, 0.0f, 50.0f);
+            ImGui::SliderFloat(("Core Strength" + id).c_str(), &ps.coreStrength, 0.0f, 10.0f);
+
+            ImGui::SliderFloat(("Radial Falloff" + id).c_str(), &ps.radialFalloff, 0.0f, 16.0f);
+            ImGui::SliderFloat(("Axial Falloff" + id).c_str(), &ps.axialFalloff, 0.0f, 16.0f);
+
+            ImGui::SliderFloat(("Noise Strength" + id).c_str(), &ps.noiseStrength, 0.0f, 2.0f);
+            ImGui::SliderFloat(("Noise Scale" + id).c_str(), &ps.noiseScale, 0.1f, 32.0f);
+            ImGui::SliderFloat(("Noise Speed" + id).c_str(), &ps.noiseSpeed, 0.0f, 8.0f);
+
+            ImGui::SliderFloat(("Shock Strength" + id).c_str(), &ps.shockStrength, 0.0f, 2.0f);
+            ImGui::SliderFloat(("Shock Frequency" + id).c_str(), &ps.shockFrequency, 0.0f, 64.0f);
+
+            ImGui::SliderFloat(("Soft Absorption" + id).c_str(), &ps.softAbsorption, 0.0f, 10.0f);
+
+            ImGui::TreePop();
+        }
+
+        ImGui::Separator();
         ImGui::TextUnformatted("Atmosphere");
         bool atmEnabled = ctx->enableAtmosphere;
         if (ImGui::Checkbox("Enable Atmosphere Scattering", &atmEnabled))

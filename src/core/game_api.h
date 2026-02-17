@@ -379,6 +379,38 @@ struct VoxelVolumeSettings
     float emissionStrength{0.0f};
 };
 
+// Analytic rocket plume settings (vacuum-focused): raymarch a procedural density field in plume-local space.
+// worldToPlume defines the local space where +Z is exhaust direction and z=0 is the nozzle exit plane.
+struct RocketPlumeSettings
+{
+    bool enabled{false};
+
+    glm::mat4 worldToPlume{1.0f};
+
+    float length{20.0f};
+    float nozzleRadius{0.15f};
+    float expansionAngleRad{0.22f};
+    float radiusExp{1.0f};
+
+    float intensity{8.0f};
+    glm::vec3 coreColor{1.0f, 0.8f, 0.6f};
+    glm::vec3 plumeColor{0.6f, 0.7f, 1.0f};
+    float coreLength{2.0f};
+    float coreStrength{2.5f};
+
+    float radialFalloff{4.0f};
+    float axialFalloff{1.5f};
+
+    float noiseStrength{0.35f};
+    float noiseScale{1.8f};
+    float noiseSpeed{1.2f};
+
+    float shockStrength{0.0f};
+    float shockFrequency{10.0f};
+
+    float softAbsorption{0.0f};
+};
+
 // Particle system parameters
 struct ParticleParams
 {
@@ -1091,6 +1123,18 @@ public:
 
     // Get maximum number of voxel volumes
     size_t get_max_voxel_volumes() const;
+
+    // ------------------------------------------------------------------------
+    // Rocket Plumes (analytic raymarch)
+    // ------------------------------------------------------------------------
+
+    void set_rocket_plumes_enabled(bool enabled);
+    bool get_rocket_plumes_enabled() const;
+
+    bool get_rocket_plume(size_t index, RocketPlumeSettings& out) const;
+    bool set_rocket_plume(size_t index, const RocketPlumeSettings& settings);
+
+    size_t get_max_rocket_plumes() const;
 
     // ------------------------------------------------------------------------
     // Particle Systems
