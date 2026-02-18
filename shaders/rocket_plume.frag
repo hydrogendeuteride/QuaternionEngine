@@ -9,6 +9,7 @@ layout(location = 0) out vec4 outColor;
 // Set 1: plume inputs
 layout(set = 1, binding = 0) uniform sampler2D hdrInput;
 layout(set = 1, binding = 1) uniform sampler2D posTex;
+layout(set = 1, binding = 3) uniform sampler2D noiseTex;
 
 struct PlumeData
 {
@@ -45,37 +46,6 @@ float hash12(vec2 p)
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
     p3 += dot(p3, p3.yzx + 33.33);
     return fract((p3.x + p3.y) * p3.z);
-}
-
-float hash13(vec3 p)
-{
-    p = fract(p * 0.1031);
-    p += dot(p, p.yzx + 33.33);
-    return fract((p.x + p.y) * p.z);
-}
-
-float noise3(vec3 p)
-{
-    vec3 i = floor(p);
-    vec3 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-
-    float n000 = hash13(i + vec3(0.0, 0.0, 0.0));
-    float n100 = hash13(i + vec3(1.0, 0.0, 0.0));
-    float n010 = hash13(i + vec3(0.0, 1.0, 0.0));
-    float n110 = hash13(i + vec3(1.0, 1.0, 0.0));
-    float n001 = hash13(i + vec3(0.0, 0.0, 1.0));
-    float n101 = hash13(i + vec3(1.0, 0.0, 1.0));
-    float n011 = hash13(i + vec3(0.0, 1.0, 1.0));
-    float n111 = hash13(i + vec3(1.0, 1.0, 1.0));
-
-    float x00 = mix(n000, n100, f.x);
-    float x10 = mix(n010, n110, f.x);
-    float x01 = mix(n001, n101, f.x);
-    float x11 = mix(n011, n111, f.x);
-    float y0 = mix(x00, x10, f.y);
-    float y1 = mix(x01, x11, f.y);
-    return mix(y0, y1, f.z);
 }
 
 bool intersectAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tmin, out float tmax)
@@ -197,14 +167,36 @@ void main()
         float shockStrength = max(p.noise_shock.w, 0.0);
         float shockFreq = max(p.shock_misc.x, 0.0);
 
+        // Animate patterns outward along +Z.
+        // noiseSpeed is interpreted as "plume lengths per second" (dimensionless).
+        float flow = time * noiseSpeed * len;
+
         for (int si = 0; si < steps; ++si)
         {
             vec3 pos = ro + rd * (t + 0.5 * dt);
 
             float u = clamp(pos.z / len, 0.0, 1.0);
-            float r = length(pos.xy);
             float pr = plume_radius(p, pos.z);
             pr = max(pr, 1e-4);
+
+            float zFlow = pos.z - flow;
+
+            // Mix radial breakup + axial streaks from a tileable 2D noise texture.
+            float ang01 = atan(pos.y, pos.x) * 0.15915494 + 0.5; // 1 / (2*pi)
+            vec2 uvRad = pos.xy * (noiseScale * 0.12) + vec2(0.0, -flow * 0.015);
+            vec2 uvAx  = vec2(zFlow * (noiseScale * 0.06), ang01 * (noiseScale * 1.25));
+
+            float nRad = texture(noiseTex, uvRad).r;
+            float nAx  = texture(noiseTex, uvAx).r;
+            float nTex = mix(nRad, nAx, 0.65);
+            float nCentered = nTex * 2.0 - 1.0;
+
+            // Break up the cross-section to reduce uniformity (turbulence grows downstream).
+            float turbStrength = clamp(noiseStrength * (0.25 + 0.75 * u) * 2.0, 0.0, 3.0);
+            vec2 warpN = vec2(nRad, nAx) * 2.0 - 1.0;
+            vec2 pxy = pos.xy + warpN * (pr * 0.12 * turbStrength);
+
+            float r = length(pxy);
 
             // Inside cone check (soft).
             float rr = r / pr;
@@ -215,9 +207,9 @@ void main()
                 float radial = (radialPow > 0.0) ? pow(inside, radialPow) : inside;
                 float axial = (axialPow > 0.0) ? pow(1.0 - u, axialPow) : (1.0 - u);
 
-                // Simple turbulence: coherent noise in plume-local space.
-                float n = noise3(pos * noiseScale + vec3(0.0, 0.0, time * noiseSpeed));
-                float turb = 1.0 + (n * 2.0 - 1.0) * noiseStrength;
+                // Exponential turbulence keeps the field positive and yields stronger contrast.
+                float turb = exp2(nCentered * (0.85 * turbStrength));
+                float streak = exp2((nAx * 2.0 - 1.0) * (0.75 * turbStrength));
 
                 // Shock diamonds: periodic modulation along axis (optional).
                 float shock = 1.0;
@@ -236,7 +228,7 @@ void main()
                 vec3 col = mix(plumeCol, coreCol, core);
                 float str = intensity * mix(1.0, coreStrength, core);
 
-                float density = radial * axial * turb * shock;
+                float density = radial * axial * turb * streak * shock;
                 density = max(density, 0.0);
 
                 vec3 emit = col * str * density;
@@ -268,4 +260,3 @@ void main()
     vec3 outRgb = add + scatter + trans * baseColor;
     outColor = vec4(outRgb, 1.0);
 }
-

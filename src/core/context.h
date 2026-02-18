@@ -342,6 +342,7 @@ public:
 
     bool enableRocketPlumes = false;             // optional analytic rocket plume raymarch pass
     int rocketPlumeSteps = 96;                   // global raymarch steps for plume rendering
+    std::string rocketPlumeNoiseTexturePath{"vfx/simplex.ktx2"}; // relative to assets/
     std::array<RocketPlumeSettings, MAX_ROCKET_PLUMES> rocketPlumes{};
 
     bool enableAtmosphere = false;               // optional atmosphere scattering toggle

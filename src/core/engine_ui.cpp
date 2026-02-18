@@ -1697,6 +1697,49 @@ namespace
 
         ImGui::SliderInt("Plume Steps##rocketplume", &ctx->rocketPlumeSteps, 8, 256);
 
+        {
+            // Noise texture selection (relative to assets/).
+            static const char *noiseOptions[] = {"vfx/simplex.ktx2", "vfx/perlin.ktx2"};
+            int cur = -1;
+            for (int i = 0; i < IM_ARRAYSIZE(noiseOptions); ++i)
+            {
+                if (ctx->rocketPlumeNoiseTexturePath == noiseOptions[i])
+                {
+                    cur = i;
+                    break;
+                }
+            }
+
+            const char *curLabel = (cur >= 0) ? noiseOptions[cur] : "Custom";
+            if (ImGui::BeginCombo("Noise Preset##rocketplume", curLabel))
+            {
+                for (int i = 0; i < IM_ARRAYSIZE(noiseOptions); ++i)
+                {
+                    const bool selected = (cur == i);
+                    if (ImGui::Selectable(noiseOptions[i], selected))
+                    {
+                        ctx->rocketPlumeNoiseTexturePath = noiseOptions[i];
+                    }
+                    if (selected)
+                    {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+
+            static char plumeNoisePathBuf[256]{};
+            const std::string &pathRef = ctx->rocketPlumeNoiseTexturePath;
+            if (std::strncmp(plumeNoisePathBuf, pathRef.c_str(), sizeof(plumeNoisePathBuf)) != 0)
+            {
+                std::snprintf(plumeNoisePathBuf, sizeof(plumeNoisePathBuf), "%s", pathRef.c_str());
+            }
+            if (ImGui::InputText("Noise Path (assets/)##rocketplume", plumeNoisePathBuf, sizeof(plumeNoisePathBuf)))
+            {
+                ctx->rocketPlumeNoiseTexturePath = plumeNoisePathBuf;
+            }
+        }
+
         for (uint32_t i = 0; i < EngineContext::MAX_ROCKET_PLUMES; ++i)
         {
             RocketPlumeSettings &ps = ctx->rocketPlumes[i];

@@ -9,6 +9,7 @@
 #include "core/context.h"
 #include "core/pipeline/manager.h"
 #include "core/assets/manager.h"
+#include "core/assets/texture_cache.h"
 #include "core/pipeline/sampler.h"
 
 #include "render/graph/graph.h"
@@ -19,6 +20,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace
@@ -41,6 +43,46 @@ namespace
     };
 }
 
+void RocketPlumePass::update_noise_texture(EngineContext *ctxLocal)
+{
+    if (!ctxLocal || !ctxLocal->textures || !ctxLocal->getSamplers() || !ctxLocal->getAssets())
+    {
+        return;
+    }
+
+    std::string desired = ctxLocal->rocketPlumeNoiseTexturePath;
+    if (desired.empty())
+    {
+        desired = "vfx/simplex.ktx2";
+    }
+
+    if (_noiseHandle != TextureCache::InvalidHandle && desired == _noisePath)
+    {
+        return;
+    }
+
+    TextureCache *cache = ctxLocal->textures;
+    if (_noiseHandle != TextureCache::InvalidHandle)
+    {
+        cache->unpin(_noiseHandle);
+        _noiseHandle = TextureCache::InvalidHandle;
+    }
+
+    TextureCache::TextureKey key{};
+    key.kind = TextureCache::TextureKey::SourceKind::FilePath;
+    key.path = ctxLocal->getAssets()->assetPath(desired);
+    key.srgb = false;
+    key.mipmapped = true;
+    key.channels = TextureCache::TextureKey::ChannelsHint::R;
+    std::string id = std::string("RocketPlumeNoise:") + key.path;
+    key.hash = texcache::fnv1a64(id);
+
+    VkSampler sampler = ctxLocal->getSamplers()->defaultLinear();
+    _noiseHandle = cache->request(key, sampler);
+    cache->pin(_noiseHandle);
+    _noisePath = desired;
+}
+
 void RocketPlumePass::init(EngineContext *context)
 {
     _context = context;
@@ -52,12 +94,13 @@ void RocketPlumePass::init(EngineContext *context)
 
     VkDevice device = _context->getDevice()->device();
 
-    // Set 1 layout: HDR input, gbuffer position, plume SSBO.
+    // Set 1 layout: HDR input, gbuffer position, plume SSBO, noise texture.
     {
         DescriptorLayoutBuilder builder;
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // hdrInput
         builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // posTex
         builder.add_binding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);         // plumes
+        builder.add_binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // noiseTex
         _inputSetLayout = builder.build(
             device,
             VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -94,10 +137,20 @@ void RocketPlumePass::init(EngineContext *context)
     };
 
     _context->pipelines->createGraphicsPipeline("rocket_plume", info);
+
+    // Request/pin the configured noise texture for plume breakup.
+    update_noise_texture(_context);
 }
 
 void RocketPlumePass::cleanup()
 {
+    if (_context && _context->textures && _noiseHandle != TextureCache::InvalidHandle)
+    {
+        _context->textures->unpin(_noiseHandle);
+        _noiseHandle = TextureCache::InvalidHandle;
+        _noisePath.clear();
+    }
+
     if (_context && _context->getDevice() && _inputSetLayout)
     {
         vkDestroyDescriptorSetLayout(_context->getDevice()->device(), _inputSetLayout, nullptr);
@@ -278,12 +331,32 @@ void RocketPlumePass::draw_plumes(VkCommandBuffer cmd,
     VkDescriptorSet inputSet = ctxLocal->currentFrame->_frameDescriptors.allocate(
         deviceManager->device(), _inputSetLayout);
     {
+        update_noise_texture(ctxLocal);
+
+        VkImageView noiseView = VK_NULL_HANDLE;
+        if (ctxLocal->textures && _noiseHandle != TextureCache::InvalidHandle)
+        {
+            ctxLocal->textures->markUsed(_noiseHandle, ctxLocal->frameIndex);
+            noiseView = ctxLocal->textures->imageView(_noiseHandle);
+        }
+        if (noiseView == VK_NULL_HANDLE && ctxLocal->getAssets())
+        {
+            // Fallback to a neutral 0.5 value (flat normal) to avoid biasing noise math.
+            noiseView = ctxLocal->getAssets()->fallbackFlatNormalView();
+        }
+        if (noiseView == VK_NULL_HANDLE)
+        {
+            return;
+        }
+
         DescriptorWriter writer;
         writer.write_image(0, hdrView, ctxLocal->getSamplers()->defaultLinear(),
                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.write_image(1, posView, ctxLocal->getSamplers()->defaultLinear(),
                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.write_buffer(2, plumeBuffer, static_cast<size_t>(plumeBufferSize), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.write_image(3, noiseView, ctxLocal->getSamplers()->defaultLinear(),
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.update_set(deviceManager->device(), inputSet);
     }
 

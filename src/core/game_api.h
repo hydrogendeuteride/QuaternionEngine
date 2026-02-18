@@ -1136,6 +1136,9 @@ public:
 
     size_t get_max_rocket_plumes() const;
 
+    void set_rocket_plume_noise_texture_path(const std::string& assetPath);
+    std::string get_rocket_plume_noise_texture_path() const;
+
     // ------------------------------------------------------------------------
     // Particle Systems
     // ------------------------------------------------------------------------

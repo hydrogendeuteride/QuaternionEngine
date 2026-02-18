@@ -3,6 +3,8 @@
 #include "render/renderpass.h"
 #include "render/graph/types.h"
 
+#include <string>
+
 class RenderGraph;
 class RGPassResources;
 
@@ -21,6 +23,8 @@ public:
     RGImageHandle register_graph(RenderGraph *graph, RGImageHandle hdrInput, RGImageHandle gbufPos);
 
 private:
+    void update_noise_texture(EngineContext *ctxLocal);
+
     void draw_plumes(VkCommandBuffer cmd,
                      EngineContext *context,
                      const RGPassResources &resources,
@@ -36,6 +40,9 @@ private:
 
     VkPipeline _pipeline = VK_NULL_HANDLE;
     VkPipelineLayout _pipelineLayout = VK_NULL_HANDLE;
+
+    uint32_t _noiseHandle = 0xFFFFFFFFu; // TextureCache::InvalidHandle
+    std::string _noisePath{};            // asset-relative, e.g. "vfx/simplex.ktx2"
 
     DeletionQueue _deletionQueue;
 };
