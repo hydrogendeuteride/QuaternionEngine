@@ -90,6 +90,8 @@ add_executable (vulkan_engine
   render/passes/sun_disk.cpp
   render/passes/geometry.h
   render/passes/geometry.cpp
+  render/passes/decal.h
+  render/passes/decal.cpp
   render/passes/lighting.h
   render/passes/lighting.cpp
   render/passes/shadow.h

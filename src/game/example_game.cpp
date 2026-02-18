@@ -11,6 +11,7 @@
 
 #include <fmt/core.h>
 #include <glm/gtx/transform.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include <algorithm>
 #include <cmath>
 
@@ -58,6 +59,7 @@ namespace Game
 
         // Setup game scene (entities + render/physics resources)
         setup_scene();
+        spawn_test_decals();
 
         // Rocket-plume style Mesh VFX demo:
         // - no albedo texture (falls back to white)
@@ -308,6 +310,7 @@ namespace Game
         if (_runtime)
         {
             auto &api = _runtime->api();
+            clear_test_decals();
             if (_imgui_example_texture_id != nullptr)
             {
                 api.free_imgui_texture(_imgui_example_texture_id);
@@ -523,6 +526,97 @@ namespace Game
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         install_contact_callbacks();
 #endif
+    }
+
+    void ExampleGame::spawn_test_decals()
+    {
+        if (!_runtime)
+        {
+            return;
+        }
+
+        auto &api = _runtime->api();
+        clear_test_decals();
+        if (!api.get_debug_draw_enabled())
+        {
+            api.set_debug_draw_enabled(true);
+        }
+
+        GameAPI::TextureLoadParams albedo_params{};
+        albedo_params.srgb = true;
+        albedo_params.mipmapped = true;
+        _decal_albedo_texture = api.load_texture("velvet.png", albedo_params);
+        if (_decal_albedo_texture != GameAPI::InvalidTexture)
+        {
+            api.pin_texture(_decal_albedo_texture);
+        }
+
+        GameAPI::TextureLoadParams normal_params{};
+        normal_params.srgb = false;
+        normal_params.mipmapped = true;
+        normal_params.channels = GameAPI::TextureChannels::RG;
+        _decal_normal_texture = api.load_texture("velvet_normal.png", normal_params);
+        if (_decal_normal_texture != GameAPI::InvalidTexture)
+        {
+            api.pin_texture(_decal_normal_texture);
+        }
+
+        GameAPI::Decal box{};
+        box.shape = GameAPI::DecalShape::Box;
+        box.position = glm::dvec3(-1.5, 0.6, -1.0);
+        box.rotation = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        box.halfExtents = glm::vec3(2.2f, 2.2f, 0.8f);
+        box.albedoTexture = _decal_albedo_texture;
+        box.normalTexture = _decal_normal_texture;
+        box.tint = glm::vec3(1.0f, 0.95f, 0.95f);
+        box.opacity = 0.9f;
+        box.normalStrength = 1.0f;
+
+        GameAPI::Decal sphere{};
+        sphere.shape = GameAPI::DecalShape::Sphere;
+        sphere.position = glm::dvec3(3.0, 1.4, 0.5);
+        sphere.rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        sphere.halfExtents = glm::vec3(1.2f, 1.2f, 1.2f);
+        sphere.albedoTexture = _decal_albedo_texture;
+        sphere.normalTexture = _decal_normal_texture;
+        sphere.tint = glm::vec3(0.8f, 0.9f, 1.0f);
+        sphere.opacity = 0.8f;
+        sphere.normalStrength = 0.9f;
+
+        const bool box_ok = api.set_decal(_decal_box_name, box);
+        const bool sphere_ok = api.set_decal(_decal_sphere_name, sphere);
+        _decal_test_spawned = box_ok || sphere_ok;
+
+        if (!_decal_test_spawned)
+        {
+            fmt::println("[ExampleGame] Failed to spawn decal test fixtures.");
+        }
+    }
+
+    void ExampleGame::clear_test_decals()
+    {
+        if (!_runtime)
+        {
+            return;
+        }
+
+        auto &api = _runtime->api();
+        (void) api.remove_decal(_decal_box_name);
+        (void) api.remove_decal(_decal_sphere_name);
+        _decal_test_spawned = false;
+
+        if (_decal_albedo_texture != GameAPI::InvalidTexture)
+        {
+            api.unpin_texture(_decal_albedo_texture);
+            api.unload_texture(_decal_albedo_texture);
+            _decal_albedo_texture = GameAPI::InvalidTexture;
+        }
+        if (_decal_normal_texture != GameAPI::InvalidTexture)
+        {
+            api.unpin_texture(_decal_normal_texture);
+            api.unload_texture(_decal_normal_texture);
+            _decal_normal_texture = GameAPI::InvalidTexture;
+        }
     }
 
     void ExampleGame::build_box_stack_layout()

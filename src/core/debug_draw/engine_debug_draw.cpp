@@ -115,6 +115,38 @@ void debug_draw_engine_layers(DebugDrawSystem *dd,
         }
     }
 
+    // Decals: visualize projection bounds (box OBB / sphere radius).
+    if (scene && layer_on(DebugDrawLayer::Misc))
+    {
+        const DrawContext &draw_context = scene->getMainDrawContext();
+        for (const DecalDraw &decal : draw_context.Decals)
+        {
+            const WorldVec3 center_world = local_to_world(decal.center_local, origin_world);
+            const float alpha = std::clamp(decal.opacity, 0.2f, 0.95f);
+
+            if (decal.shape == DecalShape::Sphere)
+            {
+                const float radius = std::max(decal.half_extents.x, std::max(decal.half_extents.y, decal.half_extents.z));
+                dd->add_sphere(center_world,
+                               radius,
+                               glm::vec4(0.45f, 0.9f, 1.0f, alpha),
+                               0.0f,
+                               DebugDepth::AlwaysOnTop,
+                               DebugDrawLayer::Misc);
+            }
+            else
+            {
+                dd->add_obb(center_world,
+                            decal.rotation,
+                            glm::max(decal.half_extents, glm::vec3(1.0e-3f)),
+                            glm::vec4(1.0f, 0.75f, 0.25f, alpha),
+                            0.0f,
+                            DebugDepth::AlwaysOnTop,
+                            DebugDrawLayer::Misc);
+            }
+        }
+    }
+
     // Particles: emitter + spawn radius + emission cone
     if (layer_on(DebugDrawLayer::Particles) && render_pass_manager)
     {

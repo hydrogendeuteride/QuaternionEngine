@@ -36,6 +36,8 @@ private:
     void setup_scene();
     void build_box_stack_layout();
     void reset_scene();
+    void spawn_test_decals();
+    void clear_test_decals();
 
     // Debug helpers
     void install_contact_callbacks();
@@ -137,6 +139,13 @@ private:
     std::string _plume_inner_instance_name{"example.mesh_vfx.plume.inner_instance"};
     bool _plume_spawned{false};
     WorldVec3 _plume_nozzle_pos{2.5, 1.9, -2.0};
+
+    // Decal test fixtures (one box + one sphere).
+    std::string _decal_box_name{"example.decal.box"};
+    std::string _decal_sphere_name{"example.decal.sphere"};
+    GameAPI::TextureHandle _decal_albedo_texture{GameAPI::InvalidTexture};
+    GameAPI::TextureHandle _decal_normal_texture{GameAPI::InvalidTexture};
+    bool _decal_test_spawned{false};
 
     // Constants
     static constexpr float SPHERE_RADIUS = 0.5f;

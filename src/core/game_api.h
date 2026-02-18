@@ -85,6 +85,12 @@ enum class PrimitiveType
     Capsule
 };
 
+enum class DecalShape : uint8_t
+{
+    Box = 0,
+    Sphere = 1
+};
+
 // Simple procedural planet (sphere mesh) parameters
 struct PlanetSphere
 {
@@ -257,6 +263,20 @@ struct PrimitiveMaterial
     glm::vec4 colorFactor{1.0f};   // Base color multiplier (RGBA)
     float metallic{0.0f};          // Metallic factor (0-1)
     float roughness{0.5f};         // Roughness factor (0-1)
+};
+
+struct Decal
+{
+    DecalShape shape{DecalShape::Box};
+    glm::dvec3 position{0.0, 0.0, 0.0};
+    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec3 scale{1.0f, 1.0f, 1.0f};
+    glm::vec3 halfExtents{0.5f, 0.5f, 0.5f};
+    TextureHandle albedoTexture{InvalidTexture};
+    TextureHandle normalTexture{InvalidTexture};
+    glm::vec3 tint{1.0f, 1.0f, 1.0f};
+    float opacity{1.0f};
+    float normalStrength{1.0f};
 };
 
 struct MeshVfxMaterialSettings
@@ -805,6 +825,13 @@ public:
 
     // Remove mesh instance (primitives or custom meshes)
     bool remove_mesh_instance(const std::string& name);
+
+    // Deferred decals (projected into G-Buffer normal/albedo, max 128 active).
+    bool set_decal(const std::string& name, const Decal& decal);
+    bool get_decal(const std::string& name, Decal& out) const;
+    bool remove_decal(const std::string& name);
+    size_t get_decal_count() const;
+    void clear_decals();
 
     // Get/set mesh instance transform
     bool get_mesh_instance_transform(const std::string& name, Transform& out) const;

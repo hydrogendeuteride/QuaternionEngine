@@ -3,6 +3,7 @@
 #include "passes/background.h"
 #include "passes/sun_disk.h"
 #include "passes/geometry.h"
+#include "passes/decal.h"
 #include "passes/imgui_pass.h"
 #include "passes/lighting.h"
 #include "passes/ssr.h"
@@ -39,6 +40,10 @@ void RenderPassManager::init(EngineContext *context)
     auto geometryPass = std::make_unique<GeometryPass>();
     geometryPass->init(context);
     addPass(std::move(geometryPass));
+
+    auto decalPass = std::make_unique<DecalPass>();
+    decalPass->init(context);
+    addPass(std::move(decalPass));
 
     auto lightingPass = std::make_unique<LightingPass>();
     lightingPass->init(context);

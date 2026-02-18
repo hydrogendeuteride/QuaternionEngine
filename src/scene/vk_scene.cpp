@@ -195,6 +195,7 @@ void SceneManager::update_scene()
     mainDrawContext.OpaqueSurfaces.clear();
     mainDrawContext.TransparentSurfaces.clear();
     mainDrawContext.MeshVfxSurfaces.clear();
+    mainDrawContext.Decals.clear();
     mainDrawContext.nextID = 1;
     mainDrawContext.gltfNodeLocalOverrides = nullptr;
 
@@ -341,6 +342,36 @@ void SceneManager::update_scene()
             {
                 mainDrawContext.OpaqueSurfaces.push_back(obj);
             }
+        }
+    }
+
+    if (!dynamicDecals.empty())
+    {
+        std::vector<const std::pair<const std::string, DecalInstance> *> ordered;
+        ordered.reserve(dynamicDecals.size());
+        for (const auto &kv : dynamicDecals)
+        {
+            ordered.push_back(&kv);
+        }
+        std::sort(ordered.begin(), ordered.end(),
+                  [](const auto *a, const auto *b) { return a->first < b->first; });
+
+        const size_t drawCount = std::min<size_t>(kMaxDecals, ordered.size());
+        mainDrawContext.Decals.reserve(drawCount);
+        for (size_t i = 0; i < drawCount; ++i)
+        {
+            const DecalInstance &src = ordered[i]->second;
+            DecalDraw d{};
+            d.shape = src.shape;
+            d.center_local = world_to_local(src.center_world, origin_world);
+            d.rotation = src.rotation;
+            d.half_extents = src.half_extents;
+            d.albedoHandle = src.albedoHandle;
+            d.normalHandle = src.normalHandle;
+            d.tint = src.tint;
+            d.opacity = src.opacity;
+            d.normalStrength = src.normalStrength;
+            mainDrawContext.Decals.push_back(d);
         }
     }
 
@@ -665,6 +696,7 @@ void SceneManager::cleanup()
     // Explicitly clear dynamic instances first to drop any extra shared_ptrs
     // that could keep GPU resources alive.
     clearMeshInstances();
+    clearDecals();
     clearGLTFInstances();
 
     // On engine shutdown we know VulkanEngine::cleanup() has already called
@@ -823,6 +855,66 @@ bool SceneManager::removeMeshInstance(const std::string &name)
 void SceneManager::clearMeshInstances()
 {
     dynamicMeshInstances.clear();
+}
+
+bool SceneManager::setDecal(const std::string &name, const DecalInstance &decal)
+{
+    if (name.empty())
+    {
+        return false;
+    }
+
+    const auto it = dynamicDecals.find(name);
+    if (it == dynamicDecals.end() && dynamicDecals.size() >= kMaxDecals)
+    {
+        return false;
+    }
+
+    DecalInstance clamped = decal;
+    const float qlen2 = glm::dot(clamped.rotation, clamped.rotation);
+    if (qlen2 > 1.0e-8f)
+    {
+        clamped.rotation = glm::normalize(clamped.rotation);
+    }
+    else
+    {
+        clamped.rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    }
+
+    clamped.half_extents = glm::max(glm::abs(clamped.half_extents), glm::vec3(1.0e-3f));
+    if (clamped.shape == DecalShape::Sphere)
+    {
+        const float r = std::max(clamped.half_extents.x, std::max(clamped.half_extents.y, clamped.half_extents.z));
+        clamped.half_extents = glm::vec3(r);
+    }
+    clamped.opacity = glm::clamp(clamped.opacity, 0.0f, 1.0f);
+    clamped.normalStrength = std::max(0.0f, clamped.normalStrength);
+    clamped.tint = glm::max(clamped.tint, glm::vec3(0.0f));
+
+    dynamicDecals[name] = clamped;
+    return true;
+}
+
+bool SceneManager::getDecal(const std::string &name, DecalInstance &outDecal) const
+{
+    const auto it = dynamicDecals.find(name);
+    if (it == dynamicDecals.end())
+    {
+        return false;
+    }
+
+    outDecal = it->second;
+    return true;
+}
+
+bool SceneManager::removeDecal(const std::string &name)
+{
+    return dynamicDecals.erase(name) > 0;
+}
+
+void SceneManager::clearDecals()
+{
+    dynamicDecals.clear();
 }
 
 void SceneManager::addGLTFInstance(const std::string &name, std::shared_ptr<LoadedGLTF> scene,

@@ -236,6 +236,73 @@ bool Engine::remove_mesh_instance(const std::string& name)
     return _engine->_sceneManager ? _engine->_sceneManager->removeMeshInstance(name) : false;
 }
 
+bool Engine::set_decal(const std::string& name, const Decal& decal)
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    SceneManager::DecalInstance inst{};
+    inst.shape = (decal.shape == GameAPI::DecalShape::Sphere) ? ::DecalShape::Sphere : ::DecalShape::Box;
+    inst.center_world = WorldVec3(decal.position);
+    inst.rotation = decal.rotation;
+
+    glm::vec3 scale = glm::abs(decal.scale);
+    inst.half_extents = glm::abs(decal.halfExtents) * scale;
+    inst.albedoHandle = static_cast<uint32_t>(decal.albedoTexture);
+    inst.normalHandle = static_cast<uint32_t>(decal.normalTexture);
+    inst.tint = decal.tint;
+    inst.opacity = decal.opacity;
+    inst.normalStrength = decal.normalStrength;
+
+    return _engine->_sceneManager->setDecal(name, inst);
+}
+
+bool Engine::get_decal(const std::string& name, Decal& out) const
+{
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    SceneManager::DecalInstance inst{};
+    if (!_engine->_sceneManager->getDecal(name, inst))
+    {
+        return false;
+    }
+
+    out.shape = (inst.shape == ::DecalShape::Sphere) ? GameAPI::DecalShape::Sphere : GameAPI::DecalShape::Box;
+    out.position = glm::dvec3(inst.center_world);
+    out.rotation = inst.rotation;
+    out.scale = glm::vec3(1.0f, 1.0f, 1.0f);
+    out.halfExtents = inst.half_extents;
+    out.albedoTexture = static_cast<TextureHandle>(inst.albedoHandle);
+    out.normalTexture = static_cast<TextureHandle>(inst.normalHandle);
+    out.tint = inst.tint;
+    out.opacity = inst.opacity;
+    out.normalStrength = inst.normalStrength;
+    return true;
+}
+
+bool Engine::remove_decal(const std::string& name)
+{
+    return _engine && _engine->_sceneManager ? _engine->_sceneManager->removeDecal(name) : false;
+}
+
+size_t Engine::get_decal_count() const
+{
+    return _engine && _engine->_sceneManager ? _engine->_sceneManager->getDecalCount() : 0;
+}
+
+void Engine::clear_decals()
+{
+    if (_engine && _engine->_sceneManager)
+    {
+        _engine->_sceneManager->clearDecals();
+    }
+}
+
 bool Engine::get_mesh_instance_transform(const std::string& name, Transform& out) const
 {
     if (!_engine->_sceneManager) return false;

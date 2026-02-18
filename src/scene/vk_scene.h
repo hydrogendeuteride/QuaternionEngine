@@ -51,11 +51,31 @@ struct RenderObject
     Node *sourceNode = nullptr;
 };
 
+enum class DecalShape : uint8_t
+{
+    Box = 0,
+    Sphere = 1
+};
+
+struct DecalDraw
+{
+    DecalShape shape = DecalShape::Box;
+    glm::vec3 center_local{0.0f, 0.0f, 0.0f};
+    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec3 half_extents{0.5f, 0.5f, 0.5f};
+    uint32_t albedoHandle = 0xFFFFFFFFu;
+    uint32_t normalHandle = 0xFFFFFFFFu;
+    glm::vec3 tint{1.0f, 1.0f, 1.0f};
+    float opacity = 1.0f;
+    float normalStrength = 1.0f;
+};
+
 struct DrawContext
 {
     std::vector<RenderObject> OpaqueSurfaces;
     std::vector<RenderObject> TransparentSurfaces;
     std::vector<RenderObject> MeshVfxSurfaces;
+    std::vector<DecalDraw> Decals;
     // Monotonic counter used to assign stable per-frame object IDs.
     uint32_t nextID = 1;
     // Optional per-instance glTF node local overrides (additive layer in local space).
@@ -66,6 +86,8 @@ struct DrawContext
 class SceneManager
 {
 public:
+    static constexpr size_t kMaxDecals = 128;
+
     SceneManager();
     ~SceneManager();
     void init(EngineContext *context);
@@ -130,6 +152,25 @@ public:
     bool setMeshInstanceMaterial(const std::string &name, std::shared_ptr<GLTFMaterial> material);
     bool removeMeshInstance(const std::string &name);
     void clearMeshInstances();
+
+    struct DecalInstance
+    {
+        DecalShape shape = DecalShape::Box;
+        WorldVec3 center_world{0.0, 0.0, 0.0};
+        glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+        glm::vec3 half_extents{0.5f, 0.5f, 0.5f};
+        uint32_t albedoHandle = 0xFFFFFFFFu;
+        uint32_t normalHandle = 0xFFFFFFFFu;
+        glm::vec3 tint{1.0f, 1.0f, 1.0f};
+        float opacity = 1.0f;
+        float normalStrength = 1.0f;
+    };
+
+    bool setDecal(const std::string &name, const DecalInstance &decal);
+    bool getDecal(const std::string &name, DecalInstance &outDecal) const;
+    bool removeDecal(const std::string &name);
+    void clearDecals();
+    size_t getDecalCount() const { return dynamicDecals.size(); }
 
     // GLTF instances (runtime-spawned scenes with transforms)
     struct GLTFInstance
@@ -304,6 +345,7 @@ private:
     std::chrono::steady_clock::time_point _lastFrameTime{};
 
     std::unordered_map<std::string, MeshInstance> dynamicMeshInstances;
+    std::unordered_map<std::string, DecalInstance> dynamicDecals;
     std::unordered_map<std::string, GLTFInstance> dynamicGLTFInstances;
     // Keep GLTF assets alive until after the next frame fence to avoid destroying
     // GPU resources that might still be in-flight.

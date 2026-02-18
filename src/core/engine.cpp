@@ -45,6 +45,7 @@
 #include "core/debug_draw/debug_draw.h"
 #include "core/debug_draw/engine_debug_draw.h"
 #include "render/passes/geometry.h"
+#include "render/passes/decal.h"
 #include "render/passes/imgui_pass.h"
 #include "render/passes/lighting.h"
 #include "render/passes/clouds.h"
@@ -1328,6 +1329,10 @@ void VulkanEngine::draw()
                                                           _drawExtent,
                                                           _swapchainManager->swapchainExtent());
                 }
+            }
+            if (auto *decal = _renderPassManager->getPass<DecalPass>())
+            {
+                decal->register_graph(_renderGraph.get(), hGBufferPosition, hGBufferNormal, hGBufferAlbedo);
             }
             if (auto *lighting = _renderPassManager->getPass<LightingPass>())
             {

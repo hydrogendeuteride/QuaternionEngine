@@ -48,6 +48,8 @@ public:
 
     void enable_blending_alphablend();
 
+    void set_color_write_mask(VkColorComponentFlags mask);
+
     void set_color_attachment_format(VkFormat format);
     void set_color_attachment_formats(std::span<VkFormat> formats);
 

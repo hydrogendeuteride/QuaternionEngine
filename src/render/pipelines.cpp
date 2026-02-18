@@ -225,6 +225,11 @@ void PipelineBuilder::enable_blending_alphablend()
     _colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 }
 
+void PipelineBuilder::set_color_write_mask(VkColorComponentFlags mask)
+{
+    _colorBlendAttachment.colorWriteMask = mask;
+}
+
 void PipelineBuilder::set_color_attachment_format(VkFormat format)
 {
     _colorAttachmentFormats.clear();
