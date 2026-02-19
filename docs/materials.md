@@ -81,6 +81,30 @@ Mesh VFX is a dedicated forward-rendered material pass for animated procedural e
 
 - To disable animation effects, set `scrollVelocity1/2 = {0,0}`, `distortionStrength = 0`, `gradientStart = gradientEnd = 1.0`, and omit noise textures (they fall back to white = 1.0).
 
+Blackbody Emission Materials
+
+Blackbody materials repurpose the emissive texture slot (`emissiveTex`, binding=5) as a tileable noise input for procedural temperature-based emission. The heat pattern is computed in object space using `nozzle_blackbody_heat()` from `blackbody.glsl`, enabling effects like glowing nozzles, heated barrels, and re-entry surfaces.
+
+- Texture bindings (set=1, shared layout with PBR):
+  - binding=1–4: Standard PBR textures (albedo, metal-rough, normal, occlusion)
+  - binding=5: `emissiveTex` — **noise texture** (linear, tileable) when blackbody is enabled
+  - Fallback: `_blackImage` (no emission) when noise path is empty or blackbody is disabled
+
+- `extra[]` layout for blackbody:
+  - `extra[9]`  — (enable, intensity, tempMinK, tempMaxK)
+  - `extra[10]` — (noiseScale, noiseContrast, scrollU, scrollV)
+  - `extra[11]` — (heatAxisLocal.xyz, hotEndBias)
+  - `extra[12]` — (noiseSpeed, 0, 0, 0)
+  - `extra[13]` — (hotRangeStart, hotRangeEnd, 0, 0)
+
+- When blackbody is enabled (`extra[9].x > 0.5`), standard `emissiveFactor` (`extra[1]`) is zeroed to avoid double emission.
+
+- Two usage modes:
+  1. **Standalone**: `create_or_update_blackbody_material()` — full PBR + blackbody for procedural meshes.
+  2. **glTF patch**: `set_gltf_material_blackbody()` — patches an existing glTF material's constants and emissive binding at runtime.
+
+- See [Blackbody](gameapi/Blackbody.md) for full API reference and usage examples.
+
 G-Buffer Outputs
 - The geometry pass (`gbuffer.frag`) writes 4 render targets:
   - `outPos` (location 0): World position (xyz) + valid flag (w=1).

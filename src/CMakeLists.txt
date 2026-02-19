@@ -29,6 +29,7 @@ add_executable (vulkan_engine
   core/game_api/game_api_postfx.cpp
   core/game_api/game_api_particles.cpp
   core/game_api/game_api_mesh_vfx.cpp
+  core/game_api/game_api_blackbody.cpp
   core/game_api/game_api_volumetrics.cpp
   core/game_api/game_api_rocket_plumes.cpp
   core/game_api/game_api_debug.cpp

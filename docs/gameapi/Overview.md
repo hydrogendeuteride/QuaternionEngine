@@ -114,8 +114,10 @@ See: [Camera](Camera.md)
 - Create particle systems with flipbook animation
 - Manage voxel volumes (clouds, smoke, flame)
 - Add procedural planets with atmosphere
+- Blackbody emission materials for hot-metal effects (nozzles, barrels)
+- Mesh VFX materials for animated procedural effects (exhaust, shields)
 
-See: [Particles](Particles.md), [Volumetrics](Volumetrics.md), [Planets](Planets.md)
+See: [Particles](Particles.md), [Volumetrics](Volumetrics.md), [Planets](Planets.md), [Blackbody](Blackbody.md), [Mesh VFX](MeshVFX.md)
 
 ### Post-Processing
 - Tonemapping (Reinhard, ACES)

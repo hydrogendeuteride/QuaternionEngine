@@ -40,6 +40,8 @@ struct Bounds
 struct GLTFMaterial
 {
     MaterialInstance data;
+    // Index into LoadedGLTF::materialDataBuffer (MaterialConstants array) for runtime patches.
+    uint32_t constants_index = 0;
 };
 
 struct GeoSurface

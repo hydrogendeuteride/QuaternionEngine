@@ -45,6 +45,31 @@ namespace
         const std::string ext = p.extension().string();
         return (p.parent_path() / (stem + ".colliders" + ext)).string();
     }
+    static void clamp_blackbody_settings(AssetManager::BlackbodySettings &s)
+    {
+        s.intensity = std::max(s.intensity, 0.0f);
+        s.tempMinK = std::max(s.tempMinK, 0.0f);
+        s.tempMaxK = std::max(s.tempMaxK, 0.0f);
+        s.noiseScale = std::max(s.noiseScale, 0.001f);
+        s.noiseContrast = std::max(s.noiseContrast, 0.001f);
+        s.noiseSpeed = std::max(s.noiseSpeed, 0.0f);
+        float axis_len2 = glm::dot(s.heatAxisLocal, s.heatAxisLocal);
+        if (axis_len2 < 1e-8f)
+        {
+            s.heatAxisLocal = glm::vec3(0.0f, 1.0f, 0.0f);
+        }
+        else
+        {
+            s.heatAxisLocal = glm::normalize(s.heatAxisLocal);
+        }
+        s.hotEndBias = std::clamp(s.hotEndBias, -1.0f, 1.0f);
+        s.hotRangeStart = std::clamp(s.hotRangeStart, 0.0f, 1.0f);
+        s.hotRangeEnd = std::clamp(s.hotRangeEnd, 0.0f, 1.0f);
+        if (s.hotRangeEnd <= s.hotRangeStart)
+        {
+            s.hotRangeEnd = std::min(1.0f, s.hotRangeStart + 0.01f);
+        }
+    }
 } // namespace
 
 void AssetManager::init(VulkanEngine *engine)
@@ -87,11 +112,23 @@ void AssetManager::cleanup()
                 _engine->_textureCache->unwatchSet(kv.second.material->data.materialSet);
             }
         }
+        for (auto &kv: _blackbodyMaterials)
+        {
+            if (kv.second.constantsBuffer.buffer != VK_NULL_HANDLE)
+            {
+                _engine->_resourceManager->destroy_buffer(kv.second.constantsBuffer);
+            }
+            if (_engine->_textureCache && kv.second.material)
+            {
+                _engine->_textureCache->unwatchSet(kv.second.material->data.materialSet);
+            }
+        }
     }
     _meshCache.clear();
     _meshMaterialBuffers.clear();
     _meshOwnedImages.clear();
     _meshVfxMaterials.clear();
+    _blackbodyMaterials.clear();
     {
         std::lock_guard<std::mutex> lock(_gltfMutex);
         _gltfCacheByPath.clear();
@@ -933,6 +970,325 @@ std::shared_ptr<GLTFMaterial> AssetManager::getMeshVfxMaterial(const std::string
         return {};
     }
     return it->second.material;
+}
+
+bool AssetManager::createOrUpdateBlackbodyMaterial(const std::string &name, const BlackbodyMaterialSettings &settings)
+{
+    if (!_engine || !_engine->_resourceManager || !_engine->_samplerManager || !_engine->_deviceManager)
+    {
+        return false;
+    }
+    if (name.empty())
+    {
+        return false;
+    }
+
+    BlackbodyMaterialSettings clamped = settings;
+    clamped.metallic = std::clamp(clamped.metallic, 0.0f, 1.0f);
+    clamped.roughness = std::clamp(clamped.roughness, 0.04f, 1.0f);
+    clamped.normalScale = std::max(clamped.normalScale, 0.0f);
+    clamped.occlusionStrength = std::clamp(clamped.occlusionStrength, 0.0f, 1.0f);
+    clamp_blackbody_settings(clamped.blackbody);
+
+    const bool bb_enabled =
+        (!clamped.blackbody.noisePath.empty()) &&
+        (clamped.blackbody.intensity > 0.0f) &&
+        (clamped.blackbody.tempMaxK > clamped.blackbody.tempMinK);
+
+    GLTFMetallic_Roughness::MaterialConstants constants{};
+    constants.colorFactors = clamped.colorFactor;
+    constants.metal_rough_factors = glm::vec4(clamped.metallic, clamped.roughness, 0.0f, 0.0f);
+    constants.extra[0].x = clamped.normalScale;
+
+    if (!clamped.occlusionPath.empty())
+    {
+        constants.extra[0].y = clamped.occlusionStrength;
+        constants.extra[0].z = 1.0f;
+    }
+
+    // Disable standard emissive; when blackbody is enabled, emissiveTex is repurposed as noise.
+    constants.extra[1] = glm::vec4(0.0f);
+
+    constants.extra[9] = glm::vec4(bb_enabled ? 1.0f : 0.0f,
+                                   clamped.blackbody.intensity,
+                                   clamped.blackbody.tempMinK,
+                                   clamped.blackbody.tempMaxK);
+    constants.extra[10] = glm::vec4(clamped.blackbody.noiseScale,
+                                    clamped.blackbody.noiseContrast,
+                                    clamped.blackbody.noiseScroll.x,
+                                    clamped.blackbody.noiseScroll.y);
+    constants.extra[11] = glm::vec4(clamped.blackbody.heatAxisLocal,
+                                    clamped.blackbody.hotEndBias);
+    constants.extra[12] = glm::vec4(clamped.blackbody.noiseSpeed, 0.0f, 0.0f, 0.0f);
+    constants.extra[13] = glm::vec4(clamped.blackbody.hotRangeStart,
+                                    clamped.blackbody.hotRangeEnd,
+                                    0.0f,
+                                    0.0f);
+
+    auto patch_texture_watches = [&](const std::shared_ptr<GLTFMaterial> &materialPtr) {
+        if (!_engine->_textureCache || !materialPtr)
+        {
+            return;
+        }
+
+        VkDescriptorSet set = materialPtr->data.materialSet;
+        if (set == VK_NULL_HANDLE)
+        {
+            return;
+        }
+
+        _engine->_textureCache->unwatchSet(set);
+
+        auto watchBindingPath = [&](const std::string &path,
+                                    bool srgb,
+                                    uint32_t binding,
+                                    VkImageView fallback,
+                                    TextureCache::TextureKey::ChannelsHint channels = TextureCache::TextureKey::ChannelsHint::Auto)
+        {
+            if (path.empty()) return;
+
+            TextureCache::TextureKey key{};
+            key.kind = TextureCache::TextureKey::SourceKind::FilePath;
+            key.path = assetPath(path);
+            key.srgb = srgb;
+            key.mipmapped = true;
+            key.channels = channels;
+
+            std::string id = std::string("BB:") + key.path + (key.srgb ? "#sRGB" : "#UNORM");
+            key.hash = texcache::fnv1a64(id);
+
+            VkSampler sampler = _engine->_samplerManager->defaultLinear();
+            auto handle = _engine->_textureCache->request(key, sampler);
+            _engine->_textureCache->watchBinding(handle, set, binding, sampler, fallback);
+        };
+
+        const bool wantAlbedo = !clamped.albedoPath.empty();
+        const VkImageView albedoFallback = wantAlbedo ? _engine->_errorCheckerboardImage.imageView : _engine->_whiteImage.imageView;
+        watchBindingPath(clamped.albedoPath, clamped.albedoSRGB, 1u, albedoFallback);
+
+        watchBindingPath(clamped.metalRoughPath, clamped.metalRoughSRGB, 2u, _engine->_whiteImage.imageView);
+
+        watchBindingPath(clamped.normalPath, clamped.normalSRGB, 3u, _engine->_flatNormalImage.imageView,
+                         TextureCache::TextureKey::ChannelsHint::RG);
+
+        watchBindingPath(clamped.occlusionPath, clamped.occlusionSRGB, 4u, _engine->_whiteImage.imageView,
+                         TextureCache::TextureKey::ChannelsHint::R);
+
+        VkSampler sampler = _engine->_samplerManager->defaultLinear();
+        if (bb_enabled)
+        {
+            // Noise is always treated as linear.
+            TextureCache::TextureKey key{};
+            key.kind = TextureCache::TextureKey::SourceKind::FilePath;
+            key.path = assetPath(clamped.blackbody.noisePath);
+            key.srgb = false;
+            key.mipmapped = true;
+            std::string id = std::string("BB_NOISE:") + key.path + "#UNORM";
+            key.hash = texcache::fnv1a64(id);
+
+            auto handle = _engine->_textureCache->request(key, sampler);
+            _engine->_textureCache->watchBindingReplace(handle, set, 5u, sampler, _engine->_blackImage.imageView);
+        }
+        else
+        {
+            // Clear any existing watch and force emissiveTex to black.
+            _engine->_textureCache->watchBindingReplace(TextureCache::InvalidHandle, set, 5u, sampler,
+                                                       _engine->_blackImage.imageView);
+        }
+    };
+
+    auto it = _blackbodyMaterials.find(name);
+    if (it != _blackbodyMaterials.end())
+    {
+        BlackbodyMaterialRecord &rec = it->second;
+        if (rec.constantsBuffer.buffer == VK_NULL_HANDLE || rec.material == nullptr)
+        {
+            return false;
+        }
+
+        VmaAllocationInfo allocInfo{};
+        vmaGetAllocationInfo(_engine->_deviceManager->allocator(), rec.constantsBuffer.allocation, &allocInfo);
+        auto *dst = static_cast<GLTFMetallic_Roughness::MaterialConstants *>(allocInfo.pMappedData);
+        if (!dst)
+        {
+            return false;
+        }
+        *dst = constants;
+        vmaFlushAllocation(_engine->_deviceManager->allocator(),
+                           rec.constantsBuffer.allocation,
+                           0,
+                           sizeof(GLTFMetallic_Roughness::MaterialConstants));
+
+        rec.settings = clamped;
+        patch_texture_watches(rec.material);
+        return true;
+    }
+
+    GLTFMetallic_Roughness::MaterialResources res{};
+    res.colorImage = clamped.albedoPath.empty() ? _engine->_whiteImage : _engine->_errorCheckerboardImage;
+    res.colorSampler = _engine->_samplerManager->defaultLinear();
+    res.metalRoughImage = _engine->_whiteImage;
+    res.metalRoughSampler = _engine->_samplerManager->defaultLinear();
+    res.normalImage = _engine->_flatNormalImage;
+    res.normalSampler = _engine->_samplerManager->defaultLinear();
+    res.occlusionImage = _engine->_whiteImage;
+    res.occlusionSampler = _engine->_samplerManager->defaultLinear();
+    res.emissiveImage = _engine->_blackImage;
+    res.emissiveSampler = _engine->_samplerManager->defaultLinear();
+
+    AllocatedBuffer constantsBuffer = createMaterialBufferWithConstants(constants);
+    res.dataBuffer = constantsBuffer.buffer;
+    res.dataBufferOffset = 0;
+
+    auto mat = createMaterial(MaterialPass::MainColor, res);
+    if (!mat)
+    {
+        _engine->_resourceManager->destroy_buffer(constantsBuffer);
+        return false;
+    }
+
+    BlackbodyMaterialRecord rec{};
+    rec.settings = clamped;
+    rec.material = mat;
+    rec.constantsBuffer = constantsBuffer;
+    _blackbodyMaterials.emplace(name, std::move(rec));
+    patch_texture_watches(mat);
+    return true;
+}
+
+bool AssetManager::removeBlackbodyMaterial(const std::string &name)
+{
+    auto it = _blackbodyMaterials.find(name);
+    if (it == _blackbodyMaterials.end())
+    {
+        return false;
+    }
+    if (it->second.material && it->second.material.use_count() > 1)
+    {
+        // In use by one or more meshes.
+        return false;
+    }
+    if (_engine && _engine->_textureCache && it->second.material)
+    {
+        _engine->_textureCache->unwatchSet(it->second.material->data.materialSet);
+    }
+    if (_engine && _engine->_resourceManager && it->second.constantsBuffer.buffer != VK_NULL_HANDLE)
+    {
+        _engine->_resourceManager->destroy_buffer(it->second.constantsBuffer);
+    }
+    _blackbodyMaterials.erase(it);
+    return true;
+}
+
+bool AssetManager::getBlackbodyMaterialSettings(const std::string &name, BlackbodyMaterialSettings &out) const
+{
+    auto it = _blackbodyMaterials.find(name);
+    if (it == _blackbodyMaterials.end())
+    {
+        return false;
+    }
+    out = it->second.settings;
+    return true;
+}
+
+std::shared_ptr<GLTFMaterial> AssetManager::getBlackbodyMaterial(const std::string &name) const
+{
+    auto it = _blackbodyMaterials.find(name);
+    if (it == _blackbodyMaterials.end())
+    {
+        return {};
+    }
+    return it->second.material;
+}
+
+bool AssetManager::applyBlackbodyToGLTFMaterial(LoadedGLTF &scene,
+                                                const std::string &materialName,
+                                                const BlackbodySettings &settings)
+{
+    if (!_engine || !_engine->_deviceManager || !_engine->_samplerManager)
+    {
+        return false;
+    }
+    if (materialName.empty())
+    {
+        return false;
+    }
+    auto it = scene.materials.find(materialName);
+    if (it == scene.materials.end() || !it->second)
+    {
+        return false;
+    }
+    if (scene.materialDataBuffer.buffer == VK_NULL_HANDLE || !scene.materialDataBuffer.info.pMappedData)
+    {
+        return false;
+    }
+
+    auto *materials = static_cast<GLTFMetallic_Roughness::MaterialConstants *>(scene.materialDataBuffer.info.pMappedData);
+    const uint32_t idx = it->second->constants_index;
+
+    BlackbodySettings clamped = settings;
+    clamp_blackbody_settings(clamped);
+
+    const bool bb_enabled =
+        (!clamped.noisePath.empty()) &&
+        (clamped.intensity > 0.0f) &&
+        (clamped.tempMaxK > clamped.tempMinK);
+
+    GLTFMetallic_Roughness::MaterialConstants &c = materials[idx];
+    c.extra[9] = glm::vec4(bb_enabled ? 1.0f : 0.0f,
+                           clamped.intensity,
+                           clamped.tempMinK,
+                           clamped.tempMaxK);
+    c.extra[10] = glm::vec4(clamped.noiseScale,
+                            clamped.noiseContrast,
+                            clamped.noiseScroll.x,
+                            clamped.noiseScroll.y);
+    c.extra[11] = glm::vec4(clamped.heatAxisLocal,
+                            clamped.hotEndBias);
+    c.extra[12] = glm::vec4(clamped.noiseSpeed, 0.0f, 0.0f, 0.0f);
+    c.extra[13] = glm::vec4(clamped.hotRangeStart,
+                            clamped.hotRangeEnd,
+                            0.0f,
+                            0.0f);
+    // Avoid sampling the noise texture as emissive when blackbody is disabled.
+    c.extra[1].x = 0.0f;
+    c.extra[1].y = 0.0f;
+    c.extra[1].z = 0.0f;
+
+    VkDeviceSize offset = static_cast<VkDeviceSize>(idx) * sizeof(GLTFMetallic_Roughness::MaterialConstants);
+    vmaFlushAllocation(_engine->_deviceManager->allocator(),
+                       scene.materialDataBuffer.allocation,
+                       offset,
+                       sizeof(GLTFMetallic_Roughness::MaterialConstants));
+
+    if (!_engine->_textureCache || it->second->data.materialSet == VK_NULL_HANDLE)
+    {
+        return true;
+    }
+
+    VkDescriptorSet set = it->second->data.materialSet;
+    VkSampler sampler = _engine->_samplerManager->defaultLinear();
+
+    if (bb_enabled)
+    {
+        TextureCache::TextureKey key{};
+        key.kind = TextureCache::TextureKey::SourceKind::FilePath;
+        key.path = assetPath(clamped.noisePath);
+        key.srgb = false;
+        key.mipmapped = true;
+        std::string id = std::string("BB_NOISE:") + key.path + "#UNORM";
+        key.hash = texcache::fnv1a64(id);
+
+        auto handle = _engine->_textureCache->request(key, sampler);
+        _engine->_textureCache->watchBindingReplace(handle, set, 5u, sampler, _engine->_blackImage.imageView);
+    }
+    else
+    {
+        _engine->_textureCache->watchBindingReplace(TextureCache::InvalidHandle, set, 5u, sampler,
+                                                   _engine->_blackImage.imageView);
+    }
+
+    return true;
 }
 
 VkImageView AssetManager::fallbackCheckerboardView() const

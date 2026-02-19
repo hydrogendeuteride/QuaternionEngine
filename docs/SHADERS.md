@@ -23,6 +23,12 @@
     - `vec4 colorFactors;`
     - `vec4 metal_rough_factors; // x = metallic, y = roughness`
     - `vec4 extra[14];            // extra[0].x = normalScale`
+    - Blackbody emission (optional):
+      - `extra[9]  = vec4(enable, intensity, tempMinK, tempMaxK)`
+      - `extra[10] = vec4(noiseScale, noiseContrast, scrollU, scrollV)`
+      - `extra[11] = vec4(heatAxisLocal.xyz, hotEndBias)`
+      - `extra[12] = vec4(noiseSpeed, 0, 0, 0)` (`noiseSpeed=0` keeps pattern static)
+      - `extra[13] = vec4(hotRangeStart, hotRangeEnd, 0, 0)`
   - Material texture bindings (set=1):
     - binding=1 `colorTex`, binding=2 `metalRoughTex`, binding=3 `normalMap`, binding=4 `occlusionTex`, binding=5 `emissiveTex`.
 
@@ -57,3 +63,4 @@ GLSL Includes
 | `input_structures.glsl` | SceneData UBO (camera, lights, shadow cascades, `shadowTuning`, `timeParams`, RT options), material bindings, light structs |
 | `lighting_common.glsl` | BRDF evaluation, point light helpers |
 | `ibl_common.glsl` | IBL split-sum, SH irradiance |
+| `blackbody.glsl` | Blackbody Kelvin→RGB conversion, triplanar noise, `nozzle_blackbody_heat()`, `evaluate_blackbody_emissive()` |

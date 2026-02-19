@@ -7,12 +7,15 @@
 #include "ibl_common.glsl"
 #include "lighting_common.glsl"
 #include "planet_shadow.glsl"
+#include "blackbody.glsl"
 
 layout (location = 0) in vec3 inNormal;
 layout (location = 1) in vec3 inColor;
 layout (location = 2) in vec2 inUV;
 layout (location = 3) in vec3 inWorldPos;
 layout (location = 4) in vec4 inTangent;
+layout (location = 5) in vec3 inObjectPos;
+layout (location = 6) in vec3 inObjectNormal;
 
 layout (location = 0) out vec4 outFragColor;
 
@@ -116,24 +119,32 @@ void main()
         ao = 1.0 - aoStrength + aoStrength * aoTex;
     }
 
-    // Emissive from texture and factor
-    vec3 emissive = vec3(0.0);
-    vec3 emissiveFactor = materialData.extra[1].rgb;
-    if (any(greaterThan(emissiveFactor, vec3(0.0))))
+    // Emissive:
+    // - default: emissive texture * emissiveFactor
+    // - optional: object-space blackbody emission (emissiveTex reused as noise)
+    vec3 emissive = evaluate_blackbody_emissive(emissiveTex,
+        materialData.extra[9], materialData.extra[10], materialData.extra[11],
+        materialData.extra[12], materialData.extra[13],
+        inObjectPos, inObjectNormal, inUV, sceneData.timeParams.x);
+    if (emissive == vec3(0.0) && materialData.extra[9].x <= 0.5)
     {
-        vec3 emissiveSample = texture(emissiveTex, inUV).rgb;
-        emissive = emissiveSample * emissiveFactor;
-
-        // Planet night emission: only show emission on the dark side of planet surfaces
-        // Convention: extra[2].y > 0 => planet material
-        bool isPlanet = (materialData.extra[2].y > 0.0);
-        if (isPlanet)
+        vec3 emissiveFactor = materialData.extra[1].rgb;
+        if (any(greaterThan(emissiveFactor, vec3(0.0))))
         {
-            float NdotL = max(dot(N, Lsun), 0.0);
-            float nightFactor = 1.0 - smoothstep(0.0, 0.15, NdotL);
-            float emissiveLuma = dot(emissive, vec3(0.2126, 0.7152, 0.0722));
-            float brightMask = smoothstep(0.08, 0.30, emissiveLuma);
-            emissive *= nightFactor * brightMask;
+            vec3 emissiveSample = texture(emissiveTex, inUV).rgb;
+            emissive = emissiveSample * emissiveFactor;
+
+            // Planet night emission: only show emission on the dark side of planet surfaces
+            // Convention: extra[2].y > 0 => planet material
+            bool isPlanet = (materialData.extra[2].y > 0.0);
+            if (isPlanet)
+            {
+                float NdotL = max(dot(N, Lsun), 0.0);
+                float nightFactor = 1.0 - smoothstep(0.0, 0.15, NdotL);
+                float emissiveLuma = dot(emissive, vec3(0.2126, 0.7152, 0.0722));
+                float brightMask = smoothstep(0.08, 0.30, emissiveLuma);
+                emissive *= nightFactor * brightMask;
+            }
         }
     }
 

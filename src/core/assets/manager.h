@@ -48,6 +48,52 @@ public:
         float emissionStrength{1.f};
     };
 
+    struct BlackbodySettings
+    {
+        // Tileable noise texture path relative to assets/ (bound to emissiveTex).
+        std::string noisePath;
+        // Emission control
+        float intensity{1.0f};
+        float tempMinK{1000.0f};
+        float tempMaxK{4000.0f};
+        // Noise sampling in object space
+        float noiseScale{1.0f};
+        float noiseContrast{1.0f};
+        glm::vec2 noiseScroll{0.0f, 0.0f};
+        // Animation speed multiplier (1.0 = previous behavior, lower = slower).
+        float noiseSpeed{1.0f};
+        // Local-space axis and hot-end selection for nozzle/barrel-like heat falloff.
+        glm::vec3 heatAxisLocal{0.0f, 1.0f, 0.0f};
+        float hotEndBias{1.0f}; // -1: -axis end, +1: +axis end, 0: both ends
+        // Axial hot zone range in [0,1] after axis projection normalization.
+        float hotRangeStart{0.68f};
+        float hotRangeEnd{0.98f};
+    };
+
+    // PBR material with optional blackbody emission (procedural, driven by noise texture).
+    // Notes:
+    // - When blackbody is enabled, emissiveTex (set=1,binding=5) is treated as a noise texture (linear).
+    // - base textures are optional; omitted ones fall back to engine defaults.
+    struct BlackbodyMaterialSettings
+    {
+        glm::vec4 colorFactor{1.0f};
+        float metallic{0.0f};
+        float roughness{1.0f};
+        float normalScale{1.0f};
+
+        std::string albedoPath;
+        bool albedoSRGB = true;
+        std::string metalRoughPath;
+        bool metalRoughSRGB = false;
+        std::string normalPath;
+        bool normalSRGB = false;
+        std::string occlusionPath;
+        bool occlusionSRGB = false;
+        float occlusionStrength{1.0f};
+
+        BlackbodySettings blackbody{};
+    };
+
     struct MaterialOptions
     {
         std::string albedoPath;
@@ -150,6 +196,16 @@ public:
     bool getMeshVfxMaterialSettings(const std::string &name, MeshVfxMaterialSettings &out) const;
     std::shared_ptr<GLTFMaterial> getMeshVfxMaterial(const std::string &name) const;
 
+    bool createOrUpdateBlackbodyMaterial(const std::string &name, const BlackbodyMaterialSettings &settings);
+    bool removeBlackbodyMaterial(const std::string &name);
+    bool getBlackbodyMaterialSettings(const std::string &name, BlackbodyMaterialSettings &out) const;
+    std::shared_ptr<GLTFMaterial> getBlackbodyMaterial(const std::string &name) const;
+
+    // Patch an existing glTF material in a loaded scene to use blackbody emission.
+    bool applyBlackbodyToGLTFMaterial(LoadedGLTF &scene,
+                                      const std::string &materialName,
+                                      const BlackbodySettings &settings);
+
     // Access engine-provided fallback textures for procedural systems.
     VkImageView fallbackCheckerboardView() const;
     VkImageView fallbackWhiteView() const;
@@ -175,6 +231,14 @@ private:
         AllocatedBuffer constantsBuffer{};
     };
     std::unordered_map<std::string, MeshVfxMaterialRecord> _meshVfxMaterials;
+
+    struct BlackbodyMaterialRecord
+    {
+        BlackbodyMaterialSettings settings{};
+        std::shared_ptr<GLTFMaterial> material;
+        AllocatedBuffer constantsBuffer{};
+    };
+    std::unordered_map<std::string, BlackbodyMaterialRecord> _blackbodyMaterials;
 
     AllocatedBuffer createMaterialBufferWithConstants(const GLTFMetallic_Roughness::MaterialConstants &constants) const;
 

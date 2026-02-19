@@ -2,12 +2,15 @@
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_buffer_reference : require
 #include "input_structures.glsl"
+#include "blackbody.glsl"
 
 layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec3 inColor;
 layout(location = 2) in vec2 inUV;
 layout(location = 3) in vec3 inWorldPos;
 layout(location = 4) in vec4 inTangent;
+layout(location = 5) in vec3 inObjectPos;
+layout(location = 6) in vec3 inObjectNormal;
 
 layout(location = 0) out vec4 outPos;
 layout(location = 1) out vec4 outNorm;
@@ -89,12 +92,18 @@ void main() {
         ao = 1.0 - aoStrength + aoStrength * aoTex;
     }
 
-    vec3 emissive = vec3(0.0);
-    vec3 emissiveFactor = materialData.extra[1].rgb;
-    if (any(greaterThan(emissiveFactor, vec3(0.0))))
+    vec3 emissive = evaluate_blackbody_emissive(emissiveTex,
+        materialData.extra[9], materialData.extra[10], materialData.extra[11],
+        materialData.extra[12], materialData.extra[13],
+        inObjectPos, inObjectNormal, inUV, sceneData.timeParams.x);
+    if (emissive == vec3(0.0) && materialData.extra[9].x <= 0.5)
     {
-        vec3 emissiveSample = texture(emissiveTex, inUV).rgb;
-        emissive = emissiveSample * emissiveFactor;
+        vec3 emissiveFactor = materialData.extra[1].rgb;
+        if (any(greaterThan(emissiveFactor, vec3(0.0))))
+        {
+            vec3 emissiveSample = texture(emissiveTex, inUV).rgb;
+            emissive = emissiveSample * emissiveFactor;
+        }
     }
     outExtra = vec4(ao, emissive);
     outObjectID = PushConstants.objectID;

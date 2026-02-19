@@ -52,6 +52,8 @@
 ### Game Development API
 
 - **[GameAPI.md](GameAPI.md)** — High-level game-facing API (textures, lighting, picking, particles, volumetrics)
+- **[gameapi/Blackbody.md](gameapi/Blackbody.md)** — Blackbody emission materials (hot metal, nozzles, barrels)
+- **[gameapi/MeshVFX.md](gameapi/MeshVFX.md)** — Mesh VFX materials (animated noise, fresnel, gradients)
 - **[debug_draw_api_examples.md](debug_draw_api_examples.md)** — Debug drawing examples (lines, spheres, AABBs, etc.)
 
 ## Documentation Organization

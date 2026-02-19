@@ -386,6 +386,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
         std::shared_ptr<GLTFMaterial> newMat = std::make_shared<GLTFMaterial>();
         materials.push_back(newMat);
         file.materials[mat.name.c_str()] = newMat;
+        newMat->constants_index = static_cast<uint32_t>(data_index);
 
         GLTFMetallic_Roughness::MaterialConstants constants{};
         constants.colorFactors.x = mat.pbrData.baseColorFactor[0];

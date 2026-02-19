@@ -145,6 +145,52 @@ namespace Game
             }
         }
 
+        // Blackbody hot-metal demo:
+        // - nozzle/barrel style heat profile in object space
+        // - triplanar + axial streak noise modulates breakup/turbulence
+        // - emissiveTex is repurposed as a noise texture when enabled
+        {
+            GameAPI::BlackbodyMaterialSettings bb{};
+            bb.colorFactor = glm::vec4(0.05f, 0.05f, 0.05f, 1.0f);
+            bb.metallic = 0.1f;
+            bb.roughness = 0.72f;
+            bb.normalScale = 1.0f;
+
+            bb.blackbody.noisePath = "vfx/simplex.ktx2";
+            bb.blackbody.intensity = 1.0f;
+            bb.blackbody.tempMinK = 1000.0f;
+            bb.blackbody.tempMaxK = 1600.0f;
+            bb.blackbody.noiseScale = 1.0f;
+            bb.blackbody.noiseContrast = 1.0f;
+            bb.blackbody.noiseScroll = glm::vec2(1.0f, -1.0f);
+            bb.blackbody.noiseSpeed = 0.0f;
+            bb.blackbody.heatAxisLocal = glm::vec3(0.0f, 1.0f, 0.0f);
+            bb.blackbody.hotEndBias = -1.0f;
+            bb.blackbody.hotRangeStart = 0.52f;
+            bb.blackbody.hotRangeEnd = 0.98f;
+
+            const bool mat_ok = api.create_or_update_blackbody_material(_blackbody_material_name, bb);
+            if (mat_ok)
+            {
+                GameAPI::Transform tr{};
+                tr.position = glm::vec3(0.5f, 1.45f, -4.0f);
+                tr.scale = glm::vec3(0.32f, 1.35f, 0.32f);
+
+                const bool spawned = api.add_primitive_instance(_blackbody_instance_name,
+                                                               GameAPI::PrimitiveType::Capsule,
+                                                               tr);
+                const bool applied = spawned && api.apply_blackbody_material_to_primitive(
+                    _blackbody_instance_name,
+                    _blackbody_material_name);
+
+                _blackbody_spawned = applied;
+                if (!_blackbody_spawned && spawned)
+                {
+                    api.remove_mesh_instance(_blackbody_instance_name);
+                }
+            }
+        }
+
         _world.set_rebase_anchor(_sphere_entity);
         _world.set_rebase_settings(GameWorld::RebaseSettings{
             .origin_threshold_m = 500.0,
@@ -330,6 +376,13 @@ namespace Game
             }
             (void)api.remove_mesh_vfx_material(_plume_outer_material_name);
             (void)api.remove_mesh_vfx_material(_plume_inner_material_name);
+
+            if (_blackbody_spawned)
+            {
+                api.remove_mesh_instance(_blackbody_instance_name);
+                _blackbody_spawned = false;
+            }
+            (void)api.remove_blackbody_material(_blackbody_material_name);
 
             if (auto *audio = _runtime->audio())
             {

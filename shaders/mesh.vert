@@ -10,6 +10,8 @@ layout (location = 1) out vec3 outColor;
 layout (location = 2) out vec2 outUV;
 layout (location = 3) out vec3 outWorldPos;
 layout (location = 4) out vec4 outTangent; // xyz: world tangent, w: sign
+layout (location = 5) out vec3 outObjectPos;
+layout (location = 6) out vec3 outObjectNormal;
 
 struct Vertex {
 
@@ -53,4 +55,6 @@ void main()
     outColor = v.color.xyz;
     outUV    = vec2(v.uv_x, v.uv_y);
     outWorldPos = worldPos.xyz;
+    outObjectPos = v.position;
+    outObjectNormal = v.normal;
 }

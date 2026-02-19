@@ -54,6 +54,12 @@ public:
     void watchBinding(TextureHandle handle, VkDescriptorSet set, uint32_t binding,
                       VkSampler sampler, VkImageView fallbackView);
 
+    // Replace an existing descriptor binding watch for (set,binding) with a new handle.
+    // This removes any prior watches for that binding (across all handles), rewrites the
+    // descriptor to fallback immediately, and then registers the new watch.
+    void watchBindingReplace(TextureHandle handle, VkDescriptorSet set, uint32_t binding,
+                             VkSampler sampler, VkImageView fallbackView);
+
     // Remove all watches for a descriptor set (call before destroying the
     // pool that owns the set). Prevents attempts to patch dead sets.
     void unwatchSet(VkDescriptorSet set);

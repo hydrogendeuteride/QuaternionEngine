@@ -181,6 +181,91 @@ void TextureCache::watchBinding(TextureHandle handle, VkDescriptorSet set, uint3
     }
 }
 
+void TextureCache::watchBindingReplace(TextureHandle handle, VkDescriptorSet set, uint32_t binding,
+                                       VkSampler sampler, VkImageView fallbackView)
+{
+    if (set == VK_NULL_HANDLE) return;
+
+    // Remove any existing watches for this exact binding so future uploads won't re-patch it.
+    for (Entry &e : _entries)
+    {
+        auto &patches = e.patches;
+        patches.erase(std::remove_if(patches.begin(), patches.end(),
+                                     [&](const Patch &p) { return p.set == set && p.binding == binding; }),
+                      patches.end());
+    }
+
+    // Immediately rewrite the descriptor to fallback to avoid leaving a stale binding active.
+    VkSampler effectiveSampler = sampler;
+    if (effectiveSampler == VK_NULL_HANDLE && handle != InvalidHandle && handle < _entries.size())
+    {
+        effectiveSampler = _entries[handle].sampler;
+    }
+    if (_context && _context->getDevice() && fallbackView != VK_NULL_HANDLE && effectiveSampler != VK_NULL_HANDLE)
+    {
+        DescriptorWriter writer;
+        writer.write_image(static_cast<int>(binding), fallbackView, effectiveSampler,
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.update_set(_context->getDevice()->device(), set);
+    }
+
+    // Rebuild per-set back-references so markSetUsed() stays correct and doesn't accumulate duplicates.
+    std::vector<TextureHandle> handles;
+    handles.reserve(8);
+    for (TextureHandle h = 0; h < _entries.size(); ++h)
+    {
+        const Entry &e = _entries[h];
+        bool hasSetPatch = false;
+        for (const Patch &p : e.patches)
+        {
+            if (p.set == set)
+            {
+                hasSetPatch = true;
+                break;
+            }
+        }
+        if (hasSetPatch) handles.push_back(h);
+    }
+    if (handles.empty())
+    {
+        _setToHandles.erase(set);
+    }
+    else
+    {
+        _setToHandles[set] = std::move(handles);
+    }
+
+    // Register the new watch (or act as a clear-only operation if handle is invalid).
+    if (handle == InvalidHandle) return;
+    if (handle >= _entries.size()) return;
+
+    Entry &e = _entries[handle];
+    Patch p{};
+    p.set = set;
+    p.binding = binding;
+    p.sampler = sampler ? sampler : e.sampler;
+    p.fallbackView = fallbackView;
+    e.patches.push_back(p);
+
+    auto &setHandles = _setToHandles[set];
+    if (std::find(setHandles.begin(), setHandles.end(), handle) == setHandles.end())
+    {
+        setHandles.push_back(handle);
+    }
+
+    // If the texture is already resident, patch the descriptor immediately.
+    if (e.state == EntryState::Resident && e.image.imageView != VK_NULL_HANDLE && _context && _context->getDevice())
+    {
+        DescriptorWriter writer;
+        writer.write_image(static_cast<int>(binding), e.image.imageView,
+                           p.sampler ? p.sampler : e.sampler,
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.update_set(_context->getDevice()->device(), set);
+    }
+}
+
 void TextureCache::unwatchSet(VkDescriptorSet set)
 {
     if (set == VK_NULL_HANDLE) return;

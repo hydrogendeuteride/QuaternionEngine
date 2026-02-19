@@ -312,6 +312,48 @@ struct MeshVfxMaterialSettings
     float emissionStrength{1.f};
 };
 
+struct BlackbodySettings
+{
+    // Tileable noise texture path relative to assets/ (bound to emissiveTex).
+    std::string noisePath;
+    // Emission control
+    float intensity{1.0f};
+    float tempMinK{1000.0f};
+    float tempMaxK{4000.0f};
+    // Noise sampling in object space
+    float noiseScale{1.0f};
+    float noiseContrast{1.0f};
+    glm::vec2 noiseScroll{0.0f, 0.0f};
+    // Animation speed multiplier (1.0 = previous behavior, lower = slower).
+    float noiseSpeed{1.0f};
+    // Local-space axis and hot-end selection for nozzle/barrel-like heat falloff.
+    glm::vec3 heatAxisLocal{0.0f, 1.0f, 0.0f};
+    float hotEndBias{1.0f}; // -1: -axis end, +1: +axis end, 0: both ends
+    // Axial hot zone range in [0,1] after axis projection normalization.
+    float hotRangeStart{0.68f};
+    float hotRangeEnd{0.98f};
+};
+
+struct BlackbodyMaterialSettings
+{
+    glm::vec4 colorFactor{1.0f};
+    float metallic{0.0f};
+    float roughness{1.0f};
+    float normalScale{1.0f};
+
+    std::string albedoPath;
+    bool albedoSRGB{true};
+    std::string metalRoughPath;
+    bool metalRoughSRGB{false};
+    std::string normalPath;
+    bool normalSRGB{false};
+    std::string occlusionPath;
+    bool occlusionSRGB{false};
+    float occlusionStrength{1.0f};
+
+    BlackbodySettings blackbody{};
+};
+
 // Point light data
 struct PointLight
 {
@@ -824,6 +866,20 @@ public:
     bool remove_mesh_vfx_material(const std::string& materialName);
     bool apply_mesh_vfx_material_to_primitive(const std::string& primitiveName,
                                               const std::string& materialName);
+
+    // Blackbody emission material profiles (procedural/primitive meshes).
+    bool create_or_update_blackbody_material(const std::string& materialName,
+                                             const BlackbodyMaterialSettings& settings);
+    bool get_blackbody_material(const std::string& materialName,
+                                BlackbodyMaterialSettings& out) const;
+    bool remove_blackbody_material(const std::string& materialName);
+    bool apply_blackbody_material_to_primitive(const std::string& primitiveName,
+                                               const std::string& materialName);
+
+    // Patch a glTF material on a loaded instance to use blackbody emission.
+    bool set_gltf_material_blackbody(const std::string& instanceName,
+                                     const std::string& materialName,
+                                     const BlackbodySettings& settings);
 
     // Remove mesh instance (primitives or custom meshes)
     bool remove_mesh_instance(const std::string& name);

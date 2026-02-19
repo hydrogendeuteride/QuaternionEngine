@@ -140,6 +140,11 @@ private:
     bool _plume_spawned{false};
     WorldVec3 _plume_nozzle_pos{2.5, 1.9, -2.0};
 
+    // Blackbody emission demo (procedural/primitive meshes).
+    std::string _blackbody_material_name{"example.blackbody.hot_metal"};
+    std::string _blackbody_instance_name{"example.blackbody.hot_metal_instance"};
+    bool _blackbody_spawned{false};
+
     // Decal test fixtures (one box + one sphere).
     std::string _decal_box_name{"example.decal.box"};
     std::string _decal_sphere_name{"example.decal.sphere"};

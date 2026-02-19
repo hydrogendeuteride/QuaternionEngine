@@ -85,6 +85,11 @@ layout(set = 1, binding = 0) uniform GLTFMaterialData{
 // - extra[6]: (distortionStrength, noiseBlend, gradientAxis, emissionStrength)
 // - extra[7]: (coreColor.rgb, gradientStart)
 // - extra[8]: (edgeColor.rgb, gradientEnd)
+// - extra[9]: blackbody (x=enable, y=intensity, z=tempMinK, w=tempMaxK)
+// - extra[10]: blackbody noise (x=noiseScale, y=noiseContrast, z=scrollU, w=scrollV)
+// - extra[11]: blackbody shape (xyz=heatAxisLocal, w=hotEndBias[-1..1])
+// - extra[12]: blackbody animation (x=noiseSpeed multiplier, 0=static)
+// - extra[13]: blackbody hot range (x=hotRangeStart, y=hotRangeEnd)
 
 layout(set = 1, binding = 1) uniform sampler2D colorTex;
 layout(set = 1, binding = 2) uniform sampler2D metalRoughTex;
