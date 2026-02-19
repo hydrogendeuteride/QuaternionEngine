@@ -377,4 +377,13 @@ public:
     // Streaming subsystems (engine-owned)
     TextureCache* textures = nullptr;            // texture streaming + cache
     IBLManager*  ibl = nullptr;                  // optional IBL owner (if created by engine)
+
+    // Per-frame cached GPUSceneData buffer + descriptor (lazily created, reusable by any pass).
+    // Call getOrCreateSceneDataDescriptor() to obtain a valid set=0 descriptor for the current frame.
+    VkDescriptorSet getOrCreateSceneDataDescriptor();
+
+private:
+    VkDescriptorSet _cachedSceneDataSet = VK_NULL_HANDLE;
+    uint32_t _cachedSceneDataFrame = UINT32_MAX;
+    AllocatedBuffer _cachedSceneDataBuffer{};
 };

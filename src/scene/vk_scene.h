@@ -164,6 +164,7 @@ public:
         glm::vec3 tint{1.0f, 1.0f, 1.0f};
         float opacity = 1.0f;
         float normalStrength = 1.0f;
+        int32_t sort_order = 0;
     };
 
     bool setDecal(const std::string &name, const DecalInstance &decal);

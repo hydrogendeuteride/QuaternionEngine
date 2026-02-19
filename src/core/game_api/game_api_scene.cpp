@@ -4,6 +4,10 @@
 #include "core/assets/manager.h"
 #include "scene/vk_scene.h"
 
+// Ensure GameAPI::DecalShape and ::DecalShape stay in sync.
+static_assert(static_cast<uint8_t>(GameAPI::DecalShape::Box) == static_cast<uint8_t>(::DecalShape::Box));
+static_assert(static_cast<uint8_t>(GameAPI::DecalShape::Sphere) == static_cast<uint8_t>(::DecalShape::Sphere));
+
 namespace GameAPI
 {
 
@@ -244,17 +248,16 @@ bool Engine::set_decal(const std::string& name, const Decal& decal)
     }
 
     SceneManager::DecalInstance inst{};
-    inst.shape = (decal.shape == GameAPI::DecalShape::Sphere) ? ::DecalShape::Sphere : ::DecalShape::Box;
+    inst.shape = static_cast<::DecalShape>(decal.shape);
     inst.center_world = WorldVec3(decal.position);
     inst.rotation = decal.rotation;
-
-    glm::vec3 scale = glm::abs(decal.scale);
-    inst.half_extents = glm::abs(decal.halfExtents) * scale;
+    inst.half_extents = decal.halfExtents;
     inst.albedoHandle = static_cast<uint32_t>(decal.albedoTexture);
     inst.normalHandle = static_cast<uint32_t>(decal.normalTexture);
     inst.tint = decal.tint;
     inst.opacity = decal.opacity;
     inst.normalStrength = decal.normalStrength;
+    inst.sort_order = decal.sortOrder;
 
     return _engine->_sceneManager->setDecal(name, inst);
 }
@@ -272,16 +275,16 @@ bool Engine::get_decal(const std::string& name, Decal& out) const
         return false;
     }
 
-    out.shape = (inst.shape == ::DecalShape::Sphere) ? GameAPI::DecalShape::Sphere : GameAPI::DecalShape::Box;
+    out.shape = static_cast<GameAPI::DecalShape>(inst.shape);
     out.position = glm::dvec3(inst.center_world);
     out.rotation = inst.rotation;
-    out.scale = glm::vec3(1.0f, 1.0f, 1.0f);
     out.halfExtents = inst.half_extents;
     out.albedoTexture = static_cast<TextureHandle>(inst.albedoHandle);
     out.normalTexture = static_cast<TextureHandle>(inst.normalHandle);
     out.tint = inst.tint;
     out.opacity = inst.opacity;
     out.normalStrength = inst.normalStrength;
+    out.sortOrder = inst.sort_order;
     return true;
 }
 

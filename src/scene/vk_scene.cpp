@@ -354,7 +354,14 @@ void SceneManager::update_scene()
             ordered.push_back(&kv);
         }
         std::sort(ordered.begin(), ordered.end(),
-                  [](const auto *a, const auto *b) { return a->first < b->first; });
+                  [](const auto *a, const auto *b)
+                  {
+                      if (a->second.sort_order != b->second.sort_order)
+                      {
+                          return a->second.sort_order < b->second.sort_order;
+                      }
+                      return a->first < b->first;
+                  });
 
         const size_t drawCount = std::min<size_t>(kMaxDecals, ordered.size());
         mainDrawContext.Decals.reserve(drawCount);
@@ -867,6 +874,7 @@ bool SceneManager::setDecal(const std::string &name, const DecalInstance &decal)
     const auto it = dynamicDecals.find(name);
     if (it == dynamicDecals.end() && dynamicDecals.size() >= kMaxDecals)
     {
+        fmt::println("[SceneManager] Decal limit ({}) reached — '{}' dropped.", kMaxDecals, name);
         return false;
     }
 

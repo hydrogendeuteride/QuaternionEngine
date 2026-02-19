@@ -19,10 +19,15 @@ layout(push_constant) uniform Push
 
 void main()
 {
-    vec2 texSize = vec2(textureSize(gbufferPosition, 0));
-    vec2 uv = gl_FragCoord.xy / texSize;
+    ivec2 pix = ivec2(gl_FragCoord.xy);
+    ivec2 texSize = textureSize(gbufferPosition, 0);
+    if (pix.x < 0 || pix.y < 0 || pix.x >= texSize.x || pix.y >= texSize.y)
+    {
+        discard;
+    }
 
-    vec4 posSample = texture(gbufferPosition, uv);
+    // Use texelFetch to avoid filtering across depth discontinuities in the position buffer.
+    vec4 posSample = texelFetch(gbufferPosition, pix, 0);
     if (posSample.w == 0.0)
     {
         discard;

@@ -17,7 +17,6 @@
 #include "render/graph/graph.h"
 #include "render/pipelines.h"
 
-#include "vk_mem_alloc.h"
 #include <glm/gtc/quaternion.hpp>
 
 namespace
@@ -86,9 +85,11 @@ void DecalPass::init(EngineContext *context)
     {
         b.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
         b.set_polygon_mode(VK_POLYGON_MODE_FILL);
-        b.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+        // Render backfaces only (cull front) to avoid proxy self-overdraw/double-blend.
+        b.set_cull_mode(VK_CULL_MODE_FRONT_BIT, VK_FRONT_FACE_CLOCKWISE);
         b.set_multisampling_none();
         b.enable_blending_alphablend();
+        // Write RGB only — preserve G-Buffer alpha (metallic / material ID).
         b.set_color_write_mask(VK_COLOR_COMPONENT_R_BIT |
                                VK_COLOR_COMPONENT_G_BIT |
                                VK_COLOR_COMPONENT_B_BIT);
@@ -159,12 +160,10 @@ void DecalPass::draw_decals(VkCommandBuffer cmd,
     EngineContext *ctxLocal = context ? context : _context;
     if (!ctxLocal || !ctxLocal->currentFrame) return;
 
-    ResourceManager *resourceManager = ctxLocal->getResources();
     DeviceManager *deviceManager = ctxLocal->getDevice();
-    DescriptorManager *descriptorLayouts = ctxLocal->getDescriptorLayouts();
     PipelineManager *pipelineManager = ctxLocal->pipelines;
     SamplerManager *samplers = ctxLocal->getSamplers();
-    if (!resourceManager || !deviceManager || !descriptorLayouts || !pipelineManager || !samplers) return;
+    if (!deviceManager || !pipelineManager || !samplers) return;
 
     const DrawContext &dc = ctxLocal->getMainDrawContext();
     if (dc.Decals.empty()) return;
@@ -184,34 +183,16 @@ void DecalPass::draw_decals(VkCommandBuffer cmd,
         return;
     }
 
-    AllocatedBuffer gpuSceneDataBuffer = resourceManager->create_buffer(
-        sizeof(GPUSceneData),
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        VMA_MEMORY_USAGE_CPU_TO_GPU);
-    ctxLocal->currentFrame->_deletionQueue.push_function([resourceManager, gpuSceneDataBuffer]()
-    {
-        resourceManager->destroy_buffer(gpuSceneDataBuffer);
-    });
-
-    VmaAllocationInfo allocInfo{};
-    vmaGetAllocationInfo(deviceManager->allocator(), gpuSceneDataBuffer.allocation, &allocInfo);
-    auto *sceneUniformData = static_cast<GPUSceneData *>(allocInfo.pMappedData);
-    *sceneUniformData = ctxLocal->getSceneData();
-    vmaFlushAllocation(deviceManager->allocator(), gpuSceneDataBuffer.allocation, 0, sizeof(GPUSceneData));
-
-    VkDescriptorSet globalSet = ctxLocal->currentFrame->_frameDescriptors.allocate(
-        deviceManager->device(), descriptorLayouts->gpuSceneDataLayout());
-    {
-        DescriptorWriter writer;
-        writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-        writer.update_set(deviceManager->device(), globalSet);
-    }
+    VkDescriptorSet globalSet = ctxLocal->getOrCreateSceneDataDescriptor();
+    if (globalSet == VK_NULL_HANDLE) return;
 
     VkDescriptorSet gbufferSet = ctxLocal->currentFrame->_frameDescriptors.allocate(
         deviceManager->device(), _gbufferInputLayout);
     {
         DescriptorWriter writer;
-        writer.write_image(0, posView, samplers->defaultLinear(),
+        // Nearest + clamp: the shader uses texelFetch (bypasses filtering),
+        // but nearest/clamp is the semantically correct sampler for a position buffer.
+        writer.write_image(0, posView, samplers->nearestClampEdge(),
                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.update_set(deviceManager->device(), gbufferSet);
     }

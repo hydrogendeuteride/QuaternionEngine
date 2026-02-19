@@ -85,6 +85,7 @@ enum class PrimitiveType
     Capsule
 };
 
+// Mirrors ::DecalShape in vk_scene.h — keep values in sync.
 enum class DecalShape : uint8_t
 {
     Box = 0,
@@ -270,13 +271,14 @@ struct Decal
     DecalShape shape{DecalShape::Box};
     glm::dvec3 position{0.0, 0.0, 0.0};
     glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
-    glm::vec3 scale{1.0f, 1.0f, 1.0f};
     glm::vec3 halfExtents{0.5f, 0.5f, 0.5f};
     TextureHandle albedoTexture{InvalidTexture};
     TextureHandle normalTexture{InvalidTexture};
     glm::vec3 tint{1.0f, 1.0f, 1.0f};
     float opacity{1.0f};
     float normalStrength{1.0f};
+    // Larger values render later (on top) when decals overlap.
+    int32_t sortOrder{0};
 };
 
 struct MeshVfxMaterialSettings
