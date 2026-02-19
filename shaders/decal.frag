@@ -38,7 +38,8 @@ void main()
         dot(rel, pc.axis_z.xyz) / halfExtents.z
     );
 
-    bool sphere = (pc.extent_yz_shape_opacity.z > 0.5);
+    int mode = int(pc.extent_yz_shape_opacity.z + 0.5);
+    bool sphere = ((mode & 1) != 0);
     if (!sphere)
     {
         if (any(greaterThan(abs(local), vec3(1.0))))

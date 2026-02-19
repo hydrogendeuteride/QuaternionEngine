@@ -44,6 +44,20 @@ vec3 cube_vertex(uint index)
 
 void main()
 {
+    int mode = int(pc.extent_yz_shape_opacity.z + 0.5);
+    bool fullscreen = (mode >= 2);
+    if (fullscreen)
+    {
+        // Fullscreen triangle fallback when camera is inside the decal volume.
+        const vec2 p[3] = vec2[3](
+            vec2(-1.0, -1.0),
+            vec2( 3.0, -1.0),
+            vec2(-1.0,  3.0)
+        );
+        gl_Position = vec4(p[gl_VertexIndex], 0.0, 1.0);
+        return;
+    }
+
     vec3 localPos = cube_vertex(uint(gl_VertexIndex));
     vec3 center = pc.center_extent_x.xyz;
     vec3 halfExtents = vec3(pc.center_extent_x.w, pc.extent_yz_shape_opacity.x, pc.extent_yz_shape_opacity.y);

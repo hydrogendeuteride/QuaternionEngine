@@ -269,28 +269,55 @@ void DecalPass::draw_decals(VkCommandBuffer cmd,
 
         const glm::quat rotation = glm::normalize(decal.rotation);
         const glm::mat3 basis = glm::mat3_cast(rotation);
+        const glm::vec3 half_extents = glm::max(decal.half_extents, glm::vec3(1.0e-3f));
+
+        bool fullscreenFallback = false;
+        if (ctxLocal->scene)
+        {
+            const glm::vec3 camera_local = ctxLocal->scene->get_camera_local_position();
+            const glm::vec3 rel = camera_local - decal.center_local;
+            const glm::vec3 camLocal(
+                glm::dot(rel, basis[0]) / half_extents.x,
+                glm::dot(rel, basis[1]) / half_extents.y,
+                glm::dot(rel, basis[2]) / half_extents.z);
+
+            if (decal.shape == DecalShape::Sphere)
+            {
+                fullscreenFallback = glm::dot(camLocal, camLocal) <= 1.0f;
+            }
+            else
+            {
+                const glm::vec3 a = glm::abs(camLocal);
+                fullscreenFallback = (a.x <= 1.0f && a.y <= 1.0f && a.z <= 1.0f);
+            }
+        }
 
         DecalPushConstants push{};
         push.axis_x = glm::vec4(basis[0], 0.0f);
         push.axis_y = glm::vec4(basis[1], 0.0f);
         push.axis_z = glm::vec4(basis[2], 0.0f);
-        push.center_extent_x = glm::vec4(decal.center_local, decal.half_extents.x);
+        push.center_extent_x = glm::vec4(decal.center_local, half_extents.x);
+        // mode:
+        // 0 = box proxy volume, 1 = sphere proxy volume,
+        // 2 = box fullscreen fallback, 3 = sphere fullscreen fallback.
+        const float mode = ((decal.shape == DecalShape::Sphere) ? 1.0f : 0.0f)
+                           + (fullscreenFallback ? 2.0f : 0.0f);
         push.extent_yz_shape_opacity = glm::vec4(
-            decal.half_extents.y,
-            decal.half_extents.z,
-            (decal.shape == DecalShape::Sphere) ? 1.0f : 0.0f,
+            half_extents.y,
+            half_extents.z,
+            mode,
             decal.opacity);
         push.tint_normal = glm::vec4(decal.tint, decal.normalStrength);
 
         vkCmdPushConstants(cmd, pipelineLayout,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(DecalPushConstants), &push);
-        vkCmdDraw(cmd, 36, 1, 0, 0);
+        vkCmdDraw(cmd, fullscreenFallback ? 3u : 36u, 1, 0, 0);
 
         if (ctxLocal->stats)
         {
             ctxLocal->stats->drawcall_count++;
-            ctxLocal->stats->triangle_count += 12;
+            ctxLocal->stats->triangle_count += fullscreenFallback ? 1 : 12;
         }
     }
 }
