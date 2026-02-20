@@ -113,6 +113,12 @@ public:
     // CPU-side source bytes currently retained (compressed image payloads kept
     // for potential re-decode). Only applies to entries created with Bytes keys.
     size_t cpuSourceBytes() const { return _cpuSourceBytes; }
+    // Bytes uploaded during the most recent pumpLoads() call.
+    size_t uploaded_bytes_last_pump() const { return _lastPumpUploadedBytes.load(std::memory_order_relaxed); }
+    // Pending decode jobs waiting on worker threads.
+    size_t decode_queue_depth() const;
+    // Decoded uploads waiting to be admitted to GPU upload.
+    size_t ready_queue_depth() const;
 
     // Runtime controls
     void setMaxLoadsPerPump(int n) { _maxLoadsPerPump = (n > 0) ? n : 1; }
@@ -177,6 +183,7 @@ private:
     std::unordered_map<VkDescriptorSet, std::vector<TextureHandle>> _setToHandles;
     size_t _residentBytes{0};
     size_t _cpuSourceBytes{0};
+    std::atomic<size_t> _lastPumpUploadedBytes{0};
 
     // Controls
     int _maxLoadsPerPump{4};
@@ -242,10 +249,10 @@ private:
     bool tryMakeSpace(size_t bytesNeeded, uint32_t now);
 
     std::vector<std::thread> _decodeThreads;
-    std::mutex _qMutex;
+    mutable std::mutex _qMutex;
     std::condition_variable _qCV;
     std::deque<DecodeRequest> _queue;
-    std::mutex _readyMutex;
+    mutable std::mutex _readyMutex;
     std::deque<DecodedResult> _ready;
     std::atomic<bool> _running{false};
 };

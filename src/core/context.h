@@ -66,26 +66,6 @@ struct ShadowSettings
     float planetSunAngularRadiusDeg = 0.27f;
 };
 
-struct CloudSettings
-{
-    // DEPRECATED: use EngineContext::voxelVolumes[0] instead.
-    // Kept temporarily to avoid breaking downstream code during refactors.
-    bool followCameraXZ = true;
-    bool animateVoxels = false;
-    glm::vec3 volumeCenterLocal{0.0f, 80.0f, 0.0f};
-    glm::vec3 volumeHalfExtents{128.0f, 20.0f, 128.0f};
-    glm::vec3 volumeVelocityLocal{0.0f, 0.0f, 0.0f};
-    float densityScale = 1.25f;
-    float coverage = 0.45f;
-    int stepCount = 64;
-    uint32_t gridResolution = 64;
-    glm::vec3 windVelocityLocal{6.0f, 0.0f, 2.0f};
-    float dissipation = 0.35f;
-    float noiseStrength = 1.0f;
-    float noiseScale = 6.0f;
-    float noiseSpeed = 0.15f;
-};
-
 enum class VoxelVolumeType : uint32_t
 {
     Clouds = 0,
@@ -333,9 +313,6 @@ public:
     // Reflection mode for SSR/RT reflections; encoded into sceneData.rtOptions.w
     // 0 = SSR only, 1 = SSR + RT fallback, 2 = RT only
     uint32_t reflectionMode = 0;
-
-    bool enableClouds = false;                   // DEPRECATED: use enableVolumetrics + voxelVolumes instead.
-    CloudSettings cloudSettings{};               // DEPRECATED: kept for compatibility during refactors.
 
     bool enableVolumetrics = false;              // optional voxel volumetrics toggle (cloud/smoke/flame)
     std::array<VoxelVolumeSettings, MAX_VOXEL_VOLUMES> voxelVolumes{};

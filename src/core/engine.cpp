@@ -273,7 +273,7 @@ void VulkanEngine::init()
     _context->logicalRenderExtent = _logicalRenderExtent;
 
     // Default voxel volumetric presets (up to 4 volumes for performance).
-    // Slot 0 matches the old CloudSettings defaults.
+    // Slot 0 is the canonical cloud preset.
     if (_context->voxelVolumes.size() >= 1)
     {
         VoxelVolumeSettings &v = _context->voxelVolumes[0];
@@ -1053,18 +1053,6 @@ void VulkanEngine::cleanup()
 
 void VulkanEngine::draw()
 {
-    // Integrate any completed async asset jobs into the scene before updating.
-    if (_asyncLoader && _sceneManager)
-    {
-        _asyncLoader->pumpMainThread(*_sceneManager);
-    }
-
-    // Apply any completed async pipeline rebuilds before using pipelines this frame.
-    if (_pipelineManager)
-    {
-        _pipelineManager->pumpMainThread();
-    }
-
     _sceneManager->update_scene();
 
     // Auto exposure readback: resolve last luminance for this frame slot now that the GPU is idle.
@@ -1632,6 +1620,16 @@ void VulkanEngine::run()
         // Begin frame: wait for the GPU, resolve pending ID-buffer picks,
         // and clear per-frame resources before building UI and recording commands.
         VK_CHECK(vkWaitForFences(_deviceManager->device(), 1, &get_current_frame()._renderFence, true, 1000000000));
+
+        // Commit async loaders/hot-reloads immediately after fence wait every frame.
+        if (_asyncLoader && _sceneManager)
+        {
+            _asyncLoader->pumpMainThread(*_sceneManager);
+        }
+        if (_pipelineManager)
+        {
+            _pipelineManager->pumpMainThread();
+        }
 
         // Safe to destroy any BLAS queued for deletion now that the previous frame is idle.
         if (_rayManager) { _rayManager->flushPendingDeletes(); }

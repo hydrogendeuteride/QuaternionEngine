@@ -68,8 +68,8 @@ void SwapchainManager::resize_render_targets(VkExtent2D renderExtent)
         return;
     }
 
-    // Ensure no in-flight work references these images before we destroy them.
-    vkDeviceWaitIdle(_deviceManager->device());
+    // Render-target resizing is called from the engine frame loop after render-fence wait.
+    // Avoid a full-device stall here to keep render-scale changes responsive.
 
     // Destroy previous targets (if any), then recreate at the new extent.
     _deletionQueue.flush();
@@ -203,7 +203,16 @@ void SwapchainManager::resize_swapchain(struct SDL_Window *window)
         return;
     }
 
-    vkDeviceWaitIdle(_deviceManager->device());
+    if (_swapchainExtent.width == static_cast<uint32_t>(w) &&
+        _swapchainExtent.height == static_cast<uint32_t>(h))
+    {
+        resize_requested = false;
+        return;
+    }
+
+    // Swapchain images can still be owned by present; waiting for the graphics/present queue
+    // is much cheaper than blocking the whole device.
+    VK_CHECK(vkQueueWaitIdle(_deviceManager->graphicsQueue()));
 
     destroy_swapchain();
 

@@ -19,6 +19,7 @@
 void TextureCache::init(EngineContext *ctx)
 {
     _context = ctx;
+    _lastPumpUploadedBytes.store(0, std::memory_order_relaxed);
     _running = true;
     unsigned int threads = std::max(1u, std::min(4u, std::thread::hardware_concurrency()));
     _decodeThreads.reserve(threads);
@@ -74,6 +75,7 @@ void TextureCache::cleanup()
         e.state = EntryState::Evicted;
     }
     _residentBytes = 0;
+    _lastPumpUploadedBytes.store(0, std::memory_order_relaxed);
     _lookup.clear();
     _setToHandles.clear();
 }
@@ -498,8 +500,9 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
     // Drain any remaining decoded results if we still have headroom.
     if (budgetRemaining)
     {
-        drainReadyUploads(rm, _maxBytesPerPump - admitted);
+        admitted += drainReadyUploads(rm, _maxBytesPerPump - admitted);
     }
+    _lastPumpUploadedBytes.store(admitted, std::memory_order_relaxed);
 
     // Optionally trim retained compressed sources to CPU budget.
     evictCpuToBudget();
@@ -1187,4 +1190,16 @@ VkImageView TextureCache::imageView(TextureHandle handle) const
     const Entry &e = _entries[handle];
     if (e.state != EntryState::Resident) return VK_NULL_HANDLE;
     return e.image.imageView;
+}
+
+size_t TextureCache::decode_queue_depth() const
+{
+    std::lock_guard<std::mutex> lk(_qMutex);
+    return _queue.size();
+}
+
+size_t TextureCache::ready_queue_depth() const
+{
+    std::lock_guard<std::mutex> lk(_readyMutex);
+    return _ready.size();
 }

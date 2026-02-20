@@ -89,6 +89,10 @@ public:
         VkImageUsageFlags creationUsage = 0;
         int firstUse = -1;
         int lastUse = -1;
+        std::string firstUsePass;
+        std::string lastUsePass;
+        std::vector<std::string> readers;
+        std::vector<std::string> writers;
     };
 
     struct RGDebugBufferInfo
@@ -100,6 +104,10 @@ public:
         VkBufferUsageFlags usage = 0;
         int firstUse = -1;
         int lastUse = -1;
+        std::string firstUsePass;
+        std::string lastUsePass;
+        std::vector<std::string> readers;
+        std::vector<std::string> writers;
     };
 
     size_t pass_count() const { return _passes.size(); }

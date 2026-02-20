@@ -1164,6 +1164,41 @@ RGImageHandle RenderGraph::import_draw_image()
 	return import_image(d);
 }
 
+namespace
+{
+	const char *debug_image_usage_name(RGImageUsage usage)
+	{
+		switch (usage)
+		{
+			case RGImageUsage::SampledFragment: return "SampledFragment";
+			case RGImageUsage::SampledCompute: return "SampledCompute";
+			case RGImageUsage::TransferSrc: return "TransferSrc";
+			case RGImageUsage::ColorAttachment: return "ColorAttachment";
+			case RGImageUsage::DepthAttachment: return "DepthAttachment";
+			case RGImageUsage::ComputeWrite: return "ComputeWrite";
+			case RGImageUsage::TransferDst: return "TransferDst";
+			case RGImageUsage::Present: return "Present";
+			default: return "?";
+		}
+	}
+
+	const char *debug_buffer_usage_name(RGBufferUsage usage)
+	{
+		switch (usage)
+		{
+			case RGBufferUsage::TransferSrc: return "TransferSrc";
+			case RGBufferUsage::TransferDst: return "TransferDst";
+			case RGBufferUsage::VertexRead: return "VertexRead";
+			case RGBufferUsage::IndexRead: return "IndexRead";
+			case RGBufferUsage::UniformRead: return "UniformRead";
+			case RGBufferUsage::StorageRead: return "StorageRead";
+			case RGBufferUsage::StorageReadWrite: return "StorageReadWrite";
+			case RGBufferUsage::IndirectArgs: return "IndirectArgs";
+			default: return "?";
+		}
+	}
+}
+
 // --- Debug helpers ---
 void RenderGraph::debug_get_passes(std::vector<RGDebugPassInfo> &out) const
 {
@@ -1205,6 +1240,27 @@ void RenderGraph::debug_get_images(std::vector<RGDebugImageInfo> &out) const
 		info.creationUsage = rec->creationUsage;
 		info.firstUse = rec->firstUse;
 		info.lastUse = rec->lastUse;
+		if (rec->firstUse >= 0 && static_cast<size_t>(rec->firstUse) < _passes.size())
+		{
+			info.firstUsePass = _passes[rec->firstUse].name;
+		}
+		if (rec->lastUse >= 0 && static_cast<size_t>(rec->lastUse) < _passes.size())
+		{
+			info.lastUsePass = _passes[rec->lastUse].name;
+		}
+		for (const auto &p : _passes)
+		{
+			for (const auto &read : p.imageReads)
+			{
+				if (!read.image.valid() || read.image.id != i) continue;
+				info.readers.push_back(p.name + " (" + debug_image_usage_name(read.usage) + ")");
+			}
+			for (const auto &write : p.imageWrites)
+			{
+				if (!write.image.valid() || write.image.id != i) continue;
+				info.writers.push_back(p.name + " (" + debug_image_usage_name(write.usage) + ")");
+			}
+		}
 		out.push_back(std::move(info));
 	}
 }
@@ -1225,6 +1281,27 @@ void RenderGraph::debug_get_buffers(std::vector<RGDebugBufferInfo> &out) const
 		info.usage = rec->usage;
 		info.firstUse = rec->firstUse;
 		info.lastUse = rec->lastUse;
+		if (rec->firstUse >= 0 && static_cast<size_t>(rec->firstUse) < _passes.size())
+		{
+			info.firstUsePass = _passes[rec->firstUse].name;
+		}
+		if (rec->lastUse >= 0 && static_cast<size_t>(rec->lastUse) < _passes.size())
+		{
+			info.lastUsePass = _passes[rec->lastUse].name;
+		}
+		for (const auto &p : _passes)
+		{
+			for (const auto &read : p.bufferReads)
+			{
+				if (!read.buffer.valid() || read.buffer.id != i) continue;
+				info.readers.push_back(p.name + " (" + debug_buffer_usage_name(read.usage) + ")");
+			}
+			for (const auto &write : p.bufferWrites)
+			{
+				if (!write.buffer.valid() || write.buffer.id != i) continue;
+				info.writers.push_back(p.name + " (" + debug_buffer_usage_name(write.usage) + ")");
+			}
+		}
 		out.push_back(std::move(info));
 	}
 }

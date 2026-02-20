@@ -1129,12 +1129,17 @@ namespace
         eng->_textureCache->setGpuBudgetBytes(texBudget);
         const size_t resBytes = eng->_textureCache->residentBytes();
         const size_t cpuSrcBytes = eng->_textureCache->cpuSourceBytes();
+        const size_t uploadBytesLastPump = eng->_textureCache->uploaded_bytes_last_pump();
+        const size_t decodeQueueDepth = eng->_textureCache->decode_queue_depth();
+        const size_t readyQueueDepth = eng->_textureCache->ready_queue_depth();
         ImGui::Text("Device local: %.1f / %.1f MiB",
                     (double) devLocalUsage / 1048576.0,
                     (double) devLocalBudget / 1048576.0);
         ImGui::Text("Texture budget: %.1f MiB", (double) texBudget / 1048576.0);
         ImGui::Text("Resident textures: %.1f MiB", (double) resBytes / 1048576.0);
         ImGui::Text("CPU source bytes: %.1f MiB", (double) cpuSrcBytes / 1048576.0);
+        ImGui::Text("Uploaded last frame: %.2f MiB", (double) uploadBytesLastPump / 1048576.0);
+        ImGui::Text("Decode queue: %zu  Ready queue: %zu", decodeQueueDepth, readyQueueDepth);
         ImGui::SameLine();
         if (ImGui::Button("Trim To Budget Now"))
         {
@@ -1407,6 +1412,34 @@ namespace
         ImGui::SameLine();
         ImGui::Text("%zu passes", passInfos.size());
 
+        auto draw_use_summary = [](const std::vector<std::string> &uses)
+        {
+            if (uses.empty())
+            {
+                ImGui::TextUnformatted("-");
+                return;
+            }
+            const size_t previewCount = std::min<size_t>(2, uses.size());
+            std::string summary;
+            for (size_t i = 0; i < previewCount; ++i)
+            {
+                if (i > 0) summary += ", ";
+                summary += uses[i];
+            }
+            if (uses.size() > previewCount)
+            {
+                summary += ", +";
+                summary += std::to_string(uses.size() - previewCount);
+            }
+            ImGui::TextUnformatted(summary.c_str());
+            if (ImGui::IsItemHovered() && uses.size() > previewCount)
+            {
+                ImGui::BeginTooltip();
+                for (const auto &u : uses) ImGui::TextUnformatted(u.c_str());
+                ImGui::EndTooltip();
+            }
+        };
+
         if (ImGui::BeginTable("passes", 8, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
         {
             ImGui::TableSetupColumn("Enable", ImGuiTableColumnFlags_WidthFixed, 70);
@@ -1465,15 +1498,16 @@ namespace
         {
             std::vector<RenderGraph::RGDebugImageInfo> imgs;
             graph.debug_get_images(imgs);
-            if (ImGui::BeginTable("images", 7, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+            if (ImGui::BeginTable("images", 8, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
             {
                 ImGui::TableSetupColumn("Id", ImGuiTableColumnFlags_WidthFixed, 40);
                 ImGui::TableSetupColumn("Name");
                 ImGui::TableSetupColumn("Fmt", ImGuiTableColumnFlags_WidthFixed, 120);
                 ImGui::TableSetupColumn("Extent", ImGuiTableColumnFlags_WidthFixed, 120);
                 ImGui::TableSetupColumn("Imported", ImGuiTableColumnFlags_WidthFixed, 70);
-                ImGui::TableSetupColumn("Usage", ImGuiTableColumnFlags_WidthFixed, 80);
-                ImGui::TableSetupColumn("Life", ImGuiTableColumnFlags_WidthFixed, 80);
+                ImGui::TableSetupColumn("Life", ImGuiTableColumnFlags_WidthFixed, 220);
+                ImGui::TableSetupColumn("Readers");
+                ImGui::TableSetupColumn("Writers");
                 ImGui::TableHeadersRow();
                 for (const auto &im: imgs)
                 {
@@ -1489,9 +1523,15 @@ namespace
                     ImGui::TableSetColumnIndex(4);
                     ImGui::TextUnformatted(im.imported ? "yes" : "no");
                     ImGui::TableSetColumnIndex(5);
-                    ImGui::Text("0x%x", (unsigned) im.creationUsage);
+                    ImGui::Text("%d..%d  (%s -> %s)",
+                                im.firstUse,
+                                im.lastUse,
+                                im.firstUsePass.empty() ? "-" : im.firstUsePass.c_str(),
+                                im.lastUsePass.empty() ? "-" : im.lastUsePass.c_str());
                     ImGui::TableSetColumnIndex(6);
-                    ImGui::Text("%d..%d", im.firstUse, im.lastUse);
+                    draw_use_summary(im.readers);
+                    ImGui::TableSetColumnIndex(7);
+                    draw_use_summary(im.writers);
                 }
                 ImGui::EndTable();
             }
@@ -1501,14 +1541,15 @@ namespace
         {
             std::vector<RenderGraph::RGDebugBufferInfo> bufs;
             graph.debug_get_buffers(bufs);
-            if (ImGui::BeginTable("buffers", 6, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+            if (ImGui::BeginTable("buffers", 7, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
             {
                 ImGui::TableSetupColumn("Id", ImGuiTableColumnFlags_WidthFixed, 40);
                 ImGui::TableSetupColumn("Name");
                 ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 100);
                 ImGui::TableSetupColumn("Imported", ImGuiTableColumnFlags_WidthFixed, 70);
-                ImGui::TableSetupColumn("Usage", ImGuiTableColumnFlags_WidthFixed, 100);
-                ImGui::TableSetupColumn("Life", ImGuiTableColumnFlags_WidthFixed, 80);
+                ImGui::TableSetupColumn("Life", ImGuiTableColumnFlags_WidthFixed, 220);
+                ImGui::TableSetupColumn("Readers");
+                ImGui::TableSetupColumn("Writers");
                 ImGui::TableHeadersRow();
                 for (const auto &bf: bufs)
                 {
@@ -1522,9 +1563,15 @@ namespace
                     ImGui::TableSetColumnIndex(3);
                     ImGui::TextUnformatted(bf.imported ? "yes" : "no");
                     ImGui::TableSetColumnIndex(4);
-                    ImGui::Text("0x%x", (unsigned) bf.usage);
+                    ImGui::Text("%d..%d  (%s -> %s)",
+                                bf.firstUse,
+                                bf.lastUse,
+                                bf.firstUsePass.empty() ? "-" : bf.firstUsePass.c_str(),
+                                bf.lastUsePass.empty() ? "-" : bf.lastUsePass.c_str());
                     ImGui::TableSetColumnIndex(5);
-                    ImGui::Text("%d..%d", bf.firstUse, bf.lastUse);
+                    draw_use_summary(bf.readers);
+                    ImGui::TableSetColumnIndex(6);
+                    draw_use_summary(bf.writers);
                 }
                 ImGui::EndTable();
             }
