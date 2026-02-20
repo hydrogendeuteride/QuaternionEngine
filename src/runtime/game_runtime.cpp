@@ -198,12 +198,13 @@ namespace GameRuntime
             }
 
             // --- Flush per-frame resources --- ///
+            // Invalidate per-frame descriptor sets before destroying resources they reference.
+            _renderer->get_current_frame()._frameDescriptors.clear_pools(_renderer->_deviceManager->device());
             _renderer->get_current_frame()._deletionQueue.flush();
             if (_renderer->_renderGraph)
             {
                 _renderer->_renderGraph->resolve_timings();
             }
-            _renderer->get_current_frame()._frameDescriptors.clear_pools(_renderer->_deviceManager->device());
 
             // --- ImGui --- //
             if (_renderer->ui())
@@ -217,6 +218,13 @@ namespace GameRuntime
 
             // --- Update frame stats --- //
             _renderer->stats.frametime = _time.delta_time() * 1000.0f;
+        }
+
+        // Ensure submitted command buffers are finished before game shutdown code
+        // frees ImGui descriptor sets or GPU-backed resources.
+        if (_renderer->_deviceManager)
+        {
+            VK_CHECK(vkDeviceWaitIdle(_renderer->_deviceManager->device()));
         }
 
         // Call game shutdown

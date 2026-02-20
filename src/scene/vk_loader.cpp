@@ -1565,6 +1565,7 @@ void LoadedGLTF::clearAll()
                  samplers.size());
 
     VkDevice dv = creator->_deviceManager->device();
+    VK_CHECK(vkDeviceWaitIdle(dv));
 
     // Before destroying descriptor pools, unregister descriptor-set watches so
     // the TextureCache will not attempt to patch dead sets.
@@ -1579,6 +1580,11 @@ void LoadedGLTF::clearAll()
             }
         }
     }
+
+    auto materialBuffer = materialDataBuffer;
+
+    // Free material descriptor sets before destroying resources they reference.
+    descriptorPool.destroy_pools(dv);
 
     for (auto &[k, v]: meshes)
     {
@@ -1604,11 +1610,6 @@ void LoadedGLTF::clearAll()
     {
         vkDestroySampler(dv, sampler, nullptr);
     }
-
-    auto materialBuffer = materialDataBuffer;
-    auto samplersToDestroy = samplers;
-
-    descriptorPool.destroy_pools(dv);
 
     creator->_resourceManager->destroy_buffer(materialBuffer);
 

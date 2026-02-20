@@ -57,6 +57,11 @@ void PlanetSystem::cleanup()
         return;
     }
 
+    if (DeviceManager *device = _context->getDevice())
+    {
+        VK_CHECK(vkDeviceWaitIdle(device->device()));
+    }
+
     TextureCache *textures = _context->textures;
     if (textures)
     {
@@ -71,6 +76,15 @@ void PlanetSystem::cleanup()
                 }
             }
         }
+    }
+
+    if (_earth_patch_material_allocator_initialized)
+    {
+        if (DeviceManager *device = _context->getDevice())
+        {
+            _earth_patch_material_allocator.destroy_pools(device->device());
+        }
+        _earth_patch_material_allocator_initialized = false;
     }
 
     ResourceManager *rm = _context->getResources();
@@ -106,15 +120,6 @@ void PlanetSystem::cleanup()
             rm->destroy_buffer(_earth_patch_index_buffer);
             _earth_patch_index_buffer = {};
         }
-    }
-
-    if (_earth_patch_material_allocator_initialized)
-    {
-        if (DeviceManager *device = _context->getDevice())
-        {
-            _earth_patch_material_allocator.destroy_pools(device->device());
-        }
-        _earth_patch_material_allocator_initialized = false;
     }
 
     if (_earth_patch_material_layout != VK_NULL_HANDLE)

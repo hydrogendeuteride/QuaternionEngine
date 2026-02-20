@@ -947,6 +947,13 @@ void VulkanEngine::cleanup()
             _debugDraw.reset();
         }
 
+        // Invalidate per-frame descriptor sets before destroying frame-owned
+        // resources referenced by those sets.
+        for (int i = 0; i < FRAME_OVERLAP; i++)
+        {
+            _frames[i]._frameDescriptors.clear_pools(_deviceManager->device());
+        }
+
         // Flush all frame deletion queues first while VMA allocator is still alive
         for (int i = 0; i < FRAME_OVERLAP; i++)
         {

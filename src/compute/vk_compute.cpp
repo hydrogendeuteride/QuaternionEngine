@@ -133,8 +133,20 @@ void ComputeManager::init(EngineContext *context)
 
 void ComputeManager::cleanup()
 {
+    if (context && context->getDevice())
+    {
+        VK_CHECK(vkDeviceWaitIdle(context->getDevice()->device()));
+    }
+
     pipelines.clear();
-    // Destroy instances and their owned resources
+
+    if (context)
+    {
+        // Free persistent compute descriptor sets first.
+        descriptorAllocator.destroy_pools(context->getDevice()->device());
+    }
+
+    // Destroy instances and their owned resources.
     if (context)
     {
         for (auto &kv : instances)
@@ -149,11 +161,6 @@ void ComputeManager::cleanup()
             }
         }
         instances.clear();
-    }
-
-    if (context)
-    {
-        descriptorAllocator.destroy_pools(context->getDevice()->device());
     }
 
     context = nullptr;
