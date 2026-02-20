@@ -38,6 +38,14 @@ const float SHADOW_MIN_BIAS = 1e-5;
 // Ray query safety params
 const float SHADOW_RAY_TMIN = 0.02;// start a bit away from the surface
 const float SHADOW_RAY_ORIGIN_BIAS = 0.01;// world units
+// Skip RT punctual shadow queries for lights with negligible BRDF contribution.
+// This avoids firing rays for back-facing/distant lights that evaluate to ~0.
+const float PUNCTUAL_RT_SHADOW_MIN_LUMA = 1e-4;
+
+float luminance(vec3 c)
+{
+    return dot(max(c, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+}
 
 // Estimate the float ULP scale at this world position magnitude, used to keep
 // ray bias and tMin effective even when world coordinates are very large.
@@ -391,10 +399,11 @@ void main(){
     for (uint i = 0u; i < pointCount; ++i)
     {
         vec3 contrib = eval_point_light(sceneData.punctualLights[i], pos, N, V, albedo, roughness, metallic);
+        float contribLuma = luminance(contrib);
 
         // Optional RT shadow for the first few point lights (hybrid mode)
         #ifdef GL_EXT_ray_query
-        if (sceneData.rtOptions.x == 1u && sceneData.rtParams.y > 0.0 && i < 4u)
+        if (sceneData.rtOptions.x == 1u && sceneData.rtParams.y > 0.0 && i < 4u && contribLuma > PUNCTUAL_RT_SHADOW_MIN_LUMA)
         {
             vec3 toL = sceneData.punctualLights[i].position_radius.xyz - pos;
             float maxT = length(toL);
@@ -435,10 +444,11 @@ void main(){
     for (uint i = 0u; i < spotCount; ++i)
     {
         vec3 contrib = eval_spot_light(sceneData.spotLights[i], pos, N, V, albedo, roughness, metallic);
+        float contribLuma = luminance(contrib);
 
         // Optional RT shadow for the first few spot lights (hybrid mode)
         #ifdef GL_EXT_ray_query
-        if (sceneData.rtOptions.x == 1u && sceneData.rtParams.y > 0.0 && i < 4u)
+        if (sceneData.rtOptions.x == 1u && sceneData.rtParams.y > 0.0 && i < 4u && contribLuma > PUNCTUAL_RT_SHADOW_MIN_LUMA)
         {
             vec3 toL = sceneData.spotLights[i].position_radius.xyz - pos;
             float maxT = length(toL);
