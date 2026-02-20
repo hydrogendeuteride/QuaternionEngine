@@ -1,5 +1,6 @@
 #include "settings_state.h"
 #include "runtime/game_runtime.h"
+#include "core/input/input_system.h"
 
 #include "imgui.h"
 
@@ -24,10 +25,9 @@ void SettingsState::on_exit(GameStateContext &ctx)
 
 void SettingsState::on_update(GameStateContext &ctx, float dt)
 {
-    (void)ctx;
     (void)dt;
 
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+    if (ctx.input && ctx.input->key_pressed(Key::Escape))
     {
         _pending = StateTransition::pop();
     }

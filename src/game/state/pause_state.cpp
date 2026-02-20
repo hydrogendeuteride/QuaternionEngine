@@ -1,6 +1,7 @@
 #include "pause_state.h"
 #include "title_screen_state.h"
 #include "settings_state.h"
+#include "core/input/input_system.h"
 
 #include "imgui.h"
 
@@ -19,11 +20,10 @@ void PauseState::on_exit(GameStateContext &ctx)
 
 void PauseState::on_update(GameStateContext &ctx, float dt)
 {
-    (void)ctx;
     (void)dt;
 
     // ESC to resume
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+    if (ctx.input && ctx.input->key_pressed(Key::Escape))
     {
         _pending = StateTransition::pop();
     }
