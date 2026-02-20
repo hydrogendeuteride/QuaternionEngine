@@ -963,6 +963,13 @@ void VulkanEngine::cleanup()
         print_vma_stats(_deviceManager.get(), "after MainDQ flush");
         dump_vma_json(_deviceManager.get(), "after_MainDQ");
 
+        // Destroy persistent descriptor pools before freeing resources referenced
+        // by long-lived descriptor sets (materials, cached textures, etc.).
+        if (_context && _context->descriptors)
+        {
+            _context->descriptors->destroy_pools(_deviceManager->device());
+        }
+
         if (_textureCache) { _textureCache->cleanup(); }
 
         _renderPassManager->cleanup();
@@ -1012,8 +1019,6 @@ void VulkanEngine::cleanup()
         _descriptorManager->cleanup();
         print_vma_stats(_deviceManager.get(), "after Samplers+Descriptors");
         dump_vma_json(_deviceManager.get(), "after_Samplers_Descriptors");
-
-        _context->descriptors->destroy_pools(_deviceManager->device());
 
         // Extra safety: flush frame deletion queues once more before destroying VMA
         for (int i = 0; i < FRAME_OVERLAP; i++)
@@ -1660,12 +1665,14 @@ void VulkanEngine::run()
             _picking->begin_frame();
         }
 
+        // Invalidate descriptor sets in this frame slot before destroying
+        // resources they may reference from the same slot's deletion queue.
+        get_current_frame()._frameDescriptors.clear_pools(_deviceManager->device());
         get_current_frame()._deletionQueue.flush();
         if (_renderGraph)
         {
             _renderGraph->resolve_timings();
         }
-        get_current_frame()._frameDescriptors.clear_pools(_deviceManager->device());
 
         if (_ui)
         {

@@ -503,6 +503,8 @@ void IBLManager::destroyImagesAndSh()
     _diff = {};
     _background = {};
     _brdf = {};
+    _specularIs2D = false;
+    _backgroundIs2D = false;
 }
 
 void IBLManager::shutdownAsync()
@@ -539,6 +541,13 @@ bool IBLManager::commitPrepared(const PreparedIBLData &data)
         rm->process_queued_uploads_immediate();
     }
 
+    // IBL resources are consumed by descriptor sets from multiple frame slots.
+    // Synchronize before replacing to avoid destroying images/buffers still referenced by in-flight descriptors.
+    if (_ctx->getDevice())
+    {
+        VK_CHECK(vkDeviceWaitIdle(_ctx->getDevice()->device()));
+    }
+
     destroyImagesAndSh();
     ensureLayout();
 
@@ -546,6 +555,7 @@ bool IBLManager::commitPrepared(const PreparedIBLData &data)
     {
         if (data.spec_is_cubemap)
         {
+            _specularIs2D = false;
             const auto &kcm = data.spec_cubemap;
             _spec = rm->create_image_compressed_layers(
                 kcm.bytes.data(), kcm.bytes.size(),
@@ -556,6 +566,7 @@ bool IBLManager::commitPrepared(const PreparedIBLData &data)
         }
         else
         {
+            _specularIs2D = true;
             const auto &k2d = data.spec_2d;
             std::vector<ResourceManager::MipLevelCopy> lv;
             lv.reserve(k2d.mipLevels);
@@ -622,11 +633,13 @@ bool IBLManager::commitPrepared(const PreparedIBLData &data)
         _background = rm->create_image_compressed(
             bg.bytes.data(), bg.bytes.size(), bg.fmt, lv,
             VK_IMAGE_USAGE_SAMPLED_BIT);
+        _backgroundIs2D = (_background.image != VK_NULL_HANDLE);
     }
 
     if (_background.image == VK_NULL_HANDLE && _spec.image != VK_NULL_HANDLE)
     {
         _background = _spec;
+        _backgroundIs2D = _specularIs2D;
     }
 
     if (data.has_brdf)

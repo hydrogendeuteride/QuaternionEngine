@@ -85,27 +85,21 @@ void BackgroundPass::init_background_pipelines()
     };
     _context->pipelines->createGraphicsPipeline("background.env", gp);
 
-    // Create fallback 1x1x6 black cube
+    // Create fallback 1x1 black 2D texture (shader samples sampler2D).
     {
-        const uint32_t faceCount = 6;
         const uint32_t pixel = 0x00000000u; // RGBA8 black
-        std::vector<uint8_t> bytes(faceCount * 4);
-        for (uint32_t f = 0; f < faceCount; ++f) std::memcpy(bytes.data() + f * 4, &pixel, 4);
-        std::vector<VkBufferImageCopy> copies;
-        copies.reserve(faceCount);
-        for (uint32_t f = 0; f < faceCount; ++f) {
-            VkBufferImageCopy r{};
-            r.bufferOffset = f * 4;
-            r.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            r.imageSubresource.mipLevel = 0;
-            r.imageSubresource.baseArrayLayer = f;
-            r.imageSubresource.layerCount = 1;
-            r.imageExtent = {1,1,1};
-            copies.push_back(r);
-        }
-        _fallbackIblCube = _context->getResources()->create_image_compressed_layers(
-            bytes.data(), bytes.size(), VK_FORMAT_R8G8B8A8_UNORM, 1, faceCount, copies,
-            VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT);
+        std::vector<uint8_t> bytes(4);
+        std::memcpy(bytes.data(), &pixel, 4);
+        std::vector<ResourceManager::MipLevelCopy> levels;
+        levels.push_back(ResourceManager::MipLevelCopy{
+            .offset = 0,
+            .length = 4,
+            .width = 1,
+            .height = 1,
+        });
+        _fallbackIbl2D = _context->getResources()->create_image_compressed(
+            bytes.data(), bytes.size(), VK_FORMAT_R8G8B8A8_UNORM, levels,
+            VK_IMAGE_USAGE_SAMPLED_BIT);
     }
 }
 
@@ -155,25 +149,28 @@ void BackgroundPass::register_graph(RenderGraph *graph, RGImageHandle drawHandle
                 VkDescriptorSet ibl = VK_NULL_HANDLE;
                 if (ctx->ibl)
                 {
-                    VkImageView envView = _fallbackIblCube.imageView;
-                    // Prefer a dedicated background texture when available, otherwise reuse specular.
-                    if (ctx->ibl->background().imageView)
+                    VkImageView envView = _fallbackIbl2D.imageView;
+                    // Background shader expects sampler2D. Bind only 2D-compatible IBL sources.
+                    if (ctx->ibl->backgroundIs2D() && ctx->ibl->background().imageView)
                     {
                         envView = ctx->ibl->background().imageView;
                     }
-                    else if (ctx->ibl->specular().imageView)
+                    else if (ctx->ibl->specularIs2D() && ctx->ibl->specular().imageView)
                     {
                         envView = ctx->ibl->specular().imageView;
                     }
 
                     VkDescriptorSetLayout iblLayout = ctx->ibl->descriptorLayout();
-                    ibl = ctx->currentFrame->_frameDescriptors.allocate(
-                        ctx->getDevice()->device(), iblLayout);
-                    DescriptorWriter w3;
-                    // Bind background map at binding 3; other bindings are unused in this shader.
-                    w3.write_image(3, envView, ctx->getSamplers()->defaultLinear(),
-                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-                    w3.update_set(ctx->getDevice()->device(), ibl);
+                    if (iblLayout != VK_NULL_HANDLE)
+                    {
+                        ibl = ctx->currentFrame->_frameDescriptors.allocate(
+                            ctx->getDevice()->device(), iblLayout);
+                        DescriptorWriter w3;
+                        // Bind background map at binding 3; other bindings are unused in this shader.
+                        w3.write_image(3, envView, ctx->getSamplers()->defaultLinear(),
+                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+                        w3.update_set(ctx->getDevice()->device(), ibl);
+                    }
                 }
 
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _envPipeline);
@@ -244,10 +241,10 @@ void BackgroundPass::cleanup()
         vkDestroyDescriptorSetLayout(_context->getDevice()->device(), _emptySetLayout, nullptr);
         _emptySetLayout = VK_NULL_HANDLE;
     }
-    if (_fallbackIblCube.image)
+    if (_fallbackIbl2D.image)
     {
-        _context->getResources()->destroy_image(_fallbackIblCube);
-        _fallbackIblCube = {};
+        _context->getResources()->destroy_image(_fallbackIbl2D);
+        _fallbackIbl2D = {};
     }
     Logger::info("BackgroundPass::cleanup()");
     _backgroundEffects.clear();

@@ -59,9 +59,13 @@ public:
     AllocatedImage specular() const { return _spec; }
     AllocatedImage diffuse() const { return _diff; }
     AllocatedImage brdf() const { return _brdf; }
+    // True when specular() was loaded as a 2D equirect texture.
+    bool specularIs2D() const { return _specularIs2D; }
     // Background environment texture used by the background pass.
     // May alias specular() when a dedicated background is not provided.
     AllocatedImage background() const { return _background; }
+    // True when background() is a 2D texture compatible with sampler2D.
+    bool backgroundIs2D() const { return _backgroundIs2D; }
     AllocatedBuffer shBuffer() const { return _shBuffer; }
     bool hasSH() const { return _shBuffer.buffer != VK_NULL_HANDLE; }
 
@@ -78,6 +82,8 @@ private:
     AllocatedImage _diff{};
     AllocatedImage _brdf{};
     AllocatedImage _background{};
+    bool _specularIs2D{false};
+    bool _backgroundIs2D{false};
     VkDescriptorSetLayout _iblSetLayout = VK_NULL_HANDLE;
     AllocatedBuffer _shBuffer{}; // 9*vec4 coefficients (RGB in .xyz)
 
