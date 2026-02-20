@@ -89,7 +89,7 @@ void ResourceManager::destroy_buffer(const AllocatedBuffer &buffer) const
 
 void ResourceManager::cleanup()
 {
-    fmt::print("ResourceManager::cleanup()\n");
+    Logger::info("ResourceManager::cleanup()");
     clear_pending_uploads();
     _deletionQueue.flush();
 }

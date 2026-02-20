@@ -39,7 +39,7 @@ bool PipelineManager::registerGraphics(const std::string &name, const GraphicsPi
     auto it = _graphicsPipelines.find(name);
     if (it != _graphicsPipelines.end())
     {
-        fmt::println("Graphics pipeline '{}' already exists", name);
+        Logger::warn("Graphics pipeline '{}' already exists", name);
         return false;
     }
 
@@ -172,7 +172,7 @@ void PipelineManager::pumpMainThread()
             // Replace existing pipeline with the freshly built one.
             destroyGraphics(it->second);
             it->second = std::move(job.record);
-            fmt::println("Reloaded graphics pipeline '{}' (async)", job.name);
+            Logger::info("Reloaded graphics pipeline '{}' (async)", job.name);
         }
         finished_names.push_back(job.name);
     }
@@ -212,7 +212,7 @@ bool PipelineManager::buildGraphics(GraphicsPipelineRecord &rec) const
     {
         if (!vkutil::load_shader_module(rec.spec.vertexShaderPath.c_str(), _context->getDevice()->device(), &vert))
         {
-            fmt::println("Failed to load vertex shader: {}", rec.spec.vertexShaderPath);
+            Logger::error("Failed to load vertex shader: {}", rec.spec.vertexShaderPath);
             return false;
         }
     }
@@ -221,7 +221,7 @@ bool PipelineManager::buildGraphics(GraphicsPipelineRecord &rec) const
         if (!vkutil::load_shader_module(rec.spec.fragmentShaderPath.c_str(), _context->getDevice()->device(), &frag))
         {
             if (vert != VK_NULL_HANDLE) vkDestroyShaderModule(_context->getDevice()->device(), vert, nullptr);
-            fmt::println("Failed to load fragment shader: {}", rec.spec.fragmentShaderPath);
+            Logger::error("Failed to load fragment shader: {}", rec.spec.fragmentShaderPath);
             return false;
         }
     }

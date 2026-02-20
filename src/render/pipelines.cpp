@@ -8,21 +8,21 @@ bool vkutil::load_shader_module(const char *filePath, VkDevice device, VkShaderM
 
     if (!file.is_open())
     {
-        fmt::println(stderr, "Failed to open shader file: {}", filePath ? filePath : "(null)");
+        Logger::error("Failed to open shader file: {}", filePath ? filePath : "(null)");
         return false;
     }
 
     const std::streamsize fileSize = file.tellg();
     if (fileSize <= 0)
     {
-        fmt::println(stderr, "Shader file is empty or unreadable: {}", filePath);
+        Logger::error("Shader file is empty or unreadable: {}", filePath);
         return false;
     }
     if ((fileSize % std::streamsize(sizeof(uint32_t))) != 0)
     {
         // SPIR-V binaries must be a multiple of 4 bytes. Without this guard we'd
         // overflow the buffer in the read() below.
-        fmt::println(stderr, "Shader file size is not a multiple of 4 bytes ({}): {}", (long long)fileSize, filePath);
+        Logger::error("Shader file size is not a multiple of 4 bytes ({}): {}", (long long)fileSize, filePath);
         return false;
     }
 
@@ -33,7 +33,7 @@ bool vkutil::load_shader_module(const char *filePath, VkDevice device, VkShaderM
     file.read(reinterpret_cast<char *>(buffer.data()), fileSize);
     if (!file)
     {
-        fmt::println(stderr, "Failed to read shader file: {}", filePath);
+        Logger::error("Failed to read shader file: {}", filePath);
         return false;
     }
 
@@ -42,7 +42,7 @@ bool vkutil::load_shader_module(const char *filePath, VkDevice device, VkShaderM
     // Validate SPIR-V magic number early; corrupted .spv files can cause driver crashes later.
     if (buffer.empty() || buffer[0] != 0x07230203u)
     {
-        fmt::println(stderr, "Invalid SPIR-V magic in shader file: {}", filePath);
+        Logger::error("Invalid SPIR-V magic in shader file: {}", filePath);
         return false;
     }
 
@@ -57,7 +57,7 @@ bool vkutil::load_shader_module(const char *filePath, VkDevice device, VkShaderM
     const VkResult res = vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule);
     if (res != VK_SUCCESS)
     {
-        fmt::println(stderr, "vkCreateShaderModule failed ({}): {}", string_VkResult(res), filePath);
+        Logger::error("vkCreateShaderModule failed ({}): {}", string_VkResult(res), filePath);
         return false;
     }
 
@@ -145,7 +145,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device)
                                   nullptr, &newPipeline);
     if (res != VK_SUCCESS)
     {
-        fmt::println(stderr, "failed to create pipeline: {}", string_VkResult(res));
+        Logger::error("failed to create pipeline: {}", string_VkResult(res));
         return VK_NULL_HANDLE;
     }
     else

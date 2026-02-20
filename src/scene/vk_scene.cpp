@@ -16,7 +16,6 @@
 #include "physics/physics_world.h"
 #include "physics/body_settings.h"
 #include "physics/collider_asset.h"
-#include <fmt/core.h>
 
 #include "config.h"
 
@@ -59,7 +58,7 @@ SceneManager::SceneManager() = default;
 
 SceneManager::~SceneManager()
 {
-    fmt::println("[SceneManager] dtor: dynamicGLTFInstances={} pendingGLTFRelease={}",
+    Logger::info("[SceneManager] dtor: dynamicGLTFInstances={} pendingGLTFRelease={}",
                  dynamicGLTFInstances.size(),
                  pendingGLTFRelease.size());
 }
@@ -179,7 +178,7 @@ void SceneManager::update_scene()
     {
         if (!pendingGLTFRelease.empty())
         {
-            fmt::println("[SceneManager] update_scene: scheduling {} pending GLTF releases (hasContext={}, hasFrame={})",
+            Logger::info("[SceneManager] update_scene: scheduling {} pending GLTF releases (hasContext={}, hasFrame={})",
                          pendingGLTFRelease.size(),
                          true,
                          true);
@@ -711,7 +710,7 @@ void SceneManager::cleanup()
     // immediately instead of deferring them through pendingGLTFRelease.
     if (!pendingGLTFRelease.empty())
     {
-        fmt::println("[SceneManager] cleanup: forcing {} pending GLTF releases before shutdown",
+        Logger::info("[SceneManager] cleanup: forcing {} pending GLTF releases before shutdown",
                      pendingGLTFRelease.size());
         pendingGLTFRelease.clear(); // drop strong refs → ~LoadedGLTF::clearAll() runs
     }
@@ -874,7 +873,7 @@ bool SceneManager::setDecal(const std::string &name, const DecalInstance &decal)
     const auto it = dynamicDecals.find(name);
     if (it == dynamicDecals.end() && dynamicDecals.size() >= kMaxDecals)
     {
-        fmt::println("[SceneManager] Decal limit ({}) reached — '{}' dropped.", kMaxDecals, name);
+        Logger::warn("[SceneManager] Decal limit ({}) reached — '{}' dropped.", kMaxDecals, name);
         return false;
     }
 
@@ -929,7 +928,7 @@ void SceneManager::addGLTFInstance(const std::string &name, std::shared_ptr<Load
                                    const glm::mat4 &transform)
 {
     if (!scene) return;
-    fmt::println("[SceneManager] addGLTFInstance '{}' (scene='{}')",
+    Logger::info("[SceneManager] addGLTFInstance '{}' (scene='{}')",
                  name,
                  scene->debugName.empty() ? "<unnamed>" : scene->debugName.c_str());
     GLTFInstance inst{};
@@ -960,7 +959,7 @@ bool SceneManager::removeGLTFInstance(const std::string &name)
         if (_context && _context->currentFrame)
         {
             auto keepAlive = it->second.scene;
-            fmt::println("[SceneManager] removeGLTFInstance '{}' scheduling deferred destroy (scene='{}')",
+            Logger::info("[SceneManager] removeGLTFInstance '{}' scheduling deferred destroy (scene='{}')",
                          name,
                          keepAlive && !keepAlive->debugName.empty() ? keepAlive->debugName.c_str() : "<unnamed>");
             _context->currentFrame->_deletionQueue.push_function([keepAlive]() mutable { keepAlive.reset(); });
@@ -1184,7 +1183,7 @@ bool SceneManager::setGLTFInstanceTRSWorld(const std::string &name,
 
 void SceneManager::clearGLTFInstances()
 {
-    fmt::println("[SceneManager] clearGLTFInstances: dynamicGLTFInstances={} pendingBefore={}",
+    Logger::info("[SceneManager] clearGLTFInstances: dynamicGLTFInstances={} pendingBefore={}",
                  dynamicGLTFInstances.size(),
                  pendingGLTFRelease.size());
 
@@ -1203,7 +1202,7 @@ void SceneManager::clearGLTFInstances()
         }
     }
     dynamicGLTFInstances.clear();
-    fmt::println("[SceneManager] clearGLTFInstances: pendingAfter={}",
+    Logger::info("[SceneManager] clearGLTFInstances: pendingAfter={}",
                  pendingGLTFRelease.size());
 }
 
@@ -1388,7 +1387,7 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
 {
     if (!world)
     {
-        fmt::println("[SceneManager] enableColliderSync: null physics world");
+        Logger::error("[SceneManager] enableColliderSync: null physics world");
         return 0;
     }
 
@@ -1402,14 +1401,14 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
     auto instIt = dynamicGLTFInstances.find(instanceName);
     if (instIt == dynamicGLTFInstances.end())
     {
-        fmt::println("[SceneManager] enableColliderSync: instance '{}' not found", instanceName);
+        Logger::warn("[SceneManager] enableColliderSync: instance '{}' not found", instanceName);
         return 0;
     }
 
     const GLTFInstance &inst = instIt->second;
     if (!inst.scene)
     {
-        fmt::println("[SceneManager] enableColliderSync: instance '{}' has no scene", instanceName);
+        Logger::warn("[SceneManager] enableColliderSync: instance '{}' has no scene", instanceName);
         return 0;
     }
 
@@ -1417,7 +1416,7 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
     const auto &mesh_instances = inst.scene->collider_mesh_instances;
     if (compounds.empty() && mesh_instances.empty())
     {
-        fmt::println("[SceneManager] enableColliderSync: instance '{}' has no colliders", instanceName);
+        Logger::warn("[SceneManager] enableColliderSync: instance '{}' has no colliders", instanceName);
         return 0;
     }
 
@@ -1427,7 +1426,7 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
     constexpr float kScaleEps = 1.0e-3f;
     if (std::abs(s.y - uniform_scale) > kScaleEps || std::abs(s.z - uniform_scale) > kScaleEps)
     {
-        fmt::println("[SceneManager] enableColliderSync: instance '{}' has non-uniform scale ({}, {}, {}); "
+        Logger::warn("[SceneManager] enableColliderSync: instance '{}' has non-uniform scale ({}, {}, {}); "
                      "using x-component for collider scaling",
                      instanceName, s.x, s.y, s.z);
     }
@@ -1527,7 +1526,7 @@ size_t SceneManager::enableColliderSync(const std::string &instanceName,
     if (created > 0)
     {
         _colliderSyncEntries[instanceName] = std::move(entry);
-        fmt::println("[SceneManager] enableColliderSync: created {} bodies for '{}'", created, instanceName);
+        Logger::info("[SceneManager] enableColliderSync: created {} bodies for '{}'", created, instanceName);
     }
 
     return created;

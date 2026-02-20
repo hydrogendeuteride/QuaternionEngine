@@ -108,11 +108,11 @@ void LightingPass::init(EngineContext *context)
 	    {
 	        if (!rtCapable)
 	        {
-	            fmt::println("[LightingPass] Ray-query not supported; skipping deferred_lighting.rt pipeline.");
+	            Logger::info("[LightingPass] Ray-query not supported; skipping deferred_lighting.rt pipeline.");
 	        }
 	        else
 	        {
-	            fmt::println("[LightingPass] RT pipeline deferred (shadow mode = Clipmap only).");
+	            Logger::info("[LightingPass] RT pipeline deferred (shadow mode = Clipmap only).");
 	        }
 
 	    }
@@ -267,7 +267,7 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
 	                infoRT.fragmentShaderPath = ctxLocal->getAssets()->shaderPath("deferred_lighting.frag.spv");
 	                if (!pipelineManager->createGraphicsPipeline("deferred_lighting.rt", infoRT))
 	                {
-	                    fmt::println(stderr, "[LightingPass] Failed to build deferred_lighting.rt; falling back to non-RT.");
+	                    Logger::error("[LightingPass] Failed to build deferred_lighting.rt; falling back to non-RT.");
 	                }
 	            }
 	        }
@@ -426,5 +426,5 @@ void LightingPass::cleanup()
     }
 
     _deletionQueue.flush();
-    fmt::print("LightingPass::cleanup()\n");
+    Logger::info("LightingPass::cleanup()");
 }

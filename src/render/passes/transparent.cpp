@@ -224,5 +224,5 @@ void TransparentPass::cleanup()
         if (_fallbackIbl2D.image) _context->getResources()->destroy_image(_fallbackIbl2D);
         if (_fallbackBrdf2D.image) _context->getResources()->destroy_image(_fallbackBrdf2D);
     }
-    fmt::print("TransparentPass::cleanup()\n");
+    Logger::info("TransparentPass::cleanup()");
 }

@@ -64,7 +64,7 @@ void TextureCache::cleanup()
         auto &e = _entries[h];
         if (e.state == EntryState::Resident && e.image.image)
         {
-            fmt::println("[TextureCache] cleanup destroy handle={} path='{}' bytes={}",
+            Logger::info("[TextureCache] cleanup destroy handle={} path='{}' bytes={}",
                          h,
                          e.path.empty() ? "<bytes>" : e.path,
                          e.sizeBytes);
@@ -139,7 +139,7 @@ TextureCache::TextureHandle TextureCache::request(const TextureKey &key, VkSampl
         e.bytes = normKey.bytes;
         _cpuSourceBytes += e.bytes.size();
     }
-    fmt::println("[TextureCache] request handle={} kind={} path='{}' srgb={} mipmapped={} hash=0x{:016x}",
+    Logger::info("[TextureCache] request handle={} kind={} path='{}' srgb={} mipmapped={} hash=0x{:016x}",
                  h,
                  (normKey.kind == TextureKey::SourceKind::FilePath ? "FilePath" : "Bytes"),
                  normKey.kind == TextureKey::SourceKind::FilePath ? normKey.path : "<bytes>",
@@ -538,7 +538,7 @@ void TextureCache::evictToBudget(size_t budgetBytes)
         // Rewrite watchers back to fallback before destroying
         patchToFallback(e);
 
-        fmt::println("[TextureCache] evictToBudget destroy handle={} path='{}' bytes={} residentBytesBefore={}",
+        Logger::info("[TextureCache] evictToBudget destroy handle={} path='{}' bytes={} residentBytesBefore={}",
                      h,
                      e.path.empty() ? "<bytes>" : e.path,
                      e.sizeBytes,
@@ -599,7 +599,7 @@ bool TextureCache::unload(TextureHandle handle, bool drop_source_bytes)
 
         if (_context && _context->getResources())
         {
-            fmt::println("[TextureCache] unload destroy handle={} path='{}' bytes={} residentBytesBefore={}",
+            Logger::info("[TextureCache] unload destroy handle={} path='{}' bytes={} residentBytesBefore={}",
                          handle,
                          e.path.empty() ? "<bytes>" : e.path,
                          e.sizeBytes,
@@ -684,7 +684,7 @@ void TextureCache::workerLoop()
                 ktxResult kres = ktxTexture2_CreateFromNamedFile(ktxPath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktex);
                 if (kres != KTX_SUCCESS || !ktex)
                 {
-                    fmt::println("[TextureCache] libktx open failed for '{}': {}", ktxPath.string(), ktxErrorString(kres));
+                    Logger::error("[TextureCache] libktx open failed for '{}': {}", ktxPath.string(), ktxErrorString(kres));
                 }
                 else
                 {
@@ -694,7 +694,7 @@ void TextureCache::workerLoop()
                         kres = ktxTexture2_TranscodeBasis(ktex, target, 0);
                         if (kres != KTX_SUCCESS)
                         {
-                            fmt::println("[TextureCache] libktx transcode failed for '{}': {}", ktxPath.string(), ktxErrorString(kres));
+                            Logger::error("[TextureCache] libktx transcode failed for '{}': {}", ktxPath.string(), ktxErrorString(kres));
                             ktxTexture_Destroy(ktxTexture(ktex));
                             ktex = nullptr;
                         }
@@ -728,7 +728,7 @@ void TextureCache::workerLoop()
                             case VK_FORMAT_BC7_SRGB_BLOCK:
                                 break;
                             default:
-                                fmt::println("[TextureCache] libktx returned non-BC format {} — skipping KTX2", string_VkFormat(vkfmt));
+                                Logger::warn("[TextureCache] libktx returned non-BC format {} -- skipping KTX2", string_VkFormat(vkfmt));
                                 ktxTexture_Destroy(ktxTexture(ktex));
                                 ktex = nullptr;
                                 break;
@@ -760,7 +760,7 @@ void TextureCache::workerLoop()
             }
             else if (p.extension() == ".ktx2")
             {
-                fmt::println("[TextureCache] Requested .ktx2 '{}' but file not found (ec={})", p.string(), ec.value());
+                Logger::warn("[TextureCache] Requested .ktx2 '{}' but file not found (ec={})", p.string(), ec.value());
             }
         }
 
@@ -872,7 +872,7 @@ size_t TextureCache::drainReadyUploads(ResourceManager &rm, size_t budgetBytes)
             if (reqFmt != fmt)
             {
                 fmt = reqFmt;
-                fmt::println("[TextureCache] Overriding KTX2 format to {} based on request (original {})",
+                Logger::info("[TextureCache] Overriding KTX2 format to {} based on request (original {})",
                               string_VkFormat(fmt), string_VkFormat(res.ktxFormat));
             }
             desiredLevels = res.ktxMipLevels;
@@ -935,7 +935,7 @@ size_t TextureCache::drainReadyUploads(ResourceManager &rm, size_t budgetBytes)
                 {
                     vkGetPhysicalDeviceFormatProperties(_context->getDevice()->physicalDevice(), fmt, &props);
                 }
-                fmt::println("[TextureCache] Compressed format unsupported: format={} (optimalFeatures=0x{:08x}) — fallback raster for {}",
+                Logger::warn("[TextureCache] Compressed format unsupported: format={} (optimalFeatures=0x{:08x}) -- fallback raster for {}",
                               string_VkFormat(fmt), props.optimalTilingFeatures, e.path);
                 // Fall back to raster path: requeue by synthesizing a non-KTX result
                 // Attempt synchronous fallback decode from file if available.
@@ -966,7 +966,7 @@ size_t TextureCache::drainReadyUploads(ResourceManager &rm, size_t budgetBytes)
                 {
                     levels.push_back(ResourceManager::MipLevelCopy{ lv.offset, lv.length, lv.width, lv.height });
                 }
-                fmt::println("[TextureCache] upload KTX2 handle={} fmt={} levels={} size={}x{} srgb={} path='{}'",
+                Logger::info("[TextureCache] upload KTX2 handle={} fmt={} levels={} size={}x{} srgb={} path='{}'",
                              res.handle,
                              string_VkFormat(fmt),
                              res.ktxMipLevels,
@@ -1011,7 +1011,7 @@ size_t TextureCache::drainReadyUploads(ResourceManager &rm, size_t budgetBytes)
             }
 
             uint32_t mipOverride = (res.mipmapped ? desiredLevels : 1);
-            fmt::println("[TextureCache] upload raster handle={} fmt={} levels={} size={}x{} srgb={} path='{}'",
+            Logger::info("[TextureCache] upload raster handle={} fmt={} levels={} size={}x{} srgb={} path='{}'",
                          res.handle,
                          string_VkFormat(fmt),
                          mipOverride,
@@ -1116,7 +1116,7 @@ bool TextureCache::tryMakeSpace(size_t bytesNeeded, uint32_t now)
         if (e.pinned) continue;
 
         patchToFallback(e);
-        fmt::println("[TextureCache] tryMakeSpace destroy handle={} path='{}' bytes={} residentBytesBefore={}",
+        Logger::info("[TextureCache] tryMakeSpace destroy handle={} path='{}' bytes={} residentBytesBefore={}",
                      h,
                      e.path.empty() ? "<bytes>" : e.path,
                      e.sizeBytes,

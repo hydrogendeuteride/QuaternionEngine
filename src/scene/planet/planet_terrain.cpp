@@ -585,7 +585,7 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
         planet::HeightFace face_data{};
         if (!planet::load_heightmap_bc4(abs, face_data))
         {
-            fmt::println("[PlanetSystem] Failed to load height face '{}'", abs);
+            Logger::error("[PlanetSystem] Failed to load height face '{}'", abs);
             ok = false;
             break;
         }

@@ -285,7 +285,7 @@ void AsyncAssetLoader::pumpMainThread(SceneManager &scene)
 
                     if (count > 0)
                     {
-                        fmt::println("[AsyncLoader] Marked {} materials for preloading in '{}'",
+                        Logger::info("[AsyncLoader] Marked {} materials for preloading in '{}'",
                                      count, job->scene_name);
 
                         // Trigger immediate texture loading pump to start upload

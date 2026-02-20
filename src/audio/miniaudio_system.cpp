@@ -1,6 +1,7 @@
 #include "miniaudio_system.h"
 
 #include <fmt/core.h>
+#include "core/util/logger.h"
 #include <algorithm>
 #include <cmath>
 
@@ -49,7 +50,7 @@ namespace Audio
         ma_result result = ma_resource_manager_init(&resource_manager_config, &_resource_manager);
         if (result != MA_SUCCESS)
         {
-            fmt::println("[Audio] Failed to initialize miniaudio resource manager (error {})",
+            Logger::error("[Audio] Failed to initialize miniaudio resource manager (error {})",
                          static_cast<int>(result));
             return false;
         }
@@ -62,14 +63,14 @@ namespace Audio
         result = ma_engine_init(&config, &_engine);
         if (result != MA_SUCCESS)
         {
-            fmt::println("[Audio] Failed to initialize miniaudio engine (error {})", static_cast<int>(result));
+            Logger::error("[Audio] Failed to initialize miniaudio engine (error {})", static_cast<int>(result));
             ma_resource_manager_uninit(&_resource_manager);
             _resource_manager_initialized = false;
             return false;
         }
 
         _initialized = true;
-        fmt::println("[Audio] miniaudio engine initialized");
+        Logger::info("[Audio] miniaudio engine initialized");
         return true;
     }
 
@@ -94,7 +95,7 @@ namespace Audio
             _resource_manager_initialized = false;
         }
         _initialized = false;
-        fmt::println("[Audio] miniaudio engine shut down");
+        Logger::info("[Audio] miniaudio engine shut down");
     }
 
     void MiniAudioSystem::set_listener(const glm::vec3 &position, const glm::vec3 &forward, const glm::vec3 &up)
@@ -200,7 +201,7 @@ namespace Audio
                                                          &cached->sound);
         if (result != MA_SUCCESS)
         {
-            fmt::println("[Audio] Failed to preload sound '{}' (error {})", event, static_cast<int>(result));
+            Logger::error("[Audio] Failed to preload sound '{}' (error {})", event, static_cast<int>(result));
             return false;
         }
 
@@ -447,7 +448,7 @@ namespace Audio
         const ma_result result = ma_sound_init_from_file(&_engine, event.c_str(), 0, nullptr, nullptr, &out_sound);
         if (result != MA_SUCCESS)
         {
-            fmt::println("[Audio] Failed to load sound '{}' (error {})", event, static_cast<int>(result));
+            Logger::error("[Audio] Failed to load sound '{}' (error {})", event, static_cast<int>(result));
             return false;
         }
 

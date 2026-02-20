@@ -329,5 +329,5 @@ void GeometryPass::draw_geometry(VkCommandBuffer cmd,
 
 void GeometryPass::cleanup()
 {
-    fmt::print("GeometryPass::cleanup()\n");
+    Logger::info("GeometryPass::cleanup()");
 }

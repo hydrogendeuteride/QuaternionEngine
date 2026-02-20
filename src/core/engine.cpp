@@ -31,7 +31,7 @@
 #include <array>
 
 #include <filesystem>
-#include <iostream>
+
 #include <cmath>
 #include <algorithm>
 #include <glm/gtx/transform.hpp>
@@ -116,7 +116,7 @@ static void print_vma_stats(DeviceManager* dev, const char* tag)
     VmaTotalStatistics stats{};
     vmaCalculateStatistics(alloc, &stats);
     const VmaStatistics &s = stats.total.statistics;
-    fmt::print("[VMA][{}] Blocks:{} Allocs:{} BlockBytes:{} AllocBytes:{}\n",
+    Logger::info("[VMA][{}] Blocks:{} Allocs:{} BlockBytes:{} AllocBytes:{}",
                tag,
                (size_t)s.blockCount,
                (size_t)s.allocationCount,
@@ -141,7 +141,7 @@ static void dump_vma_json(DeviceManager* dev, const char* tag)
         {
             fwrite(json, 1, strlen(json), f);
             fclose(f);
-            fmt::print("[VMA] Wrote {}\n", fname);
+            Logger::info("[VMA] Wrote {}", fname);
         }
         vmaFreeStatsString(alloc, json);
     }
@@ -448,7 +448,7 @@ void VulkanEngine::init()
             }
             else
             {
-                fmt::println("[Engine] Warning: failed to enqueue default IBL load (specular='{}', brdfLut='{}'). IBL lighting will be disabled until a valid IBL is loaded.",
+                Logger::warn("[Engine] Warning: failed to enqueue default IBL load (specular='{}', brdfLut='{}'). IBL lighting will be disabled until a valid IBL is loaded.",
                              ibl.specularCube,
                              ibl.brdfLut2D);
             }
@@ -522,7 +522,7 @@ void VulkanEngine::setWindowMode(WindowMode mode, int display_index)
     {
         if (SDL_SetWindowFullscreen(_window, 0) != 0)
         {
-            fmt::println("[Window] SDL_SetWindowFullscreen(0) failed: {}", SDL_GetError());
+            Logger::error("[Window] SDL_SetWindowFullscreen(0) failed: {}", SDL_GetError());
         }
     }
 
@@ -570,7 +570,7 @@ void VulkanEngine::setWindowMode(WindowMode mode, int display_index)
 
         if (SDL_SetWindowFullscreen(_window, fullscreen_flag) != 0)
         {
-            fmt::println("[Window] SDL_SetWindowFullscreen({}) failed: {}",
+            Logger::error("[Window] SDL_SetWindowFullscreen({}) failed: {}",
                          static_cast<unsigned>(fullscreen_flag),
                          SDL_GetError());
         }
@@ -722,7 +722,7 @@ bool VulkanEngine::addGLTFInstance(const std::string &instanceName,
     const std::string resolvedPath = _assetManager->modelPath(modelRelativePath);
     if (!file_exists_nothrow(resolvedPath))
     {
-        fmt::println("[Engine] Failed to add glTF instance '{}' – model file not found (requested='{}', resolved='{}')",
+        Logger::error("[Engine] Failed to add glTF instance '{}' -- model file not found (requested='{}', resolved='{}')",
                      instanceName,
                      modelRelativePath,
                      resolvedPath);
@@ -732,7 +732,7 @@ bool VulkanEngine::addGLTFInstance(const std::string &instanceName,
     auto gltf = _assetManager->loadGLTF(resolvedPath);
     if (!gltf.has_value() || !gltf.value())
     {
-        fmt::println("[Engine] Failed to add glTF instance '{}' – AssetManager::loadGLTF('{}') returned empty scene",
+        Logger::error("[Engine] Failed to add glTF instance '{}' -- AssetManager::loadGLTF('{}') returned empty scene",
                      instanceName,
                      resolvedPath);
         return false;
@@ -763,7 +763,7 @@ bool VulkanEngine::addGLTFInstance(const std::string &instanceName,
 
         if (count > 0)
         {
-            fmt::println("[Engine] Marked {} materials for preloading in instance '{}'",
+            Logger::info("[Engine] Marked {} materials for preloading in instance '{}'",
                          count, instanceName);
 
             // Trigger immediate texture loading pump to start upload
@@ -837,7 +837,7 @@ uint32_t VulkanEngine::loadGLTFAsync(const std::string &sceneName,
     const std::string resolvedPath = _assetManager->modelPath(modelRelativePath);
     if (!file_exists_nothrow(resolvedPath))
     {
-        fmt::println("[Engine] Failed to enqueue async glTF load for scene '{}' – model file not found (requested='{}', resolved='{}')",
+        Logger::error("[Engine] Failed to enqueue async glTF load for scene '{}' -- model file not found (requested='{}', resolved='{}')",
                      sceneName,
                      modelRelativePath,
                      resolvedPath);
@@ -862,7 +862,7 @@ uint32_t VulkanEngine::loadGLTFAsync(const std::string &sceneName,
     const std::string resolvedPath = _assetManager->modelPath(modelRelativePath);
     if (!file_exists_nothrow(resolvedPath))
     {
-        fmt::println("[Engine] Failed to enqueue async glTF load for scene '{}' – model file not found (requested='{}', resolved='{}')",
+        Logger::error("[Engine] Failed to enqueue async glTF load for scene '{}' -- model file not found (requested='{}', resolved='{}')",
                      sceneName,
                      modelRelativePath,
                      resolvedPath);
@@ -904,7 +904,7 @@ void VulkanEngine::preloadInstanceTextures(const std::string &instanceName)
         }
     }
 
-    fmt::println("[Engine] Preloaded {} material sets for instance '{}'", count, instanceName);
+    Logger::info("[Engine] Preloaded {} material sets for instance '{}'", count, instanceName);
 }
 
 void VulkanEngine::cleanup()
@@ -1149,7 +1149,7 @@ void VulkanEngine::draw()
                 }
                 else
                 {
-                    fmt::println("[Engine] Warning: failed to enqueue IBL load for {} (specular='{}')",
+                    Logger::warn("[Engine] Warning: failed to enqueue IBL load for {} (specular='{}')",
                                  (newVolume >= 0) ? "volume" : "global environment",
                                  resolved.specularCube);
                 }
@@ -1648,7 +1648,7 @@ void VulkanEngine::run()
                 }
                 else
                 {
-                    fmt::println("[Engine] Warning: async IBL load failed (specular='{}')",
+                    Logger::warn("[Engine] Warning: async IBL load failed (specular='{}')",
                                  _pendingIBLRequest.paths.specularCube);
                 }
                 _pendingIBLRequest.active = false;

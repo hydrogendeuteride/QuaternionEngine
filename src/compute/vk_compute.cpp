@@ -2,7 +2,7 @@
 #include <core/context.h>
 #include <render/pipelines.h>
 #include <core/util/initializers.h>
-#include <iostream>
+
 
 #include "core/device/device.h"
 #include "core/device/resource.h"
@@ -163,7 +163,7 @@ bool ComputeManager::registerPipeline(const std::string &name, const ComputePipe
 {
     if (pipelines.find(name) != pipelines.end())
     {
-        std::cerr << "Pipeline '" << name << "' already exists!" << std::endl;
+        Logger::error("Pipeline '{}' already exists!", name);
         return false;
     }
 
@@ -186,7 +186,7 @@ void ComputeManager::dispatch(VkCommandBuffer cmd, const std::string &pipelineNa
     auto it = pipelines.find(pipelineName);
     if (it == pipelines.end())
     {
-        std::cerr << "Pipeline '" << pipelineName << "' not found!" << std::endl;
+        Logger::error("Pipeline '{}' not found!", pipelineName);
         return;
     }
 
@@ -225,13 +225,13 @@ bool ComputeManager::createInstance(const std::string &instanceName, const std::
 {
     if (instances.find(instanceName) != instances.end())
     {
-        std::cerr << "Compute instance '" << instanceName << "' already exists!" << std::endl;
+        Logger::error("Compute instance '{}' already exists!", instanceName);
         return false;
     }
     auto it = pipelines.find(pipelineName);
     if (it == pipelines.end())
     {
-        std::cerr << "Pipeline '" << pipelineName << "' not found for instance!" << std::endl;
+        Logger::error("Pipeline '{}' not found for instance!", pipelineName);
         return false;
     }
 
@@ -341,13 +341,13 @@ void ComputeManager::dispatchInstance(VkCommandBuffer cmd, const std::string &in
     auto it = instances.find(instanceName);
     if (it == instances.end())
     {
-        std::cerr << "Compute instance '" << instanceName << "' not found!" << std::endl;
+        Logger::error("Compute instance '{}' not found!", instanceName);
         return;
     }
     auto pit = pipelines.find(it->second.pipelineName);
     if (pit == pipelines.end())
     {
-        std::cerr << "Pipeline '" << it->second.pipelineName << "' not found for instance dispatch!" << std::endl;
+        Logger::error("Pipeline '{}' not found for instance dispatch!", it->second.pipelineName);
         return;
     }
 
@@ -464,7 +464,7 @@ bool ComputeManager::createPipeline(const std::string &name, const ComputePipeli
     VkShaderModule shaderModule;
     if (!vkutil::load_shader_module(createInfo.shaderPath.c_str(), context->getDevice()->device(), &shaderModule))
     {
-        std::cerr << "Failed to load compute shader: " << createInfo.shaderPath << std::endl;
+        Logger::error("Failed to load compute shader: {}", createInfo.shaderPath);
         return false;
     }
 
@@ -582,7 +582,7 @@ void ComputeManager::updateDescriptorSet(VkDescriptorSet descriptorSet, const st
                 break;
 
             default:
-                std::cerr << "Unsupported descriptor type: " << binding.type << std::endl;
+                Logger::error("Unsupported descriptor type: {}", static_cast<int>(binding.type));
                 break;
         }
     }

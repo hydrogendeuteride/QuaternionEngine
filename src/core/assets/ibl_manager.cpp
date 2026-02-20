@@ -355,7 +355,7 @@ bool IBLManager::load(const IBLPaths &paths)
     {
         if (!error.empty())
         {
-            fmt::println("[IBL] load failed: {}", error);
+            Logger::error("[IBL] load failed: {}", error);
         }
         return false;
     }
@@ -419,7 +419,7 @@ IBLManager::AsyncResult IBLManager::pumpAsync()
     {
         if (!error.empty())
         {
-            fmt::println("[IBL] async load failed: {}", error);
+            Logger::error("[IBL] async load failed: {}", error);
         }
         out.success = false;
         return out;

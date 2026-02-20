@@ -75,7 +75,7 @@ void RayTracingManager::flushPendingDeletes()
 {
     if (_pendingBlasDestroy.empty()) return;
 
-    fmt::println("[RT] flushPendingDeletes: destroying {} BLAS handles", _pendingBlasDestroy.size());
+    Logger::info("[RT] flushPendingDeletes: destroying {} BLAS handles", _pendingBlasDestroy.size());
     VkDevice dv = _device->device();
     for (auto &as : _pendingBlasDestroy)
     {
@@ -107,7 +107,7 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     // If a BLAS is already cached (even an empty sentinel), return it directly.
     if (auto it = _blasByMesh.find(key); it != _blasByMesh.end())
     {
-        fmt::println("[RT] getOrBuildBLAS reuse by mesh mesh='{}' handle={}", mesh->name,
+        Logger::info("[RT] getOrBuildBLAS reuse by mesh mesh='{}' handle={}", mesh->name,
                      static_cast<const void *>(it->second.handle));
         return it->second;
     }
@@ -116,7 +116,7 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     // another job; simply report "not ready yet".
     if (_blasPendingMeshes.find(key) != _blasPendingMeshes.end())
     {
-        fmt::println("[RT] getOrBuildBLAS pending build mesh='{}'", mesh->name);
+        Logger::info("[RT] getOrBuildBLAS pending build mesh='{}'", mesh->name);
         return {};
     }
 
@@ -124,11 +124,11 @@ AccelStructureHandle RayTracingManager::getOrBuildBLAS(const std::shared_ptr<Mes
     // before queuing a BLAS that will read from those GPU buffers.
     if (_resources && _resources->deferred_uploads() && _resources->has_pending_uploads())
     {
-        fmt::println("[RT] getOrBuildBLAS: flushing pending resource uploads before queuing BLAS build");
+        Logger::info("[RT] getOrBuildBLAS: flushing pending resource uploads before queuing BLAS build");
         _resources->process_queued_uploads_immediate();
     }
 
-    fmt::println("[RT] getOrBuildBLAS queue build mesh='{}'", mesh->name);
+    Logger::info("[RT] getOrBuildBLAS queue build mesh='{}'", mesh->name);
     _blasPendingMeshes.insert(key);
     _blasBuildQueue.push_back(PendingBlasBuild{key});
 
@@ -145,7 +145,7 @@ AccelStructureHandle RayTracingManager::buildBlasForMesh(const MeshAsset *mesh)
     // before building a BLAS that reads from those GPU buffers.
     if (_resources->deferred_uploads() && _resources->has_pending_uploads())
     {
-        fmt::println("[RT] buildBlasForMesh: flushing pending resource uploads before BLAS build");
+        Logger::info("[RT] buildBlasForMesh: flushing pending resource uploads before BLAS build");
         _resources->process_queued_uploads_immediate();
     }
 
@@ -160,7 +160,7 @@ AccelStructureHandle RayTracingManager::buildBlasForMesh(const MeshAsset *mesh)
     const uint32_t vcount = mesh->meshBuffers.vertexCount;
     VkBuffer vb = mesh->meshBuffers.vertexBuffer.buffer;
 
-    fmt::println("[RT] buildBlasForMesh mesh='{}' surfaces={} vcount={}", mesh->name,
+    Logger::info("[RT] buildBlasForMesh mesh='{}' surfaces={} vcount={}", mesh->name,
                  mesh->surfaces.size(), vcount);
 
     for (const auto &s: mesh->surfaces)
@@ -199,7 +199,7 @@ AccelStructureHandle RayTracingManager::buildBlasForMesh(const MeshAsset *mesh)
     // If no valid geometries, record an empty sentinel to avoid re-queuing.
     if (geoms.empty())
     {
-        fmt::println("[RT] buildBlasForMesh: mesh='{}' has no primitives; skipping BLAS", mesh->name);
+        Logger::info("[RT] buildBlasForMesh: mesh='{}' has no primitives; skipping BLAS", mesh->name);
         _blasByMesh.emplace(mesh, AccelStructureHandle{});
         return {};
     }
@@ -250,7 +250,7 @@ AccelStructureHandle RayTracingManager::buildBlasForMesh(const MeshAsset *mesh)
     const VkAccelerationStructureBuildRangeInfoKHR* pRange = ranges.data();
     _resources->immediate_submit([&](VkCommandBuffer cmd) {
         // ppBuildRangeInfos is an array of infoCount pointers; we have 1 build info
-        fmt::println("[RT] building BLAS for mesh='{}' geoms={} primsTotal={} storageSize={} scratchSize={}",
+        Logger::info("[RT] building BLAS for mesh='{}' geoms={} primsTotal={} storageSize={} scratchSize={}",
                      mesh->name,
                      geoms.size(),
                      maxPrim.empty() ? 0u : std::accumulate(maxPrim.begin(), maxPrim.end(), 0u),
@@ -318,7 +318,7 @@ void RayTracingManager::ensureTlasStorage(VkDeviceSize requiredASSize, VkDeviceS
     if (_tlas.handle || _tlas.storage.buffer)
     {
         AccelStructureHandle old = _tlas;
-        fmt::println("[RT] ensureTlasStorage: scheduling old TLAS destroy handle={} buffer={} size={}",
+        Logger::info("[RT] ensureTlasStorage: scheduling old TLAS destroy handle={} buffer={} size={}",
                      static_cast<const void *>(old.handle),
                      static_cast<const void *>(old.storage.buffer),
                      old.storage.info.size);
@@ -341,7 +341,7 @@ void RayTracingManager::ensureTlasStorage(VkDeviceSize requiredASSize, VkDeviceS
     asci.size = requiredASSize;
     VK_CHECK(_vkCreateAccelerationStructureKHR(_device->device(), &asci, nullptr, &_tlas.handle));
 
-    fmt::println("[RT] ensureTlasStorage: created TLAS handle={} buffer={} size={}",
+    Logger::info("[RT] ensureTlasStorage: created TLAS handle={} buffer={} size={}",
                  static_cast<const void *>(_tlas.handle),
                  static_cast<const void *>(_tlas.storage.buffer),
                  requiredASSize);
@@ -353,7 +353,7 @@ VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const Dra
     std::vector<VkAccelerationStructureInstanceKHR> instances;
     instances.reserve(dc.OpaqueSurfaces.size());
 
-    fmt::println("[RT] buildTLASFromDrawContext: opaqueSurfaces={} current TLAS handle={} buffer={}",
+    Logger::info("[RT] buildTLASFromDrawContext: opaqueSurfaces={} current TLAS handle={} buffer={}",
                  dc.OpaqueSurfaces.size(),
                  static_cast<const void *>(_tlas.handle),
                  static_cast<const void *>(_tlas.storage.buffer));

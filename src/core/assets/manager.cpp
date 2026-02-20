@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <iostream>
 
 #include <core/engine.h>
 #include <core/device/resource.h>
@@ -16,7 +15,6 @@
 #include <fastgltf/parser.hpp>
 #include <fastgltf/util.hpp>
 #include <fastgltf/tools.hpp>
-#include <fmt/core.h>
 
 using std::filesystem::path;
 
@@ -174,11 +172,11 @@ std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_v
         {
             if (auto sp = it->second.lock())
             {
-                fmt::println("[AssetManager] loadGLTF cache hit key='{}' path='{}' ptr={}", key, resolved,
+                Logger::info("[AssetManager] loadGLTF cache hit key='{}' path='{}' ptr={}", key, resolved,
                              static_cast<const void *>(sp.get()));
                 return sp;
             }
-            fmt::println("[AssetManager] loadGLTF cache expired key='{}' path='{}' (reloading)", key, resolved);
+            Logger::info("[AssetManager] loadGLTF cache expired key='{}' path='{}' (reloading)", key, resolved);
             _gltfCacheByPath.erase(it);
         }
     }
@@ -227,7 +225,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_v
                 {
                     return {};
                 }
-                fmt::println("[AssetManager] Warning: collider sidecar exists but failed to load ('{}')", sidecar_path);
+                Logger::warn("[AssetManager] Warning: collider sidecar exists but failed to load ('{}')", sidecar_path);
                 (*loaded)->build_colliders_from_markers(true);
                 (*loaded)->build_mesh_colliders_from_markers(true);
                 (*loaded)->colliders_from_sidecar = false;
@@ -242,12 +240,12 @@ std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_v
             (*loaded)->collider_source_path.clear();
         }
 
-        fmt::println("[AssetManager] loadGLTF loaded new scene key='{}' path='{}' ptr={}", key, resolved,
+        Logger::info("[AssetManager] loadGLTF loaded new scene key='{}' path='{}' ptr={}", key, resolved,
                      static_cast<const void *>(loaded.value().get()));
     }
     else
     {
-        fmt::println("[AssetManager] loadGLTF got empty scene for key='{}' path='{}'", key, resolved);
+        Logger::info("[AssetManager] loadGLTF got empty scene for key='{}' path='{}'", key, resolved);
     }
 
     {
@@ -706,7 +704,7 @@ std::pair<AllocatedImage, bool> AssetManager::loadImageFromAsset(std::string_vie
         }
         else
         {
-            fmt::println("[AssetManager] Failed to load texture '{}' (resolved='{}')",
+            Logger::error("[AssetManager] Failed to load texture '{}' (resolved='{}')",
                          imgPath,
                          resolved);
         }

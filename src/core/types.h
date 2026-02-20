@@ -26,6 +26,7 @@ inline const char *string_VkFormat(VkFormat) { return "VkFormat"; }
 #include <vk_mem_alloc.h>
 
 #include <fmt/core.h>
+#include "core/util/logger.h"
 
 #include <glm/mat4x4.hpp>
 #include <glm/mat3x4.hpp>
@@ -70,7 +71,7 @@ inline void decompose_trs_matrix(const glm::mat4 &m,
     do {                                                                \
         VkResult err = x;                                               \
         if (err) {                                                      \
-            fmt::println("Detected Vulkan error: {}", string_VkResult(err)); \
+            Logger::error("Detected Vulkan error: {}", string_VkResult(err)); \
             abort();                                                    \
         }                                                               \
     } while (0)

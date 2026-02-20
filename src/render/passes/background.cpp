@@ -249,6 +249,6 @@ void BackgroundPass::cleanup()
         _context->getResources()->destroy_image(_fallbackIblCube);
         _fallbackIblCube = {};
     }
-    fmt::print("BackgroundPass::cleanup()\n");
+    Logger::info("BackgroundPass::cleanup()");
     _backgroundEffects.clear();
 }

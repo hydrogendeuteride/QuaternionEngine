@@ -82,11 +82,11 @@ void SSRPass::init(EngineContext *context)
     {
         if (!rtCapable)
         {
-            fmt::println("[SSRPass] Ray-query not supported; skipping ssr.rt pipeline.");
+            Logger::info("[SSRPass] Ray-query not supported; skipping ssr.rt pipeline.");
         }
         else
         {
-            fmt::println("[SSRPass] RT pipeline deferred (reflection mode = SSR only).");
+            Logger::info("[SSRPass] RT pipeline deferred (reflection mode = SSR only).");
         }
     }
 }
@@ -223,7 +223,7 @@ void SSRPass::draw_ssr(VkCommandBuffer cmd,
                 infoRT.fragmentShaderPath = ctxLocal->getAssets()->shaderPath("ssr_rt.frag.spv");
                 if (!pipelineManager->createGraphicsPipeline("ssr.rt", infoRT))
                 {
-                    fmt::println(stderr, "[SSRPass] Failed to build ssr.rt; falling back to non-RT.");
+                    Logger::error("[SSRPass] Failed to build ssr.rt; falling back to non-RT.");
                 }
             }
         }

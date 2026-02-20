@@ -51,7 +51,7 @@ void SwapchainManager::cleanup()
 {
     _deletionQueue.flush();
     destroy_swapchain();
-    fmt::print("SwapchainManager::cleanup()\n");
+    Logger::info("SwapchainManager::cleanup()");
 }
 
 void SwapchainManager::resize_render_targets(VkExtent2D renderExtent)

@@ -190,7 +190,7 @@ namespace GameRuntime
                     }
                     else
                     {
-                        fmt::println("[Runtime] Warning: async IBL load failed (specular='{}')",
+                        Logger::warn("[Runtime] Warning: async IBL load failed (specular='{}')",
                                      _renderer->_pendingIBLRequest.paths.specularCube);
                     }
                     _renderer->_pendingIBLRequest.active = false;

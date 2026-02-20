@@ -175,6 +175,6 @@ void MeshVfxPass::draw_mesh_vfx(VkCommandBuffer cmd,
 
 void MeshVfxPass::cleanup()
 {
-    fmt::print("MeshVfxPass::cleanup()\n");
+    Logger::info("MeshVfxPass::cleanup()");
 }
 

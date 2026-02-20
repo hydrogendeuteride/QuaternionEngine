@@ -101,13 +101,13 @@ void DeviceManager::init_vulkan(SDL_Window *window)
             _accelStructSupported = false;
         }
 
-        fmt::print("[Device] RayQuery support: {} | AccelStruct: {}\n",
+        Logger::info("[Device] RayQuery support: {} | AccelStruct: {}",
                    rayQueryCapable ? "yes" : "no",
                    accelCapable ? "yes" : "no");
 
         if (forceDisableRayQuery && rayQueryCapable && accelCapable)
         {
-            fmt::print("[Device] VKG_DISABLE_RAY_QUERY is set; forcing RayQuery/AccelStruct OFF for compatibility.\n");
+            Logger::info("[Device] VKG_DISABLE_RAY_QUERY is set; forcing RayQuery/AccelStruct OFF for compatibility.");
         }
 
         if (_rayQuerySupported && _accelStructSupported)
@@ -189,13 +189,13 @@ void DeviceManager::cleanup()
 
         if (s.allocationCount != 0)
         {
-            fmt::print("[VMA] WARNING: {} live allocations ({} bytes) remain before allocator destruction – this will trip vk_mem_alloc.h assertion: \"Some allocations were not freed before destruction of this memory block!\"\n",
+            Logger::warn("[VMA] WARNING: {} live allocations ({} bytes) remain before allocator destruction -- this will trip vk_mem_alloc.h assertion: \"Some allocations were not freed before destruction of this memory block!\"",
                        (size_t)s.allocationCount,
                        (unsigned long long)s.allocationBytes);
         }
         else if (vmaDebugEnabled())
         {
-            fmt::print("[VMA] Blocks: {} | Allocations: {} | BlockBytes: {} | AllocationBytes: {}\n",
+            Logger::info("[VMA] Blocks: {} | Allocations: {} | BlockBytes: {} | AllocationBytes: {}",
                        (size_t)s.blockCount,
                        (size_t)s.allocationCount,
                        (unsigned long long)s.blockBytes,
@@ -207,5 +207,5 @@ void DeviceManager::cleanup()
     vkDestroyDevice(_device, nullptr);
     vkb::destroy_debug_utils_messenger(_instance, _debug_messenger);
     vkDestroyInstance(_instance, nullptr);
-    fmt::print("DeviceManager::cleanup()\n");
+    Logger::info("DeviceManager::cleanup()");
 }

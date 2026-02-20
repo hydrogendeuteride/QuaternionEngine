@@ -234,7 +234,7 @@ namespace Game
             else
             {
                 _audio_test_last_status = "Init: preload failed";
-                fmt::println("[ExampleGame] Failed to preload audio test '{}'", _audio_test_event);
+                Logger::error("[ExampleGame] Failed to preload audio test '{}'", _audio_test_event);
             }
         }
         else
@@ -642,7 +642,7 @@ namespace Game
 
         if (!_decal_test_spawned)
         {
-            fmt::println("[ExampleGame] Failed to spawn decal test fixtures.");
+            Logger::error("[ExampleGame] Failed to spawn decal test fixtures.");
         }
     }
 
@@ -836,7 +836,7 @@ namespace Game
 
             if (_contact_print_console)
             {
-                fmt::println(
+                Logger::debug(
                     "[Collision][{}][{}] {}({}) <-> {}({}) p=({:.2f},{:.2f},{:.2f}) n=({:.2f},{:.2f},{:.2f}) depth={:.3f}",
                     contact_event_type_name(entry.type),
                     entry.time,
@@ -882,7 +882,7 @@ namespace Game
 
             if (_contact_print_console)
             {
-                fmt::println("[Trigger][{}][{}] {}({}) <-> {}({}) p=({:.2f},{:.2f},{:.2f})",
+                Logger::debug("[Trigger][{}][{}] {}({}) <-> {}({}) p=({:.2f},{:.2f},{:.2f})",
                              contact_event_type_name(entry.type),
                              entry.time,
                              entry.self_label, entry.self_body,

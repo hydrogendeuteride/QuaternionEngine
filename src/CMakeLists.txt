@@ -73,6 +73,8 @@ add_executable (vulkan_engine
   core/util/initializers.cpp
   core/util/debug.h
   core/util/debug.cpp
+  core/util/logger.h
+  core/util/logger.cpp
   # core/raytracing
   core/raytracing/raytracing.h
   core/raytracing/raytracing.cpp

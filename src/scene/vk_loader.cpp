@@ -1,5 +1,4 @@
 ﻿#include "stb_image.h"
-#include <iostream>
 #include <algorithm>
 #include <cmath>
 #include "vk_loader.h"
@@ -168,7 +167,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
                                                      const GLTFLoadCallbacks *cb)
 {
     //> load_1
-    fmt::println("[GLTF] loadGltf begin: '{}'", filePath);
+    Logger::info("[GLTF] loadGltf begin: '{}'", filePath);
 
     std::shared_ptr<LoadedGLTF> scene = std::make_shared<LoadedGLTF>();
     scene->creator = engine;
@@ -197,7 +196,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
         }
         else
         {
-            std::cerr << "Failed to load glTF: " << fastgltf::to_underlying(load.error()) << std::endl;
+            Logger::error("Failed to load glTF: {}", fastgltf::to_underlying(load.error()));
             return {};
         }
     }
@@ -210,13 +209,13 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
         }
         else
         {
-            std::cerr << "Failed to load glTF: " << fastgltf::to_underlying(load.error()) << std::endl;
+            Logger::error("Failed to load glTF: {}", fastgltf::to_underlying(load.error()));
             return {};
         }
     }
     else
     {
-        std::cerr << "Failed to determine glTF container" << std::endl;
+        Logger::error("Failed to determine glTF container");
         return {};
     }
     //< load_1
@@ -240,7 +239,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
 
     //> load_2
     // we can stimate the descriptors we will need accurately
-    fmt::println("[GLTF] loadGltf: materials={} meshes={} images={} samplers={} (creating descriptor pool)",
+    Logger::info("[GLTF] loadGltf: materials={} meshes={} images={} samplers={} (creating descriptor pool)",
                  gltf.materials.size(),
                  gltf.meshes.size(),
                  gltf.images.size(),
@@ -260,7 +259,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
 
     file.descriptorPool.init(engine->_deviceManager->device(), gltf.materials.size(), sizes);
 
-    fmt::println("[GLTF] loadGltf: descriptor pool initialized for '{}' (materials={})",
+    Logger::info("[GLTF] loadGltf: descriptor pool initialized for '{}' (materials={})",
                  filePath,
                  gltf.materials.size());
 
@@ -1028,7 +1027,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
             }
         }, img.data);
     }
-    fmt::println("[GLTF] loadGltf done: meshes={} materials={} images={} samplers={} animations={} debugName='{}'",
+    Logger::info("[GLTF] loadGltf done: meshes={} materials={} images={} samplers={} animations={} debugName='{}'",
                  file.meshes.size(),
                  file.materials.size(),
                  file.images.size(),
@@ -1558,7 +1557,7 @@ void LoadedGLTF::updateAnimation(float dt, AnimationState &state)
 void LoadedGLTF::clearAll()
 {
     const char *name = debugName.empty() ? "<unnamed>" : debugName.c_str();
-    fmt::println("[GLTF] clearAll begin for '{}' (meshes={} images={} materials={} samplers={})",
+    Logger::info("[GLTF] clearAll begin for '{}' (meshes={} images={} materials={} samplers={})",
                  name,
                  meshes.size(),
                  images.size(),
@@ -1613,7 +1612,7 @@ void LoadedGLTF::clearAll()
 
     creator->_resourceManager->destroy_buffer(materialBuffer);
 
-    fmt::println("[GLTF] clearAll done for '{}' (meshes={}, images={}, materials={}, samplers={})",
+    Logger::info("[GLTF] clearAll done for '{}' (meshes={}, images={}, materials={}, samplers={})",
                  name,
                  meshes.size(),
                  images.size(),

@@ -110,7 +110,7 @@ void RenderPassManager::cleanup()
     {
         _imguiPass->cleanup();
     }
-    fmt::print("RenderPassManager::cleanup()\n");
+    Logger::info("RenderPassManager::cleanup()");
     _passes.clear();
     _imguiPass.reset();
 }

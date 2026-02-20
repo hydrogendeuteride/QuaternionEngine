@@ -63,7 +63,7 @@ void ImGuiSystem::init(EngineContext *context)
     _context = context;
     if (_context == nullptr || _context->getDevice() == nullptr || _context->getSwapchain() == nullptr || _context->window == nullptr)
     {
-        fmt::println("[ImGuiSystem] init skipped (missing context/device/swapchain/window)");
+        Logger::info("[ImGuiSystem] init skipped (missing context/device/swapchain/window)");
         return;
     }
 
@@ -108,7 +108,7 @@ void ImGuiSystem::init(EngineContext *context)
 
     if (!ImGui_ImplVulkan_CreateFontsTexture())
     {
-        fmt::println("[ImGuiSystem] Warning: ImGui_ImplVulkan_CreateFontsTexture() failed");
+        Logger::warn("[ImGuiSystem] Warning: ImGui_ImplVulkan_CreateFontsTexture() failed");
     }
 
     io.FontGlobalScale = (_dpi_scale > 0.0f) ? (1.0f / _dpi_scale) : 1.0f;
@@ -303,7 +303,7 @@ void ImGuiSystem::rebuildFonts(float dpi_scale)
     {
         if (!ImGui_ImplVulkan_CreateFontsTexture())
         {
-            fmt::println("[ImGuiSystem] Warning: ImGui_ImplVulkan_CreateFontsTexture() failed after DPI change");
+            Logger::warn("[ImGuiSystem] Warning: ImGui_ImplVulkan_CreateFontsTexture() failed after DPI change");
         }
     }
 }

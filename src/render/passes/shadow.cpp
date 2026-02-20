@@ -78,7 +78,7 @@ void ShadowPass::init(EngineContext *context)
 void ShadowPass::cleanup()
 {
     // Nothing yet; pipelines and descriptors will be added later
-    fmt::print("ShadowPass::cleanup()\n");
+    Logger::info("ShadowPass::cleanup()");
 }
 
 void ShadowPass::execute(VkCommandBuffer)

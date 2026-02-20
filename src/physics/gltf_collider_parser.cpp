@@ -56,7 +56,7 @@ namespace Physics
             auto finite_nonnegative = [](float v) { return std::isfinite(v) && v >= 0.0f; };
             if (!finite_nonnegative(sx) || !finite_nonnegative(sy) || !finite_nonnegative(sz))
             {
-                fmt::println("[GLTF][Colliders] '{}' node '{}' has non-finite scale; skipping",
+                Logger::warn("[GLTF][Colliders] '{}' node '{}' has non-finite scale; skipping",
                              scene_name, node_name);
                 return {};
             }
@@ -70,7 +70,7 @@ namespace Physics
                     const glm::vec3 he = glm::vec3(sx, sy, sz) * 0.5f;
                     if (he.x <= 0.0f || he.y <= 0.0f || he.z <= 0.0f)
                     {
-                        fmt::println("[GLTF][Colliders] '{}' node '{}' box has zero size; skipping",
+                        Logger::warn("[GLTF][Colliders] '{}' node '{}' box has zero size; skipping",
                                      scene_name, node_name);
                         return {};
                     }
@@ -80,13 +80,13 @@ namespace Physics
                 {
                     if (!approx_equal_rel(sx, sy, kUniformEps) || !approx_equal_rel(sx, sz, kUniformEps))
                     {
-                        fmt::println("[GLTF][Colliders] '{}' node '{}' sphere scale is non-uniform (x={}, y={}, z={}); using max as radius",
+                        Logger::warn("[GLTF][Colliders] '{}' node '{}' sphere scale is non-uniform (x={}, y={}, z={}); using max as radius",
                                      scene_name, node_name, sx, sy, sz);
                     }
                     const float r = 0.5f * std::max({sx, sy, sz});
                     if (r <= 0.0f)
                     {
-                        fmt::println("[GLTF][Colliders] '{}' node '{}' sphere has zero radius; skipping",
+                        Logger::warn("[GLTF][Colliders] '{}' node '{}' sphere has zero radius; skipping",
                                      scene_name, node_name);
                         return {};
                     }
@@ -96,14 +96,14 @@ namespace Physics
                 {
                     if (!approx_equal_rel(sx, sz, kUniformEps))
                     {
-                        fmt::println("[GLTF][Colliders] '{}' node '{}' capsule scale X/Z is non-uniform (x={}, z={}); using max as radius",
+                        Logger::warn("[GLTF][Colliders] '{}' node '{}' capsule scale X/Z is non-uniform (x={}, z={}); using max as radius",
                                      scene_name, node_name, sx, sz);
                     }
                     const float radius = 0.5f * std::max(sx, sz);
                     const float half_height = std::max(0.0f, 0.5f * sy - radius);
                     if (radius <= 0.0f)
                     {
-                        fmt::println("[GLTF][Colliders] '{}' node '{}' capsule has zero radius; skipping",
+                        Logger::warn("[GLTF][Colliders] '{}' node '{}' capsule has zero radius; skipping",
                                      scene_name, node_name);
                         return {};
                     }
@@ -113,14 +113,14 @@ namespace Physics
                 {
                     if (!approx_equal_rel(sx, sz, kUniformEps))
                     {
-                        fmt::println("[GLTF][Colliders] '{}' node '{}' cylinder scale X/Z is non-uniform (x={}, z={}); using max as radius",
+                        Logger::warn("[GLTF][Colliders] '{}' node '{}' cylinder scale X/Z is non-uniform (x={}, z={}); using max as radius",
                                      scene_name, node_name, sx, sz);
                     }
                     const float radius = 0.5f * std::max(sx, sz);
                     const float half_height = 0.5f * sy;
                     if (radius <= 0.0f || half_height <= 0.0f)
                     {
-                        fmt::println("[GLTF][Colliders] '{}' node '{}' cylinder has zero size; skipping",
+                        Logger::warn("[GLTF][Colliders] '{}' node '{}' cylinder has zero size; skipping",
                                      scene_name, node_name);
                         return {};
                     }
@@ -133,7 +133,7 @@ namespace Physics
                     const float bottom_radius = 0.5f * sz;
                     if (half_height <= 0.0f || (top_radius <= 0.0f && bottom_radius <= 0.0f))
                     {
-                        fmt::println("[GLTF][Colliders] '{}' node '{}' tapered cylinder has zero size; skipping",
+                        Logger::warn("[GLTF][Colliders] '{}' node '{}' tapered cylinder has zero size; skipping",
                                      scene_name, node_name);
                         return {};
                     }
@@ -204,7 +204,7 @@ namespace Physics
                 const Node* owner = resolve_owner(node_ptr.get(), name_by_ptr);
                 if (!owner)
                 {
-                    fmt::println("[GLTF][Colliders] '{}' collider node '{}' has no valid owner; skipping",
+                    Logger::warn("[GLTF][Colliders] '{}' collider node '{}' has no valid owner; skipping",
                                  scene_name, node_name);
                     continue;
                 }
@@ -212,7 +212,7 @@ namespace Physics
                 auto owner_name_it = name_by_ptr.find(owner);
                 if (owner_name_it == name_by_ptr.end())
                 {
-                    fmt::println("[GLTF][Colliders] '{}' collider node '{}' owner missing name mapping; skipping",
+                    Logger::warn("[GLTF][Colliders] '{}' collider node '{}' owner missing name mapping; skipping",
                                  scene_name, node_name);
                     continue;
                 }
@@ -274,7 +274,7 @@ namespace Physics
                 const Node *owner = resolve_owner(node_ptr.get(), name_by_ptr);
                 if (!owner)
                 {
-                    fmt::println("[GLTF][Colliders] '{}' mesh collider node '{}' has no valid owner; skipping",
+                    Logger::warn("[GLTF][Colliders] '{}' mesh collider node '{}' has no valid owner; skipping",
                                  scene_name, node_name);
                     continue;
                 }
@@ -282,7 +282,7 @@ namespace Physics
                 auto owner_name_it = name_by_ptr.find(owner);
                 if (owner_name_it == name_by_ptr.end())
                 {
-                    fmt::println("[GLTF][Colliders] '{}' mesh collider node '{}' owner missing name mapping; skipping",
+                    Logger::warn("[GLTF][Colliders] '{}' mesh collider node '{}' owner missing name mapping; skipping",
                                  scene_name, node_name);
                     continue;
                 }
@@ -306,7 +306,7 @@ namespace Physics
 
                 if (!mesh_data || mesh_data->triangles.empty())
                 {
-                    fmt::println("[GLTF][Colliders] '{}' mesh collider node '{}' has no triangle data (missing BVH?); skipping",
+                    Logger::warn("[GLTF][Colliders] '{}' mesh collider node '{}' has no triangle data (missing BVH?); skipping",
                                  scene_name, node_name);
                     continue;
                 }

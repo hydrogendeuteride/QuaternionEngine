@@ -1,6 +1,7 @@
 #include "game_state_manager.h"
 
 #include <fmt/core.h>
+#include "core/util/logger.h"
 #include <cassert>
 
 namespace Game
@@ -19,7 +20,7 @@ void GameStateManager::init(GameStateContext ctx)
 void GameStateManager::push(std::unique_ptr<IGameState> state)
 {
     assert(state && "Cannot push null state");
-    fmt::println("[StateManager] Push: {}", state->name());
+    Logger::info("[StateManager] Push: {}", state->name());
 
     state->on_enter(_ctx);
     _stack.push_back(std::move(state));
@@ -33,7 +34,7 @@ void GameStateManager::pop()
     }
 
     auto &top_state = _stack.back();
-    fmt::println("[StateManager] Pop: {}", top_state->name());
+    Logger::info("[StateManager] Pop: {}", top_state->name());
 
     top_state->on_exit(_ctx);
     _stack.pop_back();
@@ -42,7 +43,7 @@ void GameStateManager::pop()
 void GameStateManager::switch_to(std::unique_ptr<IGameState> state)
 {
     assert(state && "Cannot switch to null state");
-    fmt::println("[StateManager] Switch to: {}", state->name());
+    Logger::info("[StateManager] Switch to: {}", state->name());
 
     // Pop all existing states (in reverse order)
     while (!_stack.empty())

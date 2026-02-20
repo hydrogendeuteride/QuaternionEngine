@@ -18,7 +18,7 @@
 #include <core/device/swapchain.h>
 #include <core/util/initializers.h>
 #include <core/util/debug.h>
-#include <fmt/core.h>
+
 
 #include "core/device/device.h"
 #include <chrono>
@@ -536,7 +536,7 @@ bool RenderGraph::compile()
 				// always a bug in the pass declarations (the graph cannot insert mid-pass barriers).
 				if (!d.warnedLayoutMismatch)
 				{
-					fmt::println("[RG][Warn] Pass '{}' declares multiple layouts for image id {} ({} vs {}).",
+					Logger::warn("[RG] Pass '{}' declares multiple layouts for image id {} ({} vs {}).",
 					             pass.name, id, (int) d.info.layout, (int) u.layout);
 					d.warnedLayoutMismatch = true;
 				}
@@ -647,12 +647,12 @@ bool RenderGraph::compile()
 					// Color attachments should not be depth formats and vice versa
 					if (usage == RGImageUsage::ColorAttachment && is_depth_format(rec->format))
 					{
-						fmt::println("[RG][Warn] Pass '{}' binds depth-format image '{}' as color attachment.",
+						Logger::warn("[RG] Pass '{}' binds depth-format image '{}' as color attachment.",
 						             pass.name, rec->name);
 					}
 					if (usage == RGImageUsage::DepthAttachment && !is_depth_format(rec->format))
 					{
-						fmt::println("[RG][Warn] Pass '{}' binds non-depth image '{}' as depth attachment.",
+						Logger::warn("[RG] Pass '{}' binds non-depth image '{}' as depth attachment.",
 						             pass.name, rec->name);
 					}
 					// Usage flag sanity for transients we created
@@ -661,8 +661,8 @@ bool RenderGraph::compile()
 						VkImageUsageFlags need = usage_requires_flag(usage);
 						if ((need & rec->creationUsage) != need)
 						{
-							fmt::println(
-								"[RG][Warn] Image '{}' used as '{}' but created without needed usage flags (0x{:x}).",
+							Logger::warn(
+								"[RG] Image '{}' used as '{}' but created without needed usage flags (0x{:x}).",
 								rec->name, (int) usage, (unsigned) need);
 						}
 					}
@@ -821,8 +821,8 @@ bool RenderGraph::compile()
 					VkBufferUsageFlags need = buffer_usage_requires_flag(usage);
 					if ((need & rec->usage) != need)
 					{
-						fmt::println(
-							"[RG][Warn] Buffer '{}' used as '{}' but created without needed usage flags (0x{:x}).",
+						Logger::warn(
+							"[RG] Buffer '{}' used as '{}' but created without needed usage flags (0x{:x}).",
 							rec->name, (int) usage, (unsigned) need);
 					}
 				}
@@ -969,8 +969,8 @@ void RenderGraph::execute(VkCommandBuffer cmd)
 					         rec->extent.width != firstColorExtent.width || rec->extent.height != firstColorExtent.
 					         height))
 				{
-					fmt::println(
-						"[RG][Warn] Pass '{}' has color attachments with mismatched extents ({}x{} vs {}x{}). Using min().",
+					Logger::warn(
+						"[RG] Pass '{}' has color attachments with mismatched extents ({}x{} vs {}x{}). Using min().",
 						p.name,
 						firstColorExtent.width, firstColorExtent.height,
 						rec->extent.width, rec->extent.height);

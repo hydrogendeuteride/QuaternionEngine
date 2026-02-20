@@ -176,9 +176,9 @@ struct LoadedGLTF : public IRenderable
     ~LoadedGLTF()
     {
         const char *name = debugName.empty() ? "<unnamed>" : debugName.c_str();
-        fmt::println("[GLTF] ~LoadedGLTF destructor begin for '{}' ({})", name, static_cast<const void *>(this));
+        Logger::info("[GLTF] ~LoadedGLTF destructor begin for '{}' ({})", name, static_cast<const void *>(this));
         clearAll();
-        fmt::println("[GLTF] ~LoadedGLTF destructor end for '{}' ({})", name, static_cast<const void *>(this));
+        Logger::info("[GLTF] ~LoadedGLTF destructor end for '{}' ({})", name, static_cast<const void *>(this));
     };
 
     void clearMeshes(){ clearAll(); };
