@@ -477,14 +477,13 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
         // Allow both Unloaded and Evicted entries to start work if seen again.
         if (e.state == EntryState::Unloaded || e.state == EntryState::Evicted)
         {
-            // Visibility-driven residency: only start uploads for textures
-            // that were marked used recently (current or previous frame).
-            // This avoids uploading assets that are not visible.
-            bool recentlyUsed = true;
+            // Visibility-driven residency: start uploads for recently-used textures,
+            // but always allow pinned textures (UI/critical assets).
+            bool recentlyUsed = e.pinned;
             if (_context)
             {
                 // Schedule when first seen (previous frame) or if seen again.
-                recentlyUsed = (now == 0u) || (now - e.lastUsedFrame <= 1u);
+                recentlyUsed = recentlyUsed || (now == 0u) || (now - e.lastUsedFrame <= 1u);
             }
             // Gate reload attempts to avoid rapid oscillation right after eviction.
             bool cooldownPassed = (now >= e.nextAttemptFrame);
