@@ -165,6 +165,16 @@ namespace GameRuntime
             VK_CHECK(vkWaitForFences(_renderer->_deviceManager->device(), 1,
                 &_renderer->get_current_frame()._renderFence, true, 1000000000));
 
+            // Commit completed async asset/pipeline jobs on the main thread.
+            if (_renderer->_asyncLoader && _renderer->_sceneManager)
+            {
+                _renderer->_asyncLoader->pumpMainThread(*_renderer->_sceneManager);
+            }
+            if (_renderer->_pipelineManager)
+            {
+                _renderer->_pipelineManager->pumpMainThread();
+            }
+
             if (_renderer->_rayManager)
             {
                 _renderer->_rayManager->flushPendingDeletes();
