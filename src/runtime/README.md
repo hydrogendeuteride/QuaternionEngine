@@ -1,6 +1,6 @@
 # Runtime
 
-> Game loop orchestration with time management, physics integration, audio system, and lifecycle callbacks.
+> Game loop orchestration with time management, physics stepping, audio system, and lifecycle callbacks.
 
 ## Purpose
 
@@ -10,7 +10,7 @@ Provides a clean separation between engine rendering and game logic. The Runtime
 
 ```
 runtime/
-├── game_runtime.h      — Runtime class and IPhysicsWorld / IAudioSystem interfaces
+├── game_runtime.h      — Runtime class and IAudioSystem interface
 ├── game_runtime.cpp    — Main loop implementation
 ├── i_game_callbacks.h  — IGameCallbacks interface for game logic hooks
 ├── time_manager.h      — TimeManager class declaration
@@ -24,7 +24,7 @@ runtime/
 | `Runtime` | Central game loop manager — integrates time, physics, audio, and delegates to game callbacks |
 | `IGameCallbacks` | Interface for game logic (init, update, fixed_update, shutdown) |
 | `TimeManager` | Time management — delta time, time scale, fixed timestep accumulation, interpolation alpha |
-| `IPhysicsWorld` | Abstract physics backend (step, raycast, body transforms) |
+| `Physics::PhysicsWorld` | Physics interface from `src/physics` (bound to Runtime for fixed-step simulation) |
 | `IAudioSystem` | Abstract audio backend (3D/2D playback, buses, master volume, listener) |
 
 ## Lifecycle
@@ -33,7 +33,7 @@ runtime/
 Runtime::Runtime(VulkanEngine*)
   └─ creates GameAPI wrapper, initializes TimeManager
 
-set_physics_world(IPhysicsWorld*)   ← inject physics backend
+set_physics_world(Physics::PhysicsWorld*)   ← inject physics backend
 set_audio_system(IAudioSystem*)     ← inject audio backend
 
 run(IGameCallbacks*)                ← main loop entry point
@@ -115,24 +115,12 @@ float alpha = runtime.interpolation_alpha();
 ### Physics integration
 
 ```cpp
-class MyPhysics : public GameRuntime::IPhysicsWorld {
-public:
-    void step(float dt) override {
-        // Jolt/PhysX/Bullet integration here
-    }
+#include "physics/jolt/jolt_physics_world.h"
 
-    void get_body_transform(uint32_t id, glm::mat4& out) override {
-        // Query body world transform
-    }
-
-    RayHit raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) override {
-        // Physics raycast
-    }
-};
-
-MyPhysics physics;
-runtime.set_physics_world(&physics);
-// Runtime will call physics->step(fixed_dt) every fixed update
+auto physics = std::make_unique<Physics::JoltPhysicsWorld>();
+runtime.set_physics_world(physics.get());
+// Runtime will call physics->step(fixed_dt) every fixed update.
+// Game code can still use the full Physics::PhysicsWorld API directly.
 ```
 
 ### Audio integration

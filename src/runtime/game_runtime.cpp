@@ -2,6 +2,7 @@
 #include "core/engine.h"
 #include "core/input/input_system.h"
 #include "core/ui/imgui_system.h"
+#include "physics/physics_world.h"
 #include "scene/vk_scene.h"
 
 #include "SDL2/SDL.h"
@@ -19,7 +20,7 @@ namespace GameRuntime
 
     Runtime::~Runtime() = default;
 
-    void Runtime::set_physics_world(IPhysicsWorld *physics)
+    void Runtime::set_physics_world(Physics::PhysicsWorld *physics)
     {
         _physics = physics;
     }

@@ -50,8 +50,7 @@ physics/
 
 ```
 PhysicsWorld* physics = new JoltPhysicsWorld(config);
-PhysicsContext* ctx = new PhysicsContext();
-ctx->set_physics_world(physics);
+PhysicsContext* ctx = new PhysicsContext(*physics);
 
 // Body creation
 BodySettings settings;

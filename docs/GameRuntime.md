@@ -1,13 +1,13 @@
 ## Game Runtime System: Loop, Time, and Subsystem Integration
 
-The runtime layer orchestrates the main game loop, manages frame timing with fixed timestep physics, and provides abstract interfaces for physics and audio backends. It lives under `src/runtime` and serves as the bridge between engine rendering (`VulkanEngine`) and game logic (`IGameCallbacks`).
+The runtime layer orchestrates the main game loop, manages frame timing with fixed timestep physics, and binds physics/audio backends. It lives under `src/runtime` and serves as the bridge between engine rendering (`VulkanEngine`) and game logic (`IGameCallbacks`).
 
 ### Concepts
 
 - **Runtime**: The main loop coordinator that owns time management, invokes game callbacks, and integrates physics/audio subsystems.
 - **TimeManager**: Handles delta time calculation, time scaling, fixed timestep accumulation, and interpolation alpha for smooth rendering.
 - **IGameCallbacks**: Interface for game code to receive lifecycle events (init, update, fixed_update, shutdown).
-- **IPhysicsWorld**: Abstract physics backend for stepping simulation, raycasting, and querying body transforms.
+- **Physics::PhysicsWorld**: Physics backend interface from `src/physics` used for stepping and world queries.
 - **IAudioSystem**: Abstract audio backend with 3D spatialization, bus mixing, and listener management.
 
 ### Key Types
@@ -22,7 +22,7 @@ public:
     explicit Runtime(VulkanEngine* renderer);
 
     // Subsystem injection
-    void set_physics_world(IPhysicsWorld* physics);
+    void set_physics_world(Physics::PhysicsWorld* physics);
     void set_audio_system(IAudioSystem* audio);
 
     // Time management
@@ -110,29 +110,23 @@ public:
 | `on_fixed_update` | Fixed intervals (1/60 default) | Physics, AI, deterministic simulation |
 | `on_shutdown` | Once before exit | Cleanup game resources |
 
-#### `IPhysicsWorld` — Physics Backend Interface
+#### `Physics::PhysicsWorld` — Physics Backend Interface
 
 ```c++
-class IPhysicsWorld {
+class PhysicsWorld {
 public:
     virtual void step(float dt) = 0;
-    virtual void get_body_transform(uint32_t id, glm::mat4& out) = 0;
-
-    struct RayHit {
-        bool hit;
-        glm::vec3 position;
-        glm::vec3 normal;
-        float distance;
-        uint32_t bodyId;
-    };
-    virtual RayHit raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance) = 0;
+    virtual BodyId create_body(const BodySettings& settings) = 0;
+    virtual void destroy_body(BodyId id) = 0;
+    virtual RayHit raycast(const glm::dvec3& origin, const glm::vec3& direction, float max_distance) const = 0;
+    // ... many more APIs in src/physics/physics_world.h
 };
 ```
 
 **Integration:**
 - Runtime calls `physics->step(fixed_dt)` every fixed update
-- Physics backend (Jolt/PhysX/Bullet) implements interface
-- `get_body_transform` used to sync visual representation with physics state
+- Physics backend (Jolt/PhysX/Bullet) implements `Physics::PhysicsWorld`
+- Game-side systems (e.g. `GameWorld`) use the same interface directly
 
 #### `IAudioSystem` — Audio Backend Interface
 
@@ -280,37 +274,10 @@ int main() {
 #### Physics Integration (Jolt Example)
 
 ```c++
-class JoltPhysicsWorld : public GameRuntime::IPhysicsWorld {
-    JPH::PhysicsSystem _system;
-    JPH::BodyInterface& _bodyInterface;
+#include "physics/jolt/jolt_physics_world.h"
 
-    void step(float dt) override {
-        _system.Update(dt, 1, &_allocator, &_jobSystem);
-    }
-
-    void get_body_transform(uint32_t id, glm::mat4& out) override {
-        JPH::BodyID bodyId((JPH::BodyID::Type)id);
-        JPH::Vec3 pos = _bodyInterface.GetPosition(bodyId);
-        JPH::Quat rot = _bodyInterface.GetRotation(bodyId);
-        // convert to glm::mat4
-    }
-
-    RayHit raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) override {
-        JPH::RayCast ray;
-        ray.mOrigin = JPH::Vec3(origin.x, origin.y, origin.z);
-        ray.mDirection = JPH::Vec3(dir.x, dir.y, dir.z) * maxDist;
-
-        JPH::RayCastResult result;
-        if (_system.GetNarrowPhaseQuery().CastRay(ray, result, ...)) {
-            return {true, /* position */, /* normal */, result.mFraction * maxDist, (uint32_t)result.mBodyID.GetIndexAndSequenceNumber()};
-        }
-        return {false};
-    }
-};
-
-// Wire up
-JoltPhysicsWorld physics;
-runtime.set_physics_world(&physics);
+auto physics = std::make_unique<Physics::JoltPhysicsWorld>();
+runtime.set_physics_world(physics.get());
 ```
 
 #### Audio Integration (FMOD Example)

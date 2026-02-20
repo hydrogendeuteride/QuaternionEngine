@@ -400,8 +400,7 @@ auto jolt_world = std::make_unique<Physics::JoltPhysicsWorld>();
 ctx->physics = jolt_world.get();
 
 // Create physics context for floating origin management
-ctx->physics_context = std::make_unique<Physics::PhysicsContext>();
-ctx->physics_context->set_physics_world(ctx->physics);
+ctx->physics_context = std::make_unique<Physics::PhysicsContext>(*ctx->physics);
 ```
 
 **Update loop (in Engine::update):**

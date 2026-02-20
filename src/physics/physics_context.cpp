@@ -41,18 +41,15 @@ namespace Physics
 
     bool PhysicsContext::maybe_rebase_origin_to_body(uint32_t body_value, double threshold_m, double snap_m)
     {
-        if (!_physics)
-        {
-            return false;
-        }
+        PhysicsWorld &physics = physics_world();
 
         BodyId body_id{body_value};
-        if (!_physics->is_body_valid(body_id))
+        if (!physics.is_body_valid(body_id))
         {
             return false;
         }
 
-        const glm::dvec3 p_local = _physics->get_position(body_id);
+        const glm::dvec3 p_local = physics.get_position(body_id);
         const double dist2 = glm::dot(p_local, p_local);
         const double threshold2 = (threshold_m <= 0.0) ? 0.0 : (threshold_m * threshold_m);
         if (dist2 <= threshold2)
@@ -65,7 +62,7 @@ namespace Physics
         const WorldVec3 new_origin = (snap_m > 0.0) ? snap_world(anchor_world, snap_m) : anchor_world;
 
         const glm::dvec3 delta_local = origin_before - new_origin;
-        _physics->shift_origin(delta_local);
+        physics.shift_origin(delta_local);
 
         (void) set_origin_world(new_origin);
         return true;
@@ -73,18 +70,15 @@ namespace Physics
 
     bool PhysicsContext::maybe_rebase_velocity_to_body(uint32_t body_value, double threshold_mps)
     {
-        if (!_physics)
-        {
-            return false;
-        }
+        PhysicsWorld &physics = physics_world();
 
         BodyId body_id{body_value};
-        if (!_physics->is_body_valid(body_id))
+        if (!physics.is_body_valid(body_id))
         {
             return false;
         }
 
-        const glm::vec3 v_local_f = _physics->get_linear_velocity(body_id);
+        const glm::vec3 v_local_f = physics.get_linear_velocity(body_id);
         const double speed2 = static_cast<double>(glm::dot(v_local_f, v_local_f));
         const double threshold2 = (threshold_mps <= 0.0) ? 0.0 : (threshold_mps * threshold_mps);
         if (speed2 <= threshold2)
@@ -93,7 +87,7 @@ namespace Physics
         }
 
         const glm::dvec3 delta_v_local(v_local_f);
-        _physics->shift_velocity_origin(delta_v_local);
+        physics.shift_velocity_origin(delta_v_local);
 
         _velocity_origin_world += delta_v_local;
         ++_velocity_origin_revision;

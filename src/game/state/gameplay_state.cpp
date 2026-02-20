@@ -106,8 +106,7 @@ void GameplayState::setup_scene(GameStateContext &ctx)
 {
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
     _physics = std::make_unique<Physics::JoltPhysicsWorld>();
-    _physics_context = std::make_unique<Physics::PhysicsContext>();
-    _physics_context->set_physics_world(_physics.get());
+    _physics_context = std::make_unique<Physics::PhysicsContext>(*_physics);
 
     _world.set_physics(_physics.get());
     _world.set_physics_context(_physics_context.get());

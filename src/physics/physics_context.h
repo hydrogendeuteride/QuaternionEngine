@@ -23,7 +23,10 @@ namespace Physics
     class PhysicsContext
     {
     public:
-        PhysicsContext() = default;
+        explicit PhysicsContext(PhysicsWorld &world)
+            : _physics(&world)
+        {
+        }
         ~PhysicsContext() = default;
 
         // Non-copyable, movable
@@ -33,11 +36,10 @@ namespace Physics
         PhysicsContext &operator=(PhysicsContext &&) = default;
 
         // ========================================================================
-        // Physics world reference (optional, for rebasing operations)
+        // Physics world reference (non-owning, bound at construction)
         // ========================================================================
 
-        void set_physics_world(PhysicsWorld *world) { _physics = world; }
-        PhysicsWorld *physics_world() const { return _physics; }
+        PhysicsWorld &physics_world() const { return *_physics; }
 
         // ========================================================================
         // Position origin
@@ -69,7 +71,7 @@ namespace Physics
         const WorldVec3 &anchor_world() const { return _anchor_world; }
 
         // ========================================================================
-        // Rebasing operations (requires physics world to be set)
+        // Rebasing operations
         // ========================================================================
 
         // Rebase position origin to a body when its local position exceeds threshold.
@@ -82,7 +84,7 @@ namespace Physics
         bool maybe_rebase_velocity_to_body(uint32_t body_value, double threshold_mps);
 
     private:
-        PhysicsWorld *_physics{nullptr};
+        PhysicsWorld *_physics{nullptr}; // non-owning; bound on construction, world must outlive context
 
         // Position origin
         WorldVec3 _origin_world{0.0, 0.0, 0.0};

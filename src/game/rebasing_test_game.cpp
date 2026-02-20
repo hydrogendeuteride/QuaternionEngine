@@ -487,8 +487,7 @@ namespace Game
         _physics->set_gravity(glm::vec3(0.0f));
 
         // Create PhysicsContext for coordinate system management
-        _physics_context = std::make_unique<Physics::PhysicsContext>();
-        _physics_context->set_physics_world(_physics.get());
+        _physics_context = std::make_unique<Physics::PhysicsContext>(*_physics);
 
         _world.set_physics(_physics.get());
         _world.set_physics_context(_physics_context.get());

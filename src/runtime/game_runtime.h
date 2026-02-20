@@ -11,10 +11,14 @@
 
 class VulkanEngine;
 
+namespace Physics
+{
+class PhysicsWorld;
+} // namespace Physics
+
 namespace GameRuntime
 {
 
-class IPhysicsWorld;
 class IAudioSystem;
 
 class Runtime
@@ -31,8 +35,8 @@ public:
     // physics, audio, etcs
     // ------------------------------------------------------------------------
 
-    void set_physics_world(IPhysicsWorld* physics);
-    IPhysicsWorld* physics() const { return _physics; }
+    void set_physics_world(Physics::PhysicsWorld* physics);
+    Physics::PhysicsWorld* physics() const { return _physics; }
 
     void set_audio_system(IAudioSystem* audio);
     IAudioSystem* audio() const { return _audio; }
@@ -75,37 +79,13 @@ private:
     std::unique_ptr<GameAPI::Engine> _api;
     TimeManager _time;
 
-    IPhysicsWorld* _physics{nullptr};
+    Physics::PhysicsWorld* _physics{nullptr};
     IAudioSystem* _audio{nullptr};
 
     bool _quit_requested{false};
 
     // Internal helpers
     void update_audio_listener();
-};
-
-// ============================================================================
-// physics
-// ============================================================================
-
-class IPhysicsWorld
-{
-public:
-    virtual ~IPhysicsWorld() = default;
-
-    virtual void step(float dt) = 0;
-
-    virtual void get_body_transform(uint32_t id, glm::mat4& out) = 0;
-
-    struct RayHit
-    {
-        bool hit{false};
-        glm::vec3 position{0.0f};
-        glm::vec3 normal{0.0f};
-        float distance{0.0f};
-        uint32_t bodyId{0};
-    };
-    virtual RayHit raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance) = 0;
 };
 
 // ============================================================================
