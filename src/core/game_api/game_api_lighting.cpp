@@ -3,6 +3,7 @@
 #include "core/context.h"
 #include "scene/vk_scene.h"
 #include "core/assets/ibl_manager.h"
+#include <algorithm>
 
 namespace GameAPI
 {
@@ -101,6 +102,125 @@ void Engine::set_hybrid_ray_threshold(float threshold)
 float Engine::get_hybrid_ray_threshold() const
 {
     return _engine->_context ? _engine->_context->shadowSettings.hybridRayNoLThreshold : 0.25f;
+}
+
+void Engine::set_punctual_shadow_mode(PunctualShadowMode mode)
+{
+    if (!_engine->_context)
+    {
+        return;
+    }
+
+    if (mode == PunctualShadowMode::RTOnly || mode == PunctualShadowMode::Hybrid)
+    {
+        if (!_engine->_deviceManager
+            || !_engine->_deviceManager->supportsRayQuery()
+            || !_engine->_deviceManager->supportsAccelerationStructure())
+        {
+            mode = PunctualShadowMode::ShadowMapOnly;
+        }
+    }
+
+    _engine->_context->shadowSettings.punctualMode = static_cast<uint32_t>(mode);
+}
+
+PunctualShadowMode Engine::get_punctual_shadow_mode() const
+{
+    if (!_engine->_context)
+    {
+        return PunctualShadowMode::Off;
+    }
+    return static_cast<PunctualShadowMode>(_engine->_context->shadowSettings.punctualMode);
+}
+
+void Engine::set_punctual_shadow_budget(uint32_t max_spot_lights, uint32_t max_point_lights)
+{
+    if (!_engine->_context)
+    {
+        return;
+    }
+
+    _engine->_context->shadowSettings.maxShadowedSpotLights = std::min(max_spot_lights, kMaxShadowedSpotLights);
+    _engine->_context->shadowSettings.maxShadowedPointLights = std::min(max_point_lights, kMaxShadowedPointLights);
+}
+
+void Engine::get_punctual_shadow_budget(uint32_t &out_max_spot_lights, uint32_t &out_max_point_lights) const
+{
+    if (!_engine->_context)
+    {
+        out_max_spot_lights = 0;
+        out_max_point_lights = 0;
+        return;
+    }
+
+    out_max_spot_lights = _engine->_context->shadowSettings.maxShadowedSpotLights;
+    out_max_point_lights = _engine->_context->shadowSettings.maxShadowedPointLights;
+}
+
+void Engine::set_punctual_shadow_resolution(uint32_t spot_resolution, uint32_t point_resolution)
+{
+    if (!_engine->_context)
+    {
+        return;
+    }
+
+    auto clamp_resolution = [](uint32_t v) -> uint32_t
+    {
+        return std::clamp(v, 128u, 8192u);
+    };
+
+    _engine->_context->shadowSettings.spotShadowMapResolution = clamp_resolution(spot_resolution);
+    _engine->_context->shadowSettings.pointShadowMapResolution = clamp_resolution(point_resolution);
+}
+
+void Engine::get_punctual_shadow_resolution(uint32_t &out_spot_resolution, uint32_t &out_point_resolution) const
+{
+    if (!_engine->_context)
+    {
+        out_spot_resolution = 0;
+        out_point_resolution = 0;
+        return;
+    }
+
+    out_spot_resolution = _engine->_context->shadowSettings.spotShadowMapResolution;
+    out_point_resolution = _engine->_context->shadowSettings.pointShadowMapResolution;
+}
+
+void Engine::set_punctual_hybrid_rt_budget(uint32_t max_spot_rt_lights, uint32_t max_point_rt_lights)
+{
+    if (!_engine->_context)
+    {
+        return;
+    }
+
+    _engine->_context->shadowSettings.hybridRtMaxSpotLights = std::min(max_spot_rt_lights, kMaxShadowedSpotLights);
+    _engine->_context->shadowSettings.hybridRtMaxPointLights = std::min(max_point_rt_lights, kMaxShadowedPointLights);
+}
+
+void Engine::get_punctual_hybrid_rt_budget(uint32_t &out_max_spot_rt_lights, uint32_t &out_max_point_rt_lights) const
+{
+    if (!_engine->_context)
+    {
+        out_max_spot_rt_lights = 0;
+        out_max_point_rt_lights = 0;
+        return;
+    }
+
+    out_max_spot_rt_lights = _engine->_context->shadowSettings.hybridRtMaxSpotLights;
+    out_max_point_rt_lights = _engine->_context->shadowSettings.hybridRtMaxPointLights;
+}
+
+void Engine::set_punctual_hybrid_rt_threshold(float threshold)
+{
+    if (_engine->_context)
+    {
+        _engine->_context->shadowSettings.punctualHybridRayNoLThreshold = glm::clamp(threshold, 0.0f, 1.0f);
+    }
+}
+
+float Engine::get_punctual_hybrid_rt_threshold() const
+{
+    return _engine->_context ? _engine->_context->shadowSettings.punctualHybridRayNoLThreshold : 0.25f;
 }
 
 // ----------------------------------------------------------------------------
@@ -382,6 +502,7 @@ size_t Engine::add_point_light(const PointLight& light)
     pl.radius = light.radius;
     pl.color = light.color;
     pl.intensity = light.intensity;
+    pl.cast_shadows = light.cast_shadows;
 
     size_t idx = _engine->_sceneManager->getPointLightCount();
     _engine->_sceneManager->addPointLight(pl);
@@ -397,6 +518,7 @@ size_t Engine::add_point_light(const PointLightD& light)
     pl.radius = light.radius;
     pl.color = light.color;
     pl.intensity = light.intensity;
+    pl.cast_shadows = light.cast_shadows;
 
     size_t idx = _engine->_sceneManager->getPointLightCount();
     _engine->_sceneManager->addPointLight(pl);
@@ -419,6 +541,7 @@ bool Engine::get_point_light(size_t index, PointLight& out) const
         out.radius = pl.radius;
         out.color = pl.color;
         out.intensity = pl.intensity;
+        out.cast_shadows = pl.cast_shadows;
         return true;
     }
     return false;
@@ -435,6 +558,7 @@ bool Engine::get_point_light(size_t index, PointLightD& out) const
         out.radius = pl.radius;
         out.color = pl.color;
         out.intensity = pl.intensity;
+        out.cast_shadows = pl.cast_shadows;
         return true;
     }
     return false;
@@ -449,6 +573,7 @@ bool Engine::set_point_light(size_t index, const PointLight& light)
     pl.radius = light.radius;
     pl.color = light.color;
     pl.intensity = light.intensity;
+    pl.cast_shadows = light.cast_shadows;
 
     return _engine->_sceneManager->setPointLight(index, pl);
 }
@@ -462,6 +587,7 @@ bool Engine::set_point_light(size_t index, const PointLightD& light)
     pl.radius = light.radius;
     pl.color = light.color;
     pl.intensity = light.intensity;
+    pl.cast_shadows = light.cast_shadows;
 
     return _engine->_sceneManager->setPointLight(index, pl);
 }
@@ -497,6 +623,7 @@ size_t Engine::add_spot_light(const SpotLight& light)
     sl.intensity = light.intensity;
     sl.inner_angle_deg = light.inner_angle_deg;
     sl.outer_angle_deg = light.outer_angle_deg;
+    sl.cast_shadows = light.cast_shadows;
 
     size_t idx = _engine->_sceneManager->getSpotLightCount();
     _engine->_sceneManager->addSpotLight(sl);
@@ -517,6 +644,7 @@ size_t Engine::add_spot_light(const SpotLightD& light)
     sl.intensity = light.intensity;
     sl.inner_angle_deg = light.inner_angle_deg;
     sl.outer_angle_deg = light.outer_angle_deg;
+    sl.cast_shadows = light.cast_shadows;
 
     size_t idx = _engine->_sceneManager->getSpotLightCount();
     _engine->_sceneManager->addSpotLight(sl);
@@ -542,6 +670,7 @@ bool Engine::get_spot_light(size_t index, SpotLight& out) const
         out.intensity = sl.intensity;
         out.inner_angle_deg = sl.inner_angle_deg;
         out.outer_angle_deg = sl.outer_angle_deg;
+        out.cast_shadows = sl.cast_shadows;
         return true;
     }
     return false;
@@ -561,6 +690,7 @@ bool Engine::get_spot_light(size_t index, SpotLightD& out) const
         out.intensity = sl.intensity;
         out.inner_angle_deg = sl.inner_angle_deg;
         out.outer_angle_deg = sl.outer_angle_deg;
+        out.cast_shadows = sl.cast_shadows;
         return true;
     }
     return false;
@@ -580,6 +710,7 @@ bool Engine::set_spot_light(size_t index, const SpotLight& light)
     sl.intensity = light.intensity;
     sl.inner_angle_deg = light.inner_angle_deg;
     sl.outer_angle_deg = light.outer_angle_deg;
+    sl.cast_shadows = light.cast_shadows;
 
     return _engine->_sceneManager->setSpotLight(index, sl);
 }
@@ -598,6 +729,7 @@ bool Engine::set_spot_light(size_t index, const SpotLightD& light)
     sl.intensity = light.intensity;
     sl.inner_angle_deg = light.inner_angle_deg;
     sl.outer_angle_deg = light.outer_angle_deg;
+    sl.cast_shadows = light.cast_shadows;
 
     return _engine->_sceneManager->setSpotLight(index, sl);
 }

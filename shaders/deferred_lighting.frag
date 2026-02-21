@@ -16,6 +16,8 @@ layout(set=1, binding=1) uniform sampler2D normalTex;
 layout(set=1, binding=2) uniform sampler2D albedoTex;
 layout(set=1, binding=3) uniform sampler2D extraTex;
 layout(set=2, binding=0) uniform sampler2D shadowTex[4];
+layout(set=4, binding=0) uniform sampler2D spotShadowTex[MAX_SHADOWED_SPOT_LIGHTS];
+layout(set=5, binding=0) uniform sampler2D pointShadowTex[MAX_POINT_SHADOW_FACES];
 // TLAS for ray query (optional, guarded by sceneData.rtOptions.x)
 
 #ifdef GL_EXT_ray_query
@@ -350,6 +352,8 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L, bool forceClipmapShado
     return max(minVis, min(planetVis, vis));
 }
 
+#include "punctual_shadow_common.glsl"
+
 void main(){
     vec4 posSample = texture(posTex, inUV);
     if (posSample.w == 0.0)
@@ -392,6 +396,11 @@ void main(){
     vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
     vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * sunVis;
 
+    uint punctualMode = sceneData.punctualShadowConfig.x;
+    bool punctualMapEnabled = (punctualMode == 1u) || (punctualMode == 3u);
+    bool punctualRTEnabled = (punctualMode == 2u) || (punctualMode == 3u);
+    uint rtSpotBudget = sceneData.punctualShadowRtBudget.x;
+    uint rtPointBudget = sceneData.punctualShadowRtBudget.y;
 
     // ---------------------------- //
     // point light
@@ -400,16 +409,37 @@ void main(){
     {
         vec3 contrib = eval_point_light(sceneData.punctualLights[i], pos, N, V, albedo, roughness, metallic);
         float contribLuma = luminance(contrib);
+        vec3 lightPos = sceneData.punctualLights[i].position_radius.xyz;
+        vec3 contribBeforeShadow = contrib;
 
-        // Optional RT shadow for the first few point lights (hybrid mode)
-        #ifdef GL_EXT_ray_query
-        if (sceneData.rtOptions.x == 1u && sceneData.rtParams.y > 0.0 && i < 4u && contribLuma > PUNCTUAL_RT_SHADOW_MIN_LUMA)
+        if (punctualMapEnabled && i < sceneData.punctualShadowConfig.z)
         {
-            vec3 toL = sceneData.punctualLights[i].position_radius.xyz - pos;
+            float vis = sample_point_shadow_visibility(i, lightPos, pos, N);
+            contrib *= vis;
+            contribLuma = luminance(contrib);
+        }
+
+        // Optional RT shadow for punctual lights (RT-only or hybrid mode)
+        #ifdef GL_EXT_ray_query
+        if (punctualRTEnabled && i < rtPointBudget && contribLuma > PUNCTUAL_RT_SHADOW_MIN_LUMA)
+        {
+            vec3 toL = lightPos - pos;
             float maxT = length(toL);
             if (maxT > 0.01)
             {
                 vec3 dir = toL / maxT;
+                bool shouldTrace = true;
+                if (punctualMode == 3u)
+                {
+                    float NoL = max(dot(N, dir), 0.0);
+                    shouldTrace = (NoL < sceneData.punctualShadowParams.x);
+                }
+                if (!shouldTrace)
+                {
+                    direct += contrib;
+                    continue;
+                }
+
                 float originBias = shadow_ray_origin_bias(pos);
                 float tmin = shadow_ray_tmin(pos);
                 vec3 origin = pos + N * originBias;
@@ -431,6 +461,11 @@ void main(){
                 {
                     contrib = vec3(0.0);
                 }
+                else if (punctualMode == 3u)
+                {
+                    // RT says lit — override shadow map false-shadows
+                    contrib = contribBeforeShadow;
+                }
             }
         }
         #endif
@@ -445,12 +480,21 @@ void main(){
     {
         vec3 contrib = eval_spot_light(sceneData.spotLights[i], pos, N, V, albedo, roughness, metallic);
         float contribLuma = luminance(contrib);
+        vec3 lightPos = sceneData.spotLights[i].position_radius.xyz;
+        vec3 contribBeforeShadow = contrib;
 
-        // Optional RT shadow for the first few spot lights (hybrid mode)
-        #ifdef GL_EXT_ray_query
-        if (sceneData.rtOptions.x == 1u && sceneData.rtParams.y > 0.0 && i < 4u && contribLuma > PUNCTUAL_RT_SHADOW_MIN_LUMA)
+        if (punctualMapEnabled && i < sceneData.punctualShadowConfig.y)
         {
-            vec3 toL = sceneData.spotLights[i].position_radius.xyz - pos;
+            float vis = sample_spot_shadow_visibility(i, pos, N);
+            contrib *= vis;
+            contribLuma = luminance(contrib);
+        }
+
+        // Optional RT shadow for punctual lights (RT-only or hybrid mode)
+        #ifdef GL_EXT_ray_query
+        if (punctualRTEnabled && i < rtSpotBudget && contribLuma > PUNCTUAL_RT_SHADOW_MIN_LUMA)
+        {
+            vec3 toL = lightPos - pos;
             float maxT = length(toL);
             if (maxT > 0.01)
             {
@@ -459,6 +503,18 @@ void main(){
                 float cosTheta = dot(-L, dir);
                 if (cosTheta > sceneData.spotLights[i].direction_cos_outer.w)
                 {
+                    bool shouldTrace = true;
+                    if (punctualMode == 3u)
+                    {
+                        float NoL = max(dot(N, L), 0.0);
+                        shouldTrace = (NoL < sceneData.punctualShadowParams.x);
+                    }
+                    if (!shouldTrace)
+                    {
+                        direct += contrib;
+                        continue;
+                    }
+
                     float originBias = shadow_ray_origin_bias(pos);
                     float tmin = shadow_ray_tmin(pos);
                     vec3 origin = pos + N * originBias;
@@ -479,6 +535,11 @@ void main(){
                     if (hit)
                     {
                         contrib = vec3(0.0);
+                    }
+                    else if (punctualMode == 3u)
+                    {
+                        // RT says lit — override shadow map false-shadows
+                        contrib = contribBeforeShadow;
                     }
                 }
             }

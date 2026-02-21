@@ -60,6 +60,24 @@ struct ShadowSettings
     uint32_t hybridRayCascadesMask = 0b1110; // bit i => cascade i uses ray query assist (default: 1..3)
     float hybridRayNoLThreshold = 0.25f;  // trigger when N·L below this (mode==1)
 
+    // Punctual (point/spot) shadow mode:
+    // 0 = Off, 1 = Shadow map only, 2 = RT only, 3 = Shadow map + RT assist (hybrid)
+    uint32_t punctualMode = 3;
+    // Raster shadow-map budgets.
+    uint32_t maxShadowedSpotLights = 6;
+    uint32_t maxShadowedPointLights = 2;
+    // Resolution presets for punctual shadow maps.
+    uint32_t spotShadowMapResolution = 1024;
+    uint32_t pointShadowMapResolution = 512;
+    // RT assist budgets for punctual hybrid mode.
+    uint32_t hybridRtMaxSpotLights = 2;
+    uint32_t hybridRtMaxPointLights = 1;
+    // N·L threshold for punctual hybrid RT assist.
+    float punctualHybridRayNoLThreshold = 0.25f;
+    // Constant depth bias for punctual shadow map tests.
+    float spotShadowDepthBias = 0.0009f;
+    float pointShadowDepthBias = 0.0025f;
+
     // Analytic planet shadow penumbra control for the directional sun.
     // This is treated as the sun's angular radius (half-angle) in degrees.
     // Set to 0 for a hard edge.

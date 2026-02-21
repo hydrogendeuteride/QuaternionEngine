@@ -13,6 +13,8 @@ layout(set=1, binding=1) uniform sampler2D normalTex;
 layout(set=1, binding=2) uniform sampler2D albedoTex;
 layout(set=1, binding=3) uniform sampler2D extraTex;
 layout(set=2, binding=0) uniform sampler2D shadowTex[4];
+layout(set=4, binding=0) uniform sampler2D spotShadowTex[MAX_SHADOWED_SPOT_LIGHTS];
+layout(set=5, binding=0) uniform sampler2D pointShadowTex[MAX_POINT_SHADOW_FACES];
 
 // Tunables for shadow quality and blending
 // Border smoothing width in light-space NDC (0..1). Larger = wider cross-fade.
@@ -230,6 +232,8 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
     return max(minVis, min(planetVis, vis));
 }
 
+#include "punctual_shadow_common.glsl"
+
 void main(){
     vec4 posSample = texture(posTex, inUV);
     if (posSample.w == 0.0)
@@ -271,18 +275,34 @@ void main(){
     vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
     vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * sunVis;
 
+    // Non-RT shader fallback: treat RT-only punctual mode as shadow-map mode.
+    uint punctualMode = sceneData.punctualShadowConfig.x;
+    bool usePunctualMaps = (punctualMode == 1u) || (punctualMode == 2u) || (punctualMode == 3u);
+
     // Punctual point lights
     uint pointCount = sceneData.lightCounts.x;
     for (uint i = 0u; i < pointCount; ++i)
     {
-        direct += eval_point_light(sceneData.punctualLights[i], pos, N, V, albedo, roughness, metallic);
+        vec3 contrib = eval_point_light(sceneData.punctualLights[i], pos, N, V, albedo, roughness, metallic);
+        if (usePunctualMaps && i < sceneData.punctualShadowConfig.z)
+        {
+            float vis = sample_point_shadow_visibility(i, sceneData.punctualLights[i].position_radius.xyz, pos, N);
+            contrib *= vis;
+        }
+        direct += contrib;
     }
 
     // Spot lights
     uint spotCount = sceneData.lightCounts.y;
     for (uint i = 0u; i < spotCount; ++i)
     {
-        direct += eval_spot_light(sceneData.spotLights[i], pos, N, V, albedo, roughness, metallic);
+        vec3 contrib = eval_spot_light(sceneData.spotLights[i], pos, N, V, albedo, roughness, metallic);
+        if (usePunctualMaps && i < sceneData.punctualShadowConfig.y)
+        {
+            float vis = sample_spot_shadow_visibility(i, pos, N);
+            contrib *= vis;
+        }
+        direct += contrib;
     }
 
     // Image-Based Lighting: split-sum approximation

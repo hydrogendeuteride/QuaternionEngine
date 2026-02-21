@@ -60,6 +60,7 @@
 #include "render/passes/auto_exposure.h"
 #include "render/passes/debug_draw.h"
 #include "render/passes/shadow.h"
+#include "render/passes/punctual_shadow.h"
 #include "device/resource.h"
 #include "device/images.h"
 #include "context.h"
@@ -1209,9 +1210,12 @@ void VulkanEngine::draw()
     // For shadows, only build TLAS when shadows are enabled and an RT shadow mode is selected.
     const bool rtShadowsActive =
         _context->shadowSettings.enabled && (_context->shadowSettings.mode != 0u);
+    const bool rtPunctualShadowsActive =
+        _context->shadowSettings.enabled &&
+        (_context->shadowSettings.punctualMode == 2u || _context->shadowSettings.punctualMode == 3u);
     const bool rtReflectionsActive =
         _context->enableSSR && (_context->reflectionMode != 0u);
-    if (_rayManager && (rtShadowsActive || rtReflectionsActive))
+    if (_rayManager && (rtShadowsActive || rtPunctualShadowsActive || rtReflectionsActive))
     {
         _rayManager->buildTLASFromDrawContext(_context->getMainDrawContext(), get_current_frame()._deletionQueue);
     }
@@ -1263,6 +1267,47 @@ void VulkanEngine::draw()
         {
             std::string name = std::string("shadow.cascade.") + std::to_string(i);
             hShadowCascades[i] = _renderGraph->create_depth_image(name.c_str(), shadowExtent, VK_FORMAT_D32_SFLOAT);
+        }
+
+        std::vector<RGImageHandle> hSpotShadowMaps;
+        std::vector<RGImageHandle> hPointShadowFaces;
+        VkExtent2D spotShadowExtent{0, 0};
+        VkExtent2D pointShadowExtent{0, 0};
+        if (_context && _context->shadowSettings.enabled)
+        {
+            const uint32_t punctualMode = _context->shadowSettings.punctualMode;
+            const bool punctualUseMaps = (punctualMode == 1u) || (punctualMode == 3u);
+            const GPUSceneData &sd = _sceneManager->getSceneData();
+            const uint32_t requestedSpotShadowMaps = std::min<uint32_t>(sd.punctualShadowConfig.y, kMaxShadowedSpotLights);
+            const uint32_t requestedPointShadowLights = std::min<uint32_t>(sd.punctualShadowConfig.z, kMaxShadowedPointLights);
+            if (punctualUseMaps)
+            {
+                const uint32_t spotRes = std::clamp(_context->shadowSettings.spotShadowMapResolution, 128u, 8192u);
+                const uint32_t pointRes = std::clamp(_context->shadowSettings.pointShadowMapResolution, 128u, 8192u);
+                spotShadowExtent = VkExtent2D{spotRes, spotRes};
+                pointShadowExtent = VkExtent2D{pointRes, pointRes};
+
+                hSpotShadowMaps.reserve(requestedSpotShadowMaps);
+                for (uint32_t i = 0; i < requestedSpotShadowMaps; ++i)
+                {
+                    std::string name = std::string("shadow.spot.") + std::to_string(i);
+                    hSpotShadowMaps.push_back(_renderGraph->create_depth_image(name.c_str(), spotShadowExtent, VK_FORMAT_D32_SFLOAT));
+                }
+
+                const uint32_t pointFaceCount = requestedPointShadowLights * kPointShadowFaceCount;
+                hPointShadowFaces.reserve(pointFaceCount);
+                for (uint32_t i = 0; i < requestedPointShadowLights; ++i)
+                {
+                    for (uint32_t face = 0; face < kPointShadowFaceCount; ++face)
+                    {
+                        std::string name = std::string("shadow.point.")
+                                           + std::to_string(i)
+                                           + "."
+                                           + std::to_string(face);
+                        hPointShadowFaces.push_back(_renderGraph->create_depth_image(name.c_str(), pointShadowExtent, VK_FORMAT_D32_SFLOAT));
+                    }
+                }
+            }
         }
 
         // Prior to building passes, pump texture loads for this frame.
@@ -1317,6 +1362,18 @@ void VulkanEngine::draw()
                                            shadowExtent);
                 }
             }
+            if (!hSpotShadowMaps.empty() || !hPointShadowFaces.empty())
+            {
+                if (auto *punctualShadow = _renderPassManager->getPass<PunctualShadowPass>())
+                {
+                    punctualShadow->register_graph(
+                        _renderGraph.get(),
+                        std::span<RGImageHandle>(hSpotShadowMaps.data(), hSpotShadowMaps.size()),
+                        std::span<RGImageHandle>(hPointShadowFaces.data(), hPointShadowFaces.size()),
+                        spotShadowExtent,
+                        pointShadowExtent);
+                }
+            }
             if (auto *geometry = _renderPassManager->getPass<GeometryPass>())
             {
                 RGImageHandle hID = _renderGraph->import_id_buffer();
@@ -1337,7 +1394,9 @@ void VulkanEngine::draw()
             if (auto *lighting = _renderPassManager->getPass<LightingPass>())
             {
                 lighting->register_graph(_renderGraph.get(), hDraw, hGBufferPosition, hGBufferNormal, hGBufferAlbedo, hGBufferExtra,
-                                         std::span<RGImageHandle>(hShadowCascades.data(), hShadowCascades.size()));
+                                         std::span<RGImageHandle>(hShadowCascades.data(), hShadowCascades.size()),
+                                         std::span<RGImageHandle>(hSpotShadowMaps.data(), hSpotShadowMaps.size()),
+                                         std::span<RGImageHandle>(hPointShadowFaces.data(), hPointShadowFaces.size()));
             }
 
             // Optional Screen Space Reflections pass: consumes HDR draw + G-Buffer and

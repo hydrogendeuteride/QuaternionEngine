@@ -128,6 +128,12 @@ struct GPUSpotLight {
 
 static constexpr uint32_t kMaxSpotLights = 32;
 
+// Raster shadow-map budgets for punctual lights.
+static constexpr uint32_t kMaxShadowedSpotLights = 8;
+static constexpr uint32_t kMaxShadowedPointLights = 4;
+static constexpr uint32_t kPointShadowFaceCount = 6;
+static constexpr uint32_t kMaxPointShadowFaces = kMaxShadowedPointLights * kPointShadowFaceCount;
+
 struct GPUSceneData {
     glm::mat4 view;
     glm::mat4 proj;
@@ -153,6 +159,21 @@ struct GPUSceneData {
 
     GPUPunctualLight punctualLights[kMaxPunctualLights];
     GPUSpotLight spotLights[kMaxSpotLights];
+    // Spot-light shadow matrices for the first punctualShadowConfig.y spot lights.
+    glm::mat4 spotLightShadowViewProj[kMaxShadowedSpotLights];
+    // Point-light shadow matrices for first punctualShadowConfig.z point lights (6 faces each).
+    glm::mat4 pointLightShadowViewProj[kMaxPointShadowFaces];
+    // punctualShadowConfig.x = punctual shadow mode (0=off,1=map,2=rt,3=hybrid)
+    // punctualShadowConfig.y = active shadowed spot-light count
+    // punctualShadowConfig.z = active shadowed point-light count
+    glm::uvec4 punctualShadowConfig;
+    // punctualShadowRtBudget.x = max RT-assisted spot lights in this frame
+    // punctualShadowRtBudget.y = max RT-assisted point lights in this frame
+    glm::uvec4 punctualShadowRtBudget;
+    // punctualShadowParams.x = N·L threshold for hybrid RT assist
+    // punctualShadowParams.y = spot shadow depth bias
+    // punctualShadowParams.z = point shadow depth bias
+    glm::vec4 punctualShadowParams;
     // lightCounts.x = point light count
     // lightCounts.y = spot light count
     // lightCounts.z = planet occluder count (analytic directional sun shadow)

@@ -46,6 +46,15 @@ enum class ShadowMode : uint32_t
     RTOnly = 2         // Pure ray-traced shadows (no shadow maps)
 };
 
+// Punctual (point/spot) shadow mode
+enum class PunctualShadowMode : uint32_t
+{
+    Off = 0,           // No punctual shadows
+    ShadowMapOnly = 1, // Raster shadow maps only
+    RTOnly = 2,        // Ray-query only
+    Hybrid = 3         // Shadow maps + RT assist
+};
+
 // Reflection rendering mode
 enum class ReflectionMode : uint32_t
 {
@@ -361,6 +370,7 @@ struct PointLight
     float radius{10.0f};
     glm::vec3 color{1.0f};
     float intensity{1.0f};
+    bool cast_shadows{true};
 };
 
 // Double-precision world-space point light data (position only).
@@ -370,6 +380,7 @@ struct PointLightD
     float radius{10.0f};
     glm::vec3 color{1.0f};
     float intensity{1.0f};
+    bool cast_shadows{true};
 };
 
 // Spot light data (cone half-angles in degrees; inner <= outer)
@@ -382,6 +393,7 @@ struct SpotLight
     float intensity{1.0f};
     float inner_angle_deg{15.0f};
     float outer_angle_deg{25.0f};
+    bool cast_shadows{true};
 };
 
 // Double-precision world-space spot light data (position only).
@@ -394,6 +406,7 @@ struct SpotLightD
     float intensity{1.0f};
     float inner_angle_deg{15.0f};
     float outer_angle_deg{25.0f};
+    bool cast_shadows{true};
 };
 
 // Voxel volumetric settings (cloud/smoke/flame)
@@ -771,6 +784,26 @@ public:
     // N.L threshold for hybrid ray shadows (0.0 - 1.0)
     void set_hybrid_ray_threshold(float threshold);
     float get_hybrid_ray_threshold() const;
+
+    // Punctual (point/spot) shadow mode.
+    void set_punctual_shadow_mode(PunctualShadowMode mode);
+    PunctualShadowMode get_punctual_shadow_mode() const;
+
+    // Raster shadow-map budget (active shadow-casting light limits).
+    void set_punctual_shadow_budget(uint32_t max_spot_lights, uint32_t max_point_lights);
+    void get_punctual_shadow_budget(uint32_t &out_max_spot_lights, uint32_t &out_max_point_lights) const;
+
+    // Punctual shadow-map resolutions (square).
+    void set_punctual_shadow_resolution(uint32_t spot_resolution, uint32_t point_resolution);
+    void get_punctual_shadow_resolution(uint32_t &out_spot_resolution, uint32_t &out_point_resolution) const;
+
+    // Hybrid RT assist budget for punctual lights.
+    void set_punctual_hybrid_rt_budget(uint32_t max_spot_rt_lights, uint32_t max_point_rt_lights);
+    void get_punctual_hybrid_rt_budget(uint32_t &out_max_spot_rt_lights, uint32_t &out_max_point_rt_lights) const;
+
+    // N.L threshold for punctual hybrid RT assist.
+    void set_punctual_hybrid_rt_threshold(float threshold);
+    float get_punctual_hybrid_rt_threshold() const;
 
     // ------------------------------------------------------------------------
     // IBL (Image-Based Lighting)

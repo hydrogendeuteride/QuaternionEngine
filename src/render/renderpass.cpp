@@ -18,6 +18,7 @@
 #include "passes/tonemap.h"
 #include "passes/auto_exposure.h"
 #include "passes/shadow.h"
+#include "passes/punctual_shadow.h"
 
 void RenderPassManager::init(EngineContext *context)
 {
@@ -36,6 +37,10 @@ void RenderPassManager::init(EngineContext *context)
     auto shadowPass = std::make_unique<ShadowPass>();
     shadowPass->init(context);
     addPass(std::move(shadowPass));
+
+    auto punctualShadowPass = std::make_unique<PunctualShadowPass>();
+    punctualShadowPass->init(context);
+    addPass(std::move(punctualShadowPass));
 
     auto geometryPass = std::make_unique<GeometryPass>();
     geometryPass->init(context);

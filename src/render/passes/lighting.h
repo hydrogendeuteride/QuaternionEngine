@@ -21,13 +21,17 @@ public:
                         RGImageHandle gbufferNormal,
                         RGImageHandle gbufferAlbedo,
                         RGImageHandle gbufferExtra,
-                        std::span<RGImageHandle> shadowCascades);
+                        std::span<RGImageHandle> shadowCascades,
+                        std::span<RGImageHandle> spotShadowMaps,
+                        std::span<RGImageHandle> pointShadowFaces);
 
 private:
     EngineContext *_context = nullptr;
 
     VkDescriptorSetLayout _gBufferInputDescriptorLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout _shadowDescriptorLayout = VK_NULL_HANDLE; // set=2 (array)
+    VkDescriptorSetLayout _spotShadowDescriptorLayout = VK_NULL_HANDLE; // set=4 (array)
+    VkDescriptorSetLayout _pointShadowDescriptorLayout = VK_NULL_HANDLE; // set=5 (array)
     // Fallbacks if IBL is not loaded
     AllocatedImage _fallbackIbl2D{};       // 1x1 black
     AllocatedImage _fallbackBrdfLut2D{};   // 1x1 RG, black
@@ -45,7 +49,9 @@ private:
                        RGImageHandle gbufferNormal,
                        RGImageHandle gbufferAlbedo,
                        RGImageHandle gbufferExtra,
-                       std::span<RGImageHandle> shadowCascades);
+                       std::span<RGImageHandle> shadowCascades,
+                       std::span<RGImageHandle> spotShadowMaps,
+                       std::span<RGImageHandle> pointShadowFaces);
 
     DeletionQueue _deletionQueue;
 };

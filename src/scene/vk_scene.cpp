@@ -585,12 +585,131 @@ void SceneManager::update_scene()
         _planetSystem->update_and_emit(*this, mainDrawContext);
     }
 
+    const ShadowSettings *ssPtr = _context ? &_context->shadowSettings : nullptr;
+    const uint32_t punctualMode = (ssPtr && ssPtr->enabled) ? ssPtr->punctualMode : 0u;
+    const bool punctualUseMaps = (punctualMode == 1u) || (punctualMode == 3u);
+    const bool punctualUseRT = (punctualMode == 2u) || (punctualMode == 3u);
+    const uint32_t maxShadowedSpots = ssPtr ? std::min(ssPtr->maxShadowedSpotLights, kMaxShadowedSpotLights) : 0u;
+    const uint32_t maxShadowedPoints = ssPtr ? std::min(ssPtr->maxShadowedPointLights, kMaxShadowedPointLights) : 0u;
+    uint32_t spotShadowCount = 0u;
+    uint32_t pointShadowCount = 0u;
+
     const uint32_t lightCount = static_cast<uint32_t>(std::min(pointLights.size(), static_cast<size_t>(kMaxPunctualLights)));
+    _pointShadowOrder.clear();
+    _pointShadowOrder.reserve(lightCount);
+
+    if (lightCount > 0u)
+    {
+        auto point_shadow_score = [&](const PointLight &pl) -> double
+        {
+            const glm::vec3 c = glm::max(pl.color, glm::vec3(0.0f));
+            const float luma = glm::dot(c, glm::vec3(0.2126f, 0.7152f, 0.0722f));
+            const glm::dvec3 toCam = mainCamera.position_world - pl.position_world;
+            const double dist = std::sqrt(glm::dot(toCam, toCam));
+            const double proximity = std::clamp(static_cast<double>(pl.radius) / (dist + 1.0), 0.0, 1.0);
+            return static_cast<double>(std::max(pl.intensity, 0.0f) * luma) * proximity;
+        };
+
+        _shadowCandidates.clear();
+        _shadowCandidates.reserve(lightCount);
+        for (uint32_t i = 0; i < lightCount; ++i)
+        {
+            const PointLight &pl = pointLights[i];
+            if (pl.cast_shadows && pl.radius > 0.0f && pl.intensity > 0.0f)
+            {
+                _shadowCandidates.push_back(i);
+            }
+        }
+
+        std::sort(_shadowCandidates.begin(), _shadowCandidates.end(),
+                  [&](uint32_t a, uint32_t b)
+                  {
+                      return point_shadow_score(pointLights[a]) > point_shadow_score(pointLights[b]);
+                  });
+
+        pointShadowCount = 0u;
+        if (punctualUseMaps)
+        {
+            pointShadowCount = std::min<uint32_t>(maxShadowedPoints, static_cast<uint32_t>(_shadowCandidates.size()));
+        }
+
+        _shadowSelected.clear();
+        _shadowSelected.resize(lightCount, 0u);
+        for (uint32_t i = 0; i < pointShadowCount; ++i)
+        {
+            _pointShadowOrder.push_back(_shadowCandidates[i]);
+            _shadowSelected[_shadowCandidates[i]] = 1u;
+        }
+        for (uint32_t i = 0; i < lightCount; ++i)
+        {
+            if (!_shadowSelected[i])
+            {
+                _pointShadowOrder.push_back(i);
+            }
+        }
+    }
+
+    const uint32_t spotCount = static_cast<uint32_t>(std::min(spotLights.size(), static_cast<size_t>(kMaxSpotLights)));
+    _spotShadowOrder.clear();
+    _spotShadowOrder.reserve(spotCount);
+
+    if (spotCount > 0u)
+    {
+        auto spot_shadow_score = [&](const SpotLight &sl) -> double
+        {
+            const glm::vec3 c = glm::max(sl.color, glm::vec3(0.0f));
+            const float luma = glm::dot(c, glm::vec3(0.2126f, 0.7152f, 0.0722f));
+            const glm::dvec3 toCam = mainCamera.position_world - sl.position_world;
+            const double dist = std::sqrt(glm::dot(toCam, toCam));
+            const double proximity = std::clamp(static_cast<double>(sl.radius) / (dist + 1.0), 0.0, 1.0);
+            const double coneWeight = std::clamp(static_cast<double>(sl.outer_angle_deg) / 90.0, 0.05, 1.0);
+            return static_cast<double>(std::max(sl.intensity, 0.0f) * luma) * proximity * coneWeight;
+        };
+
+        _shadowCandidates.clear();
+        _shadowCandidates.reserve(spotCount);
+        for (uint32_t i = 0; i < spotCount; ++i)
+        {
+            const SpotLight &sl = spotLights[i];
+            if (sl.cast_shadows && sl.radius > 0.0f && sl.intensity > 0.0f)
+            {
+                _shadowCandidates.push_back(i);
+            }
+        }
+
+        std::sort(_shadowCandidates.begin(), _shadowCandidates.end(),
+                  [&](uint32_t a, uint32_t b)
+                  {
+                      return spot_shadow_score(spotLights[a]) > spot_shadow_score(spotLights[b]);
+                  });
+
+        spotShadowCount = 0u;
+        if (punctualUseMaps)
+        {
+            spotShadowCount = std::min<uint32_t>(maxShadowedSpots, static_cast<uint32_t>(_shadowCandidates.size()));
+        }
+
+        _shadowSelected.clear();
+        _shadowSelected.resize(spotCount, 0u);
+        for (uint32_t i = 0; i < spotShadowCount; ++i)
+        {
+            _spotShadowOrder.push_back(_shadowCandidates[i]);
+            _shadowSelected[_shadowCandidates[i]] = 1u;
+        }
+        for (uint32_t i = 0; i < spotCount; ++i)
+        {
+            if (!_shadowSelected[i])
+            {
+                _spotShadowOrder.push_back(i);
+            }
+        }
+    }
+
     for (uint32_t i = 0; i < lightCount; ++i)
     {
-        const PointLight &pl = pointLights[i];
+        const PointLight &pl = pointLights[_pointShadowOrder[i]];
         glm::vec3 posLocal = world_to_local(pl.position_world, origin_world);
-        sceneData.punctualLights[i].position_radius = glm::vec4(posLocal, pl.radius);
+        sceneData.punctualLights[i].position_radius = glm::vec4(posLocal, std::max(pl.radius, 0.0001f));
         sceneData.punctualLights[i].color_intensity = glm::vec4(pl.color, pl.intensity);
     }
     for (uint32_t i = lightCount; i < kMaxPunctualLights; ++i)
@@ -599,10 +718,9 @@ void SceneManager::update_scene()
         sceneData.punctualLights[i].color_intensity = glm::vec4(0.0f);
     }
 
-    const uint32_t spotCount = static_cast<uint32_t>(std::min(spotLights.size(), static_cast<size_t>(kMaxSpotLights)));
     for (uint32_t i = 0; i < spotCount; ++i)
     {
-        const SpotLight &sl = spotLights[i];
+        const SpotLight &sl = spotLights[_spotShadowOrder[i]];
         glm::vec3 posLocal = world_to_local(sl.position_world, origin_world);
 
         glm::vec3 dir = sl.direction;
@@ -634,6 +752,98 @@ void SceneManager::update_scene()
         sceneData.spotLights[i].color_intensity = glm::vec4(0.0f);
         sceneData.spotLights[i].cone = glm::vec4(0.0f);
     }
+
+    for (uint32_t i = 0; i < kMaxShadowedSpotLights; ++i)
+    {
+        sceneData.spotLightShadowViewProj[i] = glm::mat4(1.0f);
+    }
+    for (uint32_t i = 0; i < kMaxPointShadowFaces; ++i)
+    {
+        sceneData.pointLightShadowViewProj[i] = glm::mat4(1.0f);
+    }
+
+    for (uint32_t i = 0; i < spotShadowCount; ++i)
+    {
+        const glm::vec3 posLocal = glm::vec3(sceneData.spotLights[i].position_radius);
+        glm::vec3 dir = glm::vec3(sceneData.spotLights[i].direction_cos_outer);
+        if (glm::length2(dir) <= 1.0e-8f)
+        {
+            dir = glm::vec3(0.0f, -1.0f, 0.0f);
+        }
+        else
+        {
+            dir = glm::normalize(dir);
+        }
+
+        glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+        if (std::abs(glm::dot(up, dir)) > 0.99f)
+        {
+            up = glm::vec3(0.0f, 0.0f, 1.0f);
+        }
+
+        const float radius = std::max(sceneData.spotLights[i].position_radius.w, 0.05f);
+        const float cosOuter = std::clamp(sceneData.spotLights[i].direction_cos_outer.w, -1.0f, 1.0f);
+        const float fov = std::clamp(2.0f * std::acos(cosOuter), glm::radians(2.0f), glm::radians(170.0f));
+        const glm::mat4 view = glm::lookAtRH(posLocal, posLocal + dir, up);
+        const glm::mat4 proj = glm::perspectiveRH_ZO(fov, 1.0f, 0.05f, radius);
+        sceneData.spotLightShadowViewProj[i] = proj * view;
+    }
+
+    const glm::vec3 kPointDirs[kPointShadowFaceCount] = {
+        glm::vec3(1.0f, 0.0f, 0.0f),
+        glm::vec3(-1.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f),
+        glm::vec3(0.0f, -1.0f, 0.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f),
+        glm::vec3(0.0f, 0.0f, -1.0f),
+    };
+    const glm::vec3 kPointUps[kPointShadowFaceCount] = {
+        glm::vec3(0.0f, -1.0f, 0.0f),
+        glm::vec3(0.0f, -1.0f, 0.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f),
+        glm::vec3(0.0f, 0.0f, -1.0f),
+        glm::vec3(0.0f, -1.0f, 0.0f),
+        glm::vec3(0.0f, -1.0f, 0.0f),
+    };
+
+    for (uint32_t i = 0; i < pointShadowCount; ++i)
+    {
+        const glm::vec3 posLocal = glm::vec3(sceneData.punctualLights[i].position_radius);
+        const float radius = std::max(sceneData.punctualLights[i].position_radius.w, 0.05f);
+        const glm::mat4 proj = glm::perspectiveRH_ZO(glm::radians(90.0f), 1.0f, 0.05f, radius);
+        for (uint32_t face = 0; face < kPointShadowFaceCount; ++face)
+        {
+            const glm::mat4 view = glm::lookAtRH(posLocal, posLocal + kPointDirs[face], kPointUps[face]);
+            sceneData.pointLightShadowViewProj[i * kPointShadowFaceCount + face] = proj * view;
+        }
+    }
+
+    uint32_t rtSpotBudget = 0u;
+    uint32_t rtPointBudget = 0u;
+    if (punctualUseRT)
+    {
+        if (punctualMode == 2u)
+        {
+            rtSpotBudget = spotCount;
+            rtPointBudget = lightCount;
+        }
+        else
+        {
+            rtSpotBudget = ssPtr ? std::min(ssPtr->hybridRtMaxSpotLights, spotCount) : 0u;
+            rtPointBudget = ssPtr ? std::min(ssPtr->hybridRtMaxPointLights, lightCount) : 0u;
+        }
+    }
+
+    const uint32_t modeEncoded = ssPtr && ssPtr->enabled ? ssPtr->punctualMode : 0u;
+    const uint32_t modeFlags = (punctualUseMaps ? 1u : 0u) | (punctualUseRT ? 2u : 0u);
+    sceneData.punctualShadowConfig = glm::uvec4(modeEncoded, spotShadowCount, pointShadowCount, modeFlags);
+    sceneData.punctualShadowRtBudget = glm::uvec4(rtSpotBudget, rtPointBudget, 0u, 0u);
+    sceneData.punctualShadowParams = glm::vec4(
+        ssPtr ? glm::clamp(ssPtr->punctualHybridRayNoLThreshold, 0.0f, 1.0f) : 0.25f,
+        ssPtr ? std::max(ssPtr->spotShadowDepthBias, 0.0f) : 0.0009f,
+        ssPtr ? std::max(ssPtr->pointShadowDepthBias, 0.0f) : 0.0025f,
+        0.0f
+    );
 
     // Populate analytic planet shadow occluders (up to 4 planets with largest angular size from the camera).
     uint32_t planetOccluderCount = 0;

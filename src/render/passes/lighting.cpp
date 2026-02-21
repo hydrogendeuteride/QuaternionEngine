@@ -59,6 +59,24 @@ void LightingPass::init(EngineContext *context)
             nullptr, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
     }
 
+    // Spot shadow maps descriptor layout (set = 4).
+    {
+        DescriptorLayoutBuilder builder;
+        builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxShadowedSpotLights);
+        _spotShadowDescriptorLayout = builder.build(
+            _context->getDevice()->device(), VK_SHADER_STAGE_FRAGMENT_BIT,
+            nullptr, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
+    }
+
+    // Point shadow cube-face maps descriptor layout (set = 5).
+    {
+        DescriptorLayoutBuilder builder;
+        builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxPointShadowFaces);
+        _pointShadowDescriptorLayout = builder.build(
+            _context->getDevice()->device(), VK_SHADER_STAGE_FRAGMENT_BIT,
+            nullptr, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
+    }
+
     // Build lighting pipelines (RT and non-RT) through PipelineManager
     // Ensure IBL layout exists (moved to IBLManager)
     VkDescriptorSetLayout iblLayout = _emptySetLayout;
@@ -69,7 +87,9 @@ void LightingPass::init(EngineContext *context)
         _context->getDescriptorLayouts()->gpuSceneDataLayout(), // set=0
         _gBufferInputDescriptorLayout,                          // set=1
         _shadowDescriptorLayout,                                // set=2
-        iblLayout                                               // set=3
+        iblLayout,                                              // set=3
+        _spotShadowDescriptorLayout,                            // set=4
+        _pointShadowDescriptorLayout                            // set=5
     };
 
     GraphicsPipelineCreateInfo baseInfo{};
@@ -95,7 +115,9 @@ void LightingPass::init(EngineContext *context)
 	        _context->getDevice()->supportsRayQuery() &&
 	        _context->getDevice()->supportsAccelerationStructure();
 
-	    const bool wantRTAtStartup = rtCapable && _context->shadowSettings.enabled && (_context->shadowSettings.mode != 0u);
+	    const bool wantRTAtStartup = rtCapable && _context->shadowSettings.enabled &&
+            ((_context->shadowSettings.mode != 0u) ||
+             (_context->shadowSettings.punctualMode == 2u || _context->shadowSettings.punctualMode == 3u));
 	    if (wantRTAtStartup)
 	    {
 	        _rtPipelineCreateAttempted = true;
@@ -121,6 +143,8 @@ void LightingPass::init(EngineContext *context)
         // Pipelines are owned by PipelineManager; only destroy our local descriptor set layout
         vkDestroyDescriptorSetLayout(_context->getDevice()->device(), _gBufferInputDescriptorLayout, nullptr);
         vkDestroyDescriptorSetLayout(_context->getDevice()->device(), _shadowDescriptorLayout, nullptr);
+        vkDestroyDescriptorSetLayout(_context->getDevice()->device(), _spotShadowDescriptorLayout, nullptr);
+        vkDestroyDescriptorSetLayout(_context->getDevice()->device(), _pointShadowDescriptorLayout, nullptr);
         if (_emptySetLayout) vkDestroyDescriptorSetLayout(_context->getDevice()->device(), _emptySetLayout, nullptr);
     });
 
@@ -152,7 +176,9 @@ void LightingPass::register_graph(RenderGraph *graph,
                                   RGImageHandle gbufferNormal,
                                   RGImageHandle gbufferAlbedo,
                                   RGImageHandle gbufferExtra,
-                                  std::span<RGImageHandle> shadowCascades)
+                                  std::span<RGImageHandle> shadowCascades,
+                                  std::span<RGImageHandle> spotShadowMaps,
+                                  std::span<RGImageHandle> pointShadowFaces)
 {
     if (!graph || !drawHandle.valid() || !gbufferPosition.valid() || !gbufferNormal.valid() || !gbufferAlbedo.valid() ||
         !gbufferExtra.valid())
@@ -163,7 +189,7 @@ void LightingPass::register_graph(RenderGraph *graph,
     graph->add_pass(
         "Lighting",
         RGPassType::Graphics,
-        [drawHandle, gbufferPosition, gbufferNormal, gbufferAlbedo, gbufferExtra, shadowCascades](RGPassBuilder &builder, EngineContext *)
+        [drawHandle, gbufferPosition, gbufferNormal, gbufferAlbedo, gbufferExtra, shadowCascades, spotShadowMaps, pointShadowFaces](RGPassBuilder &builder, EngineContext *)
         {
             builder.read(gbufferPosition, RGImageUsage::SampledFragment);
             builder.read(gbufferNormal, RGImageUsage::SampledFragment);
@@ -173,12 +199,21 @@ void LightingPass::register_graph(RenderGraph *graph,
             {
                 if (shadowCascades[i].valid()) builder.read(shadowCascades[i], RGImageUsage::SampledFragment);
             }
+            for (size_t i = 0; i < spotShadowMaps.size(); ++i)
+            {
+                if (spotShadowMaps[i].valid()) builder.read(spotShadowMaps[i], RGImageUsage::SampledFragment);
+            }
+            for (size_t i = 0; i < pointShadowFaces.size(); ++i)
+            {
+                if (pointShadowFaces[i].valid()) builder.read(pointShadowFaces[i], RGImageUsage::SampledFragment);
+            }
 
             builder.write_color(drawHandle);
         },
-        [this, drawHandle, gbufferPosition, gbufferNormal, gbufferAlbedo, gbufferExtra, shadowCascades](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *ctx)
+        [this, drawHandle, gbufferPosition, gbufferNormal, gbufferAlbedo, gbufferExtra, shadowCascades, spotShadowMaps, pointShadowFaces](VkCommandBuffer cmd, const RGPassResources &res, EngineContext *ctx)
         {
-            draw_lighting(cmd, ctx, res, drawHandle, gbufferPosition, gbufferNormal, gbufferAlbedo, gbufferExtra, shadowCascades);
+            draw_lighting(cmd, ctx, res, drawHandle, gbufferPosition, gbufferNormal, gbufferAlbedo, gbufferExtra,
+                          shadowCascades, spotShadowMaps, pointShadowFaces);
         });
 }
 
@@ -190,7 +225,9 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
                                  RGImageHandle gbufferNormal,
                                  RGImageHandle gbufferAlbedo,
                                  RGImageHandle gbufferExtra,
-                                 std::span<RGImageHandle> shadowCascades)
+                                 std::span<RGImageHandle> shadowCascades,
+                                 std::span<RGImageHandle> spotShadowMaps,
+                                 std::span<RGImageHandle> pointShadowFaces)
 {
     EngineContext *ctxLocal = context ? context : _context;
     if (!ctxLocal || !ctxLocal->currentFrame) return;
@@ -219,10 +256,12 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
 	        ctxLocal->getDevice()->supportsAccelerationStructure();
 	    const VkAccelerationStructureKHR tlas = (ctxLocal->ray ? ctxLocal->ray->tlas() : VK_NULL_HANDLE);
 	    const VkDeviceAddress tlasAddr = (ctxLocal->ray ? ctxLocal->ray->tlasAddress() : 0);
+        const bool punctualRTRequested =
+            ctxLocal->shadowSettings.enabled &&
+            (ctxLocal->shadowSettings.punctualMode == 2u || ctxLocal->shadowSettings.punctualMode == 3u);
 	    bool useRT =
 	        haveRTFeatures &&
-	        ctxLocal->shadowSettings.enabled &&
-	        (ctxLocal->shadowSettings.mode != 0u) &&
+            ((ctxLocal->shadowSettings.enabled && (ctxLocal->shadowSettings.mode != 0u)) || punctualRTRequested) &&
 	        (tlas != VK_NULL_HANDLE) &&
 	        (tlasAddr != 0);
 
@@ -247,7 +286,9 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
 	                    descriptorLayouts->gpuSceneDataLayout(), // set=0
 	                    _gBufferInputDescriptorLayout,           // set=1
 	                    _shadowDescriptorLayout,                 // set=2
-	                    iblLayout                                // set=3
+	                    iblLayout,                               // set=3
+                        _spotShadowDescriptorLayout,            // set=4
+                        _pointShadowDescriptorLayout            // set=5
 	                };
 
 	                GraphicsPipelineCreateInfo baseInfo{};
@@ -389,6 +430,74 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
         w.update_set(deviceManager->device(), iblSet);
     }
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 3, 1, &iblSet, 0, nullptr);
+
+    // Spot shadow maps descriptor set (set = 4).
+    VkImageView fallbackDepthView = VK_NULL_HANDLE;
+    if (!shadowCascades.empty())
+    {
+        fallbackDepthView = resources.image_view(shadowCascades[0]);
+    }
+    if (fallbackDepthView == VK_NULL_HANDLE)
+    {
+        return;
+    }
+
+    VkDescriptorSet spotShadowSet = ctxLocal->currentFrame->_frameDescriptors.allocate(
+        deviceManager->device(), _spotShadowDescriptorLayout);
+    {
+        std::array<VkDescriptorImageInfo, kMaxShadowedSpotLights> infos{};
+        for (uint32_t i = 0; i < kMaxShadowedSpotLights; ++i)
+        {
+            infos[i].sampler = ctxLocal->getSamplers()->shadowLinearClamp();
+            infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            if (i < spotShadowMaps.size() && spotShadowMaps[i].valid())
+            {
+                VkImageView v = resources.image_view(spotShadowMaps[i]);
+                infos[i].imageView = (v != VK_NULL_HANDLE) ? v : fallbackDepthView;
+            }
+            else
+            {
+                infos[i].imageView = fallbackDepthView;
+            }
+        }
+        VkWriteDescriptorSet write{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        write.dstSet = spotShadowSet;
+        write.dstBinding = 0;
+        write.descriptorCount = kMaxShadowedSpotLights;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo = infos.data();
+        vkUpdateDescriptorSets(deviceManager->device(), 1, &write, 0, nullptr);
+    }
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 4, 1, &spotShadowSet, 0, nullptr);
+
+    // Point shadow maps descriptor set (set = 5).
+    VkDescriptorSet pointShadowSet = ctxLocal->currentFrame->_frameDescriptors.allocate(
+        deviceManager->device(), _pointShadowDescriptorLayout);
+    {
+        std::array<VkDescriptorImageInfo, kMaxPointShadowFaces> infos{};
+        for (uint32_t i = 0; i < kMaxPointShadowFaces; ++i)
+        {
+            infos[i].sampler = ctxLocal->getSamplers()->shadowLinearClamp();
+            infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            if (i < pointShadowFaces.size() && pointShadowFaces[i].valid())
+            {
+                VkImageView v = resources.image_view(pointShadowFaces[i]);
+                infos[i].imageView = (v != VK_NULL_HANDLE) ? v : fallbackDepthView;
+            }
+            else
+            {
+                infos[i].imageView = fallbackDepthView;
+            }
+        }
+        VkWriteDescriptorSet write{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        write.dstSet = pointShadowSet;
+        write.dstBinding = 0;
+        write.descriptorCount = kMaxPointShadowFaces;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo = infos.data();
+        vkUpdateDescriptorSets(deviceManager->device(), 1, &write, 0, nullptr);
+    }
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 5, 1, &pointShadowSet, 0, nullptr);
 
     VkViewport viewport{};
     viewport.x = 0;

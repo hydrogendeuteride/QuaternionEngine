@@ -6,6 +6,11 @@
 #define MAX_PUNCTUAL_LIGHTS 64
 // Maximum number of spot lights
 #define MAX_SPOT_LIGHTS 32
+// Punctual shadow-map budgets
+#define MAX_SHADOWED_SPOT_LIGHTS 8
+#define MAX_SHADOWED_POINT_LIGHTS 4
+#define POINT_SHADOW_FACE_COUNT 6
+#define MAX_POINT_SHADOW_FACES (MAX_SHADOWED_POINT_LIGHTS * POINT_SHADOW_FACE_COUNT)
 
 struct GPUPunctualLight {
     vec4 position_radius;
@@ -46,6 +51,21 @@ layout(set = 0, binding = 0) uniform  SceneData{
 
     GPUPunctualLight punctualLights[MAX_PUNCTUAL_LIGHTS];
     GPUSpotLight spotLights[MAX_SPOT_LIGHTS];
+    // Spot-light shadow matrices for first punctualShadowConfig.y spot lights.
+    mat4 spotLightShadowViewProj[MAX_SHADOWED_SPOT_LIGHTS];
+    // Point-light shadow matrices for first punctualShadowConfig.z point lights (6 faces each).
+    mat4 pointLightShadowViewProj[MAX_POINT_SHADOW_FACES];
+    // punctualShadowConfig.x = punctual shadow mode (0=off,1=map,2=rt,3=hybrid)
+    // punctualShadowConfig.y = active shadowed spot-light count
+    // punctualShadowConfig.z = active shadowed point-light count
+    uvec4 punctualShadowConfig;
+    // punctualShadowRtBudget.x = max RT-assisted spot lights in this frame
+    // punctualShadowRtBudget.y = max RT-assisted point lights in this frame
+    uvec4 punctualShadowRtBudget;
+    // punctualShadowParams.x = N·L threshold for hybrid RT assist
+    // punctualShadowParams.y = spot shadow depth bias
+    // punctualShadowParams.z = point shadow depth bias
+    vec4 punctualShadowParams;
     // lightCounts.x = point light count
     // lightCounts.y = spot light count
     // lightCounts.z = planet occluder count (analytic directional sun shadow)

@@ -313,15 +313,26 @@ void RayTracingManager::pumpBlasBuilds(uint32_t max_builds_per_frame)
 
 void RayTracingManager::ensureTlasStorage(VkDeviceSize requiredASSize, VkDeviceSize /*requiredScratch*/, DeletionQueue& dq)
 {
-    // Recreate TLAS storage if size grows. Defer destruction to the frame DQ to
-    // avoid freeing while referenced by in-flight frames.
-    if (_tlas.handle || _tlas.storage.buffer)
+    const VkDeviceSize current_size = _tlas.storage.info.size;
+    const bool has_tlas = (_tlas.handle || _tlas.storage.buffer);
+
+    // Keep the existing TLAS allocation when it is already large enough.
+    if (has_tlas && current_size >= requiredASSize)
+    {
+        return;
+    }
+
+    // Recreate TLAS storage only when growing (or first-time creation).
+    // Defer destruction to the frame DQ to avoid freeing while referenced by
+    // in-flight frames.
+    if (has_tlas)
     {
         AccelStructureHandle old = _tlas;
-        Logger::info("[RT] ensureTlasStorage: scheduling old TLAS destroy handle={} buffer={} size={}",
-                     static_cast<const void *>(old.handle),
-                     static_cast<const void *>(old.storage.buffer),
-                     old.storage.info.size);
+        Logger::debug("[RT] ensureTlasStorage: growing TLAS {} -> {} (destroy old handle={} buffer={})",
+                      old.storage.info.size,
+                      requiredASSize,
+                      static_cast<const void *>(old.handle),
+                      static_cast<const void *>(old.storage.buffer));
         dq.push_function([this, old]() {
             if (old.handle)
                 _vkDestroyAccelerationStructureKHR(_device->device(), old.handle, nullptr);
@@ -341,10 +352,10 @@ void RayTracingManager::ensureTlasStorage(VkDeviceSize requiredASSize, VkDeviceS
     asci.size = requiredASSize;
     VK_CHECK(_vkCreateAccelerationStructureKHR(_device->device(), &asci, nullptr, &_tlas.handle));
 
-    Logger::info("[RT] ensureTlasStorage: created TLAS handle={} buffer={} size={}",
-                 static_cast<const void *>(_tlas.handle),
-                 static_cast<const void *>(_tlas.storage.buffer),
-                 requiredASSize);
+    Logger::debug("[RT] ensureTlasStorage: created TLAS handle={} buffer={} size={}",
+                  static_cast<const void *>(_tlas.handle),
+                  static_cast<const void *>(_tlas.storage.buffer),
+                  requiredASSize);
 }
 
 VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const DrawContext &dc, DeletionQueue& dq)
@@ -353,10 +364,10 @@ VkAccelerationStructureKHR RayTracingManager::buildTLASFromDrawContext(const Dra
     std::vector<VkAccelerationStructureInstanceKHR> instances;
     instances.reserve(dc.OpaqueSurfaces.size());
 
-    Logger::info("[RT] buildTLASFromDrawContext: opaqueSurfaces={} current TLAS handle={} buffer={}",
-                 dc.OpaqueSurfaces.size(),
-                 static_cast<const void *>(_tlas.handle),
-                 static_cast<const void *>(_tlas.storage.buffer));
+    Logger::debug("[RT] buildTLASFromDrawContext: opaqueSurfaces={} current TLAS handle={} buffer={}",
+                  dc.OpaqueSurfaces.size(),
+                  static_cast<const void *>(_tlas.handle),
+                  static_cast<const void *>(_tlas.storage.buffer));
 
     for (const auto &r: dc.OpaqueSurfaces)
     {

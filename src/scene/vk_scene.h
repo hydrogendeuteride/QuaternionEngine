@@ -244,6 +244,7 @@ public:
         float radius;
         glm::vec3 color;
         float intensity;
+        bool cast_shadows = true;
     };
 
     void addPointLight(const PointLight &light);
@@ -264,6 +265,7 @@ public:
         // Cone half-angles in degrees (inner <= outer).
         float inner_angle_deg = 15.0f;
         float outer_angle_deg = 25.0f;
+        bool cast_shadows = true;
     };
 
     void addSpotLight(const SpotLight &light);
@@ -355,6 +357,12 @@ private:
     std::unique_ptr<PlanetSystem> _planetSystem;
 
     PickingDebug pickingDebug{};
+
+    // Reusable scratch vectors for punctual shadow sorting (avoid per-frame allocation)
+    std::vector<uint32_t> _pointShadowOrder;
+    std::vector<uint32_t> _spotShadowOrder;
+    std::vector<uint32_t> _shadowCandidates;
+    std::vector<uint8_t> _shadowSelected;
 
     // Collider sync state per glTF instance
     struct ColliderSyncEntry

@@ -99,6 +99,8 @@ add_executable (vulkan_engine
   render/passes/lighting.cpp
   render/passes/shadow.h
   render/passes/shadow.cpp
+  render/passes/punctual_shadow.h
+  render/passes/punctual_shadow.cpp
   render/passes/fxaa.h
   render/passes/fxaa.cpp
   render/passes/ssr.h

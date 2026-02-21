@@ -1384,6 +1384,61 @@ namespace
         }
         ImGui::SliderFloat("N·L threshold", &ss.hybridRayNoLThreshold, 0.0f, 1.0f, "%.2f");
         ImGui::EndDisabled();
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Punctual (Point/Spot) Shadows");
+        int punctualMode = static_cast<int>(ss.punctualMode);
+        ImGui::RadioButton("Off##punctual_mode", &punctualMode, 0);
+        ImGui::SameLine();
+        ImGui::RadioButton("Shadow map##punctual_mode", &punctualMode, 1);
+        ImGui::SameLine();
+        ImGui::RadioButton("RT only##punctual_mode", &punctualMode, 2);
+        ImGui::SameLine();
+        ImGui::RadioButton("Hybrid##punctual_mode", &punctualMode, 3);
+        if (!(rq && as) && (punctualMode == 2 || punctualMode == 3))
+        {
+            punctualMode = 1;
+        }
+        ss.punctualMode = static_cast<uint32_t>(punctualMode);
+
+        auto clamp_u32 = [](uint32_t v, uint32_t lo, uint32_t hi) -> uint32_t
+        {
+            return std::min(std::max(v, lo), hi);
+        };
+
+        ss.maxShadowedSpotLights = clamp_u32(ss.maxShadowedSpotLights, 0u, kMaxShadowedSpotLights);
+        ss.maxShadowedPointLights = clamp_u32(ss.maxShadowedPointLights, 0u, kMaxShadowedPointLights);
+        ss.spotShadowMapResolution = clamp_u32(ss.spotShadowMapResolution, 128u, 8192u);
+        ss.pointShadowMapResolution = clamp_u32(ss.pointShadowMapResolution, 128u, 8192u);
+        ss.hybridRtMaxSpotLights = clamp_u32(ss.hybridRtMaxSpotLights, 0u, kMaxShadowedSpotLights);
+        ss.hybridRtMaxPointLights = clamp_u32(ss.hybridRtMaxPointLights, 0u, kMaxShadowedPointLights);
+        ss.punctualHybridRayNoLThreshold = glm::clamp(ss.punctualHybridRayNoLThreshold, 0.0f, 1.0f);
+
+        int maxSpot = static_cast<int>(ss.maxShadowedSpotLights);
+        int maxPoint = static_cast<int>(ss.maxShadowedPointLights);
+        ImGui::SliderInt("Max shadowed spot", &maxSpot, 0, static_cast<int>(kMaxShadowedSpotLights));
+        ImGui::SliderInt("Max shadowed point", &maxPoint, 0, static_cast<int>(kMaxShadowedPointLights));
+        ss.maxShadowedSpotLights = static_cast<uint32_t>(maxSpot);
+        ss.maxShadowedPointLights = static_cast<uint32_t>(maxPoint);
+
+        int spotRes = static_cast<int>(ss.spotShadowMapResolution);
+        int pointRes = static_cast<int>(ss.pointShadowMapResolution);
+        ImGui::InputInt("Spot shadow resolution", &spotRes, 64, 256);
+        ImGui::InputInt("Point shadow resolution", &pointRes, 64, 256);
+        ss.spotShadowMapResolution = clamp_u32(static_cast<uint32_t>(std::max(spotRes, 1)), 128u, 8192u);
+        ss.pointShadowMapResolution = clamp_u32(static_cast<uint32_t>(std::max(pointRes, 1)), 128u, 8192u);
+
+        ImGui::BeginDisabled(ss.punctualMode != 3u && ss.punctualMode != 2u);
+        int rtSpot = static_cast<int>(ss.hybridRtMaxSpotLights);
+        int rtPoint = static_cast<int>(ss.hybridRtMaxPointLights);
+        ImGui::SliderInt("RT spot budget", &rtSpot, 0, static_cast<int>(kMaxShadowedSpotLights));
+        ImGui::SliderInt("RT point budget", &rtPoint, 0, static_cast<int>(kMaxShadowedPointLights));
+        ss.hybridRtMaxSpotLights = static_cast<uint32_t>(rtSpot);
+        ss.hybridRtMaxPointLights = static_cast<uint32_t>(rtPoint);
+        ImGui::SliderFloat("Punctual hybrid N·L", &ss.punctualHybridRayNoLThreshold, 0.0f, 1.0f, "%.2f");
+        ImGui::EndDisabled();
+        ImGui::SliderFloat("Spot depth bias", &ss.spotShadowDepthBias, 0.0f, 0.02f, "%.5f");
+        ImGui::SliderFloat("Point depth bias", &ss.pointShadowDepthBias, 0.0f, 0.02f, "%.5f");
         ImGui::EndDisabled();
 
         ImGui::Separator();
@@ -2288,6 +2343,7 @@ namespace
                     changed |= ImGui::SliderFloat("Radius", &pl.radius, 0.1f, 1000.0f);
                     changed |= ImGui::ColorEdit3("Color", col);
                     changed |= ImGui::SliderFloat("Intensity", &pl.intensity, 0.0f, 100.0f);
+                    changed |= ImGui::Checkbox("Cast shadows##point_cast", &pl.cast_shadows);
 
                     if (changed)
                     {
@@ -2311,11 +2367,13 @@ namespace
             static float newRadius = 10.0f;
             static float newColor[3] = {1.0f, 1.0f, 1.0f};
             static float newIntensity = 5.0f;
+            static bool newCastShadows = true;
 
             ImGui::InputScalarN("New position (world)", ImGuiDataType_Double, newPos, 3, nullptr, nullptr, "%.3f");
             ImGui::SliderFloat("New radius", &newRadius, 0.1f, 1000.0f);
             ImGui::ColorEdit3("New color", newColor);
             ImGui::SliderFloat("New intensity", &newIntensity, 0.0f, 100.0f);
+            ImGui::Checkbox("New cast shadows##point_new_cast", &newCastShadows);
 
             if (ImGui::Button("Add point light"))
             {
@@ -2324,6 +2382,7 @@ namespace
                 pl.radius = newRadius;
                 pl.color = glm::vec3(newColor[0], newColor[1], newColor[2]);
                 pl.intensity = newIntensity;
+                pl.cast_shadows = newCastShadows;
 
                 const size_t oldCount = sceneMgr->getPointLightCount();
                 sceneMgr->addPointLight(pl);
@@ -2380,6 +2439,7 @@ namespace
                     changed |= ImGui::SliderFloat("Outer angle (deg)##spot_outer", &sl.outer_angle_deg, 0.0f, 89.9f);
                     changed |= ImGui::ColorEdit3("Color##spot_color", col);
                     changed |= ImGui::SliderFloat("Intensity##spot_intensity", &sl.intensity, 0.0f, 100.0f);
+                    changed |= ImGui::Checkbox("Cast shadows##spot_cast", &sl.cast_shadows);
 
                     if (changed)
                     {
@@ -2409,6 +2469,7 @@ namespace
             static float newSpotOuter = 25.0f;
             static float newSpotColor[3] = {1.0f, 1.0f, 1.0f};
             static float newSpotIntensity = 10.0f;
+            static bool newSpotCastShadows = true;
 
             ImGui::InputScalarN("New position (world)##spot_new_pos", ImGuiDataType_Double, newSpotPos, 3, nullptr, nullptr, "%.3f");
             ImGui::InputFloat3("New direction##spot_new_dir", newSpotDir, "%.3f");
@@ -2421,6 +2482,7 @@ namespace
             }
             ImGui::ColorEdit3("New color##spot_new_color", newSpotColor);
             ImGui::SliderFloat("New intensity##spot_new_intensity", &newSpotIntensity, 0.0f, 100.0f);
+            ImGui::Checkbox("New cast shadows##spot_new_cast", &newSpotCastShadows);
 
             if (ImGui::Button("Add spot light##spot_add"))
             {
@@ -2433,6 +2495,7 @@ namespace
                 sl.intensity = newSpotIntensity;
                 sl.inner_angle_deg = std::clamp(newSpotInner, 0.0f, 89.0f);
                 sl.outer_angle_deg = std::clamp(newSpotOuter, sl.inner_angle_deg, 89.9f);
+                sl.cast_shadows = newSpotCastShadows;
 
                 const size_t oldCount = sceneMgr->getSpotLightCount();
                 sceneMgr->addSpotLight(sl);
