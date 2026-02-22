@@ -23,14 +23,14 @@ const float SHADOW_BORDER_SMOOTH_NDC = 0.08;
 const float SHADOW_PCF_BASE_RADIUS = 1.05;
 // Additional per-cascade radius scale for coarser cascades (0..1 factor added across levels)
 const float SHADOW_PCF_CASCADE_GAIN = 2.0; // extra radius at far end
-// Receiver normal-based offset to reduce acne (in world units)
+// Receiver normal-based offset to reduce acne (in local units)
 const float SHADOW_NORMAL_OFFSET = 0.0015;
 // Scale for receiver-plane depth bias term (tweak if over/under biased)
 const float SHADOW_RPDB_SCALE = 1.0;
 // Minimum clamp to keep a tiny bias even on perpendicular receivers
 const float SHADOW_MIN_BIAS = 1e-5;
 
-vec3 getCameraWorldPosition() // Because I'm not clever enough to add cmaera position...
+vec3 getCameraLocalPosition() // Derived from sceneData.view (render-local coordinates).
 {
     // view = [ R^T  -R^T*C ]
     //        [ 0       1   ]
@@ -70,13 +70,13 @@ const float POISSON_16_WEIGHT[16] = float[16](
 // Compute primary cascade and an optional neighbor for cross-fade near borders
 struct CascadeMix { uint i0; uint i1; float w1; };
 
-CascadeMix computeCascadeMix(vec3 worldPos)
+CascadeMix computeCascadeMix(vec3 localPos)
 {
     uint primary = 3u;
     vec3 ndcP = vec3(0);
     for (uint i = 0u; i < 4u; ++i)
     {
-        vec4 lclip = sceneData.lightViewProjCascades[i] * vec4(worldPos, 1.0);
+        vec4 lclip = sceneData.lightViewProjCascades[i] * vec4(localPos, 1.0);
         vec3 ndc = lclip.xyz / max(lclip.w, 1e-6);
         if (abs(ndc.x) <= 1.0 && abs(ndc.y) <= 1.0 && ndc.z >= 0.0 && ndc.z <= 1.0)
         {
@@ -99,7 +99,7 @@ CascadeMix computeCascadeMix(vec3 worldPos)
         {
             // Only blend if neighbor actually covers the point
             uint neighbor = primary + 1u;
-            vec4 lclipN = sceneData.lightViewProjCascades[neighbor] * vec4(worldPos, 1.0);
+            vec4 lclipN = sceneData.lightViewProjCascades[neighbor] * vec4(localPos, 1.0);
             vec3 ndcN = lclipN.xyz / max(lclipN.w, 1e-6);
             bool insideN = (abs(ndcN.x) <= 1.0 && abs(ndcN.y) <= 1.0 && ndcN.z >= 0.0 && ndcN.z <= 1.0);
             if (insideN)
@@ -142,11 +142,11 @@ vec2 receiverPlaneDepthGradient(vec3 ndc, vec3 dndc_dx, vec3 dndc_dy)
     return invJ * dz_dxdy; // (dz/du, dz/dv)
 }
 
-float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
+float sampleCascadeShadow(uint ci, vec3 localPos, vec3 N, vec3 L)
 {
     mat4 lightMat = sceneData.lightViewProjCascades[ci];
 
-    vec4 lclip = lightMat * vec4(worldPos, 1.0);
+    vec4 lclip = lightMat * vec4(localPos, 1.0);
     vec3 ndc  = lclip.xyz / lclip.w;
     vec2 suv  = ndc.xy * 0.5 + 0.5;
 
@@ -203,7 +203,7 @@ float sampleCascadeShadow(uint ci, vec3 worldPos, vec3 N, vec3 L)
     return visibility;
 }
 
-float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
+float calcShadowVisibility(vec3 localPos, vec3 N, vec3 L)
 {
     float minVis = clamp(sceneData.shadowTuning.x, 0.0, 1.0);
 
@@ -213,7 +213,7 @@ float calcShadowVisibility(vec3 worldPos, vec3 N, vec3 L)
         return 1.0;
     }
 
-    vec3 wp = worldPos + N * SHADOW_NORMAL_OFFSET * (0.5 + 0.5 * (1.0 - max(dot(N, L), 0.0)));
+    vec3 wp = localPos + N * SHADOW_NORMAL_OFFSET * (0.5 + 0.5 * (1.0 - max(dot(N, L), 0.0)));
     float planetVis = planet_analytic_shadow_visibility(wp, L);
     if (planetVis <= 0.0)
     {
@@ -255,8 +255,8 @@ void main(){
     float ao = extraSample.x;
     vec3 emissive = extraSample.yzw;
 
-    vec3 camPos = getCameraWorldPosition();
-    vec3 V = normalize(camPos - pos);
+    vec3 camLocal = getCameraLocalPosition();
+    vec3 V = normalize(camLocal - pos);
 
     // Directional sun term using evaluate_brdf + cascaded shadowing
     vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);

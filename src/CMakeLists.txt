@@ -205,24 +205,30 @@ add_executable (vulkan_engine
   game/game_world.h
   game/game_world.cpp
   game/component/component.h
-  game/example_game.h
-  game/example_game.cpp
-  game/rebasing_test_game.h
-  game/rebasing_test_game.cpp
-        game/main_game.h
-        game/main_game.cpp
+  game/main_game.h
+  game/main_game.cpp
+  # game/state — state machine infrastructure
   game/state/game_state.h
   game/state/game_state.cpp
   game/state/game_state_manager.h
   game/state/game_state_manager.cpp
-  game/state/title_screen_state.h
-  game/state/title_screen_state.cpp
-  game/state/gameplay_state.h
-  game/state/gameplay_state.cpp
-  game/state/pause_state.h
-  game/state/pause_state.cpp
-  game/state/settings_state.h
-  game/state/settings_state.cpp
+  # game/states — concrete state implementations
+  game/states/title_screen_state.h
+  game/states/title_screen_state.cpp
+  game/states/pause_state.h
+  game/states/pause_state.cpp
+  game/states/settings_state.h
+  game/states/settings_state.cpp
+  game/states/gameplay/gameplay_state.h
+  game/states/gameplay/orbit_helpers.h
+  game/states/gameplay/gameplay_state.cpp
+  game/states/gameplay/gameplay_state_scene.cpp
+  game/states/gameplay/gameplay_state_sim.cpp
+  # game/legacy — old IGameCallbacks demos
+  game/legacy/example_game.h
+  game/legacy/example_game.cpp
+  game/legacy/rebasing_test_game.h
+  game/legacy/rebasing_test_game.cpp
         physics/collider_mesh_instance.h
 )
 

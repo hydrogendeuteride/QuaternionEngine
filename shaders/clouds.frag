@@ -25,7 +25,7 @@ layout(push_constant) uniform VolumePush
     ivec4 misc;                // x: stepCount, y: gridResolution, z: volumeType (0=cloud,1=smoke,2=flame)
 } pc;
 
-vec3 getCameraWorldPosition()
+vec3 getCameraLocalPosition()
 {
     mat3 rotT = mat3(sceneData.view); // R^T
     mat3 rot  = transpose(rotT);      // R
@@ -103,9 +103,9 @@ void main()
 {
     vec3 baseColor = texture(hdrInput, inUV).rgb;
 
-    vec3 camPos = getCameraWorldPosition();
+    vec3 camLocal = getCameraLocalPosition();
 
-    // Reconstruct a world-space ray for this pixel (Vulkan depth range 0..1).
+    // Reconstruct a local-space ray for this pixel (Vulkan depth range 0..1).
     vec2 ndc = inUV * 2.0 - 1.0;
     vec3 viewDir = normalize(vec3(ndc.x / sceneData.proj[0][0], ndc.y / sceneData.proj[1][1], -1.0));
     vec3 rd = transpose(mat3(sceneData.view)) * viewDir;
@@ -114,14 +114,14 @@ void main()
     vec3 center = pc.volume_center_follow.xyz;
     if (pc.volume_center_follow.w > 0.5)
     {
-        center.xz += camPos.xz;
+        center.xz += camLocal.xz;
     }
     vec3 halfExt = max(pc.volume_half_extents.xyz, vec3(0.01));
     vec3 bmin = center - halfExt;
     vec3 bmax = center + halfExt;
 
     float t0, t1;
-    if (!intersectAABB(camPos, rd, bmin, bmax, t0, t1))
+    if (!intersectAABB(camLocal, rd, bmin, bmax, t0, t1))
     {
         outColor = vec4(baseColor, 1.0);
         return;
@@ -131,7 +131,7 @@ void main()
     vec4 posSample = texture(posTex, inUV);
     if (posSample.w > 0.0)
     {
-        float surfT = dot(posSample.xyz - camPos, rd);
+        float surfT = dot(posSample.xyz - camLocal, rd);
         if (surfT > 0.0)
         {
             t1 = min(t1, surfT);
@@ -159,7 +159,7 @@ void main()
 
     for (int i = 0; i < steps; ++i)
     {
-        vec3 p = camPos + rd * (t + 0.5 * dt);
+        vec3 p = camLocal + rd * (t + 0.5 * dt);
 
         float d = sample_voxel_density(p, bmin, bmax);
         d = max(0.0, d - pc.density_params.y) / max(1.0 - pc.density_params.y, 1e-3);

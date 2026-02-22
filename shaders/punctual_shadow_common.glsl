@@ -13,14 +13,14 @@ uint select_point_shadow_face(vec3 d)
     return d.z >= 0.0 ? 4u : 5u;
 }
 
-float sample_spot_shadow_visibility(uint shadowIndex, vec3 worldPos, vec3 N)
+float sample_spot_shadow_visibility(uint shadowIndex, vec3 localPos, vec3 N)
 {
     if (shadowIndex >= sceneData.punctualShadowConfig.y)
     {
         return 1.0;
     }
 
-    vec3 wp = worldPos + N * SHADOW_NORMAL_OFFSET;
+    vec3 wp = localPos + N * SHADOW_NORMAL_OFFSET;
     vec4 clip = sceneData.spotLightShadowViewProj[shadowIndex] * vec4(wp, 1.0);
     vec3 ndc = clip.xyz / max(clip.w, 1e-6);
     vec2 uv = ndc.xy * 0.5 + 0.5;
@@ -46,14 +46,14 @@ float sample_spot_shadow_visibility(uint shadowIndex, vec3 worldPos, vec3 N)
     return sum / taps;
 }
 
-float sample_point_shadow_visibility(uint pointShadowIndex, vec3 lightPos, vec3 worldPos, vec3 N)
+float sample_point_shadow_visibility(uint pointShadowIndex, vec3 lightPos, vec3 localPos, vec3 N)
 {
     if (pointShadowIndex >= sceneData.punctualShadowConfig.z)
     {
         return 1.0;
     }
 
-    vec3 wp = worldPos + N * SHADOW_NORMAL_OFFSET;
+    vec3 wp = localPos + N * SHADOW_NORMAL_OFFSET;
     vec3 fromLight = wp - lightPos;
     uint face = select_point_shadow_face(fromLight);
     uint texIndex = pointShadowIndex * POINT_SHADOW_FACE_COUNT + face;
@@ -87,4 +87,4 @@ float sample_point_shadow_visibility(uint pointShadowIndex, vec3 lightPos, vec3 
     return sum / taps;
 }
 
-#endif// PUNCTUAL_SHADOW_COMMON_GLSL
+#endif // PUNCTUAL_SHADOW_COMMON_GLSL

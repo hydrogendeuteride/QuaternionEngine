@@ -1,7 +1,7 @@
 #pragma once
 
 #include "runtime/i_game_callbacks.h"
-#include "state/game_state_manager.h"
+#include "game/state/game_state_manager.h"
 
 namespace Game
 {

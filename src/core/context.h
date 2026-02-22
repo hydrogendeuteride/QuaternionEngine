@@ -139,7 +139,7 @@ struct VoxelVolumeSettings
 // The plume coordinate system is defined by worldToPlume:
 // - +Z points along exhaust direction
 // - z = 0 is the nozzle exit plane
-// - units are render-local units (same as scene rendering)
+// - input matrix operates in world coordinates; renderer composes floating-origin translation per frame
 struct RocketPlumeSettings
 {
     bool enabled = false;

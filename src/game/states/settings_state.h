@@ -1,15 +1,18 @@
 #pragma once
 
-#include "game_state.h"
+#include "game/state/game_state.h"
 
 namespace Game
 {
 
 // ============================================================================
-// TitleScreenState: Main menu — New Game, Load, Settings, Quit
+// SettingsState: Graphics, audio, controls settings
+//
+// is_overlay() = true — renders on top of whatever called it
+// (title screen or pause menu)
 // ============================================================================
 
-class TitleScreenState : public IGameState
+class SettingsState : public IGameState
 {
 public:
     void on_enter(GameStateContext &ctx) override;
@@ -19,7 +22,14 @@ public:
     void on_draw_ui(GameStateContext &ctx) override;
 
     bool wants_fixed_update() const override { return false; }
-    const char *name() const override { return "TitleScreen"; }
+    bool is_overlay() const override { return true; }
+    const char *name() const override { return "Settings"; }
+
+private:
+    // Settings state (local copy, applied on "Apply")
+    float _master_volume{1.0f};
+    float _sfx_volume{1.0f};
+    float _bgm_volume{1.0f};
 };
 
 } // namespace Game

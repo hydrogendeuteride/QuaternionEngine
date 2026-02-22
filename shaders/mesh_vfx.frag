@@ -11,7 +11,7 @@ layout (location = 3) in vec3 inWorldPos;
 
 layout (location = 0) out vec4 outFragColor;
 
-vec3 get_camera_world_position()
+vec3 get_camera_local_position()
 {
     mat3 rotT = mat3(sceneData.view);
     mat3 rot = transpose(rotT);
@@ -68,7 +68,7 @@ void main()
 
     // --- Fresnel ---
     vec3 N = normalize(inNormal);
-    vec3 V = normalize(get_camera_world_position() - inWorldPos);
+    vec3 V = normalize(get_camera_local_position() - inWorldPos);
     float fresnel = pow(1.0 - max(dot(N, V), 0.0), fresnelPower);
 
     // --- Composite ---

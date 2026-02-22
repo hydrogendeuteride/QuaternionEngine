@@ -1,18 +1,15 @@
 #pragma once
 
-#include "game_state.h"
+#include "game/state/game_state.h"
 
 namespace Game
 {
 
 // ============================================================================
-// PauseState: Overlay on top of GameplayState
-//
-// is_overlay() = true so the gameplay scene still renders underneath.
-// wants_fixed_update() = false so physics/simulation freezes.
+// TitleScreenState: Main menu — New Game, Load, Settings, Quit
 // ============================================================================
 
-class PauseState : public IGameState
+class TitleScreenState : public IGameState
 {
 public:
     void on_enter(GameStateContext &ctx) override;
@@ -22,8 +19,7 @@ public:
     void on_draw_ui(GameStateContext &ctx) override;
 
     bool wants_fixed_update() const override { return false; }
-    bool is_overlay() const override { return true; }
-    const char *name() const override { return "Pause"; }
+    const char *name() const override { return "TitleScreen"; }
 };
 
 } // namespace Game

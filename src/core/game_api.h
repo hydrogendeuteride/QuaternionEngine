@@ -458,6 +458,7 @@ struct VoxelVolumeSettings
 
 // Analytic rocket plume settings (vacuum-focused): raymarch a procedural density field in plume-local space.
 // worldToPlume defines the local space where +Z is exhaust direction and z=0 is the nozzle exit plane.
+// This matrix is world-space; floating-origin compensation is applied internally by the renderer.
 struct RocketPlumeSettings
 {
     bool enabled{false};

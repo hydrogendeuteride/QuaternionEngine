@@ -15,8 +15,8 @@
 #include "audio/miniaudio_system.h"
 
 #if USE_ENTITY_SYSTEM
-#include "game/example_game.h"
-#include "game/rebasing_test_game.h"
+#include "game/legacy/example_game.h"
+#include "game/legacy/rebasing_test_game.h"
 #include "game/main_game.h"
 #else
 #endif // USE_ENTITY_SYSTEM

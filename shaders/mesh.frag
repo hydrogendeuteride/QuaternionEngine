@@ -19,7 +19,7 @@ layout (location = 6) in vec3 inObjectNormal;
 
 layout (location = 0) out vec4 outFragColor;
 
-vec3 getCameraWorldPosition() // Because I'm not clever enough to add cmaera position...
+vec3 getCameraLocalPosition() // Derived from sceneData.view (render-local coordinates).
 {
     // view = [ R^T  -R^T*C ]
     //        [ 0       1   ]
@@ -66,8 +66,8 @@ void main()
         vec3 B = normalize(cross(Nn, T)) * inTangent.w;
         N = normalize(T * Nm.x + B * Nm.y + Nn * Nm.z);
     }
-    vec3 camPos = getCameraWorldPosition();
-    vec3 V = normalize(camPos - inWorldPos);
+    vec3 camLocal = getCameraLocalPosition();
+    vec3 V = normalize(camLocal - inWorldPos);
 
     // Directional sun term (no shadows in forward path)
     vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);

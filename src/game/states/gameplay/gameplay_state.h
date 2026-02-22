@@ -1,6 +1,6 @@
 #pragma once
 
-#include "game_state.h"
+#include "game/state/game_state.h"
 #include "game/game_world.h"
 #include "game/component/component.h"
 #include "physics/physics_world.h"
@@ -44,6 +44,13 @@ namespace Game
 
     private:
         void setup_scene(GameStateContext &ctx);
+        void setup_environment(GameStateContext &ctx);
+        void init_orbitsim(double orbit_radius_m, double speed_scale,
+                           WorldVec3 &ship_pos_world, glm::dvec3 &ship_vel_world,
+                           WorldVec3 &moon_pos_world, bool &have_moon);
+
+        void step_physics(GameStateContext &ctx, float fixed_dt);
+        void update_prediction(GameStateContext &ctx, float fixed_dt);
 
         ComponentContext build_component_context(GameStateContext &ctx, float alpha = 0.0f);
 
@@ -55,12 +62,24 @@ namespace Game
 
         void emit_orbit_prediction_debug(GameStateContext &ctx);
 
+        float effective_prediction_interval() const;
+
         // Game world (entities + resource lifetime)
         GameWorld _world;
 
         // Physics
         std::unique_ptr<Physics::PhysicsWorld> _physics;
         std::unique_ptr<Physics::PhysicsContext> _physics_context;
+        enum class VelocityOriginMode
+        {
+            // Every fixed step: absorb anchor local velocity into velocity-origin.
+            PerStepAnchorSync,
+
+            // Integrate velocity-origin from anchor acceleration and run in anchor free-fall frame.
+            FreeFallAnchorFrame
+        };
+
+        VelocityOriginMode _velocity_origin_mode{VelocityOriginMode::FreeFallAnchorFrame};
 
         // Scenario entities (early gameplay prototype)
         EntityId _ship_entity;

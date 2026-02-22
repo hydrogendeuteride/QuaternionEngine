@@ -48,7 +48,7 @@ const float CLOUD_THICKNESS_MAX = 1.35;
 
 // ── Utility ──────────────────────────────────────────────────────────
 
-vec3 getCameraWorldPosition()
+vec3 getCameraLocalPosition()
 {
     mat3 rotT = mat3(sceneData.view);
     mat3 rot  = transpose(rotT);
@@ -230,7 +230,7 @@ vec2 sun_optical_depth(float r, float muS, float planetRadius, float atmRadius)
 
 struct MarchParams
 {
-    vec3  camPos;
+    vec3  camLocal;
     vec3  rd;
     vec3  center;
     float planetRadius;
@@ -283,7 +283,7 @@ MarchParams mp, inout MarchState s)
     for (int i = 0; i < steps; ++i)
     {
         float ts = t0 + (float(i) + mp.jitter) * dt;
-        vec3 p = mp.camPos + mp.rd * ts;
+        vec3 p = mp.camLocal + mp.rd * ts;
 
         vec3 radial = p - mp.center;
         float r = length(radial);
@@ -468,7 +468,7 @@ void main()
 
     if (!atmActive && !cloudsActive) { outColor = vec4(baseColor, 1.0); return; }
 
-    vec3 camPos = getCameraWorldPosition();
+    vec3 camLocal = getCameraLocalPosition();
 
     vec2 ndc = inUV * 2.0 - 1.0;
     vec3 viewDir = normalize(vec3(ndc.x / sceneData.proj[0][0], ndc.y / sceneData.proj[1][1], -1.0));
@@ -480,7 +480,7 @@ void main()
     if (boundRadius <= planetRadius) { outColor = vec4(baseColor, 1.0); return; }
 
     float tBound0, tBound1;
-    if (!ray_sphere_intersect(camPos, rd, center, boundRadius, tBound0, tBound1))
+    if (!ray_sphere_intersect(camLocal, rd, center, boundRadius, tBound0, tBound1))
     {
         outColor = vec4(baseColor, 1.0); return;
     }
@@ -490,7 +490,7 @@ void main()
     vec4 posSample = texture(posTex, inUV);
     if (posSample.w > 0.0)
     {
-        float tSurf = dot(posSample.xyz - camPos, rd);
+        float tSurf = dot(posSample.xyz - camLocal, rd);
         if (tSurf > 0.0)
         {
             bool isPlanet = (posSample.w > 1.5);
@@ -500,7 +500,7 @@ void main()
                 if (snapM > 0.0)
                 {
                     float tP0, tP1;
-                    if (ray_sphere_intersect(camPos, rd, center, planetRadius, tP0, tP1))
+                    if (ray_sphere_intersect(camLocal, rd, center, planetRadius, tP0, tP1))
                     {
                         float tSphere = (tP0 > 0.0) ? tP0 : tP1;
                         if (tSphere > 0.0)
@@ -541,7 +541,7 @@ void main()
 
     // Build march parameters (constant across all segments).
     MarchParams mp;
-    mp.camPos       = camPos;
+    mp.camLocal       = camLocal;
     mp.rd           = rd;
     mp.center       = center;
     mp.planetRadius = planetRadius;
@@ -588,10 +588,10 @@ void main()
     if (cloudsActive)
     {
         float tO0, tO1;
-        if (ray_sphere_intersect(camPos, rd, center, rTop, tO0, tO1))
+        if (ray_sphere_intersect(camLocal, rd, center, rTop, tO0, tO1))
         {
             float tI0, tI1;
-            bool hasInner = ray_sphere_intersect(camPos, rd, center, rBase, tI0, tI1);
+            bool hasInner = ray_sphere_intersect(camLocal, rd, center, rBase, tI0, tI1);
 
             if (!hasInner)
             {

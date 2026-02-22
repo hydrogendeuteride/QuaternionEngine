@@ -33,7 +33,7 @@ layout(push_constant) uniform PlumePush
     ivec4 misc; // x steps, y plumeCount
 } pc;
 
-vec3 getCameraWorldPosition()
+vec3 getCameraLocalPosition()
 {
     mat3 rotT = mat3(sceneData.view); // R^T
     mat3 rot  = transpose(rotT);      // R
@@ -86,9 +86,9 @@ void main()
         return;
     }
 
-    vec3 camPos = getCameraWorldPosition();
+    vec3 camLocal = getCameraLocalPosition();
 
-    // Reconstruct a world-space ray for this pixel (Vulkan depth range 0..1).
+    // Reconstruct a local-space ray for this pixel (Vulkan depth range 0..1).
     vec2 ndc = inUV * 2.0 - 1.0;
     vec3 viewDir = normalize(vec3(ndc.x / sceneData.proj[0][0], ndc.y / sceneData.proj[1][1], -1.0));
     vec3 rdWorld = transpose(mat3(sceneData.view)) * viewDir;
@@ -98,7 +98,7 @@ void main()
     vec4 posSample = texture(posTex, inUV);
     if (posSample.w > 0.0)
     {
-        float surfT = dot(posSample.xyz - camPos, rdWorld);
+        float surfT = dot(posSample.xyz - camLocal, rdWorld);
         if (surfT > 0.0)
         {
             tGeom = surfT;
@@ -125,7 +125,7 @@ void main()
         rMax = max(rMax, baseR);
 
         // Transform ray to plume-local space.
-        vec3 ro = (p.world_to_plume * vec4(camPos, 1.0)).xyz;
+        vec3 ro = (p.world_to_plume * vec4(camLocal, 1.0)).xyz;
         vec3 rd = (p.world_to_plume * vec4(rdWorld, 0.0)).xyz;
         float rdLen = max(length(rd), 1e-6);
         rd /= rdLen;

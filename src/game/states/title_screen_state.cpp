@@ -1,5 +1,5 @@
 #include "title_screen_state.h"
-#include "gameplay_state.h"
+#include "gameplay/gameplay_state.h"
 #include "settings_state.h"
 
 #include "imgui.h"

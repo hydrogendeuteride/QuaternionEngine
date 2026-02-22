@@ -1,18 +1,18 @@
 #pragma once
 
-#include "game_state.h"
+#include "game/state/game_state.h"
 
 namespace Game
 {
 
 // ============================================================================
-// SettingsState: Graphics, audio, controls settings
+// PauseState: Overlay on top of GameplayState
 //
-// is_overlay() = true — renders on top of whatever called it
-// (title screen or pause menu)
+// is_overlay() = true so the gameplay scene still renders underneath.
+// wants_fixed_update() = false so physics/simulation freezes.
 // ============================================================================
 
-class SettingsState : public IGameState
+class PauseState : public IGameState
 {
 public:
     void on_enter(GameStateContext &ctx) override;
@@ -23,13 +23,7 @@ public:
 
     bool wants_fixed_update() const override { return false; }
     bool is_overlay() const override { return true; }
-    const char *name() const override { return "Settings"; }
-
-private:
-    // Settings state (local copy, applied on "Apply")
-    float _master_volume{1.0f};
-    float _sfx_volume{1.0f};
-    float _bgm_volume{1.0f};
+    const char *name() const override { return "Pause"; }
 };
 
 } // namespace Game

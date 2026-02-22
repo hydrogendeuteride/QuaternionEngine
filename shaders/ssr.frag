@@ -11,7 +11,7 @@ layout(set = 1, binding = 1) uniform sampler2D posTex;
 layout(set = 1, binding = 2) uniform sampler2D normalTex;
 layout(set = 1, binding = 3) uniform sampler2D albedoTex;
 
-vec3 getCameraWorldPosition() // Because I'm not clever enough to add cmaera position...
+vec3 getCameraLocalPosition() // Derived from sceneData.view (render-local coordinates).
 {
     mat3 rotT = mat3(sceneData.view);      // R^T
     mat3 rot  = transpose(rotT);           // R
@@ -57,7 +57,7 @@ void main()
         return;
     }
 
-    vec3 worldPos = posSample.xyz;
+    vec3 localPos = posSample.xyz;
 
     vec4 normSample = texture(normalTex, inUV);
     vec3 N          = normalize(normSample.xyz);
@@ -66,10 +66,10 @@ void main()
     vec4 albSample  = texture(albedoTex, inUV);
     float metallic  = clamp(albSample.a, 0.0, 1.0);
 
-    vec3 camPos = getCameraWorldPosition();
-    vec3 V      = normalize(camPos - worldPos);
+    vec3 camLocal = getCameraLocalPosition();
+    vec3 V      = normalize(camLocal - localPos);
     vec3 R      = reflect(-V, N);
-    vec3 viewPos = (sceneData.view * vec4(worldPos, 1.0)).xyz;
+    vec3 viewPos = (sceneData.view * vec4(localPos, 1.0)).xyz;
     vec3 viewDir = (sceneData.view * vec4(R, 0.0)).xyz;
 
     float gloss        = 1.0 - roughness;
@@ -83,9 +83,9 @@ void main()
     }
 
     const int   MAX_STEPS    = 64;
-    const float STEP_LENGTH  = 0.5;   // world units per step
+    const float STEP_LENGTH  = 0.5;   // local units per step
     const float MAX_DISTANCE = 50.0;  // clamp ray length
-    const float THICKNESS    = 3.0;   // world-space thickness tolerance
+    const float THICKNESS    = 3.0;   // local-space thickness tolerance
 
     int  maxSteps = int(mix(8.0, float(MAX_STEPS), reflectivity));
     bool hit      = false;

@@ -183,6 +183,10 @@ RGImageHandle RocketPlumePass::register_graph(RenderGraph *graph, RGImageHandle 
         return hdrInput;
     }
 
+    // Shader-side camera/gbuffer positions are in render-local space (floating-origin shifted).
+    // Convert user-facing world->plume transforms to local->plume each frame.
+    const glm::vec3 origin_local = glm::vec3(ctxLocal->origin_world);
+
     std::vector<GPURocketPlume> instances;
     instances.reserve(EngineContext::MAX_ROCKET_PLUMES);
     for (uint32_t i = 0; i < EngineContext::MAX_ROCKET_PLUMES; ++i)
@@ -195,6 +199,7 @@ RGImageHandle RocketPlumePass::register_graph(RenderGraph *graph, RGImageHandle 
 
         GPURocketPlume gpu{};
         gpu.world_to_plume = ps.worldToPlume;
+        gpu.world_to_plume[3] += ps.worldToPlume * glm::vec4(origin_local, 0.0f);
         gpu.shape = glm::vec4(std::max(0.0f, ps.length),
                               std::max(0.0f, ps.nozzleRadius),
                               ps.expansionAngleRad,
