@@ -19,10 +19,6 @@ target_include_directories(scenario_loader_tests PRIVATE
   "${PROJECT_SOURCE_DIR}/third_party/taskflow/3rd-party"
 )
 
-target_compile_definitions(scenario_loader_tests PRIVATE
-  VULKAN_ENGINE_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
-)
-
 target_link_libraries(scenario_loader_tests PRIVATE
   gtest
   fmt::fmt

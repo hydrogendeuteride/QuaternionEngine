@@ -101,13 +101,15 @@ namespace
     }
 } // namespace
 
-TEST(ScenarioLoader, LoadsDefaultScenarioAsset)
+TEST(ScenarioLoader, LoadsValidScenarioDocument)
 {
-    const std::string path = std::string(VULKAN_ENGINE_SOURCE_DIR) + "/assets/scenarios/default_gameplay.json";
-    auto cfg = Game::load_scenario_config(path);
+    const std::filesystem::path dir = make_temp_dir();
+    auto cfg = Game::load_scenario_config(write_json_file(dir, "valid_scenario.json", make_valid_scenario()));
     ASSERT_TRUE(cfg.has_value());
     EXPECT_FALSE(cfg->celestials.empty());
     EXPECT_FALSE(cfg->orbiters.empty());
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
 }
 
 TEST(ScenarioLoader, RejectsMissingRequiredArray)

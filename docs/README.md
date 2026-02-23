@@ -179,6 +179,7 @@ When adding new features:
 1. Update relevant documentation in `docs/`
 2. Add examples to [GameAPI.md](GameAPI.md) if exposing new API
 3. Include shader documentation in [SHADERS.md](SHADERS.md) for new shaders
+4. Use short branch names: `<type>/<topic>` (e.g. `fix/sdl-submodule`, `ci/scenario-tests`)
 
 ## Getting Help
 
