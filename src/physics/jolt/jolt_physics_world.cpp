@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cfloat>
 #include <cstdarg>
 #include <cstdio>
 #include <cmath>
@@ -63,6 +64,18 @@ namespace Physics
         const glm::vec3 ref = std::abs(a.y) < 0.99f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
         out_normal = glm::normalize(glm::cross(ref, a));
     }
+
+    namespace
+    {
+        double sanitize_cast_distance(double distance)
+        {
+            if (!std::isfinite(distance) || distance <= 0.0)
+            {
+                return 0.0;
+            }
+            return std::min(distance, static_cast<double>(FLT_MAX));
+        }
+    } // namespace
 
     // ============================================================================
     // Contact listener
@@ -1282,7 +1295,7 @@ namespace Physics
     // Raycasting
     // ============================================================================
 
-    RayHit JoltPhysicsWorld::raycast(const glm::dvec3 &origin, const glm::vec3 &direction, float max_distance) const
+    RayHit JoltPhysicsWorld::raycast(const glm::dvec3 &origin, const glm::vec3 &direction, double max_distance) const
     {
         RaycastOptions options;
         options.max_distance = max_distance;
@@ -1299,13 +1312,22 @@ namespace Physics
             return result;
         }
 
+        const double max_distance_d = sanitize_cast_distance(options.max_distance);
+        if (max_distance_d <= 0.0)
+        {
+            return result;
+        }
+
+        const float max_distance_f = static_cast<float>(max_distance_d);
+        const double max_distance_effective = static_cast<double>(max_distance_f);
+
         glm::vec3 dir_norm = glm::length(direction) > 0.0f
                                  ? glm::normalize(direction)
                                  : glm::vec3(0.0f, -1.0f, 0.0f);
 
         JPH::RRayCast ray(
             JPH::RVec3(origin.x, origin.y, origin.z),
-            JPH::Vec3(dir_norm.x, dir_norm.y, dir_norm.z) * options.max_distance);
+            JPH::Vec3(dir_norm.x, dir_norm.y, dir_norm.z) * max_distance_f);
 
         JoltQuery::LayerMaskFilter layer_filter(options.layer_mask);
         JoltQuery::IgnoreBodyAndSensorsFilter body_filter(options.ignore_body, options.include_sensors,
@@ -1319,7 +1341,6 @@ namespace Physics
                                                ? JPH::EBackFaceMode::IgnoreBackFaces
                                                : JPH::EBackFaceMode::CollideWithBackFaces;
 
-        JPH::RayCastResult hit;
         JPH::ClosestHitCollisionCollector<JPH::CastRayCollector> collector;
         _physics_system.GetNarrowPhaseQuery().CastRay(ray, ray_settings, collector, layer_filter,
                                                       layer_filter, body_filter);
@@ -1329,13 +1350,10 @@ namespace Physics
             const JPH::RayCastResult &hit = collector.mHit;
 
             result.hit = true;
-            result.distance = hit.mFraction * options.max_distance;
+            result.distance = static_cast<double>(hit.mFraction) * max_distance_effective;
 
-            JPH::RVec3 hp = ray.GetPointOnRay(hit.mFraction);
-            result.position = glm::dvec3(
-                static_cast<double>(hp.GetX()),
-                static_cast<double>(hp.GetY()),
-                static_cast<double>(hp.GetZ()));
+            const glm::dvec3 hit_position = origin + glm::dvec3(dir_norm) * result.distance;
+            result.position = hit_position;
 
             result.sub_shape_id = hit.mSubShapeID2.GetValue();
 
@@ -1344,6 +1362,7 @@ namespace Physics
                 if (lock.Succeeded())
                 {
                     const JPH::Body &body = lock.GetBody();
+                    const JPH::RVec3 hp(hit_position.x, hit_position.y, hit_position.z);
                     const JPH::Vec3 n = body.GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, hp);
                     result.normal = glm::vec3(n.GetX(), n.GetY(), n.GetZ());
                     result.layer = body.GetObjectLayer();
@@ -1374,6 +1393,15 @@ namespace Physics
             return result;
         }
 
+        const double max_distance_d = sanitize_cast_distance(options.max_distance);
+        if (max_distance_d <= 0.0)
+        {
+            return result;
+        }
+
+        const float max_distance_f = static_cast<float>(max_distance_d);
+        const double max_distance_effective = static_cast<double>(max_distance_f);
+
         const glm::vec3 dir_norm = safe_normalize(direction, glm::vec3(0.0f, -1.0f, 0.0f));
 
         JPH::RefConst<JPH::Shape> jolt_shape = create_jolt_shape(shape);
@@ -1384,8 +1412,9 @@ namespace Physics
                 JPH::Mat44::sRotation(JPH::Quat(rotation.x, rotation.y, rotation.z, rotation.w)) *
                 shape_com;
 
-        const JPH::Vec3 cast_dir = JPH::Vec3(dir_norm.x, dir_norm.y, dir_norm.z) * options.max_distance;
+        const JPH::Vec3 cast_dir = JPH::Vec3(dir_norm.x, dir_norm.y, dir_norm.z) * max_distance_f;
         const JPH::RShapeCast shape_cast(jolt_shape.GetPtr(), JPH::Vec3::sOne(), com_start, cast_dir);
+        const JPH::RVec3 base_offset = com_start.GetTranslation();
 
         JoltQuery::LayerMaskFilter layer_filter(options.layer_mask);
         JoltQuery::IgnoreBodyAndSensorsFilter body_filter(options.ignore_body, options.include_sensors,
@@ -1401,7 +1430,7 @@ namespace Physics
                                                 : JPH::EBackFaceMode::CollideWithBackFaces;
 
         JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
-        _physics_system.GetNarrowPhaseQuery().CastShape(shape_cast, cast_settings, JPH::RVec3::sZero(), collector,
+        _physics_system.GetNarrowPhaseQuery().CastShape(shape_cast, cast_settings, base_offset, collector,
                                                         layer_filter, layer_filter, body_filter);
 
         if (collector.HadHit())
@@ -1409,9 +1438,12 @@ namespace Physics
             const JPH::ShapeCastResult &hit = collector.mHit;
 
             result.hit = true;
-            result.distance = hit.mFraction * options.max_distance;
-            result.position = glm::dvec3(static_cast<double>(hit.mContactPointOn2.GetX()),
+            result.distance = static_cast<double>(hit.mFraction) * max_distance_effective;
+            result.position = glm::dvec3(static_cast<double>(base_offset.GetX()) +
+                                         static_cast<double>(hit.mContactPointOn2.GetX()),
+                                         static_cast<double>(base_offset.GetY()) +
                                          static_cast<double>(hit.mContactPointOn2.GetY()),
+                                         static_cast<double>(base_offset.GetZ()) +
                                          static_cast<double>(hit.mContactPointOn2.GetZ()));
 
             const float n_len = hit.mPenetrationAxis.Length();
@@ -1456,6 +1488,7 @@ namespace Physics
                 JPH::RMat44::sTranslation(JPH::RVec3(position.x, position.y, position.z)) *
                 JPH::Mat44::sRotation(JPH::Quat(rotation.x, rotation.y, rotation.z, rotation.w)) *
                 shape_com;
+        const JPH::RVec3 base_offset = com_transform.GetTranslation();
 
         JoltQuery::LayerMaskFilter layer_filter(options.layer_mask);
         JoltQuery::IgnoreBodyAndSensorsFilter body_filter(options.ignore_body, options.include_sensors,
@@ -1470,7 +1503,7 @@ namespace Physics
             JPH::Vec3::sOne(),
             com_transform,
             collide_settings,
-            JPH::RVec3::sZero(),
+            base_offset,
             collector,
             layer_filter,
             layer_filter,

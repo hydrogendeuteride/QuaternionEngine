@@ -92,7 +92,7 @@ namespace Physics
 
     struct RaycastOptions : QueryFilter
     {
-        float max_distance = 1000.0f;
+        double max_distance = 1000.0;
         bool backface_culling = true; // Ignore hits from inside shapes
     };
 
@@ -101,7 +101,7 @@ namespace Physics
         bool hit{false};
         glm::dvec3 position{0.0, 0.0, 0.0};
         glm::vec3 normal{0.0f, 1.0f, 0.0f};
-        float distance{0.0f};
+        double distance{0.0};
         BodyId body_id;
         uint32_t sub_shape_id{0}; // For compound shapes
         uint32_t layer{0}; // Layer of the hit body
@@ -114,7 +114,7 @@ namespace Physics
 
     struct SweepOptions : QueryFilter
     {
-        float max_distance = 1000.0f;
+        double max_distance = 1000.0;
         bool backface_culling = true;
     };
 

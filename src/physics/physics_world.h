@@ -150,7 +150,7 @@ namespace Physics
         // ========================================================================
 
         // Simple raycast (legacy interface)
-        virtual RayHit raycast(const glm::dvec3 &origin, const glm::vec3 &direction, float max_distance) const = 0;
+        virtual RayHit raycast(const glm::dvec3 &origin, const glm::vec3 &direction, double max_distance) const = 0;
 
         // Extended raycast with filtering options
         virtual RayHit raycast(const glm::dvec3 &origin, const glm::vec3 &direction,

@@ -29,7 +29,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 set(BVH2_ENABLE_TESTS OFF CACHE BOOL "Disable BVH2 tests (offline builds)" FORCE)
 
 option(VULKAN_ENGINE_USE_JOLT "Build with Jolt Physics (vendored in third_party/JoltPhysics)" ON)
-option(VULKAN_ENGINE_JOLT_DOUBLE_PRECISION "Build Jolt with double precision math (JPH_DOUBLE_PRECISION)" OFF)
+option(VULKAN_ENGINE_JOLT_DOUBLE_PRECISION "Build Jolt with double precision math (JPH_DOUBLE_PRECISION)" ON)
 
 add_subdirectory(third_party)
 

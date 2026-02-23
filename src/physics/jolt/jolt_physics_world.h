@@ -102,7 +102,7 @@ namespace Physics
 
         bool is_active(BodyId id) const override;
 
-        RayHit raycast(const glm::dvec3 &origin, const glm::vec3 &direction, float max_distance) const override;
+        RayHit raycast(const glm::dvec3 &origin, const glm::vec3 &direction, double max_distance) const override;
 
         RayHit raycast(const glm::dvec3 &origin, const glm::vec3 &direction,
                        const RaycastOptions &options) const override;
