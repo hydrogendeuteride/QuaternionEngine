@@ -224,6 +224,8 @@ add_executable (vulkan_engine
   game/states/gameplay/gameplay_state.cpp
   game/states/gameplay/gameplay_state_scene.cpp
   game/states/gameplay/gameplay_state_sim.cpp
+  game/states/gameplay/scenario_loader.h
+  game/states/gameplay/scenario_loader.cpp
   # game/legacy — old IGameCallbacks demos
   game/legacy/example_game.h
   game/legacy/example_game.cpp
@@ -387,6 +389,7 @@ target_include_directories(vulkan_engine PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/physics"
   "${CMAKE_CURRENT_SOURCE_DIR}/game"
   "${CMAKE_CURRENT_SOURCE_DIR}/audio"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/taskflow/3rd-party"
 )
 
 option(ENABLE_MIKKTS "Use MikkTSpace for tangent generation" ON)

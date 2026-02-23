@@ -1,9 +1,11 @@
 #include "gameplay_state.h"
 #include "orbit_helpers.h"
+#include "scenario_loader.h"
 #include "game/states/pause_state.h"
 #include "core/engine.h"
 #include "core/game_api.h"
 #include "core/input/input_system.h"
+#include "core/util/logger.h"
 
 #include "imgui.h"
 
@@ -27,6 +29,22 @@ namespace Game
         _elapsed = 0.0f;
         _fixed_time_s = 0.0;
         _reset_requested = false;
+
+        // Try loading scenario from JSON; fall back to compiled default.
+        if (ctx.renderer && ctx.renderer->_assetManager)
+        {
+            const std::string scenario_path =
+                    ctx.renderer->_assetManager->assetPath("scenarios/default_gameplay.json");
+            if (auto loaded = load_scenario_config(scenario_path))
+            {
+                _scenario_config = std::move(*loaded);
+            }
+            else
+            {
+                Logger::warn("Falling back to compiled default scenario config.");
+                _scenario_config = default_earth_moon_config();
+            }
+        }
 
         setup_scene(ctx);
     }
