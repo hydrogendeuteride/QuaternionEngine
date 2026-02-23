@@ -1219,6 +1219,75 @@ namespace Physics
         _physics_system.GetBodyInterface().SetUserData(jolt_id, user_data);
     }
 
+    bool JoltPhysicsWorld::set_motion_type(BodyId id, MotionType motion_type)
+    {
+        if (!_initialized || !id.is_valid())
+        {
+            return false;
+        }
+
+        JPH::BodyID jolt_id(id.value);
+        JPH::BodyInterface &bi = _physics_system.GetBodyInterface();
+        if (!bi.IsAdded(jolt_id))
+        {
+            return false;
+        }
+
+        uint32_t layer = Layer::Default;
+        {
+            std::scoped_lock lock(_debug_bodies_mutex);
+            auto it = _debug_bodies.find(id.value);
+            if (it != _debug_bodies.end())
+            {
+                layer = it->second.layer;
+                it->second.motion_type = motion_type;
+            }
+        }
+
+        const JPH::ObjectLayer object_layer = to_jolt_layer(layer, motion_type);
+        const JPH::EMotionType jolt_motion = to_jolt_motion_type(motion_type);
+        const JPH::EActivation activation =
+                (motion_type == MotionType::Static) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate;
+
+        bi.SetObjectLayer(jolt_id, object_layer);
+        bi.SetMotionType(jolt_id, jolt_motion, activation);
+
+        if (motion_type != MotionType::Dynamic)
+        {
+            bi.SetLinearVelocity(jolt_id, JPH::Vec3::sZero());
+            bi.SetAngularVelocity(jolt_id, JPH::Vec3::sZero());
+        }
+
+        return true;
+    }
+
+    MotionType JoltPhysicsWorld::get_motion_type(BodyId id) const
+    {
+        if (!_initialized || !id.is_valid())
+        {
+            return MotionType::Static;
+        }
+
+        JPH::BodyID jolt_id(id.value);
+        const JPH::BodyInterface &bi = _physics_system.GetBodyInterface();
+        if (!bi.IsAdded(jolt_id))
+        {
+            return MotionType::Static;
+        }
+
+        switch (bi.GetMotionType(jolt_id))
+        {
+            case JPH::EMotionType::Static:
+                return MotionType::Static;
+            case JPH::EMotionType::Kinematic:
+                return MotionType::Kinematic;
+            case JPH::EMotionType::Dynamic:
+                return MotionType::Dynamic;
+            default:
+                return MotionType::Static;
+        }
+    }
+
     void JoltPhysicsWorld::add_force(BodyId id, const glm::vec3 &force)
     {
         if (!_initialized || !id.is_valid())

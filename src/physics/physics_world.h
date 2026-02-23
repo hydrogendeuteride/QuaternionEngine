@@ -131,6 +131,21 @@ namespace Physics
 
         virtual void set_user_data(BodyId id, uint64_t user_data) = 0;
 
+        // Runtime motion-type control.
+        // Default implementations are no-op/unknown for backends that do not support this.
+        virtual bool set_motion_type(BodyId id, MotionType motion_type)
+        {
+            (void) id;
+            (void) motion_type;
+            return false;
+        }
+
+        virtual MotionType get_motion_type(BodyId id) const
+        {
+            (void) id;
+            return MotionType::Static;
+        }
+
         // Force application (for dynamic bodies)
         virtual void add_force(BodyId id, const glm::vec3 &force) = 0;
 

@@ -16,11 +16,11 @@ namespace Game
 {
     using detail::finite_vec3;
     using detail::point_mass_accel;
-    using detail::orbitsim_nbody_accel_earth_fixed;
+    using detail::nbody_accel_body_centered;
 
     // ---- Physics simulation ----
 
-    void GameplayState::step_physics([[maybe_unused]] GameStateContext &ctx, float fixed_dt)
+    void GameplayState::step_physics(GameStateContext &ctx, float fixed_dt)
     {
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (!_physics || !_physics_context)
@@ -28,23 +28,54 @@ namespace Game
             return;
         }
 
+        update_rebase_anchor();
         _world.pre_physics_step();
 
-        const bool use_orbitsim = _orbitsim && _orbitsim->earth_id != orbitsim::kInvalidBodyId;
+        const auto &cfg = _scenario_config;
+        const bool use_orbitsim = _orbitsim && !_orbitsim->bodies.empty()
+                                  && _orbitsim->reference_body() != nullptr;
+
         if (use_orbitsim)
         {
             _orbitsim->sim.step(static_cast<double>(fixed_dt));
 
-            const orbitsim::MassiveBody *earth = _orbitsim->sim.body_by_id(_orbitsim->earth_id);
-            const orbitsim::MassiveBody *moon = _orbitsim->sim.body_by_id(_orbitsim->moon_id);
-            if (earth && moon)
+            // Update celestial body render entities (all except reference body)
+            const CelestialBodyInfo *ref_info = _orbitsim->reference_body();
+            const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+
+            if (ref_info && ref_sim)
             {
-                const WorldVec3 moon_pos_world =
-                        _planet_center_world + WorldVec3(moon->state.position_m - earth->state.position_m);
-                if (Entity *moon_ent = _world.entities().find(_moon_entity))
+                for (auto &body_info : _orbitsim->bodies)
                 {
-                    moon_ent->set_position_world(moon_pos_world);
-                    moon_ent->set_rotation(glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+                    if (body_info.sim_id == ref_info->sim_id)
+                    {
+                        continue;
+                    }
+
+                    const orbitsim::MassiveBody *sim_body = _orbitsim->sim.body_by_id(body_info.sim_id);
+                    if (!sim_body)
+                    {
+                        continue;
+                    }
+
+                    const WorldVec3 body_pos_world =
+                            cfg.system_center + WorldVec3(sim_body->state.position_m - ref_sim->state.position_m);
+
+                    if (body_info.has_terrain && ctx.api)
+                    {
+                        (void) ctx.api->set_planet_center(body_info.name, glm::dvec3(body_pos_world));
+                    }
+
+                    if (!body_info.render_entity.is_valid())
+                    {
+                        continue;
+                    }
+
+                    if (Entity *ent = _world.entities().find(body_info.render_entity))
+                    {
+                        ent->set_position_world(body_pos_world);
+                        ent->set_rotation(glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+                    }
                 }
             }
         }
@@ -55,18 +86,19 @@ namespace Game
                 return glm::dvec3(0.0);
             }
 
-            const glm::dvec3 p_rel = glm::dvec3(p_world - _planet_center_world);
+            const glm::dvec3 p_rel = glm::dvec3(p_world - cfg.system_center);
             if (use_orbitsim)
             {
-                return orbitsim_nbody_accel_earth_fixed(*_orbitsim, p_rel);
+                return nbody_accel_body_centered(*_orbitsim, p_rel);
             }
 
-            if (!(_orbitsim->earth_mass_kg > 0.0))
+            const CelestialBodyInfo *ref = _orbitsim->reference_body();
+            if (!ref || !(ref->mass_kg > 0.0))
             {
                 return glm::dvec3(0.0);
             }
 
-            return point_mass_accel(orbitsim::kGravitationalConstant_SI, _orbitsim->earth_mass_kg, p_rel, 0.0);
+            return point_mass_accel(orbitsim::kGravitationalConstant_SI, ref->mass_kg, p_rel, 0.0);
         };
 
         // Velocity-origin handling:
@@ -77,9 +109,15 @@ namespace Game
         const bool per_step_sync = _velocity_origin_mode == VelocityOriginMode::PerStepAnchorSync;
         const WorldVec3 physics_origin_world = _physics_context->origin_world();
 
-        if (_ship_entity.is_valid())
+        EntityId anchor_eid = _world.rebase_anchor();
+        if (!anchor_eid.is_valid())
         {
-            Entity *anchor = _world.entities().find(_ship_entity);
+            anchor_eid = player_entity();
+        }
+
+        if (anchor_eid.is_valid())
+        {
+            Entity *anchor = _world.entities().find(anchor_eid);
             if (anchor && anchor->has_physics())
             {
                 const Physics::BodyId anchor_body{anchor->physics_body_value()};
@@ -135,8 +173,14 @@ namespace Game
             _physics->activate(body_id);
         };
 
-        apply_gravity_accel(_ship_entity);
-        apply_gravity_accel(_probe_entity);
+        // Apply gravity to all orbiters
+        for (const auto &orbiter : _orbiters)
+        {
+            if (orbiter.apply_gravity && orbiter.entity.is_valid())
+            {
+                apply_gravity_accel(orbiter.entity);
+            }
+        }
 
         _physics->step(fixed_dt);
 
@@ -153,26 +197,27 @@ namespace Game
 #endif
     }
 
-    // ---- Ship state query ----
+    // ---- Player state query ----
 
-    bool GameplayState::get_ship_world_state(WorldVec3 &out_pos_world,
-                                             glm::dvec3 &out_vel_world,
-                                             glm::vec3 &out_vel_local) const
+    bool GameplayState::get_player_world_state(WorldVec3 &out_pos_world,
+                                               glm::dvec3 &out_vel_world,
+                                               glm::vec3 &out_vel_local) const
     {
-        const Entity *ship = _world.entities().find(_ship_entity);
-        if (!ship)
+        const EntityId player_eid = player_entity();
+        const Entity *player = _world.entities().find(player_eid);
+        if (!player)
         {
             return false;
         }
 
-        out_pos_world = ship->position_world();
+        out_pos_world = player->position_world();
         out_vel_world = glm::dvec3(0.0);
         out_vel_local = glm::vec3(0.0f);
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-        if (_physics && _physics_context && ship->has_physics())
+        if (_physics && _physics_context && player->has_physics())
         {
-            const Physics::BodyId body_id{ship->physics_body_value()};
+            const Physics::BodyId body_id{player->physics_body_value()};
             if (_physics->is_body_valid(body_id))
             {
                 out_vel_local = _physics->get_linear_velocity(body_id);
@@ -220,7 +265,7 @@ namespace Game
         glm::dvec3 ship_vel_world(0.0);
         glm::vec3 ship_vel_local_f(0.0f);
 
-        if (get_ship_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
+        if (get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
         {
             update_orbit_prediction_cache(ship_pos_world, ship_vel_world);
             emit_orbit_prediction_debug(ctx);
@@ -256,6 +301,15 @@ namespace Game
             return;
         }
 
+        const auto &cfg = _scenario_config;
+        const CelestialBodyInfo *ref_info = _orbitsim->reference_body();
+        if (!ref_info)
+        {
+            return;
+        }
+
+        const double planet_radius_m = ref_info->radius_m;
+
         const double dt_s = std::clamp(_prediction_dt_s, 0.01, 60.0);
         const double horizon_s = std::clamp(_prediction_horizon_s, dt_s, 36'000.0);
 
@@ -266,7 +320,7 @@ namespace Game
         _prediction_speed_kmps.reserve(static_cast<size_t>(steps) + 1);
         _prediction_points_world.reserve(static_cast<size_t>(steps) + 1);
 
-        OrbitsimDemo demo_pred = *_orbitsim;
+        OrbitalScenario scenario_pred = *_orbitsim;
 
         auto safe_length = [](const glm::dvec3 &v) -> double {
             const double len2 = glm::dot(v, v);
@@ -277,21 +331,22 @@ namespace Game
             return std::sqrt(len2);
         };
 
-        const bool can_use_orbitsim_predict = demo_pred.earth_id != orbitsim::kInvalidBodyId;
+        const bool can_use_orbitsim_predict = !scenario_pred.bodies.empty()
+                                              && scenario_pred.reference_sim_body() != nullptr;
         if (can_use_orbitsim_predict)
         {
-            const orbitsim::MassiveBody *earth = demo_pred.sim.body_by_id(demo_pred.earth_id);
-            if (earth)
+            const orbitsim::MassiveBody *ref_sim = scenario_pred.reference_sim_body();
+            if (ref_sim)
             {
-                const glm::dvec3 ship_rel_pos_m = glm::dvec3(ship_pos_world - _planet_center_world);
-                const glm::dvec3 ship_bary_pos_m = earth->state.position_m + ship_rel_pos_m;
-                const glm::dvec3 ship_bary_vel_mps = earth->state.velocity_mps + ship_vel_world;
+                const glm::dvec3 ship_rel_pos_m = glm::dvec3(ship_pos_world - cfg.system_center);
+                const glm::dvec3 ship_bary_pos_m = ref_sim->state.position_m + ship_rel_pos_m;
+                const glm::dvec3 ship_bary_vel_mps = ref_sim->state.velocity_mps + ship_vel_world;
 
                 orbitsim::Spacecraft ship_sc{};
                 ship_sc.state = orbitsim::make_state(ship_bary_pos_m, ship_bary_vel_mps);
                 ship_sc.dry_mass_kg = 1.0;
 
-                const auto ship_h = demo_pred.sim.create_spacecraft(ship_sc);
+                const auto ship_h = scenario_pred.sim.create_spacecraft(ship_sc);
                 if (ship_h.valid())
                 {
                     orbitsim::TrajectoryOptions opt{};
@@ -305,30 +360,30 @@ namespace Game
                     opt.include_end = true;
                     opt.stop_on_impact = false;
 
-                    const orbitsim::CelestialEphemeris eph = orbitsim::build_celestial_ephemeris(demo_pred.sim, opt);
+                    const orbitsim::CelestialEphemeris eph = orbitsim::build_celestial_ephemeris(scenario_pred.sim, opt);
                     const std::vector<orbitsim::TrajectorySample> traj_inertial =
-                            orbitsim::predict_spacecraft_trajectory(demo_pred.sim, eph, ship_h.id, opt);
+                            orbitsim::predict_spacecraft_trajectory(scenario_pred.sim, eph, ship_h.id, opt);
 
                     if (!traj_inertial.empty())
                     {
-                        const std::vector<orbitsim::TrajectorySample> traj_earth_centered =
-                                orbitsim::trajectory_to_body_centered_inertial(traj_inertial, eph, *earth);
+                        const std::vector<orbitsim::TrajectorySample> traj_centered =
+                                orbitsim::trajectory_to_body_centered_inertial(traj_inertial, eph, *ref_sim);
 
-                        if (!traj_earth_centered.empty())
+                        if (!traj_centered.empty())
                         {
-                            _prediction_altitude_km.reserve(traj_earth_centered.size());
-                            _prediction_speed_kmps.reserve(traj_earth_centered.size());
-                            _prediction_points_world.reserve(traj_earth_centered.size());
+                            _prediction_altitude_km.reserve(traj_centered.size());
+                            _prediction_speed_kmps.reserve(traj_centered.size());
+                            _prediction_points_world.reserve(traj_centered.size());
 
-                            for (const orbitsim::TrajectorySample &sample: traj_earth_centered)
+                            for (const orbitsim::TrajectorySample &sample : traj_centered)
                             {
                                 const double r_m = safe_length(sample.position_m);
-                                const double alt_km = (r_m - _planet_radius_m) * 1.0e-3;
+                                const double alt_km = (r_m - planet_radius_m) * 1.0e-3;
                                 const double spd_kmps = safe_length(sample.velocity_mps) * 1.0e-3;
 
                                 _prediction_altitude_km.push_back(static_cast<float>(alt_km));
                                 _prediction_speed_kmps.push_back(static_cast<float>(spd_kmps));
-                                _prediction_points_world.push_back(_planet_center_world + WorldVec3(sample.position_m));
+                                _prediction_points_world.push_back(cfg.system_center + WorldVec3(sample.position_m));
                             }
                             return;
                         }
@@ -338,19 +393,19 @@ namespace Game
         }
 
         // Fallback: legacy local integration when orbitsim prediction is unavailable.
-        glm::dvec3 p_rel_m = glm::dvec3(ship_pos_world - _planet_center_world);
+        glm::dvec3 p_rel_m = glm::dvec3(ship_pos_world - cfg.system_center);
         glm::dvec3 v_rel_mps = ship_vel_world;
-        const bool use_orbitsim = demo_pred.earth_id != orbitsim::kInvalidBodyId;
+        const bool use_orbitsim = can_use_orbitsim_predict;
 
         for (int i = 0; i <= steps; ++i)
         {
             const double r_m = safe_length(p_rel_m);
-            const double alt_km = (r_m - _planet_radius_m) * 1.0e-3;
+            const double alt_km = (r_m - planet_radius_m) * 1.0e-3;
             const double spd_kmps = safe_length(v_rel_mps) * 1.0e-3;
 
             _prediction_altitude_km.push_back(static_cast<float>(alt_km));
             _prediction_speed_kmps.push_back(static_cast<float>(spd_kmps));
-            _prediction_points_world.push_back(_planet_center_world + WorldVec3(p_rel_m));
+            _prediction_points_world.push_back(cfg.system_center + WorldVec3(p_rel_m));
 
             if (i == steps)
             {
@@ -360,12 +415,12 @@ namespace Game
             glm::dvec3 a_rel(0.0);
             if (use_orbitsim)
             {
-                a_rel = orbitsim_nbody_accel_earth_fixed(demo_pred, p_rel_m);
-                demo_pred.sim.step(dt_s);
+                a_rel = nbody_accel_body_centered(scenario_pred, p_rel_m);
+                scenario_pred.sim.step(dt_s);
             }
-            else if (demo_pred.earth_mass_kg > 0.0)
+            else if (ref_info->mass_kg > 0.0)
             {
-                a_rel = point_mass_accel(orbitsim::kGravitationalConstant_SI, demo_pred.earth_mass_kg, p_rel_m, 0.0);
+                a_rel = point_mass_accel(orbitsim::kGravitationalConstant_SI, ref_info->mass_kg, p_rel_m, 0.0);
             }
 
             if (!finite_vec3(a_rel))
@@ -413,7 +468,7 @@ namespace Game
         WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 ship_vel_world(0.0);
         glm::vec3 ship_vel_local_f(0.0f);
-        if (get_ship_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
+        if (get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
         {
             const double speed_mps = glm::length(ship_vel_world);
             double len_m = 40.0;

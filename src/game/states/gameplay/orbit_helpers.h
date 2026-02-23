@@ -6,18 +6,103 @@
 #include <cmath>
 #include <glm/glm.hpp>
 
+#include "game/entity.h"
 #include "physics/physics_world.h"
 
 namespace Game
 {
-    struct OrbitsimDemo
+    // ============================================================================
+    // CelestialBodyInfo — runtime state for one massive body in the scenario.
+    // ============================================================================
+
+    struct CelestialBodyInfo
+    {
+        orbitsim::BodyId sim_id{orbitsim::kInvalidBodyId};
+        EntityId render_entity;
+        std::string name;
+        double radius_m{0.0};
+        double mass_kg{0.0};
+        bool has_terrain{false};
+    };
+
+    // ============================================================================
+    // OrbitalScenario — owns the N-body simulation + celestial body registry.
+    // Replaces the old OrbitsimDemo which only supported Earth + Moon.
+    // ============================================================================
+
+    struct OrbitalScenario
     {
         orbitsim::GameSimulation sim{};
-        orbitsim::BodyId earth_id{orbitsim::kInvalidBodyId};
-        orbitsim::BodyId moon_id{orbitsim::kInvalidBodyId};
+        std::vector<CelestialBodyInfo> bodies;
+        size_t reference_body_index{0}; // index into bodies[] for the frame center (e.g. earth)
 
-        double earth_mass_kg{0.0};
+        const CelestialBodyInfo *reference_body() const
+        {
+            if (reference_body_index < bodies.size())
+            {
+                return &bodies[reference_body_index];
+            }
+            return nullptr;
+        }
+
+        CelestialBodyInfo *reference_body()
+        {
+            if (reference_body_index < bodies.size())
+            {
+                return &bodies[reference_body_index];
+            }
+            return nullptr;
+        }
+
+        const CelestialBodyInfo *find_body(const std::string &name) const
+        {
+            for (const auto &b : bodies)
+            {
+                if (b.name == name)
+                {
+                    return &b;
+                }
+            }
+            return nullptr;
+        }
+
+        const orbitsim::MassiveBody *reference_sim_body() const
+        {
+            const CelestialBodyInfo *ref = reference_body();
+            if (!ref || ref->sim_id == orbitsim::kInvalidBodyId)
+            {
+                return nullptr;
+            }
+            return sim.body_by_id(ref->sim_id);
+        }
+
+        orbitsim::MassiveBody *reference_sim_body()
+        {
+            CelestialBodyInfo *ref = reference_body();
+            if (!ref || ref->sim_id == orbitsim::kInvalidBodyId)
+            {
+                return nullptr;
+            }
+            return sim.body_by_id(ref->sim_id);
+        }
     };
+
+    // ============================================================================
+    // OrbiterInfo — runtime state for one orbiting entity (ship, probe, etc.)
+    // ============================================================================
+
+    struct OrbiterInfo
+    {
+        EntityId entity;
+        std::string name;
+        bool apply_gravity{true};
+        bool is_player{false}; // HUD/camera/prediction subject candidates
+        bool is_rebase_anchor{false};
+    };
+
+    // ============================================================================
+    // Helpers (detail namespace)
+    // ============================================================================
 
     namespace detail
     {
@@ -121,42 +206,45 @@ namespace Game
             return a;
         }
 
-        // Acceleration in a translating Earth-centered frame:
-        //   a_rel = a_sc_bary - a_earth_bary
+        // Acceleration in a translating reference-body-centered frame:
+        //   a_rel = a_sc_bary - a_ref_bary
         // where barycentric acceleration is computed from all massive bodies.
-        inline glm::dvec3 orbitsim_nbody_accel_earth_fixed(const OrbitsimDemo &demo, const glm::dvec3 &p_rel_m)
+        inline glm::dvec3 nbody_accel_body_centered(const OrbitalScenario &scenario, const glm::dvec3 &p_rel_m)
         {
-            const orbitsim::MassiveBody *earth = demo.sim.body_by_id(demo.earth_id);
-            if (!earth)
+            const orbitsim::MassiveBody *ref = scenario.reference_sim_body();
+            if (!ref)
             {
                 return glm::dvec3(0.0);
             }
 
-            const double G = demo.sim.config().gravitational_constant;
-            const double eps_m = demo.sim.config().softening_length_m;
+            const orbitsim::BodyId ref_id = ref->id;
+            const double G = scenario.sim.config().gravitational_constant;
+            const double eps_m = scenario.sim.config().softening_length_m;
             const double eps2 = eps_m * eps_m;
 
-            const glm::dvec3 p_earth_bary = earth->state.position_m;
-            const glm::dvec3 p_sc_bary = p_earth_bary + p_rel_m;
+            const glm::dvec3 p_ref_bary = ref->state.position_m;
+            const glm::dvec3 p_sc_bary = p_ref_bary + p_rel_m;
 
             glm::dvec3 a_sc_bary(0.0);
-            glm::dvec3 a_earth_bary(0.0);
+            glm::dvec3 a_ref_bary(0.0);
 
-            a_sc_bary += point_mass_accel(G, earth->mass_kg, p_rel_m, eps2);
+            // Acceleration from reference body on spacecraft
+            a_sc_bary += point_mass_accel(G, ref->mass_kg, p_rel_m, eps2);
 
-            for (const orbitsim::MassiveBody &body: demo.sim.massive_bodies())
+            // Acceleration from all other bodies
+            for (const orbitsim::MassiveBody &body : scenario.sim.massive_bodies())
             {
-                if (body.id == demo.earth_id)
+                if (body.id == ref_id)
                 {
                     continue;
                 }
 
                 a_sc_bary += point_mass_accel(G, body.mass_kg, p_sc_bary - glm::dvec3(body.state.position_m), eps2);
-                a_earth_bary += point_mass_accel(G, body.mass_kg,
-                                                  p_earth_bary - glm::dvec3(body.state.position_m), eps2);
+                a_ref_bary += point_mass_accel(G, body.mass_kg,
+                                                p_ref_bary - glm::dvec3(body.state.position_m), eps2);
             }
 
-            return a_sc_bary - a_earth_bary;
+            return a_sc_bary - a_ref_bary;
         }
     } // namespace detail
 } // namespace Game

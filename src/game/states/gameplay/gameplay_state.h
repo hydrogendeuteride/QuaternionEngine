@@ -3,8 +3,10 @@
 #include "game/state/game_state.h"
 #include "game/game_world.h"
 #include "game/component/component.h"
+#include "core/game_api.h"
 #include "physics/physics_world.h"
 #include "physics/physics_context.h"
+#include "orbit_helpers.h"
 
 #include <memory>
 #include <deque>
@@ -13,7 +15,52 @@
 
 namespace Game
 {
-    struct OrbitsimDemo;
+    // ============================================================================
+    // ScenarioConfig — data-driven definition of a scenario (celestials + orbiters).
+    // ============================================================================
+
+    struct ScenarioConfig
+    {
+        struct CelestialDef
+        {
+            std::string name;
+            double mass_kg{0.0};
+            double radius_m{0.0};
+            double atmosphere_top_m{0.0};
+            double terrain_max_m{0.0};
+            double soi_radius_m{0.0};
+            double orbit_distance_m{0.0}; // distance from reference body; 0 = this IS the reference body
+            bool has_terrain{false};
+            // Planet terrain rendering assets (only when has_terrain=true)
+            std::string albedo_dir;
+            std::string height_dir;
+            double height_max_m{0.0};
+            std::string emission_dir;
+            glm::vec3 emission_factor{0.0f};
+            float render_scale{1.0f}; // visual scale for non-terrain celestials
+        };
+
+        struct OrbiterDef
+        {
+            std::string name;
+            double orbit_altitude_m{0.0};       // altitude above reference body surface
+            glm::dvec3 offset_from_player{0.0}; // offset relative to player (non-player orbiters)
+            glm::dvec3 relative_velocity{0.0};  // velocity relative to player
+            GameAPI::PrimitiveType primitive{GameAPI::PrimitiveType::Capsule};
+            glm::vec3 render_scale{1.0f};
+            Physics::BodySettings body_settings{};
+            bool is_player{false};
+            bool is_rebase_anchor{false}; // explicit floating-origin anchor candidate
+        };
+
+        std::vector<CelestialDef> celestials; // [0] = reference body
+        std::vector<OrbiterDef> orbiters;
+        double speed_scale{1.0};
+        double mu_base{3.986004418e14}; // gravitational parameter (m^3/s^2), scaled by speed_scale^2
+        WorldVec3 system_center{1.0e12, 0.0, 0.0};
+    };
+
+    ScenarioConfig default_earth_moon_config();
 
     // ============================================================================
     // GameplayState: Main gameplay — orbital mechanics, combat, ship control
@@ -45,24 +92,29 @@ namespace Game
     private:
         void setup_scene(GameStateContext &ctx);
         void setup_environment(GameStateContext &ctx);
-        void init_orbitsim(double orbit_radius_m, double speed_scale,
-                           WorldVec3 &ship_pos_world, glm::dvec3 &ship_vel_world,
-                           WorldVec3 &moon_pos_world, bool &have_moon);
+        void init_orbitsim(WorldVec3 &player_pos_world, glm::dvec3 &player_vel_world);
 
         void step_physics(GameStateContext &ctx, float fixed_dt);
         void update_prediction(GameStateContext &ctx, float fixed_dt);
 
         ComponentContext build_component_context(GameStateContext &ctx, float alpha = 0.0f);
 
-        bool get_ship_world_state(WorldVec3 &out_pos_world,
-                                  glm::dvec3 &out_vel_world,
-                                  glm::vec3 &out_vel_local) const;
+        bool get_player_world_state(WorldVec3 &out_pos_world,
+                                    glm::dvec3 &out_vel_world,
+                                    glm::vec3 &out_vel_local) const;
 
         void update_orbit_prediction_cache(const WorldVec3 &ship_pos_world, const glm::dvec3 &ship_vel_world);
 
         void emit_orbit_prediction_debug(GameStateContext &ctx);
 
         float effective_prediction_interval() const;
+
+        // Orbiter helpers
+        // player = first `is_player` orbiter (HUD/camera/prediction subject)
+        const OrbiterInfo *find_player_orbiter() const;
+        EntityId player_entity() const;
+        EntityId select_rebase_anchor_entity() const;
+        void update_rebase_anchor();
 
         // Game world (entities + resource lifetime)
         GameWorld _world;
@@ -81,29 +133,14 @@ namespace Game
 
         VelocityOriginMode _velocity_origin_mode{VelocityOriginMode::FreeFallAnchorFrame};
 
-        // Scenario entities (early gameplay prototype)
-        EntityId _ship_entity;
-        EntityId _probe_entity;
-        EntityId _moon_entity;
+        // Scenario configuration
+        ScenarioConfig _scenario_config;
 
-        // orbitsim (Earth-Moon)
-        std::unique_ptr<OrbitsimDemo> _orbitsim;
+        // Runtime entities
+        std::vector<OrbiterInfo> _orbiters;
 
-        // Planet configuration (world-space, meters)
-        std::string _planet_name{"earth"};
-        WorldVec3 _planet_center_world{1.0e12, 0.0, 0.0};
-        double _planet_radius_m{6'371'000.0};
-
-        // Orbit configuration (meters / seconds)
-        double _orbit_altitude_m{400'000.0};
-        double _orbit_speed_scale{1.0}; // scales circular speed via mu *= scale^2
-        double _moon_distance_m{384'400'000.0};
-
-        // Earth gravitational parameter (m^3/s^2). We scale this to get faster orbits.
-        double _mu_base_m3ps2{3.986004418e14};
-
-        // Initial offset for the "probe" relative to the ship (meters, world axes).
-        glm::dvec3 _probe_offset_world{0.0, -2.0, 30.0};
+        // Orbital simulation
+        std::unique_ptr<OrbitalScenario> _orbitsim;
 
         struct ContactLogEntry
         {

@@ -14,7 +14,10 @@ namespace Game
 {
     using detail::contact_event_type_name;
 
-    GameplayState::GameplayState() = default;
+    GameplayState::GameplayState()
+        : _scenario_config(default_earth_moon_config())
+    {
+    }
 
     GameplayState::~GameplayState() = default;
 
@@ -36,14 +39,12 @@ namespace Game
         _world.set_physics_context(nullptr);
         _world.set_api(nullptr);
         _orbitsim.reset();
+        _orbiters.clear();
         _contact_log.clear();
         _prediction_update_accum_s = 0.0f;
         _prediction_altitude_km.clear();
         _prediction_speed_kmps.clear();
         _prediction_points_world.clear();
-        _ship_entity = EntityId{};
-        _probe_entity = EntityId{};
-        _moon_entity = EntityId{};
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (ctx.renderer && ctx.renderer->_context)
@@ -177,29 +178,59 @@ namespace Game
                                     : VelocityOriginMode::FreeFallAnchorFrame;
                     }
                 }
+
+                const EntityId player_eid = player_entity();
+                if (_physics && player_eid.is_valid())
+                {
+                    const Entity *player = _world.entities().find(player_eid);
+                    if (player && player->has_physics())
+                    {
+                        const Physics::BodyId body_id{player->physics_body_value()};
+                        if (_physics->is_body_valid(body_id))
+                        {
+                            const Physics::MotionType motion = _physics->get_motion_type(body_id);
+                            bool kinematic = motion == Physics::MotionType::Kinematic;
+                            if (ImGui::Checkbox("Primary player kinematic", &kinematic))
+                            {
+                                const Physics::MotionType target =
+                                        kinematic ? Physics::MotionType::Kinematic : Physics::MotionType::Dynamic;
+                                (void) _physics->set_motion_type(body_id, target);
+                            }
+                            ImGui::SameLine();
+                            ImGui::TextUnformatted("Anchor source: orbiter config (is_rebase_anchor).");
+                        }
+                    }
+                }
 #endif
 
-                const bool have_ship = get_ship_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f);
-                if (!have_ship)
+                const bool have_player = get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f);
+                if (!have_player)
                 {
                     ImGui::TextUnformatted("Ship state unavailable.");
                 }
                 else
                 {
-                    const glm::dvec3 p_rel = glm::dvec3(ship_pos_world - _planet_center_world);
+                    const auto &cfg = _scenario_config;
+                    const double planet_radius_m =
+                            (_orbitsim && _orbitsim->reference_body())
+                                ? _orbitsim->reference_body()->radius_m
+                                : (cfg.celestials.empty() ? 0.0 : cfg.celestials[0].radius_m);
+
+                    const glm::dvec3 p_rel = glm::dvec3(ship_pos_world - cfg.system_center);
                     const double r_m = glm::length(p_rel);
-                    const double alt_m = r_m - _planet_radius_m;
+                    const double alt_m = r_m - planet_radius_m;
                     const double speed_mps = glm::length(ship_vel_world);
 
-                    const double speed_scale = std::max(0.0, _orbit_speed_scale);
-                    const double mu = _mu_base_m3ps2 * speed_scale * speed_scale;
+                    const double speed_scale = std::max(0.0, cfg.speed_scale);
+                    const double mu = cfg.mu_base * speed_scale * speed_scale;
                     const double v_circ_est = (r_m > 1.0) ? std::sqrt(mu / r_m) : 0.0;
 
                     ImGui::Text("Altitude: %.0f m", alt_m);
                     ImGui::Text("Speed:    %.3f km/s (v_circ est %.3f km/s)", speed_mps * 1.0e-3, v_circ_est * 1.0e-3);
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-                    if (_physics && _physics_context && _ship_entity.is_valid())
+                    const EntityId player_eid = player_entity();
+                    if (_physics && _physics_context && player_eid.is_valid())
                     {
                         const glm::dvec3 v_origin_world = _physics_context->velocity_origin_world();
                         ImGui::Text("v_origin: %.1f, %.1f, %.1f m/s", v_origin_world.x, v_origin_world.y,
@@ -207,10 +238,10 @@ namespace Game
                         ImGui::Text("v_local:  %.2f, %.2f, %.2f m/s", ship_vel_local_f.x, ship_vel_local_f.y,
                                     ship_vel_local_f.z);
 
-                        const Entity *ship = _world.entities().find(_ship_entity);
-                        if (ship && ship->has_physics())
+                        const Entity *player = _world.entities().find(player_eid);
+                        if (player && player->has_physics())
                         {
-                            const Physics::BodyId body_id{ship->physics_body_value()};
+                            const Physics::BodyId body_id{player->physics_body_value()};
                             if (_physics->is_body_valid(body_id))
                             {
                                 const glm::vec3 w_local_f = _physics->get_angular_velocity(body_id);

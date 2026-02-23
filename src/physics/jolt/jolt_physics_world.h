@@ -90,6 +90,9 @@ namespace Physics
 
         void set_user_data(BodyId id, uint64_t user_data) override;
 
+        bool set_motion_type(BodyId id, MotionType motion_type) override;
+        MotionType get_motion_type(BodyId id) const override;
+
         void add_force(BodyId id, const glm::vec3 &force) override;
 
         void add_impulse(BodyId id, const glm::vec3 &impulse) override;
