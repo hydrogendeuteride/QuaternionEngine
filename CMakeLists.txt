@@ -30,6 +30,7 @@ set(BVH2_ENABLE_TESTS OFF CACHE BOOL "Disable BVH2 tests (offline builds)" FORCE
 
 option(VULKAN_ENGINE_USE_JOLT "Build with Jolt Physics (vendored in third_party/JoltPhysics)" ON)
 option(VULKAN_ENGINE_JOLT_DOUBLE_PRECISION "Build Jolt with double precision math (JPH_DOUBLE_PRECISION)" ON)
+option(VULKAN_ENGINE_BUILD_TESTS "Build unit tests" ON)
 
 add_subdirectory(third_party)
 
@@ -42,6 +43,11 @@ if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_SIMULATE_ID STR
 endif()
 
 add_subdirectory(src)
+
+if (VULKAN_ENGINE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 option(VULKAN_ENGINE_BUILD_SHADERS "Compile GLSL shaders to SPIR-V at build time" ON)
 
