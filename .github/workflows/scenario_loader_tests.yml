@@ -27,6 +27,7 @@ jobs:
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Debug \
+            -DVULKAN_ENGINE_BUILD_APP=OFF \
             -DVULKAN_ENGINE_BUILD_TESTS=ON \
             -DVULKAN_ENGINE_BUILD_SHADERS=OFF \
             -DVULKAN_ENGINE_USE_JOLT=OFF

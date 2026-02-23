@@ -30,6 +30,7 @@ set(BVH2_ENABLE_TESTS OFF CACHE BOOL "Disable BVH2 tests (offline builds)" FORCE
 
 option(VULKAN_ENGINE_USE_JOLT "Build with Jolt Physics (vendored in third_party/JoltPhysics)" ON)
 option(VULKAN_ENGINE_JOLT_DOUBLE_PRECISION "Build Jolt with double precision math (JPH_DOUBLE_PRECISION)" ON)
+option(VULKAN_ENGINE_BUILD_APP "Build the vulkan_engine executable target" ON)
 option(VULKAN_ENGINE_BUILD_TESTS "Build unit tests" ON)
 
 add_subdirectory(third_party)
@@ -38,11 +39,15 @@ if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_SIMULATE_ID STR
     foreach(_SDL_TARGET IN ITEMS SDL2 SDL2-static)
         if(TARGET ${_SDL_TARGET})
             target_link_options(${_SDL_TARGET} PRIVATE /DEFAULTLIB:ucrt.lib /DEFAULTLIB:vcruntime.lib)
+            # clang-cl can conflict on SDL_endian.h _m_prefetch shim; mark pseudo-header as present for consumers.
+            target_compile_definitions(${_SDL_TARGET} INTERFACE __PRFCHWINTRIN_H=1)
         endif()
     endforeach()
 endif()
 
-add_subdirectory(src)
+if (VULKAN_ENGINE_BUILD_APP)
+    add_subdirectory(src)
+endif()
 
 if (VULKAN_ENGINE_BUILD_TESTS)
     enable_testing()
@@ -81,5 +86,7 @@ if(VULKAN_ENGINE_BUILD_SHADERS)
     endforeach()
 
     add_custom_target(shaders_spirv DEPENDS ${SPIRV_BINARY_FILES})
-    add_dependencies(vulkan_engine shaders_spirv)
+    if (TARGET vulkan_engine)
+        add_dependencies(vulkan_engine shaders_spirv)
+    endif()
 endif()
