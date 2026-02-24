@@ -17,8 +17,8 @@
   - `cmake --build build --config Release`
 
 - Run
-  - `./bin/vulkan_engine` (Linux/macOS)
-  - `bin/vulkan_engine.exe` (Windows)
+  - Single-config (Linux/macOS): `./build/bin/vulkan_engine`
+  - Multi-config (Windows/MSVC): `build/bin/Release/vulkan_engine.exe` (or `Debug`)
 
 - Shaders
   - CMake compiles GLSL via `glslangValidator` to SPIR‑V targeting Vulkan 1.2:
