@@ -984,8 +984,27 @@ namespace Physics
         body_settings.mGravityFactor = settings.gravity_scale;
         body_settings.mAllowSleeping = settings.allow_sleeping;
 
+        // Velocity limits
+        // Jolt's per-body default max linear velocity is 500 m/s. That is far too low for orbital
+        // mechanics / delta-v maneuvers and will clamp linear velocity silently.
+        // NOTE: This caps *local* velocity inside the physics backend. The game may still represent
+        // much larger world velocities via velocity-origin / floating-origin transforms.
+        if (motion == MotionType::Dynamic)
+        {
+            body_settings.mMaxLinearVelocity = std::max(body_settings.mMaxLinearVelocity, 100000.0f);
+        }
+
         // Sensor flag
         body_settings.mIsSensor = settings.is_sensor;
+
+        // Mass / inertia
+        // Jolt shapes default to a density of 1000 kg/m^3, so for large shapes the resulting
+        // mass/inertia can be enormous. If the caller provided an explicit mass, use it.
+        if (motion == MotionType::Dynamic && std::isfinite(settings.mass) && settings.mass > 0.0f)
+        {
+            body_settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+            body_settings.mMassPropertiesOverride.mMass = settings.mass;
+        }
 
         // Activation
         JPH::EActivation activation = settings.start_active

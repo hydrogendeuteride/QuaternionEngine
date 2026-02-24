@@ -3,6 +3,7 @@
 #include "game/state/game_state.h"
 #include "game/game_world.h"
 #include "game/component/component.h"
+#include "game/component/ship_controller.h"
 #include "core/game_api.h"
 #include "physics/physics_world.h"
 #include "physics/physics_context.h"
@@ -135,6 +136,9 @@ namespace Game
 
         // Scenario configuration
         ScenarioConfig _scenario_config;
+        std::string _scenario_slot_rel_path{"scenarios/user_gameplay.json"};
+        std::string _scenario_io_status{};
+        bool _scenario_io_status_ok{true};
 
         // Runtime entities
         std::vector<OrbiterInfo> _orbiters;
@@ -169,6 +173,13 @@ namespace Game
         double _prediction_horizon_s{180.0};
         bool _prediction_dirty{true};
         bool _prediction_draw_velocity_ray{false};
+        bool _prediction_allow_legacy_fallback{false}; // Euler fallback (for debug only)
+
+        // Cached prediction source state (to refresh prediction when the ship state changes).
+        WorldVec3 _prediction_last_pos_world{0.0, 0.0, 0.0};
+        glm::dvec3 _prediction_last_vel_world{0.0, 0.0, 0.0};
+        double _prediction_last_rebuild_s{0.0};
+        bool _prediction_last_valid{false};
 
         std::vector<float> _prediction_altitude_km;
         std::vector<float> _prediction_speed_kmps;

@@ -205,6 +205,8 @@ add_executable (vulkan_engine
   game/game_world.h
   game/game_world.cpp
   game/component/component.h
+  game/component/ship_controller.h
+  game/component/ship_controller.cpp
   game/main_game.h
   game/main_game.cpp
   # game/state — state machine infrastructure

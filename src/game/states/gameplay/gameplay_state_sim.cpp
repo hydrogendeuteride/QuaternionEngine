@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace Game
 {
@@ -259,12 +260,42 @@ namespace Game
 
         if (get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
         {
+            // Refresh prediction when the ship state changes, otherwise the predicted curve will
+            // become stale as the ship moves / performs delta-v maneuvers.
             bool rebuild_prediction = _prediction_dirty || _prediction_points_world.empty();
+            if (!rebuild_prediction)
+            {
+                // Keep the debug curve "attached" to the ship and responsive to thrust.
+                const double dt_since_rebuild_s = _fixed_time_s - _prediction_last_rebuild_s;
+                const double pos_delta_m = _prediction_last_valid
+                                               ? glm::length(ship_pos_world - _prediction_last_pos_world)
+                                               : std::numeric_limits<double>::infinity();
+                const double vel_delta_mps = _prediction_last_valid
+                                                 ? glm::length(ship_vel_world - _prediction_last_vel_world)
+                                                 : std::numeric_limits<double>::infinity();
+
+                // Heuristics:
+                // - periodic refresh keeps the curve anchored even without maneuvers
+                // - velocity change refresh makes delta-v show up quickly
+                const double min_refresh_s = 0.1; // throttle expensive prediction rebuilds
+                const bool allow_refresh = dt_since_rebuild_s >= min_refresh_s;
+
+                const bool periodic = dt_since_rebuild_s >= 0.5;
+                const bool moved_far = pos_delta_m >= 10'000.0; // 10 km
+                const bool delta_v = vel_delta_mps >= 1.0;      // 1 m/s
+
+                rebuild_prediction = allow_refresh && (periodic || moved_far || delta_v);
+            }
 
             if (rebuild_prediction)
             {
                 update_orbit_prediction_cache(ship_pos_world, ship_vel_world);
                 _prediction_dirty = false;
+
+                _prediction_last_pos_world = ship_pos_world;
+                _prediction_last_vel_world = ship_vel_world;
+                _prediction_last_rebuild_s = _fixed_time_s;
+                _prediction_last_valid = true;
             }
 
             emit_orbit_prediction_debug(ctx);
@@ -388,6 +419,12 @@ namespace Game
                     }
                 }
             }
+        }
+
+        if (!_prediction_allow_legacy_fallback)
+        {
+            // Orbitsim prediction unavailable/failed and legacy fallback is disabled.
+            return;
         }
 
         // Fallback: legacy local integration when orbitsim prediction is unavailable.
