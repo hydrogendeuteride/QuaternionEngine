@@ -231,33 +231,25 @@ namespace Game
 
     // ---- Orbit prediction ----
 
-    float GameplayState::effective_prediction_interval() const
+    void GameplayState::mark_prediction_dirty()
     {
-        constexpr float kDefault = 0.25f;
-        return (std::isfinite(_prediction_update_interval_s) && _prediction_update_interval_s > 0.0f)
-            ? _prediction_update_interval_s : kDefault;
+        _prediction_dirty = true;
     }
 
     void GameplayState::update_prediction(GameStateContext &ctx, float fixed_dt)
     {
+        (void) fixed_dt;
+
         if (!_prediction_enabled)
         {
             if (!_prediction_altitude_km.empty() || !_prediction_speed_kmps.empty() ||
                 !_prediction_points_world.empty())
             {
-                _prediction_update_accum_s = 0.0f;
                 _prediction_altitude_km.clear();
                 _prediction_speed_kmps.clear();
                 _prediction_points_world.clear();
             }
-            return;
-        }
-
-        const float interval_s = effective_prediction_interval();
-        _prediction_update_accum_s += fixed_dt;
-
-        if (!_prediction_points_world.empty() && _prediction_update_accum_s < interval_s)
-        {
+            _prediction_dirty = true;
             return;
         }
 
@@ -267,7 +259,14 @@ namespace Game
 
         if (get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
         {
-            update_orbit_prediction_cache(ship_pos_world, ship_vel_world);
+            bool rebuild_prediction = _prediction_dirty || _prediction_points_world.empty();
+
+            if (rebuild_prediction)
+            {
+                update_orbit_prediction_cache(ship_pos_world, ship_vel_world);
+                _prediction_dirty = false;
+            }
+
             emit_orbit_prediction_debug(ctx);
         }
         else
@@ -275,9 +274,8 @@ namespace Game
             _prediction_altitude_km.clear();
             _prediction_speed_kmps.clear();
             _prediction_points_world.clear();
+            _prediction_dirty = true;
         }
-
-        _prediction_update_accum_s = std::fmod(_prediction_update_accum_s, interval_s);
     }
 
     void GameplayState::update_orbit_prediction_cache(const WorldVec3 &ship_pos_world, const glm::dvec3 &ship_vel_world)
@@ -450,8 +448,9 @@ namespace Game
             return;
         }
 
-        const float interval_s = effective_prediction_interval();
-        const float ttl_s = std::max(std::max(_prediction_debug_ttl_s, interval_s + 0.05f), 0.11f);
+        // Debug commands are pruned in engine draw begin_frame(dt), so ttl must be > max frame dt clamp
+        // to survive until the current frame is rendered.
+        constexpr float ttl_s = 0.11f;
 
         constexpr glm::vec4 color_orbit{0.2f, 0.9f, 0.2f, 0.65f};
         constexpr glm::vec4 color_velocity{1.0f, 0.35f, 0.1f, 1.0f};
@@ -468,7 +467,7 @@ namespace Game
         WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 ship_vel_world(0.0);
         glm::vec3 ship_vel_local_f(0.0f);
-        if (get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
+        if (_prediction_draw_velocity_ray && get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
         {
             const double speed_mps = glm::length(ship_vel_world);
             double len_m = 40.0;
