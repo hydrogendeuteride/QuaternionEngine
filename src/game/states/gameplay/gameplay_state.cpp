@@ -59,10 +59,10 @@ namespace Game
         _orbitsim.reset();
         _orbiters.clear();
         _contact_log.clear();
-        _prediction_update_accum_s = 0.0f;
         _prediction_altitude_km.clear();
         _prediction_speed_kmps.clear();
         _prediction_points_world.clear();
+        _prediction_dirty = true;
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (ctx.renderer && ctx.renderer->_context)
@@ -179,6 +179,8 @@ namespace Game
             ImGui::Separator();
             if (ImGui::CollapsingHeader("Orbit", ImGuiTreeNodeFlags_DefaultOpen))
             {
+                ImGui::Checkbox("Prediction velocity ray", &_prediction_draw_velocity_ray);
+
                 WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
                 glm::dvec3 ship_vel_world(0.0);
                 glm::vec3 ship_vel_local_f(0.0f);

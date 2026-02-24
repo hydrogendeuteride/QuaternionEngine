@@ -119,10 +119,10 @@ namespace Game
         _fixed_time_s = 0.0;
         _reset_requested = false;
         _contact_log.clear();
-        _prediction_update_accum_s = 0.0f;
         _prediction_altitude_km.clear();
         _prediction_speed_kmps.clear();
         _prediction_points_world.clear();
+        _prediction_dirty = true;
 
         _world.clear_rebase_anchor();
         _world.clear();
@@ -344,11 +344,14 @@ namespace Game
                     {
                         Physics::PhysicsWorld::BodyCallbacks callbacks{};
                         callbacks.on_collision = [this](const Physics::CollisionEvent &e) {
-                            if (!_contact_log_enabled)
+                            if (e.type != Physics::ContactEventType::Begin)
                             {
                                 return;
                             }
-                            if (e.type != Physics::ContactEventType::Begin)
+
+                            mark_prediction_dirty();
+
+                            if (!_contact_log_enabled)
                             {
                                 return;
                             }
