@@ -58,6 +58,11 @@ enum class Key : uint16_t
     Tab = 43,
     Space = 44,
 
+    ArrowRight = 79,
+    ArrowLeft = 80,
+    ArrowDown = 81,
+    ArrowUp = 82,
+
     LeftCtrl = 224,
     LeftShift = 225,
     LeftAlt = 226,

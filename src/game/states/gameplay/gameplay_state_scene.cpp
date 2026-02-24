@@ -1,5 +1,6 @@
 #include "gameplay_state.h"
 #include "orbit_helpers.h"
+#include "game/component/ship_controller.h"
 #include "core/engine.h"
 #include "core/game_api.h"
 #include "core/util/logger.h"
@@ -187,6 +188,7 @@ namespace Game
                                  GameAPI::PrimitiveType prim,
                                  const glm::vec3 &render_scale,
                                  const Physics::BodySettings &settings,
+                                 bool is_player,
                                  EntityId &out_id) {
             Transform tr{};
             tr.position_world = pos_world;
@@ -230,6 +232,12 @@ namespace Game
                     _physics->set_linear_velocity(body_id, vel_local_f);
                 }
             }
+
+            if (is_player)
+            {
+                // Use ShipController defaults so tuning in ship_controller.h (and UI sliders) takes effect.
+                ent->add_component<ShipController>();
+            }
 #endif
         };
 
@@ -258,13 +266,14 @@ namespace Game
                           orbiter_def.primitive,
                           orbiter_def.render_scale,
                           orbiter_def.body_settings,
+                          is_primary_player,
                           entity_id);
 
             OrbiterInfo info{};
             info.entity = entity_id;
             info.name = orbiter_def.name;
             info.apply_gravity = true;
-            info.is_player = orbiter_def.is_player;
+            info.is_player = is_primary_player;
             info.is_rebase_anchor = orbiter_def.is_rebase_anchor;
             _orbiters.push_back(std::move(info));
         }
@@ -321,7 +330,13 @@ namespace Game
         }
 
         // Configure explicit rebase anchor and camera target.
-        _world.set_rebase_settings(GameWorld::RebaseSettings{});
+        {
+            // Keep local velocities bounded for Jolt (float velocities) in high-speed scenarios.
+            // 0 disables automatic velocity rebasing.
+            GameWorld::RebaseSettings rs{};
+            rs.velocity_threshold_mps = 2000.0; // 2 km/s local delta-v before rebasing
+            _world.set_rebase_settings(rs);
+        }
         update_rebase_anchor();
 
         const EntityId primary_player_eid = player_entity();
