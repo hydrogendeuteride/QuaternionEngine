@@ -107,7 +107,7 @@ namespace Game
 
         void emit_orbit_prediction_debug(GameStateContext &ctx);
 
-        float effective_prediction_interval() const;
+        void mark_prediction_dirty();
 
         // Orbiter helpers
         // player = first `is_player` orbiter (HUD/camera/prediction subject)
@@ -167,9 +167,8 @@ namespace Game
         bool _prediction_enabled{true};
         double _prediction_dt_s{1.0};
         double _prediction_horizon_s{180.0};
-        float _prediction_update_interval_s{0.25f};
-        float _prediction_update_accum_s{0.0f};
-        float _prediction_debug_ttl_s{0.35f};
+        bool _prediction_dirty{true};
+        bool _prediction_draw_velocity_ray{false};
 
         std::vector<float> _prediction_altitude_km;
         std::vector<float> _prediction_speed_kmps;
