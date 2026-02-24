@@ -32,6 +32,7 @@ namespace Game
         GameAPI::Engine *api{nullptr};
         const InputState *input{nullptr};
         Physics::PhysicsWorld *physics{nullptr};
+        bool ui_capture_keyboard{false};
         float interpolation_alpha{0.0f};
     };
 

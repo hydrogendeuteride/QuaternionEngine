@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 
 namespace Game
 {
@@ -29,6 +30,8 @@ namespace Game
         _elapsed = 0.0f;
         _fixed_time_s = 0.0;
         _reset_requested = false;
+        _scenario_io_status.clear();
+        _scenario_io_status_ok = true;
 
         // Try loading scenario from JSON; fall back to compiled default.
         if (ctx.renderer && ctx.renderer->_assetManager)
@@ -147,6 +150,69 @@ namespace Game
                 _reset_requested = true;
             }
 
+            const auto resolve_slot_path = [&ctx, this]() -> std::string {
+                const std::filesystem::path slot_rel(_scenario_slot_rel_path);
+                if (slot_rel.is_absolute())
+                {
+                    return slot_rel.string();
+                }
+                if (ctx.renderer && ctx.renderer->_assetManager)
+                {
+                    const AssetPaths &paths = ctx.renderer->_assetManager->paths();
+                    if (!paths.assets.empty())
+                    {
+                        return (paths.assets / slot_rel).string();
+                    }
+                }
+                return slot_rel.string();
+            };
+            const std::string scenario_slot_path = resolve_slot_path();
+
+            ImGui::SameLine();
+            if (ImGui::Button("Save scenario slot"))
+            {
+                if (save_scenario_config(scenario_slot_path, _scenario_config))
+                {
+                    _scenario_io_status = "Saved scenario: " + scenario_slot_path;
+                    _scenario_io_status_ok = true;
+                }
+                else
+                {
+                    _scenario_io_status = "Save failed: " + scenario_slot_path;
+                    _scenario_io_status_ok = false;
+                }
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Load scenario slot"))
+            {
+                if (auto loaded = load_scenario_config(scenario_slot_path))
+                {
+                    _scenario_config = std::move(*loaded);
+                    _scenario_io_status = "Loaded scenario: " + scenario_slot_path;
+                    _scenario_io_status_ok = true;
+                    _reset_requested = true;
+                }
+                else
+                {
+                    _scenario_io_status = "Load failed: " + scenario_slot_path;
+                    _scenario_io_status_ok = false;
+                }
+            }
+
+            ImGui::Text("Scenario slot: %s", scenario_slot_path.c_str());
+            if (!_scenario_io_status.empty())
+            {
+                if (_scenario_io_status_ok)
+                {
+                    ImGui::TextUnformatted(_scenario_io_status.c_str());
+                }
+                else
+                {
+                    ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", _scenario_io_status.c_str());
+                }
+            }
+
             ImGui::Checkbox("Contact log", &_contact_log_enabled);
             ImGui::SameLine();
             ImGui::Checkbox("Print console", &_contact_log_print_console);
@@ -176,6 +242,74 @@ namespace Game
                             e.point.x, e.point.y, e.point.z);
             }
 
+            // Ship controller HUD
+#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
+            {
+                const EntityId player_eid = player_entity();
+                if (player_eid.is_valid())
+                {
+                    Entity *player = _world.entities().find(player_eid);
+                    if (player)
+                    {
+                        auto *sc = player->get_component<ShipController>();
+                        if (sc)
+                        {
+                            ImGui::Separator();
+                            const glm::vec3 td = sc->last_thrust_dir();
+                            ImGui::Text("SAS: %s  [T] toggle", sc->sas_enabled() ? "ON " : "OFF");
+                            ImGui::Text("Thrust: (%.1f, %.1f, %.1f)", td.x, td.y, td.z);
+
+                            if (ctx.renderer && ctx.renderer->ui())
+                            {
+                                ImGui::Text("UI capture keyboard: %s",
+                                            ctx.renderer->ui()->wantCaptureKeyboard() ? "YES" : "NO");
+                            }
+
+                            if (player->has_physics() && _physics)
+                            {
+                                const Physics::BodyId body_id{player->physics_body_value()};
+                                if (_physics->is_body_valid(body_id))
+                                {
+                                    const Physics::MotionType motion = _physics->get_motion_type(body_id);
+                                    const char *motion_str =
+                                            (motion == Physics::MotionType::Dynamic)
+                                                ? "Dynamic"
+                                                : (motion == Physics::MotionType::Kinematic) ? "Kinematic (forces ignored)" : "Static";
+                                    ImGui::Text("Motion: %s", motion_str);
+
+                                    float thrust = sc->thrust_force();
+                                    if (ImGui::DragFloat("Thrust force (N)", &thrust, 1000.0f, 0.0f, 1.0e9f, "%.1f"))
+                                    {
+                                        sc->set_thrust_force(thrust);
+                                    }
+
+                                    float torque = sc->torque_strength();
+                                    if (ImGui::DragFloat("Torque strength (N*m)", &torque, 1000.0f, 0.0f, 1.0e9f, "%.1f"))
+                                    {
+                                        sc->set_torque_strength(torque);
+                                    }
+
+                                    float sas = sc->sas_damping();
+                                    if (ImGui::DragFloat("SAS damping", &sas, 0.1f, 0.0f, 1.0e4f, "%.2f"))
+                                    {
+                                        sc->set_sas_damping(sas);
+                                    }
+
+                                    const glm::vec3 vel = _physics->get_linear_velocity(body_id);
+                                    ImGui::Text("Speed(local): %.2f m/s", glm::length(vel));
+                                    if (_physics_context)
+                                    {
+                                        const glm::dvec3 v_world = _physics_context->velocity_origin_world() + glm::dvec3(vel);
+                                        ImGui::Text("Speed(world): %.2f m/s", glm::length(v_world));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+#endif
+
             ImGui::Separator();
             if (ImGui::CollapsingHeader("Orbit", ImGuiTreeNodeFlags_DefaultOpen))
             {
@@ -196,6 +330,23 @@ namespace Game
                                 (mode_idx == 0)
                                     ? VelocityOriginMode::PerStepAnchorSync
                                     : VelocityOriginMode::FreeFallAnchorFrame;
+                        _prediction_dirty = true;
+                    }
+
+                    // Keep local velocities bounded (Jolt stores them as float).
+                    GameWorld::RebaseSettings rs = _world.rebase_settings();
+                    float v_rebase = static_cast<float>(rs.velocity_threshold_mps);
+                    if (ImGui::DragFloat("Velocity rebase threshold (m/s)", &v_rebase, 50.0f, 0.0f, 100000.0f, "%.1f"))
+                    {
+                        rs.velocity_threshold_mps = static_cast<double>(std::max(0.0f, v_rebase));
+                        _world.set_rebase_settings(rs);
+                    }
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted("(0 = off)");
+
+                    if (ImGui::Checkbox("Legacy prediction fallback (Euler)", &_prediction_allow_legacy_fallback))
+                    {
+                        _prediction_dirty = true;
                     }
                 }
 
@@ -284,6 +435,7 @@ namespace Game
         comp_ctx.api = ctx.api;
         comp_ctx.input = ctx.input;
         comp_ctx.physics = _physics.get();
+        comp_ctx.ui_capture_keyboard = ctx.renderer && ctx.renderer->ui() && ctx.renderer->ui()->wantCaptureKeyboard();
         comp_ctx.interpolation_alpha = alpha;
         return comp_ctx;
     }

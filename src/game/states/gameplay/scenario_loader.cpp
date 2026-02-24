@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -583,5 +584,54 @@ namespace Game
         }
 
         return root.dump(2);
+    }
+
+    bool save_scenario_config(const std::string &json_path, const ScenarioConfig &config)
+    {
+        if (json_path.empty())
+        {
+            Logger::error("Scenario save path is empty.");
+            return false;
+        }
+
+        try
+        {
+            const std::filesystem::path out_path(json_path);
+            const std::filesystem::path parent = out_path.parent_path();
+
+            if (!parent.empty())
+            {
+                std::error_code ec;
+                std::filesystem::create_directories(parent, ec);
+                if (ec)
+                {
+                    Logger::error("Failed to create scenario directory '{}': {}", parent.string(), ec.message());
+                    return false;
+                }
+            }
+
+            std::ofstream file(out_path, std::ios::out | std::ios::trunc);
+            if (!file.is_open())
+            {
+                Logger::error("Failed to open scenario file for writing: {}", json_path);
+                return false;
+            }
+
+            file << serialize_scenario_config(config);
+            if (!file.good())
+            {
+                Logger::error("Failed to write scenario file: {}", json_path);
+                return false;
+            }
+
+            Logger::info("Saved scenario '{}': {} celestials, {} orbiters",
+                         json_path, config.celestials.size(), config.orbiters.size());
+            return true;
+        }
+        catch (const std::exception &e)
+        {
+            Logger::error("Scenario '{}' save failed: {}", json_path, e.what());
+            return false;
+        }
     }
 } // namespace Game
