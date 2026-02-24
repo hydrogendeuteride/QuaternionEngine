@@ -20,9 +20,19 @@ endif()
 
 find_package(Vulkan REQUIRED COMPONENTS glslangValidator)
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
+# Keep build artifacts inside the build directory so multiple build trees
+# (e.g. build/, cmake-build-debug/, etc.) do not clobber each other.
+set(_vulkan_engine_out_root "${PROJECT_BINARY_DIR}")
+if(CMAKE_CONFIGURATION_TYPES)
+    set(_vulkan_engine_cfg_dir "/$<CONFIG>")
+else()
+    set(_vulkan_engine_cfg_dir "")
+endif()
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${_vulkan_engine_out_root}/bin${_vulkan_engine_cfg_dir}")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${_vulkan_engine_out_root}/bin${_vulkan_engine_cfg_dir}")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${_vulkan_engine_out_root}/lib${_vulkan_engine_cfg_dir}")
+unset(_vulkan_engine_out_root)
+unset(_vulkan_engine_cfg_dir)
 
 # Third-party deps are vendored; keep builds offline-friendly by default.
 # BVH2's CMake enables tests by default, which would FetchContent googletest.

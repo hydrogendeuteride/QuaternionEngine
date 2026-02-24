@@ -6,7 +6,7 @@
 
 - Override root via environment
   - Set `VKG_ASSET_ROOT` to a directory containing `assets/` and/or `shaders/`.
-  - Example: `VKG_ASSET_ROOT=/home/user/vulkan-engine ./bin/vulkan_engine`
+  - Example: `VKG_ASSET_ROOT=/home/user/vulkan-engine ./build/bin/vulkan_engine`
 
 - API
   - Use `AssetLocator` through `EngineContext::getAssets()` helpers:
@@ -24,4 +24,3 @@
     - Albedo/base color → sRGB
     - Metallic-Roughness → UNORM (G=roughness, B=metallic)
     - Normal map → UNORM (+Y green up)
-
