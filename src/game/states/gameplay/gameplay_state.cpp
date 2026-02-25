@@ -34,6 +34,7 @@ namespace Game
         _scenario_io_status_ok = true;
 
         // Try loading scenario from JSON; fall back to compiled default.
+        // NOTE: JSON data is authoritative when present, including orbiter body mass.
         if (ctx.renderer && ctx.renderer->_assetManager)
         {
             const std::string scenario_path =

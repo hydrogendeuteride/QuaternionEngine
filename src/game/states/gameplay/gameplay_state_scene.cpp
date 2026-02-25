@@ -81,7 +81,8 @@ namespace Game
                     .set_friction(0.2f)
                     .set_restitution(0.05f)
                     .set_linear_damping(0.0f)
-                    .set_angular_damping(0.0f);
+                    .set_angular_damping(0.0f)
+                    .set_mass(10000.0f);
 
             cfg.orbiters.push_back(std::move(ship));
         }
@@ -104,7 +105,8 @@ namespace Game
                     .set_friction(0.2f)
                     .set_restitution(0.1f)
                     .set_linear_damping(0.0f)
-                    .set_angular_damping(0.0f);
+                    .set_angular_damping(0.0f)
+                    .set_mass(1000.0f);
 
             cfg.orbiters.push_back(std::move(probe));
         }
