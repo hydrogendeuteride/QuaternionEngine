@@ -14,6 +14,8 @@ namespace Game
 {
     void ShipController::on_fixed_update(ComponentContext &ctx, float fixed_dt)
     {
+        _thrust_applied_this_tick = false;
+
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (!ctx.input || !ctx.physics || !entity() || !entity()->has_physics())
         {
@@ -90,6 +92,7 @@ namespace Game
         if (glm::length(world_force) > 0.0f)
         {
             ctx.physics->add_force(body_id, world_force);
+            _thrust_applied_this_tick = true;
         }
 
         if (glm::length(world_torque) > 0.0f)

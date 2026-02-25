@@ -8,11 +8,13 @@
 #include "physics/physics_world.h"
 #include "physics/physics_context.h"
 #include "orbit_helpers.h"
+#include "orbitsim/trajectory_types.hpp"
 
 #include <memory>
 #include <deque>
 #include <string>
 #include <vector>
+#include <limits>
 
 namespace Game
 {
@@ -104,7 +106,12 @@ namespace Game
                                     glm::dvec3 &out_vel_world,
                                     glm::vec3 &out_vel_local) const;
 
-        void update_orbit_prediction_cache(const WorldVec3 &ship_pos_world, const glm::dvec3 &ship_vel_world);
+        void update_orbit_prediction_cache(const WorldVec3 &ship_pos_world,
+                                          const glm::dvec3 &ship_vel_world,
+                                          bool thrusting);
+        void refresh_prediction_world_points();
+        WorldVec3 prediction_reference_body_world() const;
+        bool player_thrust_applied_this_tick() const;
 
         void emit_orbit_prediction_debug(GameStateContext &ctx);
 
@@ -168,22 +175,56 @@ namespace Game
         bool _reset_requested{false};
 
         // Orbit prediction (UI + debug draw)
+        struct OrbitPredictionCache
+        {
+            bool valid{false};
+            double build_time_s{0.0};
+            WorldVec3 build_pos_world{0.0, 0.0, 0.0};
+            glm::dvec3 build_vel_world{0.0, 0.0, 0.0};
+
+            // BCI = body-centered inertial (relative to the current reference body)
+            std::vector<orbitsim::TrajectorySample> trajectory_bci;
+
+            // Cached world-space polyline refreshed from trajectory_bci each frame.
+            std::vector<WorldVec3> points_world;
+            std::vector<float> altitude_km;
+            std::vector<float> speed_kmps;
+
+            // Classical orbital-element-like values for HUD.
+            double semi_major_axis_m{0.0};
+            double eccentricity{0.0};
+            double orbital_period_s{0.0};
+            double periapsis_alt_km{0.0};
+            double apoapsis_alt_km{std::numeric_limits<double>::infinity()};
+
+            void clear()
+            {
+                valid = false;
+                build_time_s = 0.0;
+                build_pos_world = WorldVec3(0.0, 0.0, 0.0);
+                build_vel_world = glm::dvec3(0.0, 0.0, 0.0);
+                trajectory_bci.clear();
+                points_world.clear();
+                altitude_km.clear();
+                speed_kmps.clear();
+                semi_major_axis_m = 0.0;
+                eccentricity = 0.0;
+                orbital_period_s = 0.0;
+                periapsis_alt_km = 0.0;
+                apoapsis_alt_km = std::numeric_limits<double>::infinity();
+            }
+        };
+
         bool _prediction_enabled{true};
-        double _prediction_dt_s{1.0};
-        double _prediction_horizon_s{180.0};
         bool _prediction_dirty{true};
+        bool _prediction_draw_full_orbit{true};
+        bool _prediction_draw_future_segment{true};
         bool _prediction_draw_velocity_ray{false};
         bool _prediction_allow_legacy_fallback{false}; // Euler fallback (for debug only)
-
-        // Cached prediction source state (to refresh prediction when the ship state changes).
-        WorldVec3 _prediction_last_pos_world{0.0, 0.0, 0.0};
-        glm::dvec3 _prediction_last_vel_world{0.0, 0.0, 0.0};
-        double _prediction_last_rebuild_s{0.0};
-        bool _prediction_last_valid{false};
-
-        std::vector<float> _prediction_altitude_km;
-        std::vector<float> _prediction_speed_kmps;
-        std::vector<WorldVec3> _prediction_points_world;
+        double _prediction_periodic_refresh_s{0.0}; // 0 = never (cache is extended when horizon runs out)
+        double _prediction_thrust_refresh_s{0.1};    // rebuild at most this often while thrusting
+        double _prediction_future_window_s{600.0};
+        OrbitPredictionCache _prediction_cache{};
 
         // Timing
         float _elapsed{0.0f};
