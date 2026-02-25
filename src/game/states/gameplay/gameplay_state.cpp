@@ -63,9 +63,7 @@ namespace Game
         _orbitsim.reset();
         _orbiters.clear();
         _contact_log.clear();
-        _prediction_altitude_km.clear();
-        _prediction_speed_kmps.clear();
-        _prediction_points_world.clear();
+        _prediction_cache.clear();
         _prediction_dirty = true;
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
@@ -102,6 +100,9 @@ namespace Game
         ComponentContext comp_ctx = build_component_context(ctx, alpha);
         _world.entities().update_components(comp_ctx, dt);
         _world.entities().sync_to_render(*ctx.api, alpha);
+
+        // Draw orbit debug using the same interpolation alpha as rendering to avoid visual offset.
+        emit_orbit_prediction_debug(ctx);
     }
 
     void GameplayState::on_fixed_update(GameStateContext &ctx, float fixed_dt)
@@ -314,6 +315,36 @@ namespace Game
             ImGui::Separator();
             if (ImGui::CollapsingHeader("Orbit", ImGuiTreeNodeFlags_DefaultOpen))
             {
+                ImGui::Checkbox("Prediction full orbit", &_prediction_draw_full_orbit);
+                ImGui::Checkbox("Prediction future segment", &_prediction_draw_future_segment);
+
+                float future_window_s = static_cast<float>(_prediction_future_window_s);
+                if (ImGui::DragFloat("Prediction future window (s)", &future_window_s, 10.0f, 0.0f, 36000.0f, "%.0f"))
+                {
+                    _prediction_future_window_s = static_cast<double>(std::max(0.0f, future_window_s));
+                }
+
+                float refresh_s = static_cast<float>(_prediction_periodic_refresh_s);
+                if (ImGui::DragFloat("Prediction refresh (s)", &refresh_s, 1.0f, 0.0f, 36000.0f, "%.1f"))
+                {
+                    _prediction_periodic_refresh_s = static_cast<double>(std::max(0.0f, refresh_s));
+                }
+                ImGui::SameLine();
+                ImGui::TextUnformatted("(0 = never)");
+
+                float thrust_refresh_s = static_cast<float>(_prediction_thrust_refresh_s);
+                if (ImGui::DragFloat("Prediction thrust refresh (s)",
+                                     &thrust_refresh_s,
+                                     0.01f,
+                                     0.0f,
+                                     2.0f,
+                                     "%.2f"))
+                {
+                    _prediction_thrust_refresh_s = static_cast<double>(std::max(0.0f, thrust_refresh_s));
+                }
+                ImGui::SameLine();
+                ImGui::TextUnformatted("(0 = every fixed tick)");
+
                 ImGui::Checkbox("Prediction velocity ray", &_prediction_draw_velocity_ray);
 
                 WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
@@ -382,6 +413,12 @@ namespace Game
                 }
                 else
                 {
+                    if (_prediction_cache.valid && _orbitsim)
+                    {
+                        const double age_s = _orbitsim->sim.time_s() - _prediction_cache.build_time_s;
+                        ImGui::Text("Prediction: %zu pts, age %.1f s", _prediction_cache.points_world.size(), age_s);
+                    }
+
                     const auto &cfg = _scenario_config;
                     const double planet_radius_m =
                             (_orbitsim && _orbitsim->reference_body())
@@ -399,6 +436,27 @@ namespace Game
 
                     ImGui::Text("Altitude: %.0f m", alt_m);
                     ImGui::Text("Speed:    %.3f km/s (v_circ est %.3f km/s)", speed_mps * 1.0e-3, v_circ_est * 1.0e-3);
+                    if (_prediction_cache.valid)
+                    {
+                        ImGui::Text("Predicted Pe: %.1f km", _prediction_cache.periapsis_alt_km);
+                        if (std::isfinite(_prediction_cache.apoapsis_alt_km))
+                        {
+                            ImGui::Text("Predicted Ap: %.1f km", _prediction_cache.apoapsis_alt_km);
+                        }
+                        else
+                        {
+                            ImGui::TextUnformatted("Predicted Ap: escape");
+                        }
+
+                        if (_prediction_cache.orbital_period_s > 0.0 && std::isfinite(_prediction_cache.orbital_period_s))
+                        {
+                            ImGui::Text("Predicted Period: %.2f min", _prediction_cache.orbital_period_s / 60.0);
+                        }
+                        else
+                        {
+                            ImGui::TextUnformatted("Predicted Period: N/A");
+                        }
+                    }
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
                     const EntityId player_eid = player_entity();
