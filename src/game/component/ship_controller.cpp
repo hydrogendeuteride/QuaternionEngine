@@ -12,7 +12,7 @@
 
 namespace Game
 {
-    void ShipController::on_fixed_update(ComponentContext &ctx, [[maybe_unused]] float fixed_dt)
+    void ShipController::on_fixed_update(ComponentContext &ctx, float fixed_dt)
     {
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (!ctx.input || !ctx.physics || !entity() || !entity()->has_physics())
@@ -97,7 +97,7 @@ namespace Game
             ctx.physics->add_torque(body_id, world_torque);
         }
 
-        // --- SAS: dampen angular velocity when enabled and no rotation input ---
+        // --- SAS: mass/inertia-independent angular damping when enabled ---
         if (_sas_enabled && !has_rotation_input)
         {
             const glm::vec3 angular_vel = ctx.physics->get_angular_velocity(body_id);
@@ -105,14 +105,18 @@ namespace Game
 
             if (ang_speed > 1e-4f)
             {
-                // Counter-torque proportional to angular velocity, clamped to max torque
-                glm::vec3 counter = -angular_vel * _sas_damping;
-                const float counter_mag = glm::length(counter);
-                if (counter_mag > _torque_strength)
+                // Exponential decay is frame-rate independent and avoids mass-dependent SAS feel.
+                const float damping = std::max(0.0f, _sas_damping);
+                const float decay = std::exp(-damping * std::max(0.0f, fixed_dt));
+                glm::vec3 damped_angular_vel = angular_vel * decay;
+
+                // Snap tiny residual spin to zero to avoid endless micro-jitter.
+                if (glm::length(damped_angular_vel) < 1e-3f)
                 {
-                    counter = counter * (_torque_strength / counter_mag);
+                    damped_angular_vel = glm::vec3(0.0f);
                 }
-                ctx.physics->add_torque(body_id, counter);
+
+                ctx.physics->set_angular_velocity(body_id, damped_angular_vel);
             }
         }
 #endif // VULKAN_ENGINE_USE_JOLT

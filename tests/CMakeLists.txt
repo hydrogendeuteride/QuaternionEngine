@@ -16,6 +16,7 @@ set_property(TARGET scenario_loader_tests PROPERTY CXX_STANDARD 20)
 
 target_include_directories(scenario_loader_tests PRIVATE
   "${PROJECT_SOURCE_DIR}/src"
+  "${PROJECT_SOURCE_DIR}/third_party/vma"
   "${PROJECT_SOURCE_DIR}/third_party/taskflow/3rd-party"
 )
 
