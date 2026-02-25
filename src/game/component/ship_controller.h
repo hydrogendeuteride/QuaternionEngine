@@ -44,6 +44,7 @@ namespace Game
         // State
         bool sas_enabled() const { return _sas_enabled; }
         glm::vec3 last_thrust_dir() const { return _last_thrust_dir; }
+        bool thrust_applied_this_tick() const { return _thrust_applied_this_tick; }
 
     private:
         float _thrust_force{500.0f};
@@ -54,5 +55,6 @@ namespace Game
 
         // Last-frame state for HUD display
         glm::vec3 _last_thrust_dir{0.0f};
+        bool _thrust_applied_this_tick{false};
     };
 } // namespace Game

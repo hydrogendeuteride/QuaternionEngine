@@ -122,9 +122,7 @@ namespace Game
         _fixed_time_s = 0.0;
         _reset_requested = false;
         _contact_log.clear();
-        _prediction_altitude_km.clear();
-        _prediction_speed_kmps.clear();
-        _prediction_points_world.clear();
+        _prediction_cache.clear();
         _prediction_dirty = true;
 
         _world.clear_rebase_anchor();
