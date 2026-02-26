@@ -48,6 +48,8 @@ public:
                               | static_cast<uint32_t>(DebugDrawLayer::Volumetrics)
                               | static_cast<uint32_t>(DebugDrawLayer::Misc);
         int segments = 32;
+        float line_width_px = 2.0f;
+        float line_aa_px = 1.0f;
     };
 
     struct LineVertexLists
