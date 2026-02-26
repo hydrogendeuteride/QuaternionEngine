@@ -61,6 +61,7 @@ namespace GameRuntime
         {
             // --- Begin frame: time, input --- //
             _time.begin_frame();
+            _renderer->_frame_delta_time_s = _time.delta_time();
 
             InputSystem *input = _renderer->input();
             if (input)

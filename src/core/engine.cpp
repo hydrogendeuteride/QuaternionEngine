@@ -1070,9 +1070,19 @@ void VulkanEngine::draw()
         }
     }
 
-    if (_debugDraw && _sceneManager)
+    if (_debugDraw)
     {
-        _debugDraw->begin_frame(_sceneManager->getDeltaTime());
+        float debug_dt_s = _frame_delta_time_s;
+        if (!std::isfinite(debug_dt_s) || debug_dt_s < 0.0f)
+        {
+            debug_dt_s = 0.0f;
+        }
+        if (debug_dt_s <= 0.0f && _sceneManager)
+        {
+            debug_dt_s = _sceneManager->getDeltaTime();
+        }
+        _debugDraw->begin_frame(debug_dt_s);
+        _frame_delta_time_s = 0.0f;
     }
 
     // Update IBL based on camera position and user-defined reflection volumes.
@@ -1494,16 +1504,16 @@ void VulkanEngine::draw()
             {
                 finalColor = tonemap->register_graph(_renderGraph.get(), hdrTarget);
 
-                // Optional FXAA pass: runs on LDR tonemapped output.
-                if (auto *fxaa = _renderPassManager->getPass<FxaaPass>())
-                {
-                    finalColor = fxaa->register_graph(_renderGraph.get(), finalColor);
-                }
-
-                // Debug lines after tonemap/FXAA so they don't trigger bloom.
+                // Debug lines after tonemap and before FXAA so line edges can be anti-aliased.
                 if (auto *debugDraw = _renderPassManager->getPass<DebugDrawPass>())
                 {
                     debugDraw->register_graph(_renderGraph.get(), finalColor, hDepth, true /*LDR*/);
+                }
+
+                // Optional FXAA pass: runs on LDR tonemapped output (including debug lines).
+                if (auto *fxaa = _renderPassManager->getPass<FxaaPass>())
+                {
+                    finalColor = fxaa->register_graph(_renderGraph.get(), finalColor);
                 }
             }
             else

@@ -260,6 +260,8 @@ public:
 
 	bool resize_requested{false};
 	bool freeze_rendering{false};
+    // Runtime-provided frame delta used by systems that need deterministic per-frame TTL/update timing.
+    float _frame_delta_time_s{0.0f};
 
 private:
     struct WindowedRect

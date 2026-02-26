@@ -12,6 +12,7 @@
 #include <render/graph/resources.h>
 #include <scene/vk_scene.h>
 
+#include <algorithm>
 #include <cstring>
 
 namespace
@@ -20,9 +21,15 @@ namespace
     {
         glm::mat4 viewproj;
         VkDeviceAddress vertex_buffer;
+        glm::vec2 inv_viewport_size_ndc;
+        float half_line_width_px;
+        float aa_px;
     };
     static_assert(offsetof(DebugDrawPushConstants, vertex_buffer) == 64);
-    static_assert(sizeof(DebugDrawPushConstants) >= 72);
+    static_assert(offsetof(DebugDrawPushConstants, inv_viewport_size_ndc) == 72);
+    static_assert(offsetof(DebugDrawPushConstants, half_line_width_px) == 80);
+    static_assert(offsetof(DebugDrawPushConstants, aa_px) == 84);
+    static_assert(sizeof(DebugDrawPushConstants) >= 88);
     static_assert((sizeof(DebugDrawPushConstants) % 4) == 0);
 
     constexpr const char *k_debug_vert = "debug_lines.vert.spv";
@@ -59,7 +66,7 @@ void DebugDrawPass::init(EngineContext *context)
 
     auto make_cfg = [depthFormat](VkFormat colorFormat, bool depth_test) {
         return [colorFormat, depthFormat, depth_test](PipelineBuilder &b) {
-            b.set_input_topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
+            b.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
             b.set_polygon_mode(VK_POLYGON_MODE_FILL);
             b.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
             b.set_multisampling_none();
@@ -198,8 +205,18 @@ void DebugDrawPass::draw_debug(VkCommandBuffer cmd,
     DebugDrawPushConstants pc{};
     pc.viewproj = ctxLocal->getSceneData().viewproj;
     pc.vertex_buffer = addr;
-
     VkExtent2D extent = ctxLocal->getDrawExtent();
+    const float width_px = std::clamp(dd->settings().line_width_px, 1.0f, 8.0f);
+    const float aa_px = std::clamp(dd->settings().line_aa_px, 0.0f, 4.0f);
+    const float inv_w = 2.0f / static_cast<float>(std::max(1u, extent.width));
+    const float inv_h = 2.0f / static_cast<float>(std::max(1u, extent.height));
+    pc.inv_viewport_size_ndc = glm::vec2(inv_w, inv_h);
+    pc.half_line_width_px = 0.5f * width_px;
+    pc.aa_px = aa_px;
+
+    const uint32_t depth_segment_count = lists.depth_vertex_count / 2u;
+    const uint32_t overlay_segment_count = lists.overlay_vertex_count / 2u;
+
     VkViewport vp{0.f, 0.f, (float)extent.width, (float)extent.height, 0.f, 1.f};
     VkRect2D sc{{0, 0}, extent};
     vkCmdSetViewport(cmd, 0, 1, &vp);
@@ -208,7 +225,7 @@ void DebugDrawPass::draw_debug(VkCommandBuffer cmd,
     const char *depthPipeName = is_ldr_target ? k_ldr_depth : k_hdr_depth;
     const char *overlayPipeName = is_ldr_target ? k_ldr_overlay : k_hdr_overlay;
 
-    if (lists.depth_vertex_count > 0)
+    if (depth_segment_count > 0)
     {
         VkPipeline pipeline = VK_NULL_HANDLE;
         VkPipelineLayout layout = VK_NULL_HANDLE;
@@ -216,11 +233,11 @@ void DebugDrawPass::draw_debug(VkCommandBuffer cmd,
         {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
             vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
-            vkCmdDraw(cmd, lists.depth_vertex_count, 1, 0, 0);
+            vkCmdDraw(cmd, 6, depth_segment_count, 0, 0);
         }
     }
 
-    if (lists.overlay_vertex_count > 0)
+    if (overlay_segment_count > 0)
     {
         VkPipeline pipeline = VK_NULL_HANDLE;
         VkPipelineLayout layout = VK_NULL_HANDLE;
@@ -228,7 +245,7 @@ void DebugDrawPass::draw_debug(VkCommandBuffer cmd,
         {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
             vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
-            vkCmdDraw(cmd, lists.overlay_vertex_count, 1, lists.depth_vertex_count, 0);
+            vkCmdDraw(cmd, 6, overlay_segment_count, 0, depth_segment_count);
         }
     }
 }

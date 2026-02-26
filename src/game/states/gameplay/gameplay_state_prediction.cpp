@@ -286,7 +286,27 @@ namespace Game
         if (!rebuild_prediction && _prediction_cache.valid && !_prediction_cache.trajectory_bci.empty())
         {
             const double cache_end_s = _prediction_cache.trajectory_bci.back().t_s;
-            const double required_ahead_s = std::max(0.0, _prediction_draw_future_segment ? _prediction_future_window_s : 0.0);
+            double required_ahead_s = std::max(0.0, _prediction_draw_future_segment ? _prediction_future_window_s : 0.0);
+
+            if (_maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
+            {
+                double max_node_time_s = now_s;
+                for (const ManeuverNode &node : _maneuver_state.nodes)
+                {
+                    if (std::isfinite(node.time_s))
+                    {
+                        max_node_time_s = std::max(max_node_time_s, node.time_s);
+                    }
+                }
+
+                if (max_node_time_s > now_s)
+                {
+                    // Ensure we can render a useful post-node segment (planned trajectory).
+                    const double post_node_window_s = std::max(120.0, _prediction_future_window_s);
+                    required_ahead_s = std::max(required_ahead_s, (max_node_time_s - now_s) + post_node_window_s);
+                }
+            }
+
             const double margin_s = std::max(0.0, static_cast<double>(fixed_dt));
             rebuild_prediction = (cache_end_s - now_s) < (required_ahead_s + margin_s);
         }
@@ -345,6 +365,7 @@ namespace Game
         if (!_prediction_cache.valid || _prediction_cache.trajectory_bci.empty())
         {
             _prediction_cache.points_world.clear();
+            _prediction_cache.points_world_planned.clear();
             return;
         }
 
@@ -355,6 +376,19 @@ namespace Game
         {
             _prediction_cache.points_world[i] =
                     ref_body_world + WorldVec3(_prediction_cache.trajectory_bci[i].position_m);
+        }
+
+        if (_prediction_cache.trajectory_bci_planned.empty())
+        {
+            _prediction_cache.points_world_planned.clear();
+            return;
+        }
+
+        _prediction_cache.points_world_planned.resize(_prediction_cache.trajectory_bci_planned.size());
+        for (size_t i = 0; i < _prediction_cache.trajectory_bci_planned.size(); ++i)
+        {
+            _prediction_cache.points_world_planned[i] =
+                    ref_body_world + WorldVec3(_prediction_cache.trajectory_bci_planned[i].position_m);
         }
     }
 
@@ -394,6 +428,26 @@ namespace Game
         double horizon_s = std::clamp(horizon_s_auto, 60.0, 36'000.0);
         double dt_s = std::clamp(dt_s_auto, 0.01, 60.0);
         int max_steps = 2'000;
+        double min_horizon_s = horizon_s;
+
+        if (_maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
+        {
+            double max_node_time_s = build_sim_time_s;
+            for (const ManeuverNode &node : _maneuver_state.nodes)
+            {
+                if (std::isfinite(node.time_s))
+                {
+                    max_node_time_s = std::max(max_node_time_s, node.time_s);
+                }
+            }
+
+            if (max_node_time_s > build_sim_time_s)
+            {
+                const double extra_s = std::max(120.0, _prediction_future_window_s);
+                min_horizon_s = std::max(min_horizon_s, (max_node_time_s - build_sim_time_s) + extra_s);
+                horizon_s = std::max(horizon_s, min_horizon_s);
+            }
+        }
 
         if (thrusting)
         {
@@ -402,6 +456,7 @@ namespace Game
             const double thrust_horizon_cap_s =
                     std::clamp(std::max(120.0, _prediction_future_window_s * 1.25), 120.0, 3'600.0);
             horizon_s = std::min(horizon_s, thrust_horizon_cap_s);
+            horizon_s = std::max(horizon_s, min_horizon_s);
 
             const double target_samples = std::clamp(horizon_s / 1.0, 300.0, 800.0);
             dt_s = std::clamp(horizon_s / target_samples, 0.02, 20.0);
@@ -418,6 +473,7 @@ namespace Game
             }
 
             _prediction_cache.trajectory_bci = std::move(trajectory_bci);
+            _prediction_cache.trajectory_bci_planned.clear();
             _prediction_cache.altitude_km.reserve(_prediction_cache.trajectory_bci.size());
             _prediction_cache.speed_kmps.reserve(_prediction_cache.trajectory_bci.size());
 
@@ -447,7 +503,6 @@ namespace Game
             _prediction_cache.build_pos_world = ship_pos_world;
             _prediction_cache.build_vel_world = ship_vel_world;
             _prediction_cache.valid = true;
-            refresh_prediction_world_points();
             return true;
         };
 
@@ -471,6 +526,8 @@ namespace Game
             return;
         }
 
+        scenario_pred.sim.maneuver_plan() = orbitsim::ManeuverPlan{};
+
         orbitsim::TrajectoryOptions opt{};
         opt.duration_s = horizon_s;
         opt.sample_dt_s = dt_s;
@@ -483,20 +540,38 @@ namespace Game
         opt.stop_on_impact = false;
 
         const orbitsim::CelestialEphemeris eph = orbitsim::build_celestial_ephemeris(scenario_pred.sim, opt);
-        const std::vector<orbitsim::TrajectorySample> traj_inertial =
+        const std::vector<orbitsim::TrajectorySample> traj_inertial_baseline =
                 orbitsim::predict_spacecraft_trajectory(scenario_pred.sim, eph, ship_h.id, opt);
 
-        if (traj_inertial.empty())
+        if (traj_inertial_baseline.empty())
         {
             return;
         }
 
-        const std::vector<orbitsim::TrajectorySample> traj_centered =
-                orbitsim::trajectory_to_body_centered_inertial(traj_inertial, eph, *ref_sim);
-        if (!fill_cache_from_trajectory(traj_centered))
+        std::vector<orbitsim::TrajectorySample> traj_centered_baseline =
+                orbitsim::trajectory_to_body_centered_inertial(traj_inertial_baseline, eph, *ref_sim);
+        if (!fill_cache_from_trajectory(std::move(traj_centered_baseline)))
         {
             return;
         }
+
+        if (_maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
+        {
+            scenario_pred.sim.maneuver_plan() = _maneuver_state.to_orbitsim_plan(ship_h.id);
+            const std::vector<orbitsim::TrajectorySample> traj_inertial_planned =
+                    orbitsim::predict_spacecraft_trajectory(scenario_pred.sim, eph, ship_h.id, opt);
+            if (!traj_inertial_planned.empty())
+            {
+                std::vector<orbitsim::TrajectorySample> traj_centered_planned =
+                        orbitsim::trajectory_to_body_centered_inertial(traj_inertial_planned, eph, *ref_sim);
+                if (traj_centered_planned.size() >= 2)
+                {
+                    _prediction_cache.trajectory_bci_planned = std::move(traj_centered_planned);
+                }
+            }
+        }
+
+        refresh_prediction_world_points();
     }
 
     void GameplayState::emit_orbit_prediction_debug(GameStateContext &ctx)
@@ -553,9 +628,21 @@ namespace Game
         // be > dt to survive until the current frame is rendered.
         const float ttl_s = std::clamp(ctx.delta_time(), 0.0f, 0.1f) + 0.002f;
 
-        constexpr glm::vec4 color_orbit_full{0.2f, 0.9f, 0.2f, 0.22f};
-        constexpr glm::vec4 color_orbit_future{0.2f, 0.9f, 0.2f, 0.75f};
+        constexpr glm::vec4 color_orbit_full_current{0.75f, 0.20f, 0.92f, 0.22f};
+        constexpr glm::vec4 color_orbit_future_current{0.75f, 0.20f, 0.92f, 0.80f};
+        constexpr glm::vec4 color_orbit_planned{1.00f, 0.62f, 0.10f, 0.90f}; // dashed
         constexpr glm::vec4 color_velocity{1.0f, 0.35f, 0.1f, 1.0f};
+
+        const float line_alpha_scale = std::clamp(_prediction_line_alpha_scale, 0.1f, 8.0f);
+        const float line_overlay_boost = std::clamp(_prediction_line_overlay_boost, 0.0f, 1.0f);
+        auto scaled_line_color = [line_alpha_scale](glm::vec4 color) {
+            color.a = std::clamp(color.a * line_alpha_scale, 0.0f, 1.0f);
+            return color;
+        };
+
+        const glm::vec4 color_orbit_full = scaled_line_color(color_orbit_full_current);
+        const glm::vec4 color_orbit_future = scaled_line_color(color_orbit_future_current);
+        const glm::vec4 color_orbit_plan = scaled_line_color(color_orbit_planned);
 
         WorldVec3 ship_pos_world_state{0.0, 0.0, 0.0};
         glm::dvec3 ship_vel_world(0.0);
@@ -574,28 +661,37 @@ namespace Game
 
         const WorldVec3 ref_body_world = prediction_reference_body_world();
 
-        auto lower_bound_by_time = [&](double t_s) {
-            return std::lower_bound(_prediction_cache.trajectory_bci.cbegin(),
-                                    _prediction_cache.trajectory_bci.cend(),
+        const auto &traj_base = _prediction_cache.trajectory_bci;
+        const auto &points_base = _prediction_cache.points_world;
+
+        const bool have_planned =
+                !_prediction_cache.trajectory_bci_planned.empty() &&
+                _prediction_cache.trajectory_bci_planned.size() == _prediction_cache.points_world_planned.size();
+        const auto &traj_planned = _prediction_cache.trajectory_bci_planned;
+        const auto &points_planned = _prediction_cache.points_world_planned;
+
+        auto lower_bound_by_time = [&](const std::vector<orbitsim::TrajectorySample> &traj, double t_s) {
+            return std::lower_bound(traj.cbegin(),
+                                    traj.cend(),
                                     t_s,
                                     [](const orbitsim::TrajectorySample &s, double t) { return s.t_s < t; });
         };
 
-        const auto it_hi = lower_bound_by_time(now_s);
-        size_t i_hi = static_cast<size_t>(std::distance(_prediction_cache.trajectory_bci.cbegin(), it_hi));
-        if (i_hi >= _prediction_cache.trajectory_bci.size())
+        const auto it_hi = lower_bound_by_time(traj_base, now_s);
+        size_t i_hi = static_cast<size_t>(std::distance(traj_base.cbegin(), it_hi));
+        if (i_hi >= traj_base.size())
         {
             return;
         }
 
         // Align the curve to the ship at "now" to hide polyline chord error and keep the plot
         // visually attached even with small solver/physics drift.
-        WorldVec3 predicted_now_world = _prediction_cache.points_world[i_hi];
+        WorldVec3 predicted_now_world = points_base[i_hi];
         if (i_hi > 0)
         {
             predicted_now_world = hermite_position_world(ref_body_world,
-                                                        _prediction_cache.trajectory_bci[i_hi - 1],
-                                                        _prediction_cache.trajectory_bci[i_hi],
+                                                        traj_base[i_hi - 1],
+                                                        traj_base[i_hi],
                                                         now_s);
         }
 
@@ -614,21 +710,47 @@ namespace Game
             return hermite_position_world(ref_body_world, a, b, t_s) + align_delta;
         };
 
-        auto draw_window = [&](double t_start_s, double t_end_s, const glm::vec4 &color, WorldVec3 prev_world) {
+        auto draw_position_at = [&](const std::vector<orbitsim::TrajectorySample> &traj,
+                                    const std::vector<WorldVec3> &points_world,
+                                    const double t_s) -> WorldVec3 {
+            if (traj.size() < 2 || points_world.size() != traj.size())
+            {
+                return ship_pos_world;
+            }
+
+            const double tc = std::clamp(t_s, traj.front().t_s, traj.back().t_s);
+            const auto it = lower_bound_by_time(traj, tc);
+            const size_t i = static_cast<size_t>(std::distance(traj.cbegin(), it));
+            if (i == 0)
+            {
+                return draw_world(points_world.front());
+            }
+            if (i >= traj.size())
+            {
+                return draw_world(points_world.back());
+            }
+            return draw_hermite(traj[i - 1], traj[i], tc);
+        };
+
+        auto draw_window = [&](const std::vector<orbitsim::TrajectorySample> &traj,
+                               double t_start_s,
+                               double t_end_s,
+                               const glm::vec4 &color,
+                               WorldVec3 prev_world,
+                               const bool dashed) {
             if (!(t_end_s > t_start_s))
             {
                 return;
             }
 
-            const auto &traj = _prediction_cache.trajectory_bci;
             const size_t n = traj.size();
             if (n < 2)
             {
                 return;
             }
 
-            auto it_start_hi = lower_bound_by_time(t_start_s);
-            size_t i_start_hi = static_cast<size_t>(std::distance(traj.cbegin(), it_start_hi));
+            auto it_start_hi = lower_bound_by_time(traj, t_start_s);
+            const size_t i_start_hi = static_cast<size_t>(std::distance(traj.cbegin(), it_start_hi));
             if (i_start_hi >= n)
             {
                 return;
@@ -637,6 +759,12 @@ namespace Game
             size_t seg = (i_start_hi == 0) ? 0 : (i_start_hi - 1);
             double t = std::clamp(t_start_s, traj.front().t_s, traj.back().t_s);
             const double t_end = std::clamp(t_end_s, traj.front().t_s, traj.back().t_s);
+
+            const double dash_on_m = 30'000.0;
+            const double dash_off_m = 20'000.0;
+            double dash_accum_m = 0.0;
+            bool dash_on = true;
+            double dash_limit_m = dash_on_m;
 
             while (t < t_end && (seg + 1) < n)
             {
@@ -658,7 +786,42 @@ namespace Game
                     const double u = static_cast<double>(j) / static_cast<double>(sub);
                     const double tj = seg_start + seg_len * u;
                     const WorldVec3 p = draw_hermite(a, b, tj);
-                    ctx.api->debug_draw_line(glm::dvec3(prev_world), glm::dvec3(p), color, ttl_s, true);
+
+                    bool draw = true;
+                    if (dashed)
+                    {
+                        const double seg_m = glm::length(glm::dvec3(p - prev_world));
+                        if (std::isfinite(seg_m) && seg_m > 0.0)
+                        {
+                            dash_accum_m += seg_m;
+                        }
+                        draw = dash_on;
+
+                        while (dash_accum_m >= dash_limit_m)
+                        {
+                            dash_accum_m -= dash_limit_m;
+                            dash_on = !dash_on;
+                            dash_limit_m = dash_on ? dash_on_m : dash_off_m;
+                        }
+                    }
+
+                    if (draw)
+                    {
+                        ctx.api->debug_draw_line(glm::dvec3(prev_world), glm::dvec3(p), color, ttl_s, true);
+                        if (line_overlay_boost > 0.0f)
+                        {
+                            glm::vec4 overlay_color = color;
+                            overlay_color.a = std::clamp(overlay_color.a * line_overlay_boost, 0.0f, 1.0f);
+                            if (overlay_color.a > 0.0f)
+                            {
+                                ctx.api->debug_draw_line(glm::dvec3(prev_world),
+                                                         glm::dvec3(p),
+                                                         overlay_color,
+                                                         ttl_s,
+                                                         false);
+                            }
+                        }
+                    }
                     prev_world = p;
                 }
 
@@ -679,7 +842,7 @@ namespace Game
                 t_full_end = std::min(t0 + _prediction_cache.orbital_period_s, t1);
             }
 
-            draw_window(t0, t_full_end, color_orbit_full, draw_world(_prediction_cache.points_world.front()));
+            draw_window(traj_base, t0, t_full_end, color_orbit_full, draw_world(points_base.front()), false);
         }
 
         // Future segment highlight (windowed).
@@ -688,7 +851,50 @@ namespace Game
             const double window_s = std::max(0.0, _prediction_future_window_s);
             const double t_end = (window_s > 0.0) ? std::min(now_s + window_s, t1) : t1;
 
-            draw_window(now_s, t_end, color_orbit_future, ship_pos_world);
+            draw_window(traj_base, now_s, t_end, color_orbit_future, ship_pos_world, false);
+        }
+
+        // Planned trajectory (maneuver nodes): draw as a dashed line in a distinct color.
+        if (have_planned && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
+        {
+            double first_node_time_s = std::numeric_limits<double>::infinity();
+            for (const ManeuverNode &node : _maneuver_state.nodes)
+            {
+                if (std::isfinite(node.time_s))
+                {
+                    first_node_time_s = std::min(first_node_time_s, node.time_s);
+                }
+            }
+
+            if (std::isfinite(first_node_time_s))
+            {
+                const double t0p = traj_planned.front().t_s;
+                const double t1p = traj_planned.back().t_s;
+                double t_plan_start = std::max(first_node_time_s, now_s);
+                t_plan_start = std::clamp(t_plan_start, t0p, t1p);
+
+                double t_plan_end = t_plan_start;
+                const double window_s = std::max(0.0, _prediction_future_window_s);
+                if (_prediction_draw_future_segment && window_s > 0.0)
+                {
+                    t_plan_end = std::min(t_plan_start + window_s, t1p);
+                }
+                else if (_prediction_draw_full_orbit)
+                {
+                    double t_full_end = t1p;
+                    if (_prediction_cache.orbital_period_s > 0.0 && std::isfinite(_prediction_cache.orbital_period_s))
+                    {
+                        t_full_end = std::min(t0p + _prediction_cache.orbital_period_s, t1p);
+                    }
+                    t_plan_end = t_full_end;
+                }
+
+                if (t_plan_end > t_plan_start)
+                {
+                    const WorldVec3 p_start = draw_position_at(traj_planned, points_planned, t_plan_start);
+                    draw_window(traj_planned, t_plan_start, t_plan_end, color_orbit_plan, p_start, true);
+                }
+            }
         }
 
         if (_prediction_draw_velocity_ray)
