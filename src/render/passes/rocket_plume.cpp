@@ -13,7 +13,6 @@
 #include "core/pipeline/sampler.h"
 
 #include "render/graph/graph.h"
-#include "render/graph/resources.h"
 #include "render/pipelines.h"
 
 #include "vk_scene.h"

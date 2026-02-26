@@ -174,11 +174,11 @@ void GeometryPass::draw_geometry(VkCommandBuffer cmd,
     std::vector<uint32_t> opaque_draws;
     opaque_draws.reserve(mainDrawContext.OpaqueSurfaces.size());
 
-    for (int i = 0; i < mainDrawContext.OpaqueSurfaces.size(); i++)
+    for (size_t i = 0; i < mainDrawContext.OpaqueSurfaces.size(); ++i)
     {
         if (is_visible(mainDrawContext.OpaqueSurfaces[i], sceneData.viewproj))
         {
-            opaque_draws.push_back(i);
+            opaque_draws.push_back(static_cast<uint32_t>(i));
         }
     }
 

@@ -138,7 +138,6 @@ void FreeCameraMode::update(SceneManager & /*scene*/, Camera &camera, float dt)
     if (_velocity.x != 0.0f || _velocity.y != 0.0f || _velocity.z != 0.0f)
     {
         glm::vec3 local_delta = _velocity * (_settings.move_speed * dt);
-        glm::mat4 camera_rotation = camera.getRotationMatrix();
         glm::vec3 world_delta = glm::rotate(camera.orientation, local_delta);
         camera.position_world += glm::dvec3(world_delta);
     }

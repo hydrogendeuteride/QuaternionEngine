@@ -423,7 +423,7 @@ static std::vector<uint8_t> downscale_half(const unsigned char* src, int w, int 
     return out;
 }
 
-void TextureCache::startLoad(Entry &e, ResourceManager &rm)
+void TextureCache::startLoad(Entry &e, ResourceManager & /*rm*/)
 {
     // Legacy synchronous path retained for completeness but not used by pumpLoads now.
     enqueueDecode(e);
@@ -663,7 +663,6 @@ void TextureCache::workerLoop()
         out.mipClampLevels = rq.key.mipClampLevels;
 
         // 1) Prefer KTX2 when source is a file path and a .ktx2 version exists
-        bool attemptedKTX2 = false;
         if (rq.key.kind == TextureKey::SourceKind::FilePath)
         {
             std::filesystem::path p = rq.path;
@@ -681,7 +680,6 @@ void TextureCache::workerLoop()
             bool hasKTX2 = (!ktxPath.empty() && std::filesystem::exists(ktxPath, ec) && !ec);
             if (hasKTX2)
             {
-                attemptedKTX2 = true;
                 ktxTexture2* ktex = nullptr;
                 ktxResult kres = ktxTexture2_CreateFromNamedFile(ktxPath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktex);
                 if (kres != KTX_SUCCESS || !ktex)
@@ -1139,8 +1137,6 @@ void TextureCache::debugSnapshot(std::vector<DebugRow> &outRows, DebugStats &out
     outRows.clear();
     outStats = DebugStats{};
     outStats.residentBytes = _residentBytes;
-
-    auto stateToByteable = [&](const Entry &e) -> bool { return e.state == EntryState::Resident; };
 
     for (const auto &e : _entries)
     {

@@ -267,8 +267,6 @@ namespace Game
             throttle = std::clamp(throttle, 0.35f, 1.2f);
 
             const glm::vec3 nozzle = glm::vec3(_plume_nozzle_pos);
-            const float jitter_x = 0.02f * std::sin(_elapsed * 17.0f);
-            const float jitter_z = 0.02f * std::sin(_elapsed * 14.0f + 0.7f);
 
             GameAPI::Transform outer_tr{};
             outer_tr.position = nozzle;

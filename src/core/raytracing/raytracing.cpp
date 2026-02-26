@@ -158,7 +158,6 @@ AccelStructureHandle RayTracingManager::buildBlasForMesh(const MeshAsset *mesh)
     VkDeviceAddress vaddr = mesh->meshBuffers.vertexBufferAddress;
     VkDeviceAddress iaddr = mesh->meshBuffers.indexBufferAddress;
     const uint32_t vcount = mesh->meshBuffers.vertexCount;
-    VkBuffer vb = mesh->meshBuffers.vertexBuffer.buffer;
 
     Logger::info("[RT] buildBlasForMesh mesh='{}' surfaces={} vcount={}", mesh->name,
                  mesh->surfaces.size(), vcount);

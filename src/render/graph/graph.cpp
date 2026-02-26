@@ -7,6 +7,8 @@
 #include <core/descriptor/manager.h>
 #include <core/frame/resources.h>
 #include <core/pipeline/sampler.h>
+#include <render/graph/resources.h>
+#include <render/graph/builder.h>
 
 #include <unordered_map>
 #include <unordered_set>
@@ -25,43 +27,88 @@
 
 #include "assets/manager.h"
 
+struct RenderGraph::Impl
+{
+    struct Pass
+    {
+        std::string name;
+        RGPassType type{};
+        RecordCallback record;
+
+        // Declarations
+        std::vector<RGPassImageAccess> imageReads;
+        std::vector<RGPassImageAccess> imageWrites;
+        std::vector<RGPassBufferAccess> bufferReads;
+        std::vector<RGPassBufferAccess> bufferWrites;
+        std::vector<RGAttachmentInfo> colorAttachments;
+        bool hasDepth = false;
+        RGAttachmentInfo depthAttachment{};
+
+        std::vector<VkImageMemoryBarrier2> preImageBarriers;
+        std::vector<VkBufferMemoryBarrier2> preBufferBarriers;
+
+        // Cached rendering info derived from declared attachments (filled at execute)
+        bool hasRendering = false;
+        VkExtent2D renderExtent{};
+
+        bool enabled = true;
+    };
+
+    EngineContext *context = nullptr;
+    RGResourceRegistry resources;
+    std::vector<Pass> passes;
+
+    // --- Timing data for last executed frame ---
+    VkQueryPool timestampPool = VK_NULL_HANDLE; // holds 2 queries per pass (begin/end)
+    std::vector<float> lastGpuMillis; // per pass
+    std::vector<float> lastCpuMillis; // per pass (command recording time)
+    std::vector<bool> wroteTimestamps; // per pass; true if queries were written in last execute
+};
+
+RenderGraph::RenderGraph()
+    : _impl(std::make_unique<Impl>())
+{
+}
+
+RenderGraph::~RenderGraph() = default;
+
 void RenderGraph::init(EngineContext *ctx)
 {
-	_context = ctx;
-	_resources.init(ctx);
+	_impl->context = ctx;
+	_impl->resources.init(ctx);
 }
 
 void RenderGraph::clear()
 {
-	_passes.clear();
-	_resources.reset();
+	_impl->passes.clear();
+	_impl->resources.reset();
 }
 
 void RenderGraph::shutdown()
 {
 	// If a timestamp pool exists, ensure the GPU is not using it and destroy it.
-	if (_timestampPool != VK_NULL_HANDLE && _context && _context->getDevice())
+	if (_impl->timestampPool != VK_NULL_HANDLE && _impl->context && _impl->context->getDevice())
 	{
 		// Be conservative here: make sure the graphics queue is idle before destroying.
-		vkQueueWaitIdle(_context->getDevice()->graphicsQueue());
-		vkDestroyQueryPool(_context->getDevice()->device(), _timestampPool, nullptr);
-		_timestampPool = VK_NULL_HANDLE;
+		vkQueueWaitIdle(_impl->context->getDevice()->graphicsQueue());
+		vkDestroyQueryPool(_impl->context->getDevice()->device(), _impl->timestampPool, nullptr);
+		_impl->timestampPool = VK_NULL_HANDLE;
 	}
 }
 
 RGImageHandle RenderGraph::import_image(const RGImportedImageDesc &desc)
 {
-	return _resources.add_imported(desc);
+	return _impl->resources.add_imported(desc);
 }
 
 RGBufferHandle RenderGraph::import_buffer(const RGImportedBufferDesc &desc)
 {
-	return _resources.add_imported(desc);
+	return _impl->resources.add_imported(desc);
 }
 
 RGImageHandle RenderGraph::create_image(const RGImageDesc &desc)
 {
-	return _resources.add_transient(desc);
+	return _impl->resources.add_transient(desc);
 }
 
 RGImageHandle RenderGraph::create_depth_image(const char *name, VkExtent2D extent, VkFormat format)
@@ -76,7 +123,7 @@ RGImageHandle RenderGraph::create_depth_image(const char *name, VkExtent2D exten
 
 RGBufferHandle RenderGraph::create_buffer(const RGBufferDesc &desc)
 {
-	return _resources.add_transient(desc);
+	return _impl->resources.add_transient(desc);
 }
 
 // Render Graph: builds a per-frame DAG from declared image/buffer accesses,
@@ -90,28 +137,28 @@ RGBufferHandle RenderGraph::create_buffer(const RGBufferDesc &desc)
 // See docs/RenderGraph.md for API overview and pass patterns.
 void RenderGraph::add_pass(const char *name, RGPassType type, BuildCallback build, RecordCallback record)
 {
-	Pass p{};
+	Impl::Pass p{};
 	p.name = name;
 	p.type = type;
 	p.record = std::move(record);
 
 	// Build declarations via builder
 	RGAttachmentInfo *depthRef = nullptr;
-	RGPassBuilder builder(&_resources,
+	RGPassBuilder builder(&_impl->resources,
 	                      p.imageReads,
 	                      p.imageWrites,
 	                      p.bufferReads,
 	                      p.bufferWrites,
 	                      p.colorAttachments,
 	                      depthRef);
-	if (build) build(builder, _context);
+	if (build) build(builder, _impl->context);
 	if (depthRef)
 	{
 		p.hasDepth = true;
 		p.depthAttachment = *depthRef; // copy declared depth attachment
 	}
 
-	_passes.push_back(std::move(p));
+	_impl->passes.push_back(std::move(p));
 }
 
 void RenderGraph::add_pass(const char *name, RGPassType type, RecordCallback record)
@@ -120,12 +167,35 @@ void RenderGraph::add_pass(const char *name, RGPassType type, RecordCallback rec
 	add_pass(name, type, nullptr, std::move(record));
 }
 
+size_t RenderGraph::pass_count() const
+{
+    return _impl->passes.size();
+}
+
+const char *RenderGraph::pass_name(size_t i) const
+{
+    return i < _impl->passes.size() ? _impl->passes[i].name.c_str() : "";
+}
+
+bool RenderGraph::pass_enabled(size_t i) const
+{
+    return i < _impl->passes.size() ? _impl->passes[i].enabled : false;
+}
+
+void RenderGraph::set_pass_enabled(size_t i, bool e)
+{
+    if (i < _impl->passes.size())
+    {
+        _impl->passes[i].enabled = e;
+    }
+}
+
 bool RenderGraph::compile()
 {
-	if (!_context) return false;
+	if (!_impl->context) return false;
 
 	// --- Build dependency graph (topological sort) from declared reads/writes ---
-	const int n = static_cast<int>(_passes.size());
+	const int n = static_cast<int>(_impl->passes.size());
 	if (n <= 1)
 	{
 		// trivial order; still compute barriers below
@@ -148,7 +218,7 @@ bool RenderGraph::compile()
 
 		for (int i = 0; i < n; ++i)
 		{
-			const auto &p = _passes[i];
+			const auto &p = _impl->passes[i];
 			if (!p.enabled) continue;
 
 			// Image reads
@@ -216,13 +286,13 @@ bool RenderGraph::compile()
 			}
 		}
 
-		if (static_cast<int>(order.size()) == n)
-		{
-			// Reorder passes by topological order
-			std::vector<Pass> sorted;
+			if (static_cast<int>(order.size()) == n)
+			{
+				// Reorder passes by topological order
+				std::vector<Impl::Pass> sorted;
 			sorted.reserve(n);
-			for (int idx: order) sorted.push_back(std::move(_passes[idx]));
-			_passes = std::move(sorted);
+			for (int idx: order) sorted.push_back(std::move(_impl->passes[idx]));
+			_impl->passes = std::move(sorted);
 		}
 		else
 		{
@@ -425,8 +495,8 @@ bool RenderGraph::compile()
 		}
 	};
 
-	const size_t imageCount = _resources.image_count();
-	const size_t bufferCount = _resources.buffer_count();
+	const size_t imageCount = _impl->resources.image_count();
+	const size_t bufferCount = _impl->resources.buffer_count();
 	std::vector<ImageState> imageStates(imageCount);
 	std::vector<BufferState> bufferStates(bufferCount);
 
@@ -434,7 +504,7 @@ bool RenderGraph::compile()
 	// starting layout but no stage/access, be conservative and assume an unknown prior write.
 	for (size_t i = 0; i < imageCount; ++i)
 	{
-		const RGImageRecord *rec = _resources.get_image(RGImageHandle{static_cast<uint32_t>(i)});
+		const RGImageRecord *rec = _impl->resources.get_image(RGImageHandle{static_cast<uint32_t>(i)});
 		if (!rec) continue;
 		imageStates[i].layout = rec->initialLayout;
 		if (rec->initialLayout == VK_IMAGE_LAYOUT_UNDEFINED) continue;
@@ -460,7 +530,7 @@ bool RenderGraph::compile()
 
 	for (size_t i = 0; i < bufferCount; ++i)
 	{
-		const RGBufferRecord *rec = _resources.get_buffer(RGBufferHandle{static_cast<uint32_t>(i)});
+		const RGBufferRecord *rec = _impl->resources.get_buffer(RGBufferHandle{static_cast<uint32_t>(i)});
 		if (!rec) continue;
 		VkPipelineStageFlags2 st = rec->initialStage;
 		VkAccessFlags2 ac = rec->initialAccess;
@@ -481,7 +551,7 @@ bool RenderGraph::compile()
 	std::vector<int> imageFirst(imageCount, -1), imageLast(imageCount, -1);
 	std::vector<int> bufferFirst(bufferCount, -1), bufferLast(bufferCount, -1);
 
-	for (auto &pass: _passes)
+	for (auto &pass: _impl->passes)
 	{
 		pass.preImageBarriers.clear();
 		pass.preBufferBarriers.clear();
@@ -556,8 +626,8 @@ bool RenderGraph::compile()
 			merge_desired_image(access.image.id, access.usage);
 			if (access.image.id < imageCount)
 			{
-				if (imageFirst[access.image.id] == -1) imageFirst[access.image.id] = (int) (&pass - _passes.data());
-				imageLast[access.image.id] = (int) (&pass - _passes.data());
+				if (imageFirst[access.image.id] == -1) imageFirst[access.image.id] = (int) (&pass - _impl->passes.data());
+				imageLast[access.image.id] = (int) (&pass - _impl->passes.data());
 			}
 		}
 		for (const auto &access: pass.imageWrites)
@@ -566,8 +636,8 @@ bool RenderGraph::compile()
 			merge_desired_image(access.image.id, access.usage);
 			if (access.image.id < imageCount)
 			{
-				if (imageFirst[access.image.id] == -1) imageFirst[access.image.id] = (int) (&pass - _passes.data());
-				imageLast[access.image.id] = (int) (&pass - _passes.data());
+				if (imageFirst[access.image.id] == -1) imageFirst[access.image.id] = (int) (&pass - _impl->passes.data());
+				imageLast[access.image.id] = (int) (&pass - _impl->passes.data());
 			}
 		}
 
@@ -630,7 +700,7 @@ bool RenderGraph::compile()
 				barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 				barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
-				const RGImageRecord *rec = _resources.get_image(RGImageHandle{id});
+				const RGImageRecord *rec = _impl->resources.get_image(RGImageHandle{id});
 				barrier.image = rec ? rec->image : VK_NULL_HANDLE;
 
 				VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -744,8 +814,8 @@ bool RenderGraph::compile()
 			merge_desired_buffer(access.buffer.id, access.usage);
 			if (access.buffer.id < bufferCount)
 			{
-				if (bufferFirst[access.buffer.id] == -1) bufferFirst[access.buffer.id] = (int) (&pass - _passes.data());
-				bufferLast[access.buffer.id] = (int) (&pass - _passes.data());
+				if (bufferFirst[access.buffer.id] == -1) bufferFirst[access.buffer.id] = (int) (&pass - _impl->passes.data());
+				bufferLast[access.buffer.id] = (int) (&pass - _impl->passes.data());
 			}
 		}
 		for (const auto &access: pass.bufferWrites)
@@ -754,8 +824,8 @@ bool RenderGraph::compile()
 			merge_desired_buffer(access.buffer.id, access.usage);
 			if (access.buffer.id < bufferCount)
 			{
-				if (bufferFirst[access.buffer.id] == -1) bufferFirst[access.buffer.id] = (int) (&pass - _passes.data());
-				bufferLast[access.buffer.id] = (int) (&pass - _passes.data());
+				if (bufferFirst[access.buffer.id] == -1) bufferFirst[access.buffer.id] = (int) (&pass - _impl->passes.data());
+				bufferLast[access.buffer.id] = (int) (&pass - _impl->passes.data());
 			}
 		}
 
@@ -800,7 +870,7 @@ bool RenderGraph::compile()
 				barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 				barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
-				const RGBufferRecord *rec = _resources.get_buffer(RGBufferHandle{id});
+				const RGBufferRecord *rec = _impl->resources.get_buffer(RGBufferHandle{id});
 				barrier.buffer = rec ? rec->buffer : VK_NULL_HANDLE;
 				barrier.offset = 0;
 				// For imported buffers we don't always know the exact VkBuffer size, so use WHOLE_SIZE
@@ -855,7 +925,7 @@ bool RenderGraph::compile()
 	// Store lifetimes into records for diagnostics/aliasing
 	for (size_t i = 0; i < imageCount; ++i)
 	{
-		if (auto *rec = _resources.get_image(RGImageHandle{static_cast<uint32_t>(i)}))
+		if (auto *rec = _impl->resources.get_image(RGImageHandle{static_cast<uint32_t>(i)}))
 		{
 			rec->firstUse = imageFirst[i];
 			rec->lastUse = imageLast[i];
@@ -863,7 +933,7 @@ bool RenderGraph::compile()
 	}
 	for (size_t i = 0; i < bufferCount; ++i)
 	{
-		if (auto *rec = _resources.get_buffer(RGBufferHandle{static_cast<uint32_t>(i)}))
+		if (auto *rec = _impl->resources.get_buffer(RGBufferHandle{static_cast<uint32_t>(i)}))
 		{
 			rec->firstUse = bufferFirst[i];
 			rec->lastUse = bufferLast[i];
@@ -876,35 +946,35 @@ bool RenderGraph::compile()
 void RenderGraph::execute(VkCommandBuffer cmd)
 {
 	// Create/reset timestamp query pool for this execution (2 queries per pass)
-	if (_timestampPool != VK_NULL_HANDLE)
+	if (_impl->timestampPool != VK_NULL_HANDLE)
 	{
-		vkDestroyQueryPool(_context->getDevice()->device(), _timestampPool, nullptr);
-		_timestampPool = VK_NULL_HANDLE;
+		vkDestroyQueryPool(_impl->context->getDevice()->device(), _impl->timestampPool, nullptr);
+		_impl->timestampPool = VK_NULL_HANDLE;
 	}
-	const uint32_t queryCount = static_cast<uint32_t>(_passes.size() * 2);
+	const uint32_t queryCount = static_cast<uint32_t>(_impl->passes.size() * 2);
 	if (queryCount > 0)
 	{
 		VkQueryPoolCreateInfo qpci{.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
 		qpci.queryType = VK_QUERY_TYPE_TIMESTAMP;
 		qpci.queryCount = queryCount;
-		VK_CHECK(vkCreateQueryPool(_context->getDevice()->device(), &qpci, nullptr, &_timestampPool));
-		vkCmdResetQueryPool(cmd, _timestampPool, 0, queryCount);
+		VK_CHECK(vkCreateQueryPool(_impl->context->getDevice()->device(), &qpci, nullptr, &_impl->timestampPool));
+		vkCmdResetQueryPool(cmd, _impl->timestampPool, 0, queryCount);
 	}
 
-	_lastCpuMillis.assign(_passes.size(), -1.0f);
-	_wroteTimestamps.assign(_passes.size(), false);
+	_impl->lastCpuMillis.assign(_impl->passes.size(), -1.0f);
+	_impl->wroteTimestamps.assign(_impl->passes.size(), false);
 
-	for (size_t passIndex = 0; passIndex < _passes.size(); ++passIndex)
+	for (size_t passIndex = 0; passIndex < _impl->passes.size(); ++passIndex)
 	{
-		auto &p = _passes[passIndex];
+		auto &p = _impl->passes[passIndex];
 		if (!p.enabled) continue;
 
 		// Debug label per pass
-		if (_context && _context->getDevice())
+		if (_impl->context && _impl->context->getDevice())
 		{
 			char labelName[128];
 			std::snprintf(labelName, sizeof(labelName), "RG: %s", p.name.c_str());
-			vkdebug::cmd_begin_label(_context->getDevice()->device(), cmd, labelName);
+			vkdebug::cmd_begin_label(_impl->context->getDevice()->device(), cmd, labelName);
 		}
 
 		if (!p.preImageBarriers.empty() || !p.preBufferBarriers.empty())
@@ -918,10 +988,10 @@ void RenderGraph::execute(VkCommandBuffer cmd)
 		}
 
 		// Timestamp begin and CPU start after barriers
-		if (_timestampPool != VK_NULL_HANDLE)
+		if (_impl->timestampPool != VK_NULL_HANDLE)
 		{
 			const uint32_t qidx = static_cast<uint32_t>(passIndex * 2 + 0);
-			vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _timestampPool, qidx);
+			vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _impl->timestampPool, qidx);
 		}
 		auto cpuStart = std::chrono::high_resolution_clock::now();
 
@@ -951,7 +1021,7 @@ void RenderGraph::execute(VkCommandBuffer cmd)
 			bool warnedExtentMismatch = false;
 			for (const auto &a: p.colorAttachments)
 			{
-				const RGImageRecord *rec = _resources.get_image(a.image);
+				const RGImageRecord *rec = _impl->resources.get_image(a.image);
 				if (!rec || rec->imageView == VK_NULL_HANDLE) continue;
 				VkClearValue *pClear = nullptr;
 				VkClearValue clear = a.clear;
@@ -980,7 +1050,7 @@ void RenderGraph::execute(VkCommandBuffer cmd)
 
 			if (p.hasDepth)
 			{
-				const RGImageRecord *rec = _resources.get_image(p.depthAttachment.image);
+				const RGImageRecord *rec = _impl->resources.get_image(p.depthAttachment.image);
 				if (rec && rec->imageView != VK_NULL_HANDLE)
 				{
 					depthInfo = vkinit::depth_attachment_info(rec->imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
@@ -1001,7 +1071,7 @@ void RenderGraph::execute(VkCommandBuffer cmd)
 
 			if (chosenExtent.width == 0 || chosenExtent.height == 0)
 			{
-				chosenExtent = _context->getDrawExtent();
+				chosenExtent = _impl->context->getDrawExtent();
 			}
 
 			VkRenderingInfo ri{};
@@ -1018,8 +1088,8 @@ void RenderGraph::execute(VkCommandBuffer cmd)
 
 		if (p.record)
 		{
-			RGPassResources res(&_resources);
-			p.record(cmd, res, _context);
+			RGPassResources res(&_impl->resources);
+			p.record(cmd, res, _impl->context);
 		}
 
 		if (doRendering)
@@ -1029,17 +1099,17 @@ void RenderGraph::execute(VkCommandBuffer cmd)
 
 		// CPU end and timestamp end
 		auto cpuEnd = std::chrono::high_resolution_clock::now();
-		_lastCpuMillis[passIndex] = std::chrono::duration<float, std::milli>(cpuEnd - cpuStart).count();
-		if (_timestampPool != VK_NULL_HANDLE)
+		_impl->lastCpuMillis[passIndex] = std::chrono::duration<float, std::milli>(cpuEnd - cpuStart).count();
+		if (_impl->timestampPool != VK_NULL_HANDLE)
 		{
 			const uint32_t qidx = static_cast<uint32_t>(passIndex * 2 + 1);
-			vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _timestampPool, qidx);
-			_wroteTimestamps[passIndex] = true;
+			vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _impl->timestampPool, qidx);
+			_impl->wroteTimestamps[passIndex] = true;
 		}
 
-		if (_context && _context->getDevice())
+		if (_impl->context && _impl->context->getDevice())
 		{
-			vkdebug::cmd_end_label(_context->getDevice()->device(), cmd);
+			vkdebug::cmd_end_label(_impl->context->getDevice()->device(), cmd);
 		}
 	}
 }
@@ -1153,10 +1223,10 @@ RGImageHandle RenderGraph::import_draw_image()
 {
 	RGImportedImageDesc d{};
 	d.name = "drawImage";
-	d.image = _context->getSwapchain()->drawImage().image;
-	d.imageView = _context->getSwapchain()->drawImage().imageView;
-	d.format = _context->getSwapchain()->drawImage().imageFormat;
-	d.extent = _context->getDrawExtent();
+	d.image = _impl->context->getSwapchain()->drawImage().image;
+	d.imageView = _impl->context->getSwapchain()->drawImage().imageView;
+	d.format = _impl->context->getSwapchain()->drawImage().imageFormat;
+	d.extent = _impl->context->getDrawExtent();
 	// Treat layout as unknown at frame start to force an explicit barrier
 	// into the first declared usage (compute write / color attach). This
 	// avoids mismatches when the previous frame ended in a different layout.
@@ -1203,8 +1273,8 @@ namespace
 void RenderGraph::debug_get_passes(std::vector<RGDebugPassInfo> &out) const
 {
 	out.clear();
-	out.reserve(_passes.size());
-	for (const auto &p: _passes)
+	out.reserve(_impl->passes.size());
+	for (const auto &p: _impl->passes)
 	{
 		RGDebugPassInfo info{};
 		info.name = p.name;
@@ -1216,9 +1286,9 @@ void RenderGraph::debug_get_passes(std::vector<RGDebugPassInfo> &out) const
 		info.bufferWrites = static_cast<uint32_t>(p.bufferWrites.size());
 		info.colorAttachmentCount = static_cast<uint32_t>(p.colorAttachments.size());
 		info.hasDepth = p.hasDepth;
-		size_t idx = &p - _passes.data();
-		if (idx < _lastGpuMillis.size()) info.gpuMillis = _lastGpuMillis[idx];
-		if (idx < _lastCpuMillis.size()) info.cpuMillis = _lastCpuMillis[idx];
+		size_t idx = &p - _impl->passes.data();
+		if (idx < _impl->lastGpuMillis.size()) info.gpuMillis = _impl->lastGpuMillis[idx];
+		if (idx < _impl->lastCpuMillis.size()) info.cpuMillis = _impl->lastCpuMillis[idx];
 		out.push_back(std::move(info));
 	}
 }
@@ -1226,10 +1296,10 @@ void RenderGraph::debug_get_passes(std::vector<RGDebugPassInfo> &out) const
 void RenderGraph::debug_get_images(std::vector<RGDebugImageInfo> &out) const
 {
 	out.clear();
-	out.reserve(_resources.image_count());
-	for (uint32_t i = 0; i < _resources.image_count(); ++i)
+	out.reserve(_impl->resources.image_count());
+	for (uint32_t i = 0; i < _impl->resources.image_count(); ++i)
 	{
-		const RGImageRecord *rec = _resources.get_image(RGImageHandle{i});
+		const RGImageRecord *rec = _impl->resources.get_image(RGImageHandle{i});
 		if (!rec) continue;
 		RGDebugImageInfo info{};
 		info.id = i;
@@ -1240,15 +1310,15 @@ void RenderGraph::debug_get_images(std::vector<RGDebugImageInfo> &out) const
 		info.creationUsage = rec->creationUsage;
 		info.firstUse = rec->firstUse;
 		info.lastUse = rec->lastUse;
-		if (rec->firstUse >= 0 && static_cast<size_t>(rec->firstUse) < _passes.size())
+		if (rec->firstUse >= 0 && static_cast<size_t>(rec->firstUse) < _impl->passes.size())
 		{
-			info.firstUsePass = _passes[rec->firstUse].name;
+			info.firstUsePass = _impl->passes[rec->firstUse].name;
 		}
-		if (rec->lastUse >= 0 && static_cast<size_t>(rec->lastUse) < _passes.size())
+		if (rec->lastUse >= 0 && static_cast<size_t>(rec->lastUse) < _impl->passes.size())
 		{
-			info.lastUsePass = _passes[rec->lastUse].name;
+			info.lastUsePass = _impl->passes[rec->lastUse].name;
 		}
-		for (const auto &p : _passes)
+		for (const auto &p : _impl->passes)
 		{
 			for (const auto &read : p.imageReads)
 			{
@@ -1268,10 +1338,10 @@ void RenderGraph::debug_get_images(std::vector<RGDebugImageInfo> &out) const
 void RenderGraph::debug_get_buffers(std::vector<RGDebugBufferInfo> &out) const
 {
 	out.clear();
-	out.reserve(_resources.buffer_count());
-	for (uint32_t i = 0; i < _resources.buffer_count(); ++i)
+	out.reserve(_impl->resources.buffer_count());
+	for (uint32_t i = 0; i < _impl->resources.buffer_count(); ++i)
 	{
-		const RGBufferRecord *rec = _resources.get_buffer(RGBufferHandle{i});
+		const RGBufferRecord *rec = _impl->resources.get_buffer(RGBufferHandle{i});
 		if (!rec) continue;
 		RGDebugBufferInfo info{};
 		info.id = i;
@@ -1281,15 +1351,15 @@ void RenderGraph::debug_get_buffers(std::vector<RGDebugBufferInfo> &out) const
 		info.usage = rec->usage;
 		info.firstUse = rec->firstUse;
 		info.lastUse = rec->lastUse;
-		if (rec->firstUse >= 0 && static_cast<size_t>(rec->firstUse) < _passes.size())
+		if (rec->firstUse >= 0 && static_cast<size_t>(rec->firstUse) < _impl->passes.size())
 		{
-			info.firstUsePass = _passes[rec->firstUse].name;
+			info.firstUsePass = _impl->passes[rec->firstUse].name;
 		}
-		if (rec->lastUse >= 0 && static_cast<size_t>(rec->lastUse) < _passes.size())
+		if (rec->lastUse >= 0 && static_cast<size_t>(rec->lastUse) < _impl->passes.size())
 		{
-			info.lastUsePass = _passes[rec->lastUse].name;
+			info.lastUsePass = _impl->passes[rec->lastUse].name;
 		}
-		for (const auto &p : _passes)
+		for (const auto &p : _impl->passes)
 		{
 			for (const auto &read : p.bufferReads)
 			{
@@ -1310,10 +1380,10 @@ RGImageHandle RenderGraph::import_depth_image()
 {
 	RGImportedImageDesc d{};
 	d.name = "depthImage";
-	d.image = _context->getSwapchain()->depthImage().image;
-	d.imageView = _context->getSwapchain()->depthImage().imageView;
-	d.format = _context->getSwapchain()->depthImage().imageFormat;
-	d.extent = _context->getDrawExtent();
+	d.image = _impl->context->getSwapchain()->depthImage().image;
+	d.imageView = _impl->context->getSwapchain()->depthImage().imageView;
+	d.format = _impl->context->getSwapchain()->depthImage().imageFormat;
+	d.extent = _impl->context->getDrawExtent();
 	d.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	return import_image(d);
 }
@@ -1322,10 +1392,10 @@ RGImageHandle RenderGraph::import_gbuffer_position()
 {
 	RGImportedImageDesc d{};
 	d.name = "gBuffer.position";
-	d.image = _context->getSwapchain()->gBufferPosition().image;
-	d.imageView = _context->getSwapchain()->gBufferPosition().imageView;
-	d.format = _context->getSwapchain()->gBufferPosition().imageFormat;
-	d.extent = _context->getDrawExtent();
+	d.image = _impl->context->getSwapchain()->gBufferPosition().image;
+	d.imageView = _impl->context->getSwapchain()->gBufferPosition().imageView;
+	d.format = _impl->context->getSwapchain()->gBufferPosition().imageFormat;
+	d.extent = _impl->context->getDrawExtent();
 	d.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	return import_image(d);
 }
@@ -1334,10 +1404,10 @@ RGImageHandle RenderGraph::import_gbuffer_normal()
 {
 	RGImportedImageDesc d{};
 	d.name = "gBuffer.normal";
-	d.image = _context->getSwapchain()->gBufferNormal().image;
-	d.imageView = _context->getSwapchain()->gBufferNormal().imageView;
-	d.format = _context->getSwapchain()->gBufferNormal().imageFormat;
-	d.extent = _context->getDrawExtent();
+	d.image = _impl->context->getSwapchain()->gBufferNormal().image;
+	d.imageView = _impl->context->getSwapchain()->gBufferNormal().imageView;
+	d.format = _impl->context->getSwapchain()->gBufferNormal().imageFormat;
+	d.extent = _impl->context->getDrawExtent();
 	d.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	return import_image(d);
 }
@@ -1346,10 +1416,10 @@ RGImageHandle RenderGraph::import_gbuffer_albedo()
 {
 	RGImportedImageDesc d{};
 	d.name = "gBuffer.albedo";
-	d.image = _context->getSwapchain()->gBufferAlbedo().image;
-	d.imageView = _context->getSwapchain()->gBufferAlbedo().imageView;
-	d.format = _context->getSwapchain()->gBufferAlbedo().imageFormat;
-	d.extent = _context->getDrawExtent();
+	d.image = _impl->context->getSwapchain()->gBufferAlbedo().image;
+	d.imageView = _impl->context->getSwapchain()->gBufferAlbedo().imageView;
+	d.format = _impl->context->getSwapchain()->gBufferAlbedo().imageFormat;
+	d.extent = _impl->context->getDrawExtent();
 	d.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	return import_image(d);
 }
@@ -1358,10 +1428,10 @@ RGImageHandle RenderGraph::import_gbuffer_extra()
 {
 	RGImportedImageDesc d{};
 	d.name = "gBuffer.extra";
-	d.image = _context->getSwapchain()->gBufferExtra().image;
-	d.imageView = _context->getSwapchain()->gBufferExtra().imageView;
-	d.format = _context->getSwapchain()->gBufferExtra().imageFormat;
-	d.extent = _context->getDrawExtent();
+	d.image = _impl->context->getSwapchain()->gBufferExtra().image;
+	d.imageView = _impl->context->getSwapchain()->gBufferExtra().imageView;
+	d.format = _impl->context->getSwapchain()->gBufferExtra().imageFormat;
+	d.extent = _impl->context->getDrawExtent();
 	d.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	return import_image(d);
 }
@@ -1370,10 +1440,10 @@ RGImageHandle RenderGraph::import_id_buffer()
 {
 	RGImportedImageDesc d{};
 	d.name = "idBuffer.objectID";
-	d.image = _context->getSwapchain()->idBuffer().image;
-	d.imageView = _context->getSwapchain()->idBuffer().imageView;
-	d.format = _context->getSwapchain()->idBuffer().imageFormat;
-	d.extent = _context->getDrawExtent();
+	d.image = _impl->context->getSwapchain()->idBuffer().image;
+	d.imageView = _impl->context->getSwapchain()->idBuffer().imageView;
+	d.format = _impl->context->getSwapchain()->idBuffer().imageFormat;
+	d.extent = _impl->context->getDrawExtent();
 	d.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	return import_image(d);
 }
@@ -1382,42 +1452,48 @@ RGImageHandle RenderGraph::import_swapchain_image(uint32_t index)
 {
 	RGImportedImageDesc d{};
 	d.name = "swapchain.image";
-	const auto &views = _context->getSwapchain()->swapchainImageViews();
-	const auto &imgs = _context->getSwapchain()->swapchainImages();
+	const auto &views = _impl->context->getSwapchain()->swapchainImageViews();
+	const auto &imgs = _impl->context->getSwapchain()->swapchainImages();
 	d.image = imgs[index];
 	d.imageView = views[index];
-	d.format = _context->getSwapchain()->swapchainImageFormat();
-	d.extent = _context->getSwapchain()->swapchainExtent();
+	d.format = _impl->context->getSwapchain()->swapchainImageFormat();
+	d.extent = _impl->context->getSwapchain()->swapchainExtent();
 	// Track actual layout across frames. After present, images are in PRESENT_SRC_KHR.
-	d.currentLayout = _context->getSwapchain()->swapchain_image_layout(index);
+	d.currentLayout = _impl->context->getSwapchain()->swapchain_image_layout(index);
 	return import_image(d);
 }
 
 void RenderGraph::resolve_timings()
 {
-	if (_timestampPool == VK_NULL_HANDLE || _passes.empty())
+	if (_impl->timestampPool == VK_NULL_HANDLE || _impl->passes.empty())
 	{
-		_lastGpuMillis.assign(_passes.size(), -1.0f);
+		_impl->lastGpuMillis.assign(_impl->passes.size(), -1.0f);
 		return;
 	}
 
-	const uint32_t queryCount = static_cast<uint32_t>(_passes.size() * 2);
+	const uint32_t queryCount = static_cast<uint32_t>(_impl->passes.size() * 2);
 	std::vector<uint64_t> results(queryCount, 0);
-	VkResult r = vkGetQueryPoolResults(
-		_context->getDevice()->device(), _timestampPool,
+	const VkResult queryResult = vkGetQueryPoolResults(
+		_impl->context->getDevice()->device(), _impl->timestampPool,
 		0, queryCount,
 		sizeof(uint64_t) * results.size(), results.data(), sizeof(uint64_t),
 		VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+	if (queryResult != VK_SUCCESS)
+	{
+		_impl->lastGpuMillis.assign(_impl->passes.size(), -1.0f);
+		Logger::warn("[RenderGraph] vkGetQueryPoolResults failed: {}", string_VkResult(queryResult));
+		return;
+	}
 	VkPhysicalDeviceProperties props{};
-	vkGetPhysicalDeviceProperties(_context->getDevice()->physicalDevice(), &props);
+	vkGetPhysicalDeviceProperties(_impl->context->getDevice()->physicalDevice(), &props);
 	const double tickNs = props.limits.timestampPeriod;
 
-	_lastGpuMillis.assign(_passes.size(), -1.0f);
-	for (size_t i = 0; i < _passes.size(); ++i)
+	_impl->lastGpuMillis.assign(_impl->passes.size(), -1.0f);
+	for (size_t i = 0; i < _impl->passes.size(); ++i)
 	{
-		if (!_wroteTimestamps.empty() && !_wroteTimestamps[i])
+		if (!_impl->wroteTimestamps.empty() && !_impl->wroteTimestamps[i])
 		{
-			_lastGpuMillis[i] = -1.0f;
+			_impl->lastGpuMillis[i] = -1.0f;
 			continue;
 		}
 		const uint64_t t0 = results[i * 2 + 0];
@@ -1425,16 +1501,16 @@ void RenderGraph::resolve_timings()
 		if (t1 > t0)
 		{
 			double ns = double(t1 - t0) * tickNs;
-			_lastGpuMillis[i] = static_cast<float>(ns / 1.0e6);
+			_impl->lastGpuMillis[i] = static_cast<float>(ns / 1.0e6);
 		}
 		else
 		{
-			_lastGpuMillis[i] = -1.0f;
+			_impl->lastGpuMillis[i] = -1.0f;
 		}
 	}
 
 	// Ensure any pending work that might still reference the pool is complete
-	vkQueueWaitIdle(_context->getDevice()->graphicsQueue());
-	vkDestroyQueryPool(_context->getDevice()->device(), _timestampPool, nullptr);
-	_timestampPool = VK_NULL_HANDLE;
+	vkQueueWaitIdle(_impl->context->getDevice()->graphicsQueue());
+	vkDestroyQueryPool(_impl->context->getDevice()->device(), _impl->timestampPool, nullptr);
+	_impl->timestampPool = VK_NULL_HANDLE;
 }
