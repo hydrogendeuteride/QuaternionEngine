@@ -30,6 +30,14 @@ namespace Game
         _elapsed = 0.0f;
         _fixed_time_s = 0.0;
         reset_time_warp_state();
+        _warp_to_time_active = false;
+        _warp_to_time_target_s = 0.0;
+        _warp_to_time_restore_level = 0;
+        _execute_node_armed = false;
+        _execute_node_id = -1;
+        _maneuver_state.nodes.clear();
+        _maneuver_state.selected_node_id = -1;
+        _maneuver_state.next_node_id = 0;
         _reset_requested = false;
         _scenario_io_status.clear();
         _scenario_io_status_ok = true;
@@ -67,6 +75,14 @@ namespace Game
         _prediction_cache.clear();
         _prediction_dirty = true;
         reset_time_warp_state();
+        _warp_to_time_active = false;
+        _warp_to_time_target_s = 0.0;
+        _warp_to_time_restore_level = 0;
+        _execute_node_armed = false;
+        _execute_node_id = -1;
+        _maneuver_state.nodes.clear();
+        _maneuver_state.selected_node_id = -1;
+        _maneuver_state.next_node_id = 0;
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (ctx.renderer && ctx.renderer->_context)
@@ -107,6 +123,7 @@ namespace Game
 
         // Draw orbit debug using the same interpolation alpha as rendering to avoid visual offset.
         emit_orbit_prediction_debug(ctx);
+        emit_maneuver_node_debug_overlay(ctx);
     }
 
     void GameplayState::on_fixed_update(GameStateContext &ctx, float fixed_dt)
@@ -117,6 +134,8 @@ namespace Game
             setup_scene(ctx);
             return;
         }
+
+        update_maneuver_nodes_time_warp(ctx, fixed_dt);
 
         const TimeWarpState::Mode desired_mode = _time_warp.mode_for_level(_time_warp.warp_level);
         _time_warp.mode = desired_mode;
@@ -132,11 +151,21 @@ namespace Game
 
             if (_rails_warp_active)
             {
-                const double dt_s = static_cast<double>(fixed_dt) * warp_factor;
+                double dt_s = static_cast<double>(fixed_dt) * warp_factor;
+                if (_warp_to_time_active)
+                {
+                    const double now_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+                    const double remaining_s = _warp_to_time_target_s - now_s;
+                    if (std::isfinite(remaining_s) && remaining_s > 0.0)
+                    {
+                        dt_s = std::min(dt_s, remaining_s);
+                    }
+                }
                 _fixed_time_s += dt_s;
                 _last_sim_step_dt_s = dt_s;
 
                 rails_warp_step(ctx, dt_s);
+                update_maneuver_nodes_execution(ctx);
                 update_prediction(ctx, static_cast<float>(dt_s));
                 return;
             }
@@ -159,6 +188,7 @@ namespace Game
             step_physics(ctx, fixed_dt);
         }
 
+        update_maneuver_nodes_execution(ctx);
         update_prediction(ctx, static_cast<float>(effective_dt_s));
     }
 
@@ -420,6 +450,30 @@ namespace Game
 
                 ImGui::Checkbox("Prediction velocity ray", &_prediction_draw_velocity_ray);
 
+                float prediction_alpha_scale = _prediction_line_alpha_scale;
+                if (ImGui::DragFloat("Prediction line alpha scale",
+                                     &prediction_alpha_scale,
+                                     0.05f,
+                                     0.1f,
+                                     8.0f,
+                                     "%.2f"))
+                {
+                    _prediction_line_alpha_scale = std::clamp(prediction_alpha_scale, 0.1f, 8.0f);
+                }
+
+                float prediction_overlay_boost = _prediction_line_overlay_boost;
+                if (ImGui::DragFloat("Prediction line overlay boost",
+                                     &prediction_overlay_boost,
+                                     0.01f,
+                                     0.0f,
+                                     1.0f,
+                                     "%.2f"))
+                {
+                    _prediction_line_overlay_boost = std::clamp(prediction_overlay_boost, 0.0f, 1.0f);
+                }
+                ImGui::SameLine();
+                ImGui::TextUnformatted("(0 = depth-only)");
+
                 WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
                 glm::dvec3 ship_vel_world(0.0);
                 glm::vec3 ship_vel_local_f(0.0f);
@@ -554,6 +608,8 @@ namespace Game
             }
         }
         ImGui::End();
+
+        draw_maneuver_nodes_panel(ctx);
     }
 
     void GameplayState::reset_time_warp_state()
@@ -570,6 +626,11 @@ namespace Game
     void GameplayState::handle_time_warp_input(GameStateContext &ctx)
     {
         if (!ctx.input)
+        {
+            return;
+        }
+
+        if (_warp_to_time_active)
         {
             return;
         }
