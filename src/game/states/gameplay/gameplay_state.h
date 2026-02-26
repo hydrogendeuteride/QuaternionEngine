@@ -268,7 +268,6 @@ namespace Game
         bool _prediction_draw_full_orbit{true};
         bool _prediction_draw_future_segment{true};
         bool _prediction_draw_velocity_ray{false};
-        bool _prediction_allow_legacy_fallback{false}; // Euler fallback (for debug only)
         double _prediction_periodic_refresh_s{0.0}; // 0 = never (cache is extended when horizon runs out)
         double _prediction_thrust_refresh_s{0.1};    // rebuild at most this often while thrusting
         double _prediction_future_window_s{600.0};

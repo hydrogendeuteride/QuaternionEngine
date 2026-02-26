@@ -449,10 +449,6 @@ namespace Game
                     ImGui::SameLine();
                     ImGui::TextUnformatted("(0 = off)");
 
-                    if (ImGui::Checkbox("Legacy prediction fallback (Euler)", &_prediction_allow_legacy_fallback))
-                    {
-                        _prediction_dirty = true;
-                    }
                 }
 
                 const EntityId player_eid = player_entity();
