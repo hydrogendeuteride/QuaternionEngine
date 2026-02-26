@@ -13,8 +13,10 @@
 #include <memory>
 #include <deque>
 #include <string>
+#include <array>
 #include <vector>
 #include <limits>
+#include <algorithm>
 
 namespace Game
 {
@@ -116,6 +118,52 @@ namespace Game
         void emit_orbit_prediction_debug(GameStateContext &ctx);
 
         void mark_prediction_dirty();
+
+        // Time warp
+        struct TimeWarpState
+        {
+            enum class Mode
+            {
+                Realtime,
+                PhysicsWarp,
+                RailsWarp
+            };
+
+            Mode mode{Mode::Realtime};
+            int warp_level{0}; // 0=x1, 1=x2, 2=x5, 3=x10, 4=x50, 5=x100, 6=x1000
+
+            static constexpr int kMaxPhysicsWarpLevel = 3; // x10
+            static constexpr int kMaxWarpLevel = 6;        // x1000
+
+            static constexpr std::array<double, 7> kWarpFactors{1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 1000.0};
+
+            double factor() const
+            {
+                const int idx = std::clamp(warp_level, 0, kMaxWarpLevel);
+                return kWarpFactors[static_cast<size_t>(idx)];
+            }
+
+            Mode mode_for_level(int level) const
+            {
+                if (level <= 0)
+                {
+                    return Mode::Realtime;
+                }
+                if (level <= kMaxPhysicsWarpLevel)
+                {
+                    return Mode::PhysicsWarp;
+                }
+                return Mode::RailsWarp;
+            }
+        };
+
+        void reset_time_warp_state();
+        void handle_time_warp_input(GameStateContext &ctx);
+        void set_time_warp_level(GameStateContext &ctx, int level);
+        void enter_rails_warp(GameStateContext &ctx);
+        void exit_rails_warp(GameStateContext &ctx);
+        void rails_warp_step(GameStateContext &ctx, double dt_s);
+        void sync_celestial_render_entities(GameStateContext &ctx);
 
         // Orbiter helpers
         // player = first `is_player` orbiter (HUD/camera/prediction subject)
@@ -229,5 +277,12 @@ namespace Game
         // Timing
         float _elapsed{0.0f};
         double _fixed_time_s{0.0};
+
+        TimeWarpState _time_warp{};
+        bool _rails_warp_active{false};
+        double _last_sim_step_dt_s{0.0};
+        bool _rails_thrust_applied_this_tick{false};
+        glm::vec3 _rails_last_thrust_dir_local{0.0f};
+        glm::vec3 _rails_last_torque_dir_local{0.0f};
     };
 } // namespace Game

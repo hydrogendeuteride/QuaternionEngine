@@ -120,6 +120,7 @@ namespace Game
     {
         _elapsed = 0.0f;
         _fixed_time_s = 0.0;
+        reset_time_warp_state();
         _reset_requested = false;
         _contact_log.clear();
         _prediction_cache.clear();
@@ -275,6 +276,7 @@ namespace Game
             info.apply_gravity = true;
             info.is_player = is_primary_player;
             info.is_rebase_anchor = orbiter_def.is_rebase_anchor;
+            info.mass_kg = std::max(0.0, static_cast<double>(orbiter_def.body_settings.mass));
             _orbiters.push_back(std::move(info));
         }
 
