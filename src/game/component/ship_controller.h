@@ -8,6 +8,13 @@
 
 namespace Game
 {
+    struct ThrustInput
+    {
+        glm::vec3 local_thrust_dir{0.0f}; // normalized, 0 if no input
+        glm::vec3 local_torque_dir{0.0f}; // normalized, 0 if no input
+        bool sas_toggled{false};          // T key, edge-triggered
+    };
+
     // ============================================================================
     // ShipController: Reads keyboard input and applies thrust/torque to a ship
     //
@@ -31,6 +38,10 @@ namespace Game
 
         void on_fixed_update(ComponentContext &ctx, float fixed_dt) override;
 
+        // Key input only; does not touch physics.
+        static ThrustInput read_input(const InputState *input, bool ui_capture_keyboard,
+                                      bool &sas_toggle_prev_down);
+
         // Config
         float thrust_force() const { return _thrust_force; }
         void set_thrust_force(float f) { _thrust_force = f; }
@@ -43,6 +54,8 @@ namespace Game
 
         // State
         bool sas_enabled() const { return _sas_enabled; }
+        void set_sas_enabled(bool enabled) { _sas_enabled = enabled; }
+        void set_sas_toggle_prev_down(bool down) { _sas_toggle_prev_down = down; }
         glm::vec3 last_thrust_dir() const { return _last_thrust_dir; }
         bool thrust_applied_this_tick() const { return _thrust_applied_this_tick; }
 

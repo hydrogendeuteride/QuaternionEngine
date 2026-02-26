@@ -29,6 +29,7 @@ namespace Game
         _world.set_api(ctx.api);
         _elapsed = 0.0f;
         _fixed_time_s = 0.0;
+        reset_time_warp_state();
         _reset_requested = false;
         _scenario_io_status.clear();
         _scenario_io_status_ok = true;
@@ -65,6 +66,7 @@ namespace Game
         _contact_log.clear();
         _prediction_cache.clear();
         _prediction_dirty = true;
+        reset_time_warp_state();
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (ctx.renderer && ctx.renderer->_context)
@@ -90,6 +92,8 @@ namespace Game
 
         _elapsed += dt;
 
+        handle_time_warp_input(ctx);
+
         if (ctx.input && ctx.input->key_pressed(Key::Escape))
         {
             _pending = StateTransition::push<PauseState>();
@@ -114,13 +118,48 @@ namespace Game
             return;
         }
 
-        _fixed_time_s += static_cast<double>(fixed_dt);
+        const TimeWarpState::Mode desired_mode = _time_warp.mode_for_level(_time_warp.warp_level);
+        _time_warp.mode = desired_mode;
+
+        const double warp_factor = _time_warp.factor();
+
+        if (desired_mode == TimeWarpState::Mode::RailsWarp)
+        {
+            if (!_rails_warp_active)
+            {
+                enter_rails_warp(ctx);
+            }
+
+            if (_rails_warp_active)
+            {
+                const double dt_s = static_cast<double>(fixed_dt) * warp_factor;
+                _fixed_time_s += dt_s;
+                _last_sim_step_dt_s = dt_s;
+
+                rails_warp_step(ctx, dt_s);
+                update_prediction(ctx, static_cast<float>(dt_s));
+                return;
+            }
+        }
+
+        const int physics_steps =
+                (desired_mode == TimeWarpState::Mode::PhysicsWarp)
+                    ? std::max(1, static_cast<int>(warp_factor))
+                    : 1;
+
+        const double effective_dt_s = static_cast<double>(fixed_dt) * static_cast<double>(physics_steps);
+        _last_sim_step_dt_s = static_cast<double>(fixed_dt);
 
         ComponentContext comp_ctx = build_component_context(ctx);
-        _world.entities().fixed_update_components(comp_ctx, fixed_dt);
 
-        update_prediction(ctx, fixed_dt);
-        step_physics(ctx, fixed_dt);
+        for (int i = 0; i < physics_steps; ++i)
+        {
+            _fixed_time_s += static_cast<double>(fixed_dt);
+            _world.entities().fixed_update_components(comp_ctx, fixed_dt);
+            step_physics(ctx, fixed_dt);
+        }
+
+        update_prediction(ctx, static_cast<float>(effective_dt_s));
     }
 
     void GameplayState::on_draw_ui(GameStateContext &ctx)
@@ -133,7 +172,28 @@ namespace Game
 
         if (ImGui::Begin("##GameplayHUD", nullptr, flags))
         {
-            ImGui::Text("Time: %.1f s (fixed %.2f)", _elapsed, _fixed_time_s);
+            const double sim_time_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+            const int sim_hours = static_cast<int>(std::floor(sim_time_s / 3600.0));
+            const int sim_minutes = static_cast<int>(std::floor(std::fmod(sim_time_s, 3600.0) / 60.0));
+            const double sim_seconds = std::fmod(sim_time_s, 60.0);
+
+            const char *warp_mode = "Realtime";
+            switch (_time_warp.mode)
+            {
+                case TimeWarpState::Mode::Realtime:
+                    warp_mode = "Realtime";
+                    break;
+                case TimeWarpState::Mode::PhysicsWarp:
+                    warp_mode = "Physics";
+                    break;
+                case TimeWarpState::Mode::RailsWarp:
+                    warp_mode = "Rails";
+                    break;
+            }
+
+            ImGui::Text("Sim: %dh %dm %.1fs", sim_hours, sim_minutes, sim_seconds);
+            ImGui::Text("Warp: x%.0f (%s)  [.,] change  [/]/[Backspace] x1", _time_warp.factor(), warp_mode);
+            ImGui::Text("Real: %.1f s", _elapsed);
             ImGui::Text("[ESC] Pause");
 
 #if !(defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT)
@@ -257,9 +317,12 @@ namespace Game
                         if (sc)
                         {
                             ImGui::Separator();
-                            const glm::vec3 td = sc->last_thrust_dir();
+                            const bool rails_warp = _rails_warp_active && _time_warp.mode == TimeWarpState::Mode::RailsWarp;
+                            const glm::vec3 td = rails_warp ? _rails_last_thrust_dir_local : sc->last_thrust_dir();
                             ImGui::Text("SAS: %s  [T] toggle", sc->sas_enabled() ? "ON " : "OFF");
-                            ImGui::Text("Thrust: (%.1f, %.1f, %.1f)", td.x, td.y, td.z);
+                            ImGui::Text("Thrust input: (%.1f, %.1f, %.1f)%s",
+                                        td.x, td.y, td.z,
+                                        (rails_warp && _rails_thrust_applied_this_tick) ? " [applied]" : "");
 
                             if (ctx.renderer && ctx.renderer->ui())
                             {
@@ -267,7 +330,17 @@ namespace Game
                                             ctx.renderer->ui()->wantCaptureKeyboard() ? "YES" : "NO");
                             }
 
-                            if (player->has_physics() && _physics)
+                            if (rails_warp)
+                            {
+                                WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
+                                glm::dvec3 ship_vel_world(0.0);
+                                glm::vec3 ship_vel_local_f(0.0f);
+                                if (get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
+                                {
+                                    ImGui::Text("Speed(world): %.2f m/s", glm::length(ship_vel_world));
+                                }
+                            }
+                            else if (player->has_physics() && _physics)
                             {
                                 const Physics::BodyId body_id{player->physics_body_value()};
                                 if (_physics->is_body_valid(body_id))
@@ -485,6 +558,55 @@ namespace Game
             }
         }
         ImGui::End();
+    }
+
+    void GameplayState::reset_time_warp_state()
+    {
+        _time_warp.warp_level = 0;
+        _time_warp.mode = TimeWarpState::Mode::Realtime;
+        _rails_warp_active = false;
+        _last_sim_step_dt_s = 0.0;
+        _rails_thrust_applied_this_tick = false;
+        _rails_last_thrust_dir_local = glm::vec3(0.0f);
+        _rails_last_torque_dir_local = glm::vec3(0.0f);
+    }
+
+    void GameplayState::handle_time_warp_input(GameStateContext &ctx)
+    {
+        if (!ctx.input)
+        {
+            return;
+        }
+
+        const bool ui_capture_keyboard = ctx.renderer && ctx.renderer->ui() && ctx.renderer->ui()->wantCaptureKeyboard();
+        if (ui_capture_keyboard)
+        {
+            return;
+        }
+
+        int level = _time_warp.warp_level;
+        bool changed = false;
+
+        if (ctx.input->key_pressed(Key::Period))
+        {
+            level += 1;
+            changed = true;
+        }
+        if (ctx.input->key_pressed(Key::Comma))
+        {
+            level -= 1;
+            changed = true;
+        }
+        if (ctx.input->key_pressed(Key::Slash) || ctx.input->key_pressed(Key::Backspace))
+        {
+            level = 0;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            set_time_warp_level(ctx, level);
+        }
     }
 
     ComponentContext GameplayState::build_component_context(GameStateContext &ctx, float alpha)

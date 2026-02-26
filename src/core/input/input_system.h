@@ -58,6 +58,10 @@ enum class Key : uint16_t
     Tab = 43,
     Space = 44,
 
+    Comma = 54,
+    Period = 55,
+    Slash = 56,
+
     ArrowRight = 79,
     ArrowLeft = 80,
     ArrowDown = 81,
@@ -222,4 +226,3 @@ private:
     uint32_t _last_resize_event_ms = 0;
     CursorMode _cursor_mode = CursorMode::Normal;
 };
-
