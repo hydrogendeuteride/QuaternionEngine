@@ -9,6 +9,7 @@
 #include "core/util/initializers.h"
 #include "core/types.h"
 #include "core/config.h"
+#include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
 
@@ -29,8 +30,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine *engine, fastgltf::Asset &
 
     std::visit(
         fastgltf::visitor{
-            [](auto &arg) {
-            },
+            [](auto &) {},
             [&](fastgltf::sources::URI &filePath) {
                 assert(filePath.fileByteOffset == 0); // We don't support offsets with stbi.
                 assert(filePath.uri.isLocalPath()); // We're only capable of loading
@@ -83,8 +83,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine *engine, fastgltf::Asset &
                                // We only care about VectorWithMime here, because we
                                // specify LoadExternalBuffers, meaning all buffers
                                // are already loaded into a vector.
-                               [](auto &arg) {
-                               },
+                               [](auto &) {},
                                [&](fastgltf::sources::Vector &vector) {
                                    unsigned char *data = stbi_load_from_memory(
                                        vector.bytes.data() + bufferView.byteOffset,
@@ -270,7 +269,9 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
     // load samplers
     for (fastgltf::Sampler &sampler: gltf.samplers)
     {
-        VkSamplerCreateInfo sampl = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, .pNext = nullptr};
+        VkSamplerCreateInfo sampl{};
+        sampl.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampl.pNext = nullptr;
         sampl.maxLod = VK_LOD_CLAMP_NONE;
         sampl.minLod = 0.0f;
 
@@ -350,7 +351,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
                 auto &bufferView = gltf.bufferViews[view.bufferViewIndex];
                 auto &buffer = gltf.buffers[bufferView.bufferIndex];
                 std::visit(fastgltf::visitor{
-                    [](auto &arg) {},
+                    [](auto &) {},
                     [&](fastgltf::sources::Vector &vec)
                     {
                         size_t off = bufferView.byteOffset;
@@ -362,7 +363,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
                     }
                 }, buffer.data);
             },
-            [](auto &other) {}
+            [](auto &) {}
         }, image.data);
         return key;
     };
@@ -838,8 +839,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
 
         std::visit(fastgltf::visitor{
                        [&](fastgltf::Node::TransformMatrix matrix) {
-                           glm::mat4 m(1.0f);
-                           memcpy(&m, matrix.data(), sizeof(matrix));
+                           glm::mat4 m = glm::make_mat4(matrix.data());
 
                            glm::vec3 t;
                            glm::quat r;
@@ -870,7 +870,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
     //< load_nodes
     //> load_graph
     // run loop again to setup transform hierarchy
-    for (int i = 0; i < gltf.nodes.size(); i++)
+    for (size_t i = 0; i < gltf.nodes.size(); ++i)
     {
         fastgltf::Node &node = gltf.nodes[i];
         std::shared_ptr<Node> &sceneNode = nodes[i];
@@ -1012,7 +1012,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
     for (auto &buf : gltf.buffers)
     {
         std::visit(fastgltf::visitor{
-            [](auto &arg) {},
+            [](auto &) {},
             [&](fastgltf::sources::Vector &vec) {
                 std::vector<uint8_t>().swap(vec.bytes);
             }
@@ -1021,7 +1021,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
     for (auto &img : gltf.images)
     {
         std::visit(fastgltf::visitor{
-            [](auto &arg) {},
+            [](auto &) {},
             [&](fastgltf::sources::Vector &vec) {
                 std::vector<uint8_t>().swap(vec.bytes);
             }

@@ -11,7 +11,6 @@
 #include "core/pipeline/manager.h"
 
 #include "render/graph/graph.h"
-#include "render/graph/resources.h"
 #include "render/pipelines.h"
 
 #include <algorithm>

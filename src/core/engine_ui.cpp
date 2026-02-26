@@ -2158,7 +2158,6 @@ namespace
             return;
         }
 
-        SceneManager *sceneMgr = eng->_sceneManager.get();
         PickingSystem *picking = eng->picking();
 
         // Spawn glTF instances (runtime)

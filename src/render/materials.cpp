@@ -30,7 +30,8 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine *engine)
     // Ensure IBL layout exists; add placeholder for set=2
     // Create a persistent empty set layout placeholder (lifetime = GLTFMetallic_Roughness)
     {
-        VkDescriptorSetLayoutCreateInfo info{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        VkDescriptorSetLayoutCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         VK_CHECK(vkCreateDescriptorSetLayout(engine->_deviceManager->device(), &info, nullptr, &emptySetLayout));
     }
     VkDescriptorSetLayout iblLayout = emptySetLayout;

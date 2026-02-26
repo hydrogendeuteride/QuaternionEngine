@@ -14,7 +14,6 @@
 #include "core/world.h"
 
 #include "render/graph/graph.h"
-#include "render/graph/resources.h"
 #include "render/pipelines.h"
 
 #include "scene/vk_scene.h"
