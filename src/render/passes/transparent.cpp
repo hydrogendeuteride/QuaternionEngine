@@ -69,7 +69,7 @@ void TransparentPass::register_graph(RenderGraph *graph, RGImageHandle drawHandl
 
 void TransparentPass::draw_transparent(VkCommandBuffer cmd,
                                        EngineContext *context,
-                                       const RGPassResources &resources,
+                                       const RGPassResources & /*resources*/,
                                        RGImageHandle /*drawHandle*/,
                                        RGImageHandle /*depthHandle*/) const
 {

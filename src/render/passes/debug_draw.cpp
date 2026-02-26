@@ -9,7 +9,6 @@
 #include <core/frame/resources.h>
 #include <core/pipeline/manager.h>
 #include <render/graph/graph.h>
-#include <render/graph/resources.h>
 #include <scene/vk_scene.h>
 
 #include <algorithm>
@@ -198,7 +197,8 @@ void DebugDrawPass::draw_debug(VkCommandBuffer cmd,
         rm->destroy_buffer(vb);
     });
 
-    VkBufferDeviceAddressInfo addrInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    VkBufferDeviceAddressInfo addrInfo{};
+    addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     addrInfo.buffer = vb.buffer;
     VkDeviceAddress addr = vkGetBufferDeviceAddress(dm->device(), &addrInfo);
 

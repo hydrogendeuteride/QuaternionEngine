@@ -205,7 +205,7 @@ namespace Game
             renderer->ui()->addDrawCallback([this]() { draw_ui(); });
         }
 
-        if (auto* audio = runtime.audio())
+        if (runtime.audio())
         {
             // audio->play_3d();
         }

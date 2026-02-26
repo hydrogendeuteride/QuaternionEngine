@@ -571,7 +571,7 @@ AssetManager::GLTFTexturePrefetchResult AssetManager::prefetchGLTFTexturesWithHa
                 auto &bufferView = gltf.bufferViews[view.bufferViewIndex];
                 auto &buffer = gltf.buffers[bufferView.bufferIndex];
                 std::visit(fastgltf::visitor{
-                    [](auto &arg) {},
+                    [](auto &) {},
                     [&](fastgltf::sources::Vector &vec)
                     {
                         size_t off = bufferView.byteOffset;
@@ -583,7 +583,7 @@ AssetManager::GLTFTexturePrefetchResult AssetManager::prefetchGLTFTexturesWithHa
                     }
                 }, buffer.data);
             },
-            [](auto &other) {}
+            [](auto &) {}
         }, image.data);
 
         if (key.hash != 0)
@@ -608,7 +608,7 @@ AssetManager::GLTFTexturePrefetchResult AssetManager::prefetchGLTFTexturesWithHa
     for (auto &buf : gltf.buffers)
     {
         std::visit(fastgltf::visitor{
-            [](auto &arg) {},
+            [](auto &) {},
             [&](fastgltf::sources::Vector &vec) {
                 std::vector<uint8_t>().swap(vec.bytes);
             }

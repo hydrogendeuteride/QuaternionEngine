@@ -6,7 +6,6 @@
 #include "vk_mem_alloc.h"
 #include <render/graph/graph.h>
 #include <render/graph/builder.h>
-#include <render/graph/resources.h>
 
 #include "core/frame/resources.h"
 
@@ -32,7 +31,7 @@ void ResourceManager::init(DeviceManager *deviceManager)
     VkFenceCreateInfo fenceCreateInfo = vkinit::fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
     VK_CHECK(vkCreateFence(_deviceManager->device(), &fenceCreateInfo, nullptr, &_immFence));
 
-    _deletionQueue.push_function([=]() {
+    _deletionQueue.push_function([this]() {
         vkDestroyCommandPool(_deviceManager->device(), _immCommandPool, nullptr);
         vkDestroyFence(_deviceManager->device(), _immFence, nullptr);
     });

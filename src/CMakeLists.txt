@@ -374,6 +374,14 @@ if (APPLE)
     )
 endif()
 
+# Vulkan structs are intentionally partially initialized in many places
+# (set sType + only required fields). Suppress this noisy warning category.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(vulkan_engine PRIVATE
+        -Wno-missing-field-initializers
+    )
+endif()
+
 target_include_directories(vulkan_engine PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/core"
@@ -394,6 +402,11 @@ target_include_directories(vulkan_engine PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/game"
   "${CMAKE_CURRENT_SOURCE_DIR}/audio"
   "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/taskflow/3rd-party"
+)
+
+# Treat BVH headers as system headers to avoid third-party warning noise.
+target_include_directories(vulkan_engine SYSTEM PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/BVH/include"
 )
 
 option(ENABLE_MIKKTS "Use MikkTSpace for tangent generation" ON)
