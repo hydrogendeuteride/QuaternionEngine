@@ -549,7 +549,7 @@ bool ComputeManager::createPipeline(const std::string &name, const ComputePipeli
 }
 
 VkDescriptorSet ComputeManager::allocateDescriptorSet(const ComputePipeline &pipeline,
-                                                      const std::vector<ComputeBinding> &bindings)
+                                                      const std::vector<ComputeBinding> & /*bindings*/)
 {
     if (pipeline.descriptorLayout == VK_NULL_HANDLE)
     {

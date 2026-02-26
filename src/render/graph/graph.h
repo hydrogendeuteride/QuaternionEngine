@@ -2,10 +2,10 @@
 
 #include <core/types.h>
 #include <render/graph/types.h>
-#include <render/graph/resources.h>
 #include <render/graph/builder.h>
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -15,6 +15,9 @@ class EngineContext;
 class RenderGraph
 {
 public:
+    RenderGraph();
+    ~RenderGraph();
+
     void init(EngineContext* ctx);
     void clear();
     // Destroy any GPU-side state owned by the graph (e.g. query pools).
@@ -110,10 +113,10 @@ public:
         std::vector<std::string> writers;
     };
 
-    size_t pass_count() const { return _passes.size(); }
-    const char* pass_name(size_t i) const { return i < _passes.size() ? _passes[i].name.c_str() : ""; }
-    bool pass_enabled(size_t i) const { return i < _passes.size() ? _passes[i].enabled : false; }
-    void set_pass_enabled(size_t i, bool e) { if (i < _passes.size()) _passes[i].enabled = e; }
+    size_t pass_count() const;
+    const char* pass_name(size_t i) const;
+    bool pass_enabled(size_t i) const;
+    void set_pass_enabled(size_t i, bool e);
 
     void debug_get_passes(std::vector<RGDebugPassInfo>& out) const;
     void debug_get_images(std::vector<RGDebugImageInfo>& out) const;
@@ -123,44 +126,6 @@ public:
     void resolve_timings();
 
 private:
-	struct ImportedImage
-	{
-		RGImportedImageDesc desc;
-		RGImageHandle handle;
-	};
-
-    struct Pass
-    {
-        std::string name;
-        RGPassType type{};
-        RecordCallback record;
-
-		// Declarations
-		std::vector<RGPassImageAccess> imageReads;
-		std::vector<RGPassImageAccess> imageWrites;
-		std::vector<RGPassBufferAccess> bufferReads;
-		std::vector<RGPassBufferAccess> bufferWrites;
-		std::vector<RGAttachmentInfo> colorAttachments;
-		bool hasDepth = false;
-		RGAttachmentInfo depthAttachment{};
-
-        std::vector<VkImageMemoryBarrier2> preImageBarriers;
-        std::vector<VkBufferMemoryBarrier2> preBufferBarriers;
-
-        // Cached rendering info derived from declared attachments (filled at execute)
-        bool hasRendering = false;
-        VkExtent2D renderExtent{};
-
-        bool enabled = true;
-    };
-
-	EngineContext* _context = nullptr;
-    RGResourceRegistry _resources;
-    std::vector<Pass> _passes;
-
-    // --- Timing data for last executed frame ---
-    VkQueryPool _timestampPool = VK_NULL_HANDLE; // holds 2 queries per pass (begin/end)
-    std::vector<float> _lastGpuMillis; // per pass
-    std::vector<float> _lastCpuMillis; // per pass (command recording time)
-    std::vector<bool> _wroteTimestamps; // per pass; true if queries were written in last execute
+    struct Impl;
+    std::unique_ptr<Impl> _impl;
 };

@@ -950,17 +950,17 @@ void VulkanEngine::cleanup()
 
         // Invalidate per-frame descriptor sets before destroying frame-owned
         // resources referenced by those sets.
-        for (int i = 0; i < FRAME_OVERLAP; i++)
+        for (unsigned int i = 0; i < FRAME_OVERLAP; ++i)
         {
             _frames[i]._frameDescriptors.clear_pools(_deviceManager->device());
         }
 
         // Flush all frame deletion queues first while VMA allocator is still alive
-        for (int i = 0; i < FRAME_OVERLAP; i++)
+        for (unsigned int i = 0; i < FRAME_OVERLAP; ++i)
         {
             _frames[i]._deletionQueue.flush();
         }
-        for (int i = 0; i < FRAME_OVERLAP; i++)
+        for (unsigned int i = 0; i < FRAME_OVERLAP; ++i)
         {
             _frames[i].cleanup(_deviceManager.get());
         }
@@ -1029,7 +1029,7 @@ void VulkanEngine::cleanup()
         dump_vma_json(_deviceManager.get(), "after_Samplers_Descriptors");
 
         // Extra safety: flush frame deletion queues once more before destroying VMA
-        for (int i = 0; i < FRAME_OVERLAP; i++)
+        for (unsigned int i = 0; i < FRAME_OVERLAP; ++i)
         {
             _frames[i]._deletionQueue.flush();
         }
@@ -1266,8 +1266,6 @@ void VulkanEngine::draw()
         RGImageHandle hGBufferAlbedo = _renderGraph->import_gbuffer_albedo();
         RGImageHandle hGBufferExtra = _renderGraph->import_gbuffer_extra();
         RGImageHandle hSwapchain = _renderGraph->import_swapchain_image(swapchainImageIndex);
-        // For debug overlays (IBL volumes), re-use HDR draw image as a color target.
-        RGImageHandle hDebugColor = hDraw;
 
         // Create transient depth targets for cascaded shadow maps (even if RT-only / disabled, to keep descriptors stable)
         const uint32_t shadowRes = _context ? _context->getShadowMapResolution() : kShadowMapResolution;
@@ -1774,7 +1772,7 @@ void VulkanEngine::initFrameResources()
         {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1},
     };
 
-    for (int i = 0; i < FRAME_OVERLAP; i++)
+    for (unsigned int i = 0; i < FRAME_OVERLAP; ++i)
     {
         _frames[i].init(_deviceManager.get(), frame_sizes);
     }

@@ -10,7 +10,6 @@
 #include <core/device/resource.h>
 #include <core/pipeline/sampler.h>
 #include <render/graph/graph.h>
-#include <render/graph/resources.h>
 
 #include "core/frame/resources.h"
 
