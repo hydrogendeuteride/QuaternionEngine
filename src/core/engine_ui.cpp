@@ -3303,6 +3303,8 @@ namespace
             }
 
             ImGui::SliderInt("Segments", &dd->settings().segments, 8, 128);
+            ImGui::SliderFloat("Line width (px)", &dd->settings().line_width_px, 1.0f, 8.0f, "%.1f");
+            ImGui::SliderFloat("Line AA (px)", &dd->settings().line_aa_px, 0.0f, 4.0f, "%.1f");
         }
     }
 } // namespace

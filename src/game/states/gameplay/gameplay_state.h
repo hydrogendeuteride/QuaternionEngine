@@ -9,6 +9,7 @@
 #include "physics/physics_context.h"
 #include "orbit_helpers.h"
 #include "orbitsim/trajectory_types.hpp"
+#include "orbitsim/maneuvers_types.hpp"
 
 #include <memory>
 #include <deque>
@@ -116,6 +117,7 @@ namespace Game
         bool player_thrust_applied_this_tick() const;
 
         void emit_orbit_prediction_debug(GameStateContext &ctx);
+        void emit_maneuver_node_debug_overlay(GameStateContext &ctx);
 
         void mark_prediction_dirty();
 
@@ -232,9 +234,11 @@ namespace Game
 
             // BCI = body-centered inertial (relative to the current reference body)
             std::vector<orbitsim::TrajectorySample> trajectory_bci;
+            std::vector<orbitsim::TrajectorySample> trajectory_bci_planned;
 
             // Cached world-space polyline refreshed from trajectory_bci each frame.
             std::vector<WorldVec3> points_world;
+            std::vector<WorldVec3> points_world_planned;
             std::vector<float> altitude_km;
             std::vector<float> speed_kmps;
 
@@ -252,7 +256,9 @@ namespace Game
                 build_pos_world = WorldVec3(0.0, 0.0, 0.0);
                 build_vel_world = glm::dvec3(0.0, 0.0, 0.0);
                 trajectory_bci.clear();
+                trajectory_bci_planned.clear();
                 points_world.clear();
+                points_world_planned.clear();
                 altitude_km.clear();
                 speed_kmps.clear();
                 semi_major_axis_m = 0.0;
@@ -268,10 +274,100 @@ namespace Game
         bool _prediction_draw_full_orbit{true};
         bool _prediction_draw_future_segment{true};
         bool _prediction_draw_velocity_ray{false};
+        float _prediction_line_alpha_scale{1.0f};   // multiplier for orbit line alpha
+        float _prediction_line_overlay_boost{0.0f}; // extra always-on-top alpha fraction
         double _prediction_periodic_refresh_s{0.0}; // 0 = never (cache is extended when horizon runs out)
         double _prediction_thrust_refresh_s{0.1};    // rebuild at most this often while thrusting
         double _prediction_future_window_s{600.0};
         OrbitPredictionCache _prediction_cache{};
+
+        // Maneuver nodes (planning UI + prediction)
+        struct ManeuverNode
+        {
+            int id{-1};                         // unique ID (stable)
+            double time_s{0.0};                 // sim time (absolute)
+            glm::dvec3 dv_rtn_mps{0.0, 0.0, 0.0}; // (Radial, Tangential/Prograde, Normal) [m/s]
+            orbitsim::BodyId primary_body_id{orbitsim::kInvalidBodyId}; // RTN primary body
+
+            // Cached/derived values (updated by gameplay state)
+            double total_dv_mps{0.0};
+            WorldVec3 position_world{0.0, 0.0, 0.0};
+            glm::dvec3 burn_direction_world{0.0, 0.0, 0.0};
+        };
+
+        struct ManeuverPlanState
+        {
+            std::vector<ManeuverNode> nodes;
+            int selected_node_id{-1};
+            int next_node_id{0};
+
+            ManeuverNode *find_node(const int id)
+            {
+                for (auto &n : nodes)
+                {
+                    if (n.id == id)
+                    {
+                        return &n;
+                    }
+                }
+                return nullptr;
+            }
+
+            const ManeuverNode *find_node(const int id) const
+            {
+                for (const auto &n : nodes)
+                {
+                    if (n.id == id)
+                    {
+                        return &n;
+                    }
+                }
+                return nullptr;
+            }
+
+            void sort_by_time()
+            {
+                std::sort(nodes.begin(), nodes.end(), [](const ManeuverNode &a, const ManeuverNode &b) {
+                    return a.time_s < b.time_s;
+                });
+            }
+
+            orbitsim::ManeuverPlan to_orbitsim_plan(const orbitsim::SpacecraftId sc_id) const
+            {
+                orbitsim::ManeuverPlan plan{};
+                plan.impulses.reserve(nodes.size());
+
+                for (const auto &node : nodes)
+                {
+                    orbitsim::ImpulseSegment imp{};
+                    imp.t_s = node.time_s;
+                    imp.primary_body_id = node.primary_body_id;
+                    imp.dv_rtn_mps = orbitsim::Vec3{node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z};
+                    imp.spacecraft_id = sc_id;
+                    plan.impulses.push_back(imp);
+                }
+
+                orbitsim::sort_impulses_by_time(plan);
+                return plan;
+            }
+        };
+
+        void draw_maneuver_nodes_panel(GameStateContext &ctx);
+        void update_maneuver_nodes_time_warp(GameStateContext &ctx, float fixed_dt);
+        void update_maneuver_nodes_execution(GameStateContext &ctx);
+
+        bool _maneuver_nodes_enabled{true};
+        bool _maneuver_nodes_debug_draw{true};
+        double _maneuver_timeline_window_s{3600.0};
+        ManeuverPlanState _maneuver_state{};
+
+        // Warp/execute helpers for maneuver nodes
+        bool _warp_to_time_active{false};
+        double _warp_to_time_target_s{0.0};
+        int _warp_to_time_restore_level{0};
+
+        bool _execute_node_armed{false};
+        int _execute_node_id{-1};
 
         // Timing
         float _elapsed{0.0f};
