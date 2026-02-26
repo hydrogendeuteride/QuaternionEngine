@@ -226,6 +226,7 @@ add_executable (vulkan_engine
   game/states/gameplay/gameplay_state.cpp
   game/states/gameplay/gameplay_state_scene.cpp
   game/states/gameplay/gameplay_state_sim.cpp
+  game/states/gameplay/gameplay_state_prediction.cpp
   game/states/gameplay/scenario_loader.h
   game/states/gameplay/scenario_loader.cpp
   # game/legacy — old IGameCallbacks demos
