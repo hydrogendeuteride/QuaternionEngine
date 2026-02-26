@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include "game/entity.h"
 #include "physics/physics_world.h"
@@ -98,6 +99,29 @@ namespace Game
         bool apply_gravity{true};
         bool is_player{false}; // HUD/camera/prediction subject candidates
         bool is_rebase_anchor{false};
+        double mass_kg{0.0};
+
+        struct RailsState
+        {
+            orbitsim::SpacecraftId sc_id{orbitsim::kInvalidSpacecraftId};
+            glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+            glm::vec3 angular_velocity_radps{0.0f};
+            bool sas_enabled{false};
+            bool sas_toggle_prev_down{false};
+
+            bool active() const { return sc_id != orbitsim::kInvalidSpacecraftId; }
+
+            void clear()
+            {
+                sc_id = orbitsim::kInvalidSpacecraftId;
+                rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+                angular_velocity_radps = glm::vec3(0.0f);
+                sas_enabled = false;
+                sas_toggle_prev_down = false;
+            }
+        };
+
+        RailsState rails{};
     };
 
     // ============================================================================
@@ -208,7 +232,7 @@ namespace Game
 
         // Acceleration in a translating reference-body-centered frame:
         //   a_rel = a_sc_bary - a_ref_bary
-        // where barycentric acceleration is computed from all massive bodies.
+        // where barycentric acceleration is computed from all massive bodies(tidal force).
         inline glm::dvec3 nbody_accel_body_centered(const OrbitalScenario &scenario, const glm::dvec3 &p_rel_m)
         {
             const orbitsim::MassiveBody *ref = scenario.reference_sim_body();

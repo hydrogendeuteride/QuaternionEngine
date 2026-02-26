@@ -12,34 +12,26 @@
 
 namespace Game
 {
-    void ShipController::on_fixed_update(ComponentContext &ctx, float fixed_dt)
+    ThrustInput ShipController::read_input(const InputState *input, const bool ui_capture_keyboard,
+                                           bool &sas_toggle_prev_down)
     {
-        _thrust_applied_this_tick = false;
-
-#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-        if (!ctx.input || !ctx.physics || !entity() || !entity()->has_physics())
+        ThrustInput out{};
+        if (!input)
         {
-            return;
+            sas_toggle_prev_down = false;
+            return out;
         }
 
-        const Physics::BodyId body_id{entity()->physics_body_value()};
-        if (!ctx.physics->is_body_valid(body_id))
-        {
-            return;
-        }
-
-        const auto *input = ctx.input;
+        const bool allow_keyboard = !ui_capture_keyboard;
 
         // --- SAS toggle (T key, edge-triggered) ---
         // fixed_update may run multiple times per frame; use key_down edge detection.
         const bool sas_toggle_down = input->key_down(Key::T);
-        if (!ctx.ui_capture_keyboard && sas_toggle_down && !_sas_toggle_prev_down)
+        if (allow_keyboard && sas_toggle_down && !sas_toggle_prev_down)
         {
-            _sas_enabled = !_sas_enabled;
+            out.sas_toggled = true;
         }
-        _sas_toggle_prev_down = sas_toggle_down;
-
-        const bool allow_keyboard = !ctx.ui_capture_keyboard;
+        sas_toggle_prev_down = sas_toggle_down;
 
         // --- Translation input (local frame) ---
         glm::vec3 local_thrust{0.0f};
@@ -60,7 +52,7 @@ namespace Game
             local_thrust = glm::normalize(local_thrust);
         }
 
-        _last_thrust_dir = local_thrust;
+        out.local_thrust_dir = local_thrust;
 
         // --- Rotation input (local frame) ---
         glm::vec3 local_torque{0.0f};
@@ -80,13 +72,41 @@ namespace Game
             local_torque = glm::normalize(local_torque);
         }
 
-        const bool has_rotation_input = glm::length(local_torque) > 0.0f;
+        out.local_torque_dir = local_torque;
+
+        return out;
+    }
+
+    void ShipController::on_fixed_update(ComponentContext &ctx, float fixed_dt)
+    {
+        _thrust_applied_this_tick = false;
+
+        const ThrustInput input = read_input(ctx.input, ctx.ui_capture_keyboard, _sas_toggle_prev_down);
+        if (input.sas_toggled)
+        {
+            _sas_enabled = !_sas_enabled;
+        }
+        _last_thrust_dir = input.local_thrust_dir;
+
+#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
+        if (!ctx.physics || !entity() || !entity()->has_physics())
+        {
+            return;
+        }
+
+        const Physics::BodyId body_id{entity()->physics_body_value()};
+        if (!ctx.physics->is_body_valid(body_id))
+        {
+            return;
+        }
+
+        const bool has_rotation_input = glm::length(input.local_torque_dir) > 0.0f;
 
         // --- Transform local -> world ---
         const glm::quat ship_rot = ctx.physics->get_rotation(body_id);
 
-        const glm::vec3 world_force = ship_rot * (local_thrust * _thrust_force);
-        const glm::vec3 world_torque = ship_rot * (local_torque * _torque_strength);
+        const glm::vec3 world_force = ship_rot * (input.local_thrust_dir * _thrust_force);
+        const glm::vec3 world_torque = ship_rot * (input.local_torque_dir * _torque_strength);
 
         // --- Apply force & torque ---
         if (glm::length(world_force) > 0.0f)
