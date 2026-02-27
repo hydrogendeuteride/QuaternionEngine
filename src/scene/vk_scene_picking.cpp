@@ -317,13 +317,17 @@ namespace
         {
             case BoundsType::Sphere:
             {
-                // Early reject using bounding sphere in world space.
+                // Use the actual geometric sphere radius (max axis extent) rather than
+                // the bounding-sphere diagonal (length(extents) ≈ 1.73x for uniform extents).
+                // The diagonal is intentionally conservative for Box/Capsule pre-filters,
+                // but for Sphere bounds we want exact hit testing.
+                Bounds tightBounds = bounds;
+                tightBounds.sphereRadius = std::max({bounds.extents.x, bounds.extents.y, bounds.extents.z});
                 float sphereT = 0.0f;
-                if (!intersect_ray_sphere(rayOrigin, rayDir, bounds, worldTransform, sphereT))
+                if (!intersect_ray_sphere(rayOrigin, rayDir, tightBounds, worldTransform, sphereT))
                 {
                     return false;
                 }
-                // We already have the hit distance along the ray from the sphere test.
                 outWorldHit = rayOrigin + rayDir * sphereT;
                 return true;
             }
@@ -512,7 +516,7 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
         }
 
         PlanetSystem::PlanetBody *body = planets->find_body_by_name(obj.ownerName);
-        if (!body || !body->terrain || !(body->terrain_height_max_m <= 0.0))
+        if (!body || !body->terrain)
         {
             return false;
         }
@@ -520,7 +524,10 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
         const glm::dvec3 ro = glm::dvec3(rayOrigin);
         const glm::dvec3 rd = glm::dvec3(rayDir);
         const glm::dvec3 center_local = body->center_world - origin_world;
-        const double r = std::max(0.0, body->radius_m);
+        // Use base radius + small padding (0.2%) for a tight pick sphere.
+        // terrain_height_max_m is too conservative for click picking; a thin
+        // margin keeps the sphere close to the visual surface.
+        const double r = std::max(0.0, body->radius_m) * 1.002;
         if (!(r > 0.0))
         {
             return false;
