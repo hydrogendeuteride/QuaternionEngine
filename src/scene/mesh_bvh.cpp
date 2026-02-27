@@ -80,10 +80,13 @@ std::unique_ptr<MeshBVH> build_mesh_bvh(const MeshAsset &mesh,
         return {};
     }
 
-    unsigned int threadCount = std::thread::hardware_concurrency();
-    if (threadCount == 0)
+    // Small triangle counts (e.g. terrain patches ~2k tris) don't benefit from
+    // multi-threading — the thread-pool creation/teardown cost dominates.
+    constexpr size_t kMultiThreadThreshold = 4096;
+    unsigned int threadCount = 1;
+    if (result->primitives.size() > kMultiThreadThreshold)
     {
-        threadCount = 1;
+        threadCount = std::max(1u, std::thread::hardware_concurrency());
     }
 
     tf::Executor executor{threadCount};
