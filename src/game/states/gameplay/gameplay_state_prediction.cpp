@@ -1,5 +1,6 @@
 #include "gameplay_state.h"
 #include "orbit_helpers.h"
+#include "core/engine.h"
 #include "core/game_api.h"
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
@@ -576,6 +577,13 @@ namespace Game
 
     void GameplayState::emit_orbit_prediction_debug(GameStateContext &ctx)
     {
+        PickingSystem *picking = (ctx.renderer != nullptr) ? ctx.renderer->picking() : nullptr;
+        if (picking)
+        {
+            // Orbit plot is emitted per-frame, so refresh pickable segments the same way.
+            picking->clear_line_picks();
+        }
+
         if (!_prediction_enabled || !_debug_draw_enabled)
         {
             return;
@@ -670,6 +678,10 @@ namespace Game
         const auto &traj_planned = _prediction_cache.trajectory_bci_planned;
         const auto &points_planned = _prediction_cache.points_world_planned;
 
+        constexpr uint32_t kInvalidPickGroup = std::numeric_limits<uint32_t>::max();
+        const uint32_t pick_group_base = picking ? picking->add_line_pick_group("OrbitPlot/Base") : kInvalidPickGroup;
+        const uint32_t pick_group_planned = picking ? picking->add_line_pick_group("OrbitPlot/Planned") : kInvalidPickGroup;
+
         auto lower_bound_by_time = [&](const std::vector<orbitsim::TrajectorySample> &traj, double t_s) {
             return std::lower_bound(traj.cbegin(),
                                     traj.cend(),
@@ -737,7 +749,8 @@ namespace Game
                                double t_end_s,
                                const glm::vec4 &color,
                                WorldVec3 prev_world,
-                               const bool dashed) {
+                               const bool dashed,
+                               const uint32_t pick_group_id) {
             if (!(t_end_s > t_start_s))
             {
                 return;
@@ -765,6 +778,7 @@ namespace Game
             double dash_accum_m = 0.0;
             bool dash_on = true;
             double dash_limit_m = dash_on_m;
+            double prev_t_s = t_start_s;
 
             while (t < t_end && (seg + 1) < n)
             {
@@ -821,8 +835,18 @@ namespace Game
                                                          false);
                             }
                         }
+
+                        if (picking && pick_group_id != kInvalidPickGroup)
+                        {
+                            picking->add_line_pick_segment(pick_group_id,
+                                                           prev_world,
+                                                           p,
+                                                           prev_t_s,
+                                                           tj);
+                        }
                     }
                     prev_world = p;
+                    prev_t_s = tj;
                 }
 
                 t = seg_end;
@@ -842,7 +866,14 @@ namespace Game
                 t_full_end = std::min(t0 + _prediction_cache.orbital_period_s, t1);
             }
 
-            draw_window(traj_base, t0, t_full_end, color_orbit_full, draw_world(points_base.front()), false);
+            if (!_prediction_draw_future_segment)
+            {
+                draw_window(traj_base, t0, t_full_end, color_orbit_full, draw_world(points_base.front()), false, pick_group_base);
+            }
+            else
+            {
+                draw_window(traj_base, t0, t_full_end, color_orbit_full, draw_world(points_base.front()), false, kInvalidPickGroup);
+            }
         }
 
         // Future segment highlight (windowed).
@@ -851,7 +882,7 @@ namespace Game
             const double window_s = std::max(0.0, _prediction_future_window_s);
             const double t_end = (window_s > 0.0) ? std::min(now_s + window_s, t1) : t1;
 
-            draw_window(traj_base, now_s, t_end, color_orbit_future, ship_pos_world, false);
+            draw_window(traj_base, now_s, t_end, color_orbit_future, ship_pos_world, false, pick_group_base);
         }
 
         // Planned trajectory (maneuver nodes): draw as a dashed line in a distinct color.
@@ -892,7 +923,7 @@ namespace Game
                 if (t_plan_end > t_plan_start)
                 {
                     const WorldVec3 p_start = draw_position_at(traj_planned, points_planned, t_plan_start);
-                    draw_window(traj_planned, t_plan_start, t_plan_end, color_orbit_plan, p_start, true);
+                    draw_window(traj_planned, t_plan_start, t_plan_end, color_orbit_plan, p_start, true, pick_group_planned);
                 }
             }
         }
