@@ -480,6 +480,7 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
                     if (line_hit &&
                         hit_object.ownerType == RenderObject::OwnerType::MeshInstance &&
                         hit_object.sourceMesh == nullptr &&
+                        hit_object.pickBVH == nullptr &&
                         !hit_object.ownerName.empty())
                     {
                         if (PlanetSystem *planets = scene->get_planet_system())
@@ -492,7 +493,7 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
                                     if (compute_camera_ray(release_pos, ray))
                                     {
                                         const glm::dvec3 center_local = glm::dvec3(body->center_world - ray.origin_world);
-                                        const double r = std::max(0.0, body->radius_m) * 1.002;
+                                        const double r = std::max(0.0, body->radius_m);
 
                                         double t_sphere = 0.0;
                                         if (intersect_ray_sphere_depth(ray.origin_local, ray.dir_local, center_local, r, t_sphere))
@@ -627,6 +628,7 @@ void PickingSystem::update_hover(bool ui_want_capture_mouse)
 
             if (hover_obj.ownerType == RenderObject::OwnerType::MeshInstance &&
                 hover_obj.sourceMesh == nullptr &&
+                hover_obj.pickBVH == nullptr &&
                 !hover_obj.ownerName.empty())
             {
                 if (PlanetSystem *planets = _context->scene->get_planet_system())
@@ -639,7 +641,7 @@ void PickingSystem::update_hover(bool ui_want_capture_mouse)
                             if (compute_camera_ray(_mouse_pos_window, ray))
                             {
                                 const glm::dvec3 center_local = glm::dvec3(body->center_world - ray.origin_world);
-                                const double r = std::max(0.0, body->radius_m) * 1.002;
+                                const double r = std::max(0.0, body->radius_m);
 
                                 double t_sphere = 0.0;
                                 if (intersect_ray_sphere_depth(ray.origin_local, ray.dir_local, center_local, r, t_sphere))

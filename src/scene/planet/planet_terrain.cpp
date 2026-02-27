@@ -8,6 +8,7 @@
 #include <core/assets/manager.h>
 #include <render/materials.h>
 #include <core/pipeline/sampler.h>
+#include <scene/mesh_bvh.h>
 #include <scene/planet/cubesphere.h>
 #include <scene/planet/planet_heightmap.h>
 
@@ -78,23 +79,21 @@ void PlanetSystem::clear_terrain_patch_cache(TerrainState &state)
     {
         for (TerrainPatch &p: state.patches)
         {
-            if (p.vertex_buffer.buffer == VK_NULL_HANDLE)
+            if (p.vertex_buffer.buffer != VK_NULL_HANDLE)
             {
-                continue;
+                const AllocatedBuffer vb = p.vertex_buffer;
+                if (frame)
+                {
+                    frame->_deletionQueue.push_function([rm, vb]() { rm->destroy_buffer(vb); });
+                }
+                else
+                {
+                    rm->destroy_buffer(vb);
+                }
             }
-
-            const AllocatedBuffer vb = p.vertex_buffer;
-            if (frame)
-            {
-                frame->_deletionQueue.push_function([rm, vb]() { rm->destroy_buffer(vb); });
-            }
-            else
-            {
-                rm->destroy_buffer(vb);
-            }
-
             p.vertex_buffer = {};
             p.vertex_buffer_address = 0;
+            p.pick_bvh.reset();
         }
     }
 
@@ -173,14 +172,15 @@ void PlanetSystem::ensure_earth_patch_index_buffer()
         _earth_patch_index_buffer = {};
         _earth_patch_index_count = 0;
         _earth_patch_index_resolution = 0;
+        _earth_patch_indices_cpu.clear();
     }
 
-    std::vector<uint32_t> indices;
-    planet::build_cubesphere_patch_indices(indices, _earth_patch_resolution);
-    _earth_patch_index_count = static_cast<uint32_t>(indices.size());
+    _earth_patch_indices_cpu.clear();
+    planet::build_cubesphere_patch_indices(_earth_patch_indices_cpu, _earth_patch_resolution);
+    _earth_patch_index_count = static_cast<uint32_t>(_earth_patch_indices_cpu.size());
     _earth_patch_index_buffer =
-            rm->upload_buffer(indices.data(),
-                              indices.size() * sizeof(uint32_t),
+            rm->upload_buffer(_earth_patch_indices_cpu.data(),
+                              _earth_patch_indices_cpu.size() * sizeof(uint32_t),
                               VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
@@ -645,6 +645,7 @@ PlanetSystem::TerrainPatch *PlanetSystem::get_or_create_terrain_patch(TerrainSta
             p->vertex_buffer = {};
             p->vertex_buffer_address = 0;
         }
+        p->pick_bvh.reset();
     }
 
     if (!_context)
@@ -659,7 +660,9 @@ PlanetSystem::TerrainPatch *PlanetSystem::get_or_create_terrain_patch(TerrainSta
         return nullptr;
     }
 
-    if (_earth_patch_index_buffer.buffer == VK_NULL_HANDLE || _earth_patch_index_count == 0)
+    if (_earth_patch_index_buffer.buffer == VK_NULL_HANDLE ||
+        _earth_patch_index_count == 0 ||
+        _earth_patch_indices_cpu.empty())
     {
         return nullptr;
     }
@@ -777,6 +780,23 @@ PlanetSystem::TerrainPatch *PlanetSystem::get_or_create_terrain_patch(TerrainSta
                            key.level);
 
     const planet_helpers::PatchBoundsData bounds = planet_helpers::compute_patch_bounds(scratch_vertices);
+    std::shared_ptr<MeshBVH> patch_pick_bvh{};
+    {
+        MeshAsset pick_mesh{};
+        GeoSurface pick_surface{};
+        pick_surface.startIndex = 0;
+        pick_surface.count = _earth_patch_index_count;
+        pick_mesh.surfaces.push_back(pick_surface);
+
+        std::unique_ptr<MeshBVH> built_bvh =
+                build_mesh_bvh(pick_mesh,
+                               std::span<const Vertex>(scratch_vertices),
+                               std::span<const uint32_t>(_earth_patch_indices_cpu));
+        if (built_bvh)
+        {
+            patch_pick_bvh = std::move(built_bvh);
+        }
+    }
 
     AllocatedBuffer vb =
             rm->upload_buffer(scratch_vertices.data(),
@@ -820,6 +840,7 @@ PlanetSystem::TerrainPatch *PlanetSystem::get_or_create_terrain_patch(TerrainSta
     p.edge_stitch_mask = edge_stitch_mask;
     p.vertex_buffer = vb;
     p.vertex_buffer_address = addr;
+    p.pick_bvh = std::move(patch_pick_bvh);
     p.bounds_origin = bounds.origin;
     p.bounds_extents = bounds.extents;
     p.bounds_sphere_radius = bounds.sphere_radius;
