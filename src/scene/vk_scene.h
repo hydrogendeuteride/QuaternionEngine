@@ -34,6 +34,10 @@ struct RenderObject
 
     // Optional debug/source information (may be null/unused for some objects).
     MeshAsset *sourceMesh = nullptr;
+    // Optional CPU BVH used only for picking (e.g. procedural terrain patches).
+    // Raw pointer into a TerrainPatch::pick_bvh shared_ptr. Valid for one frame
+    // only — the patch LRU guarantees it won't be evicted until the next update_and_emit.
+    const MeshBVH *pickBVH = nullptr;
     uint32_t surfaceIndex = 0;
     // Unique per-draw identifier for ID-buffer picking (0 = none).
     uint32_t objectID = 0;

@@ -345,7 +345,12 @@ namespace
                 // For mesh bounds we rely solely on the CPU mesh BVH.
                 // If there is no BVH or the BVH misses, the object is
                 // treated as not hit by this ray (no coarse box fallback).
-                if (!obj.sourceMesh || !obj.sourceMesh->bvh)
+                const MeshBVH *pick_bvh = obj.pickBVH;
+                if (!pick_bvh && obj.sourceMesh && obj.sourceMesh->bvh)
+                {
+                    pick_bvh = obj.sourceMesh->bvh.get();
+                }
+                if (!pick_bvh)
                 {
                     return false;
                 }
@@ -356,7 +361,7 @@ namespace
                 }
 
                 MeshBVHPickHit meshHit{};
-                if (!intersect_ray_mesh_bvh(*obj.sourceMesh->bvh, worldTransform, rayOrigin, rayDir, meshHit))
+                if (!intersect_ray_mesh_bvh(*pick_bvh, worldTransform, rayOrigin, rayDir, meshHit))
                 {
                     if (debug)
                     {
@@ -510,7 +515,8 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
         // analytic ray/sphere intersection against the planet base radius for a stable result.
         if (obj.ownerType != RenderObject::OwnerType::MeshInstance ||
             obj.ownerName.empty() ||
-            obj.sourceMesh != nullptr)
+            obj.sourceMesh != nullptr ||
+            obj.pickBVH != nullptr)
         {
             return false;
         }
@@ -524,10 +530,9 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
         const glm::dvec3 ro = glm::dvec3(rayOrigin);
         const glm::dvec3 rd = glm::dvec3(rayDir);
         const glm::dvec3 center_local = body->center_world - origin_world;
-        // Use base radius + small padding (0.2%) for a tight pick sphere.
-        // terrain_height_max_m is too conservative for click picking; a thin
-        // margin keeps the sphere close to the visual surface.
-        const double r = std::max(0.0, body->radius_m) * 1.002;
+        // Use the base radius as-is for terrain-planet picking.
+        // terrain_height_max_m is too conservative for click picking.
+        const double r = std::max(0.0, body->radius_m);
         if (!(r > 0.0))
         {
             return false;
@@ -580,9 +585,14 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
                 bestHitPos = hitPos;
                 outObject = obj;
 
+                // Resolve effective BVH: prefer explicit pickBVH, fall back to sourceMesh.
+                const MeshBVH *hit_bvh = outObject.pickBVH
+                    ? outObject.pickBVH
+                    : (outObject.sourceMesh ? outObject.sourceMesh->bvh.get() : nullptr);
+
                 // If we have a precise mesh BVH hit, refine the picked
                 // primitive to the exact triangle instead of the whole surface.
-                if (localMeshHit.hit && outObject.sourceMesh && outObject.sourceMesh->bvh)
+                if (localMeshHit.hit && hit_bvh)
                 {
                     outObject.firstIndex = localMeshHit.firstIndex;
                     outObject.indexCount = 3;
@@ -595,12 +605,12 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
                 pickingDebug.usedMeshBVH = localDebug.usedBVH;
                 pickingDebug.meshBVHHit = localDebug.bvhHit;
                 pickingDebug.meshBVHFallbackBox = localDebug.fallbackBox;
-                if (obj.sourceMesh && obj.sourceMesh->bvh)
+                if (hit_bvh)
                 {
                     pickingDebug.meshBVHPrimCount =
-                        static_cast<uint32_t>(obj.sourceMesh->bvh->primitives.size());
+                        static_cast<uint32_t>(hit_bvh->primitives.size());
                     pickingDebug.meshBVHNodeCount =
-                        static_cast<uint32_t>(obj.sourceMesh->bvh->nodes.size());
+                        static_cast<uint32_t>(hit_bvh->nodes.size());
                 }
                 else
                 {
