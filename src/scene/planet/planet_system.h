@@ -18,6 +18,7 @@ class EngineContext;
 class SceneManager;
 struct DrawContext;
 class MeshAsset;
+struct MeshBVH;
 struct GLTFMaterial;
 
 class PlanetSystem
@@ -202,6 +203,7 @@ private:
 
         AllocatedBuffer vertex_buffer{};
         VkDeviceAddress vertex_buffer_address = 0;
+        std::shared_ptr<MeshBVH> pick_bvh{};
 
         glm::vec3 bounds_origin{0.0f};
         glm::vec3 bounds_extents{0.5f};
@@ -280,6 +282,7 @@ private:
     AllocatedBuffer _earth_patch_index_buffer{};
     uint32_t _earth_patch_index_count = 0;
     uint32_t _earth_patch_index_resolution = 0;
+    std::vector<uint32_t> _earth_patch_indices_cpu{};
 
     VkDescriptorSetLayout _earth_patch_material_layout = VK_NULL_HANDLE;
     DescriptorAllocatorGrowable _earth_patch_material_allocator{};

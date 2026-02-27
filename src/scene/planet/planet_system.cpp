@@ -135,6 +135,7 @@ void PlanetSystem::cleanup()
 
     _earth_patch_index_count = 0;
     _earth_patch_index_resolution = 0;
+    _earth_patch_indices_cpu.clear();
 
     _bodies.clear();
 }
@@ -820,7 +821,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 b.origin = patch.bounds_origin;
                 b.extents = patch.bounds_extents;
                 b.sphereRadius = patch.bounds_sphere_radius;
-                b.type = BoundsType::Box;
+                b.type = patch.pick_bvh ? BoundsType::Mesh : BoundsType::Box;
 
                 RenderObject obj{};
                 obj.indexCount = _earth_patch_index_count;
@@ -833,6 +834,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 obj.transform = transform;
                 // Planet terrain patches are not meaningful RT occluders; skip BLAS/TLAS builds.
                 obj.sourceMesh = nullptr;
+                obj.pickBVH = patch.pick_bvh.get();
                 obj.surfaceIndex = 0;
                 obj.objectID = draw_context.nextID++;
                 obj.ownerType = RenderObject::OwnerType::MeshInstance;
