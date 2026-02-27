@@ -5,6 +5,7 @@
 #include "core/device/images.h"
 #include "core/device/swapchain.h"
 #include "render/graph/graph.h"
+#include "scene/planet/planet_system.h"
 
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_vulkan.h"
@@ -247,6 +248,51 @@ namespace
         out.dist2 = glm::dot(pr - ps, pr - ps);
         return out;
     }
+
+    bool intersect_ray_sphere_depth(const glm::dvec3 &ray_origin,
+                                    const glm::dvec3 &ray_dir_unit,
+                                    const glm::dvec3 &center,
+                                    double radius_m,
+                                    double &out_t)
+    {
+        out_t = 0.0;
+
+        if (!(radius_m > 0.0) || !std::isfinite(radius_m))
+        {
+            return false;
+        }
+
+        const double dir_len2 = glm::dot(ray_dir_unit, ray_dir_unit);
+        if (!(dir_len2 > 0.0) || !std::isfinite(dir_len2))
+        {
+            return false;
+        }
+
+        // Assume ray_dir_unit is unit length (from compute_camera_ray), but be defensive.
+        const glm::dvec3 rd = ray_dir_unit / std::sqrt(dir_len2);
+        const glm::dvec3 oc = ray_origin - center;
+
+        const double b = glm::dot(oc, rd);
+        const double c = glm::dot(oc, oc) - radius_m * radius_m;
+        const double disc = b * b - c;
+        if (!(disc >= 0.0) || !std::isfinite(disc))
+        {
+            return false;
+        }
+
+        const double s = std::sqrt(disc);
+        const double t0 = -b - s;
+        const double t1 = -b + s;
+        const double t = (t0 >= 0.0) ? t0 : t1;
+
+        if (!(t >= 0.0) || !std::isfinite(t))
+        {
+            return false;
+        }
+
+        out_t = t;
+        return true;
+    }
 } // namespace
 
 void PickingSystem::init(EngineContext *context)
@@ -411,30 +457,69 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
                         _pending_pick.window_pos_swapchain = window_to_swapchain_pixels(release_pos);
                     }
                 }
-                else if (scene)
+            else if (scene)
+            {
+                RenderObject hit_object{};
+                WorldVec3 hit_pos{};
+                const bool mesh_hit = scene->pick(window_to_swapchain_pixels(release_pos), hit_object, hit_pos);
+
+                if (mesh_hit)
                 {
-                    RenderObject hit_object{};
-                    WorldVec3 hit_pos{};
-                    const bool mesh_hit = scene->pick(window_to_swapchain_pixels(release_pos), hit_object, hit_pos);
-
-                    if (mesh_hit)
+                    const WorldVec3 cam_world = scene->getMainCamera().position_world;
+                    double mesh_depth_m = glm::length(glm::dvec3(hit_pos - cam_world));
+                    if (!std::isfinite(mesh_depth_m))
                     {
-                        const WorldVec3 cam_world = scene->getMainCamera().position_world;
-                        const double mesh_depth_m = glm::length(glm::dvec3(hit_pos - cam_world));
+                        mesh_depth_m = std::numeric_limits<double>::infinity();
+                    }
 
-                        if (line_hit && std::isfinite(line_depth_m) &&
-                            std::isfinite(mesh_depth_m) &&
-                            line_depth_m < mesh_depth_m)
+                    // Terrain patch AABBs can be very conservative at low LOD, causing false
+                    // hits that incorrectly occlude orbit plot line picking. When the hit is a
+                    // terrain planet, derive the occlusion depth from an analytic planet sphere
+                    // (base radius + max terrain height). If the ray does not intersect the
+                    // sphere, treat the mesh hit as non-occluding for line picks.
+                    if (line_hit &&
+                        hit_object.ownerType == RenderObject::OwnerType::MeshInstance &&
+                        hit_object.sourceMesh == nullptr &&
+                        !hit_object.ownerName.empty())
+                    {
+                        if (PlanetSystem *planets = scene->get_planet_system())
                         {
-                            _last_pick = std::move(line_pick);
-                            _last_pick_object_id = 0;
-                        }
-                        else
-                        {
-                            set_pick_from_hit(hit_object, hit_pos, _last_pick);
-                            _last_pick_object_id = hit_object.objectID;
+                            if (const PlanetSystem::PlanetBody *body = planets->find_body_by_name(hit_object.ownerName))
+                            {
+                                if (body->terrain)
+                                {
+                                    CameraRay ray{};
+                                    if (compute_camera_ray(release_pos, ray))
+                                    {
+                                        const glm::dvec3 center_local = glm::dvec3(body->center_world - ray.origin_world);
+                                        const double r = std::max(0.0, body->radius_m + std::max(0.0, body->terrain_height_max_m));
+
+                                        double t_sphere = 0.0;
+                                        if (intersect_ray_sphere_depth(ray.origin_local, ray.dir_local, center_local, r, t_sphere))
+                                        {
+                                            mesh_depth_m = t_sphere;
+                                        }
+                                        else
+                                        {
+                                            mesh_depth_m = std::numeric_limits<double>::infinity();
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
+
+                    if (line_hit && std::isfinite(line_depth_m) && line_depth_m < mesh_depth_m)
+                    {
+                        _last_pick = std::move(line_pick);
+                        _last_pick_object_id = 0;
+                    }
+                    else
+                    {
+                        set_pick_from_hit(hit_object, hit_pos, _last_pick);
+                        _last_pick_object_id = hit_object.objectID;
+                    }
+                }
                     else if (line_hit)
                     {
                         _last_pick = std::move(line_pick);
@@ -534,10 +619,44 @@ void PickingSystem::update_hover(bool ui_want_capture_mouse)
         else
         {
             const WorldVec3 cam_world = _context->scene->getMainCamera().position_world;
-            const double mesh_depth_m = glm::length(glm::dvec3(hover_pos - cam_world));
-            if (std::isfinite(line_depth_m) &&
-                std::isfinite(mesh_depth_m) &&
-                line_depth_m < mesh_depth_m)
+            double mesh_depth_m = glm::length(glm::dvec3(hover_pos - cam_world));
+            if (!std::isfinite(mesh_depth_m))
+            {
+                mesh_depth_m = std::numeric_limits<double>::infinity();
+            }
+
+            if (hover_obj.ownerType == RenderObject::OwnerType::MeshInstance &&
+                hover_obj.sourceMesh == nullptr &&
+                !hover_obj.ownerName.empty())
+            {
+                if (PlanetSystem *planets = _context->scene->get_planet_system())
+                {
+                    if (const PlanetSystem::PlanetBody *body = planets->find_body_by_name(hover_obj.ownerName))
+                    {
+                        if (body->terrain)
+                        {
+                            CameraRay ray{};
+                            if (compute_camera_ray(_mouse_pos_window, ray))
+                            {
+                                const glm::dvec3 center_local = glm::dvec3(body->center_world - ray.origin_world);
+                                const double r = std::max(0.0, body->radius_m + std::max(0.0, body->terrain_height_max_m));
+
+                                double t_sphere = 0.0;
+                                if (intersect_ray_sphere_depth(ray.origin_local, ray.dir_local, center_local, r, t_sphere))
+                                {
+                                    mesh_depth_m = t_sphere;
+                                }
+                                else
+                                {
+                                    mesh_depth_m = std::numeric_limits<double>::infinity();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (std::isfinite(line_depth_m) && line_depth_m < mesh_depth_m)
             {
                 _hover_pick = std::move(line_pick);
             }
