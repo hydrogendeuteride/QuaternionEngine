@@ -1,5 +1,6 @@
 #include "gameplay_state.h"
 
+#include "core/engine.h"
 #include "core/game_api.h"
 
 #include "orbitsim/coordinate_frames.hpp"
@@ -170,8 +171,6 @@ namespace Game
             return;
         }
 
-        (void) ctx;
-
         const double now_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
 
         ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
@@ -245,6 +244,53 @@ namespace Game
         const double t_start_s = now_s;
         const double t_end_s = now_s + std::max(60.0, _maneuver_timeline_window_s);
         const double span_s = t_end_s - t_start_s;
+
+        const PickingSystem::PickInfo *orbit_pick = nullptr;
+        if (ctx.renderer)
+        {
+            if (const PickingSystem *picking = ctx.renderer->picking())
+            {
+                const auto &pick = picking->last_pick();
+                if (pick.valid &&
+                    pick.kind == PickingSystem::PickInfo::Kind::Line &&
+                    pick.ownerName.rfind("OrbitPlot/", 0) == 0)
+                {
+                    orbit_pick = &pick;
+                }
+            }
+        }
+
+        if (orbit_pick)
+        {
+            const double dt_s = orbit_pick->time_s - now_s;
+            if (std::isfinite(dt_s))
+            {
+                ImGui::Text("Orbit pick: %s  T%+.0fs", orbit_pick->ownerName.c_str(), dt_s);
+            }
+            else
+            {
+                ImGui::Text("Orbit pick: %s", orbit_pick->ownerName.c_str());
+            }
+
+            const bool can_add = std::isfinite(orbit_pick->time_s);
+            ImGui::BeginDisabled(!can_add);
+            if (ImGui::Button("Add Node @ Pick"))
+            {
+                ManeuverNode n{};
+                n.id = _maneuver_state.next_node_id++;
+                n.time_s = orbit_pick->time_s;
+                n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
+                n.primary_body_id = (_orbitsim && _orbitsim->reference_body())
+                                        ? _orbitsim->reference_body()->sim_id
+                                        : orbitsim::kInvalidBodyId;
+                n.total_dv_mps = 0.0;
+                _maneuver_state.nodes.push_back(n);
+                _maneuver_state.selected_node_id = n.id;
+                _maneuver_state.sort_by_time();
+                mark_prediction_dirty();
+            }
+            ImGui::EndDisabled();
+        }
 
         ImGui::Separator();
 

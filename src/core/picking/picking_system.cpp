@@ -149,6 +149,104 @@ namespace
         }
         return false;
     }
+
+    struct RaySegmentClosest
+    {
+        double ray_s = 0.0;   // distance along ray direction (>= 0)
+        double seg_t = 0.0;   // segment parameter in [0, 1]
+        double dist2 = 0.0;   // squared distance between closest points
+    };
+
+    RaySegmentClosest closest_points_ray_segment(const glm::dvec3 &ray_origin,
+                                                 const glm::dvec3 &ray_dir_unit,
+                                                 const glm::dvec3 &a,
+                                                 const glm::dvec3 &b)
+    {
+        RaySegmentClosest out{};
+
+        const glm::dvec3 v = b - a;
+        const double c = glm::dot(v, v);
+        if (!(c > 1.0e-18) || !std::isfinite(c))
+        {
+            // Segment is a point.
+            const glm::dvec3 w = a - ray_origin;
+            double s = glm::dot(ray_dir_unit, w);
+            if (!std::isfinite(s))
+            {
+                return out;
+            }
+            s = std::max(0.0, s);
+            const glm::dvec3 pr = ray_origin + ray_dir_unit * s;
+            out.ray_s = s;
+            out.seg_t = 0.0;
+            out.dist2 = glm::dot(pr - a, pr - a);
+            return out;
+        }
+
+        const glm::dvec3 w0 = ray_origin - a;
+        const double bdot = glm::dot(ray_dir_unit, v);
+        const double dw = glm::dot(ray_dir_unit, w0);
+        const double e = glm::dot(v, w0);
+
+        const double denom = c - (bdot * bdot); // since dot(d,d)=1
+        double s = 0.0;
+        double t = 0.0;
+
+        if (denom > 1.0e-18 && std::isfinite(denom))
+        {
+            t = (e - bdot * dw) / denom;
+            s = bdot * t - dw;
+
+            if (s < 0.0 || !std::isfinite(s))
+            {
+                s = 0.0;
+                t = std::clamp(e / c, 0.0, 1.0);
+            }
+            else if (t < 0.0 || !std::isfinite(t))
+            {
+                t = 0.0;
+                s = std::max(0.0, -dw);
+            }
+            else if (t > 1.0)
+            {
+                t = 1.0;
+                const glm::dvec3 w1 = ray_origin - b;
+                const double dw1 = glm::dot(ray_dir_unit, w1);
+                s = std::max(0.0, -dw1);
+            }
+        }
+        else
+        {
+            // Ray and segment are nearly parallel: choose the closer endpoint.
+            const double s_a = std::max(0.0, -dw);
+            const glm::dvec3 pr_a = ray_origin + ray_dir_unit * s_a;
+            const double dist2_a = glm::dot(pr_a - a, pr_a - a);
+
+            const glm::dvec3 w1 = ray_origin - b;
+            const double dw1 = glm::dot(ray_dir_unit, w1);
+            const double s_b = std::max(0.0, -dw1);
+            const glm::dvec3 pr_b = ray_origin + ray_dir_unit * s_b;
+            const double dist2_b = glm::dot(pr_b - b, pr_b - b);
+
+            if (dist2_a <= dist2_b)
+            {
+                s = s_a;
+                t = 0.0;
+            }
+            else
+            {
+                s = s_b;
+                t = 1.0;
+            }
+        }
+
+        const glm::dvec3 pr = ray_origin + ray_dir_unit * s;
+        const glm::dvec3 ps = a + v * t;
+        out.ray_s = s;
+        out.seg_t = t;
+        out.dist2 = glm::dot(pr - ps, pr - ps);
+        return out;
+    }
 } // namespace
 
 void PickingSystem::init(EngineContext *context)
@@ -157,6 +255,8 @@ void PickingSystem::init(EngineContext *context)
     _last_pick = {};
     _hover_pick = {};
     _drag_selection.clear();
+    _line_pick_groups.clear();
+    _line_pick_segments.clear();
     _mouse_pos_window = glm::vec2{-1.0f, -1.0f};
     _drag_state = {};
     _pending_pick = {};
@@ -185,6 +285,8 @@ void PickingSystem::cleanup()
     _last_pick = {};
     _hover_pick = {};
     _drag_selection.clear();
+    _line_pick_groups.clear();
+    _line_pick_segments.clear();
     _pending_pick = {};
     _pick_result_pending = false;
     _last_pick_object_id = 0;
@@ -290,19 +392,53 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
 
             if (do_click_select)
             {
+                PickInfo line_pick{};
+                double line_depth_m = 0.0;
+                const bool line_hit =
+                    _settings.enable_line_picking &&
+                    pick_line_at_window_pos(release_pos, line_pick, line_depth_m);
+
                 if (_use_id_buffer_picking)
                 {
-                    _pending_pick.active = true;
-                    _pending_pick.window_pos_swapchain = window_to_swapchain_pixels(release_pos);
+                    if (line_hit)
+                    {
+                        _last_pick = std::move(line_pick);
+                        _last_pick_object_id = 0;
+                    }
+                    else
+                    {
+                        _pending_pick.active = true;
+                        _pending_pick.window_pos_swapchain = window_to_swapchain_pixels(release_pos);
+                    }
                 }
                 else if (scene)
                 {
                     RenderObject hit_object{};
                     WorldVec3 hit_pos{};
-                    if (scene->pick(window_to_swapchain_pixels(release_pos), hit_object, hit_pos))
+                    const bool mesh_hit = scene->pick(window_to_swapchain_pixels(release_pos), hit_object, hit_pos);
+
+                    if (mesh_hit)
                     {
-                        set_pick_from_hit(hit_object, hit_pos, _last_pick);
-                        _last_pick_object_id = hit_object.objectID;
+                        const WorldVec3 cam_world = scene->getMainCamera().position_world;
+                        const double mesh_depth_m = glm::length(glm::dvec3(hit_pos - cam_world));
+
+                        if (line_hit && std::isfinite(line_depth_m) &&
+                            std::isfinite(mesh_depth_m) &&
+                            line_depth_m < mesh_depth_m)
+                        {
+                            _last_pick = std::move(line_pick);
+                            _last_pick_object_id = 0;
+                        }
+                        else
+                        {
+                            set_pick_from_hit(hit_object, hit_pos, _last_pick);
+                            _last_pick_object_id = hit_object.objectID;
+                        }
+                    }
+                    else if (line_hit)
+                    {
+                        _last_pick = std::move(line_pick);
+                        _last_pick_object_id = 0;
                     }
                     else if (_settings.clear_last_pick_on_miss)
                     {
@@ -375,11 +511,39 @@ void PickingSystem::update_hover(bool ui_want_capture_mouse)
 
     RenderObject hover_obj{};
     WorldVec3 hover_pos{};
-    if (_context->scene->pick(window_to_swapchain_pixels(_mouse_pos_window), hover_obj, hover_pos))
+    const bool mesh_hit = _context->scene->pick(window_to_swapchain_pixels(_mouse_pos_window), hover_obj, hover_pos);
+
+    if (mesh_hit)
     {
         set_pick_from_hit(hover_obj, hover_pos, _hover_pick);
     }
-    else
+
+    PickInfo line_pick{};
+    double line_depth_m = 0.0;
+    const bool line_hit =
+        _settings.enable_line_picking &&
+        _settings.enable_line_hover &&
+        pick_line_at_window_pos(_mouse_pos_window, line_pick, line_depth_m);
+
+    if (line_hit)
+    {
+        if (!mesh_hit)
+        {
+            _hover_pick = std::move(line_pick);
+        }
+        else
+        {
+            const WorldVec3 cam_world = _context->scene->getMainCamera().position_world;
+            const double mesh_depth_m = glm::length(glm::dvec3(hover_pos - cam_world));
+            if (std::isfinite(line_depth_m) &&
+                std::isfinite(mesh_depth_m) &&
+                line_depth_m < mesh_depth_m)
+            {
+                _hover_pick = std::move(line_pick);
+            }
+        }
+    }
+    else if (!mesh_hit)
     {
         clear_pick(_hover_pick);
     }
@@ -633,6 +797,214 @@ glm::vec2 PickingSystem::window_to_swapchain_pixels(const glm::vec2 &window_pos)
     return glm::vec2{drawable_pos.x * sx, drawable_pos.y * sy};
 }
 
+bool PickingSystem::compute_camera_ray(const glm::vec2 &window_pos, CameraRay &out_ray) const
+{
+    if (_context == nullptr || _context->scene == nullptr)
+    {
+        return false;
+    }
+
+    SwapchainManager *swapchain = _context->getSwapchain();
+    if (swapchain == nullptr)
+    {
+        return false;
+    }
+
+    VkExtent2D dstExtent = swapchain->swapchainExtent();
+    if (dstExtent.width == 0 || dstExtent.height == 0)
+    {
+        return false;
+    }
+
+    VkExtent2D logicalExtent{kRenderWidth, kRenderHeight};
+    if (_context)
+    {
+        VkExtent2D ctxLogical = _context->getLogicalRenderExtent();
+        if (ctxLogical.width > 0 && ctxLogical.height > 0)
+        {
+            logicalExtent = ctxLogical;
+        }
+    }
+
+    glm::vec2 logicalPos{};
+    const glm::vec2 swapchain_pos = window_to_swapchain_pixels(window_pos);
+    if (!vkutil::map_window_to_letterbox_src(swapchain_pos, logicalExtent, dstExtent, logicalPos))
+    {
+        return false;
+    }
+
+    const double width = static_cast<double>(logicalExtent.width);
+    const double height = static_cast<double>(logicalExtent.height);
+    if (!(width > 0.0) || !(height > 0.0))
+    {
+        return false;
+    }
+
+    // Convert from logical view coordinates (top-left origin) to NDC in [-1, 1].
+    const double ndcX = (2.0 * static_cast<double>(logicalPos.x) / width) - 1.0;
+    const double ndcY = 1.0 - (2.0 * static_cast<double>(logicalPos.y) / height);
+
+    const Camera &cam = _context->scene->getMainCamera();
+    const double fovRad = static_cast<double>(cam.fovDegrees) * (3.14159265358979323846 / 180.0);
+    const double tanHalfFov = std::tan(fovRad * 0.5);
+    const double aspect = width / height;
+
+    // Build ray in camera space using -Z forward convention.
+    glm::dvec3 dirCamera(ndcX * aspect * tanHalfFov,
+                         ndcY * tanHalfFov,
+                         -1.0);
+    const double dir_len2 = glm::dot(dirCamera, dirCamera);
+    if (!(dir_len2 > 0.0) || !std::isfinite(dir_len2))
+    {
+        return false;
+    }
+    dirCamera /= std::sqrt(dir_len2);
+
+    const WorldVec3 origin_world = _context->scene->get_world_origin();
+    const WorldVec3 cam_world = cam.position_world;
+
+    const glm::dvec3 rayOrigin = glm::dvec3(cam_world - origin_world);
+    const glm::mat4 camRotation = cam.getRotationMatrix();
+    const glm::vec3 dir_camera_f(static_cast<float>(dirCamera.x),
+                                 static_cast<float>(dirCamera.y),
+                                 static_cast<float>(dirCamera.z));
+    glm::vec3 dir_world_f = glm::vec3(camRotation * glm::vec4(dir_camera_f, 0.0f));
+    const float dir_world_len2_f = glm::dot(dir_world_f, dir_world_f);
+    if (!(dir_world_len2_f > 0.0f) || !std::isfinite(dir_world_len2_f))
+    {
+        return false;
+    }
+    dir_world_f = glm::normalize(dir_world_f);
+
+    out_ray.origin_world = origin_world;
+    out_ray.camera_world = cam_world;
+    out_ray.origin_local = rayOrigin;
+    out_ray.dir_local = glm::dvec3(dir_world_f);
+    out_ray.fov_y_rad = fovRad;
+    out_ray.viewport_height_px = height;
+    return true;
+}
+
+bool PickingSystem::pick_line_at_window_pos(const glm::vec2 &window_pos, PickInfo &out_pick, double &out_depth_m) const
+{
+    out_depth_m = 0.0;
+    clear_pick(out_pick);
+
+    if (_context == nullptr || _context->scene == nullptr)
+    {
+        return false;
+    }
+
+    if (!_settings.enabled || !_settings.enable_line_picking || _line_pick_segments.empty())
+    {
+        return false;
+    }
+
+    float radius_px = _settings.line_pick_radius_px;
+    if (!std::isfinite(radius_px) || radius_px <= 0.0f)
+    {
+        return false;
+    }
+
+    CameraRay ray{};
+    if (!compute_camera_ray(window_pos, ray))
+    {
+        return false;
+    }
+
+    const double tan_half_fov = std::tan(ray.fov_y_rad * 0.5);
+    if (!std::isfinite(tan_half_fov) || !(tan_half_fov > 0.0) || !(ray.viewport_height_px > 0.0))
+    {
+        return false;
+    }
+
+    bool any_hit = false;
+    double best_px_dist = std::numeric_limits<double>::infinity();
+    double best_depth = std::numeric_limits<double>::infinity();
+    uint32_t best_seg_index = 0;
+    double best_t = 0.0;
+
+    for (uint32_t i = 0; i < static_cast<uint32_t>(_line_pick_segments.size()); ++i)
+    {
+        const LinePickSegment &seg = _line_pick_segments[i];
+        if (seg.group_id >= _line_pick_groups.size())
+        {
+            continue;
+        }
+
+        const glm::dvec3 a_local = world_to_local_d(seg.a_world, ray.origin_world);
+        const glm::dvec3 b_local = world_to_local_d(seg.b_world, ray.origin_world);
+
+        const RaySegmentClosest c = closest_points_ray_segment(ray.origin_local, ray.dir_local, a_local, b_local);
+        if (!std::isfinite(c.dist2) || !std::isfinite(c.ray_s) || !std::isfinite(c.seg_t))
+        {
+            continue;
+        }
+        if (!(c.ray_s > 0.0))
+        {
+            continue;
+        }
+
+        const double meters_per_px = (2.0 * tan_half_fov * c.ray_s) / ray.viewport_height_px;
+        if (!std::isfinite(meters_per_px) || !(meters_per_px > 0.0))
+        {
+            continue;
+        }
+
+        const double dist_m = std::sqrt(std::max(0.0, c.dist2));
+        const double dist_px = dist_m / meters_per_px;
+        if (!(dist_px <= static_cast<double>(radius_px)))
+        {
+            continue;
+        }
+
+        if (!any_hit || dist_px < best_px_dist || (dist_px == best_px_dist && c.ray_s < best_depth))
+        {
+            any_hit = true;
+            best_px_dist = dist_px;
+            best_depth = c.ray_s;
+            best_seg_index = i;
+            best_t = std::clamp(c.seg_t, 0.0, 1.0);
+        }
+    }
+
+    if (!any_hit)
+    {
+        return false;
+    }
+
+    const LinePickSegment &best = _line_pick_segments[best_seg_index];
+    const LinePickGroup &group = _line_pick_groups[best.group_id];
+
+    const WorldVec3 hit_world = (1.0 - best_t) * best.a_world + best_t * best.b_world;
+    double hit_time_s = std::numeric_limits<double>::quiet_NaN();
+    if (std::isfinite(best.a_time_s) && std::isfinite(best.b_time_s))
+    {
+        hit_time_s = best.a_time_s + (best.b_time_s - best.a_time_s) * best_t;
+    }
+
+    out_pick.mesh = nullptr;
+    out_pick.scene = nullptr;
+    out_pick.node = nullptr;
+    out_pick.ownerType = RenderObject::OwnerType::None;
+    out_pick.ownerName = group.owner_name;
+    out_pick.nodeName.clear();
+    out_pick.nodeParentName.clear();
+    out_pick.nodeChildren.clear();
+    out_pick.nodePath.clear();
+    out_pick.worldPos = hit_world;
+    out_pick.worldTransform = glm::mat4(1.0f);
+    out_pick.indexCount = 0;
+    out_pick.firstIndex = 0;
+    out_pick.surfaceIndex = 0;
+    out_pick.time_s = hit_time_s;
+    out_pick.kind = PickInfo::Kind::Line;
+    out_pick.valid = true;
+
+    out_depth_m = best_depth;
+    return true;
+}
+
 void PickingSystem::set_pick_from_hit(const RenderObject &hit_object, const WorldVec3 &hit_pos, PickInfo &out_pick)
 {
     out_pick.mesh = hit_object.sourceMesh;
@@ -656,6 +1028,8 @@ void PickingSystem::set_pick_from_hit(const RenderObject &hit_object, const Worl
     out_pick.firstIndex = hit_object.firstIndex;
     out_pick.indexCount = hit_object.indexCount;
     out_pick.surfaceIndex = hit_object.surfaceIndex;
+    out_pick.time_s = std::numeric_limits<double>::quiet_NaN();
+    out_pick.kind = PickInfo::Kind::SceneObject;
     out_pick.valid = true;
 }
 
@@ -704,7 +1078,7 @@ bool PickingSystem::set_pick_to_gltf_node(PickInfo &pick, Node *target_node)
     return true;
 }
 
-void PickingSystem::clear_pick(PickInfo &pick)
+void PickingSystem::clear_pick(PickInfo &pick) const
 {
     pick.mesh = nullptr;
     pick.scene = nullptr;
@@ -720,5 +1094,42 @@ void PickingSystem::clear_pick(PickInfo &pick)
     pick.indexCount = 0;
     pick.firstIndex = 0;
     pick.surfaceIndex = 0;
+    pick.time_s = std::numeric_limits<double>::quiet_NaN();
+    pick.kind = PickInfo::Kind::None;
     pick.valid = false;
+}
+
+void PickingSystem::clear_line_picks()
+{
+    _line_pick_groups.clear();
+    _line_pick_segments.clear();
+}
+
+uint32_t PickingSystem::add_line_pick_group(std::string owner_name)
+{
+    LinePickGroup g{};
+    g.owner_name = std::move(owner_name);
+    const uint32_t id = static_cast<uint32_t>(_line_pick_groups.size());
+    _line_pick_groups.push_back(std::move(g));
+    return id;
+}
+
+void PickingSystem::add_line_pick_segment(uint32_t group_id,
+                                          const WorldVec3 &a_world,
+                                          const WorldVec3 &b_world,
+                                          double a_time_s,
+                                          double b_time_s)
+{
+    if (group_id >= _line_pick_groups.size())
+    {
+        return;
+    }
+
+    LinePickSegment seg{};
+    seg.group_id = group_id;
+    seg.a_world = a_world;
+    seg.b_world = b_world;
+    seg.a_time_s = a_time_s;
+    seg.b_time_s = b_time_s;
+    _line_pick_segments.push_back(std::move(seg));
 }

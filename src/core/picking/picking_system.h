@@ -10,6 +10,7 @@
 #include <glm/vec2.hpp>
 #include <glm/mat4x4.hpp>
 
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -45,10 +46,26 @@ public:
 
         // When true, clear last pick on a click miss (CPU raycast mode only).
         bool clear_last_pick_on_miss = true;
+
+        // --------------------------------------------------------------------
+        // Line / Polyline Picking (CPU)
+        // --------------------------------------------------------------------
+        // Used for thin debug visuals (e.g. orbit plot) that don't exist as scene meshes.
+        // Tolerance is expressed in *logical render pixels* (post-letterbox mapping).
+        bool enable_line_picking = true;
+        bool enable_line_hover = false;
+        float line_pick_radius_px = 15.0f;
     };
 
     struct PickInfo
     {
+        enum class Kind : uint8_t
+        {
+            None = 0,
+            SceneObject,
+            Line,
+        };
+
         MeshAsset *mesh = nullptr;
         LoadedGLTF *scene = nullptr;
         Node *node = nullptr;
@@ -64,6 +81,9 @@ public:
         uint32_t indexCount = 0;
         uint32_t firstIndex = 0;
         uint32_t surfaceIndex = 0;
+        // For Kind::Line picks (e.g. orbit polyline), this is the interpolated time at the hit point if provided.
+        double time_s = std::numeric_limits<double>::quiet_NaN();
+        Kind kind = Kind::None;
         bool valid = false;
     };
 
@@ -102,6 +122,19 @@ public:
 
     void clear_owner_picks(RenderObject::OwnerType owner_type, const std::string &owner_name);
 
+    // --------------------------------------------------------------------
+    // Custom line/polyline pick registration (CPU-only)
+    // --------------------------------------------------------------------
+    // These pickables are not part of SceneManager::DrawContext; call from gameplay/editor
+    // code to make thin debug polylines interactable (e.g., orbit plots).
+    void clear_line_picks();
+    uint32_t add_line_pick_group(std::string owner_name);
+    void add_line_pick_segment(uint32_t group_id,
+                               const WorldVec3 &a_world,
+                               const WorldVec3 &b_world,
+                               double a_time_s = std::numeric_limits<double>::quiet_NaN(),
+                               double b_time_s = std::numeric_limits<double>::quiet_NaN());
+
     PickInfo *mutable_last_pick() { return &_last_pick; }
     PickInfo *mutable_hover_pick() { return &_hover_pick; }
 
@@ -129,16 +162,46 @@ private:
 
     glm::vec2 window_to_swapchain_pixels(const glm::vec2 &window_pos) const;
 
+    struct CameraRay
+    {
+        WorldVec3 origin_world{0.0, 0.0, 0.0};
+        WorldVec3 camera_world{0.0, 0.0, 0.0};
+        glm::dvec3 origin_local{0.0, 0.0, 0.0};
+        glm::dvec3 dir_local{0.0, 0.0, -1.0};
+        double fov_y_rad{0.0};
+        double viewport_height_px{0.0};
+    };
+
+    bool compute_camera_ray(const glm::vec2 &window_pos, CameraRay &out_ray) const;
+    bool pick_line_at_window_pos(const glm::vec2 &window_pos, PickInfo &out_pick, double &out_depth_m) const;
+
     void set_pick_from_hit(const RenderObject &hit_object, const WorldVec3 &hit_pos, PickInfo &out_pick);
     bool set_pick_to_gltf_node(PickInfo &pick, Node *target_node);
 
-    void clear_pick(PickInfo &pick);
+    void clear_pick(PickInfo &pick) const;
 
     EngineContext *_context = nullptr;
+
+    struct LinePickGroup
+    {
+        std::string owner_name;
+    };
+
+    struct LinePickSegment
+    {
+        uint32_t group_id = 0;
+        WorldVec3 a_world{0.0, 0.0, 0.0};
+        WorldVec3 b_world{0.0, 0.0, 0.0};
+        double a_time_s = std::numeric_limits<double>::quiet_NaN();
+        double b_time_s = std::numeric_limits<double>::quiet_NaN();
+    };
 
     PickInfo _last_pick{};
     PickInfo _hover_pick{};
     std::vector<PickInfo> _drag_selection{};
+
+    std::vector<LinePickGroup> _line_pick_groups{};
+    std::vector<LinePickSegment> _line_pick_segments{};
 
     glm::vec2 _mouse_pos_window{-1.0f, -1.0f};
     DragState _drag_state{};
