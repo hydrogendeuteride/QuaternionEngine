@@ -61,7 +61,7 @@ std::unique_ptr<MeshBVH> build_mesh_bvh(const MeshAsset &mesh,
             // BVH2 now expects triangle primitives with explicit vertices.
             // Store the triangle in mesh-local space and let the library
             // compute/update the AABB used for hierarchy construction.
-            PrimitiveF prim{};
+            bvh2::PrimitiveF prim{};
             prim.v0 = Vec3<float>(p0.x, p0.y, p0.z);
             prim.v1 = Vec3<float>(p1.x, p1.y, p1.z);
             prim.v2 = Vec3<float>(p2.x, p2.y, p2.z);
@@ -90,7 +90,7 @@ std::unique_ptr<MeshBVH> build_mesh_bvh(const MeshAsset &mesh,
     }
 
     tf::Executor executor{threadCount};
-    result->nodes = buildLBVH<uint64_t>(executor, result->primitives, MortonSortMethod::RadixSort);
+    result->nodes = bvh2::buildLBVH<uint64_t>(executor, result->primitives, bvh2::MortonSortMethod::RadixSort);
 
     return result;
 }
@@ -128,7 +128,7 @@ bool intersect_ray_mesh_bvh(const MeshBVH &bvh,
 
     uint32_t primIdx = 0;
     float tLocal = 0.0f;
-    if (!traverseBVHClosestHit<float>(bvh.nodes, bvh.primitives, ray, primIdx, tLocal))
+    if (!bvh2::traverseBVHClosestHit<float>(bvh.nodes, bvh.primitives, ray, primIdx, tLocal))
     {
         return false;
     }

@@ -76,8 +76,11 @@ target_include_directories(ImGuizmo PUBLIC
 
 target_link_libraries(ImGuizmo PUBLIC imgui)
 
+set(BVH2_TASKFLOW_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/taskflow" CACHE PATH
+    "Taskflow include directory used by BVH2 in the parent project" FORCE)
+set(BVH2_USE_LOCAL_TASKFLOW OFF CACHE BOOL
+    "Do not expect BVH2's local taskflow checkout when embedded in this project" FORCE)
 add_subdirectory(BVH)
-target_include_directories(BVH2 INTERFACE taskflow)
 
 target_include_directories(stb_image INTERFACE stb_image)
 
