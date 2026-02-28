@@ -158,7 +158,7 @@ namespace Physics
 
             for (size_t i = 0; i < mesh.bvh->primitives.size(); ++i)
             {
-                const PrimitiveF &prim = mesh.bvh->primitives[i];
+                const bvh2::PrimitiveF &prim = mesh.bvh->primitives[i];
                 TriangleMeshTriangle tri{};
                 tri.v0 = glm::vec3(prim.v0.x, prim.v0.y, prim.v0.z);
                 tri.v1 = glm::vec3(prim.v1.x, prim.v1.y, prim.v1.z);
