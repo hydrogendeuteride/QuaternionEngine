@@ -24,8 +24,8 @@ struct MeshBVHPrimitiveRef
 // CPU-side BVH for a mesh, built in mesh-local space.
 struct MeshBVH
 {
-    std::vector<PrimitiveF> primitives;
-    std::vector<BVHNodeF> nodes;
+    std::vector<bvh2::PrimitiveF> primitives;
+    std::vector<bvh2::BVHNodeF> nodes;
     std::vector<MeshBVHPrimitiveRef> primitiveRefs;
 };
 
