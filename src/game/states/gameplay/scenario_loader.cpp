@@ -205,24 +205,55 @@ namespace Game
 
             if (type == "sphere")
             {
-                return Physics::CollisionShape::Sphere(json_required_finite<float>(j, "radius", path));
+                const float radius = json_required_finite<float>(j, "radius", path);
+                if (!(radius > 0.0f))
+                {
+                    fail(child_path(path, "radius") + " must be > 0");
+                }
+                return Physics::CollisionShape::Sphere(radius);
             }
             if (type == "capsule")
             {
+                const float radius = json_required_finite<float>(j, "radius", path);
+                const float half_height = json_required_finite<float>(j, "half_height", path);
+                if (!(radius > 0.0f))
+                {
+                    fail(child_path(path, "radius") + " must be > 0");
+                }
+                if (!(half_height > 0.0f))
+                {
+                    fail(child_path(path, "half_height") + " must be > 0");
+                }
                 return Physics::CollisionShape::Capsule(
-                        json_required_finite<float>(j, "radius", path),
-                        json_required_finite<float>(j, "half_height", path));
+                        radius,
+                        half_height);
             }
             if (type == "cylinder")
             {
+                const float radius = json_required_finite<float>(j, "radius", path);
+                const float half_height = json_required_finite<float>(j, "half_height", path);
+                if (!(radius > 0.0f))
+                {
+                    fail(child_path(path, "radius") + " must be > 0");
+                }
+                if (!(half_height > 0.0f))
+                {
+                    fail(child_path(path, "half_height") + " must be > 0");
+                }
                 return Physics::CollisionShape::Cylinder(
-                        json_required_finite<float>(j, "radius", path),
-                        json_required_finite<float>(j, "half_height", path));
+                        radius,
+                        half_height);
             }
             if (type == "box")
             {
-                return Physics::CollisionShape::Box(
-                        parse_vec3(*json_required_object(j, "half_extents", path), child_path(path, "half_extents")));
+                const glm::vec3 half_extents = parse_vec3(
+                        *json_required_object(j, "half_extents", path),
+                        child_path(path, "half_extents"));
+                if (!(half_extents.x > 0.0f) || !(half_extents.y > 0.0f) || !(half_extents.z > 0.0f))
+                {
+                    fail(child_path(path, "half_extents") + " components must be > 0");
+                }
+                return Physics::CollisionShape::Box(half_extents);
             }
 
             fail(child_path(path, "type") + " has unsupported value '" + type + "'");
