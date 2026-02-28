@@ -157,6 +157,65 @@ TEST(ScenarioLoader, RejectsInvalidNumericRange)
     EXPECT_FALSE(cfg.has_value());
 }
 
+TEST(ScenarioLoader, RejectsSphereShapeWithNonPositiveRadius)
+{
+    const TempDir tmp;
+    json root = make_valid_scenario();
+    root["orbiters"][0]["body_settings"]["shape"] = {
+            {"type", "sphere"},
+            {"radius", 0.0},
+    };
+    auto cfg = Game::load_scenario_config(write_json_file(tmp.path, "invalid_sphere_shape.json", root));
+    EXPECT_FALSE(cfg.has_value());
+}
+
+TEST(ScenarioLoader, RejectsCapsuleShapeWithNonPositiveHalfHeight)
+{
+    const TempDir tmp;
+    json root = make_valid_scenario();
+    root["orbiters"][0]["body_settings"]["shape"] = {
+            {"type", "capsule"},
+            {"radius", 1.0},
+            {"half_height", 0.0},
+    };
+    auto cfg = Game::load_scenario_config(write_json_file(tmp.path, "invalid_capsule_shape.json", root));
+    EXPECT_FALSE(cfg.has_value());
+}
+
+TEST(ScenarioLoader, RejectsCylinderShapeWithNonPositiveRadius)
+{
+    const TempDir tmp;
+    json root = make_valid_scenario();
+    root["orbiters"][0]["body_settings"]["shape"] = {
+            {"type", "cylinder"},
+            {"radius", -1.0},
+            {"half_height", 1.0},
+    };
+    auto cfg = Game::load_scenario_config(write_json_file(tmp.path, "invalid_cylinder_shape.json", root));
+    EXPECT_FALSE(cfg.has_value());
+}
+
+TEST(ScenarioLoader, RejectsBoxShapeWithNonPositiveHalfExtents)
+{
+    const TempDir tmp;
+    json root = make_valid_scenario();
+    root["orbiters"][0]["body_settings"]["shape"] = {
+            {"type", "box"},
+            {"half_extents", {{"x", 1.0}, {"y", 0.0}, {"z", 1.0}}},
+    };
+    auto cfg = Game::load_scenario_config(write_json_file(tmp.path, "invalid_box_shape.json", root));
+    EXPECT_FALSE(cfg.has_value());
+}
+
+TEST(ScenarioLoader, RejectsBodyLayerOutsideSupportedRange)
+{
+    const TempDir tmp;
+    json root = make_valid_scenario();
+    root["orbiters"][0]["body_settings"]["layer"] = 16;
+    auto cfg = Game::load_scenario_config(write_json_file(tmp.path, "invalid_layer.json", root));
+    EXPECT_FALSE(cfg.has_value());
+}
+
 TEST(ScenarioLoader, RejectsMalformedJson)
 {
     const TempDir tmp;
