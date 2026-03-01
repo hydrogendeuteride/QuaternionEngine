@@ -97,3 +97,40 @@ target_link_libraries(gameplay_time_warp_transition_tests PRIVATE
 )
 
 add_test(NAME gameplay_time_warp_transition_tests COMMAND gameplay_time_warp_transition_tests)
+
+add_executable(gameplay_prediction_maneuver_tests
+  gameplay_prediction_maneuver_tests.cpp
+  gameplay_prediction_maneuver_test_stubs.cpp
+  "${PROJECT_SOURCE_DIR}/src/game/entity.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_sim.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_prediction.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_maneuver_nodes.cpp"
+  "${PROJECT_SOURCE_DIR}/third_party/imgui/imgui.cpp"
+  "${PROJECT_SOURCE_DIR}/third_party/imgui/imgui_draw.cpp"
+  "${PROJECT_SOURCE_DIR}/third_party/imgui/imgui_tables.cpp"
+  "${PROJECT_SOURCE_DIR}/third_party/imgui/imgui_widgets.cpp"
+)
+
+set_property(TARGET gameplay_prediction_maneuver_tests PROPERTY CXX_STANDARD 20)
+
+target_compile_definitions(gameplay_prediction_maneuver_tests PRIVATE
+  VULKAN_ENGINE_USE_JOLT=0
+)
+
+target_include_directories(gameplay_prediction_maneuver_tests PRIVATE
+  "${PROJECT_SOURCE_DIR}/src"
+  "${PROJECT_SOURCE_DIR}/src/core"
+  "${PROJECT_SOURCE_DIR}/third_party/imgui"
+  "${PROJECT_SOURCE_DIR}/third_party/vkbootstrap"
+  "${PROJECT_SOURCE_DIR}/third_party/vma"
+  "${PROJECT_SOURCE_DIR}/third_party/taskflow/3rd-party"
+)
+
+target_link_libraries(gameplay_prediction_maneuver_tests PRIVATE
+  gtest
+  fmt::fmt
+  glm
+  orbitsim
+)
+
+add_test(NAME gameplay_prediction_maneuver_tests COMMAND gameplay_prediction_maneuver_tests)
