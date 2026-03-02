@@ -129,6 +129,7 @@ namespace Game
         _maneuver_state.nodes.clear();
         _maneuver_state.selected_node_id = -1;
         _maneuver_state.next_node_id = 0;
+        _maneuver_gizmo_interaction = {};
         _reset_requested = false;
         _contact_log.clear();
         _prediction_cache.clear();

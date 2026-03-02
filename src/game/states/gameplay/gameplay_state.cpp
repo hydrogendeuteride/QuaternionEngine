@@ -38,6 +38,7 @@ namespace Game
         _maneuver_state.nodes.clear();
         _maneuver_state.selected_node_id = -1;
         _maneuver_state.next_node_id = 0;
+        _maneuver_gizmo_interaction = {};
         _reset_requested = false;
         _scenario_io_status.clear();
         _scenario_io_status_ok = true;
@@ -64,6 +65,8 @@ namespace Game
 
     void GameplayState::on_exit(GameStateContext &ctx)
     {
+        clear_maneuver_gizmo_instances(ctx);
+
         _world.clear_rebase_anchor();
         _world.clear();
         _world.set_physics(nullptr);
@@ -83,6 +86,7 @@ namespace Game
         _maneuver_state.nodes.clear();
         _maneuver_state.selected_node_id = -1;
         _maneuver_state.next_node_id = 0;
+        _maneuver_gizmo_interaction = {};
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (ctx.renderer && ctx.renderer->_context)
@@ -120,6 +124,13 @@ namespace Game
         ComponentContext comp_ctx = build_component_context(ctx, alpha);
         _world.entities().update_components(comp_ctx, dt);
         _world.entities().sync_to_render(*ctx.api, alpha);
+
+        if (_prediction_dirty)
+        {
+            update_prediction(ctx, 0.0f);
+        }
+
+        refresh_maneuver_node_runtime_cache(ctx);
 
         // Draw orbit debug using the same interpolation alpha as rendering to avoid visual offset.
         emit_orbit_prediction_debug(ctx);
@@ -422,7 +433,7 @@ namespace Game
                 ImGui::Checkbox("Prediction future segment", &_prediction_draw_future_segment);
 
                 float future_window_s = static_cast<float>(_prediction_future_window_s);
-                if (ImGui::DragFloat("Prediction future window (s)", &future_window_s, 10.0f, 0.0f, 36000.0f, "%.0f"))
+                if (ImGui::DragFloat("Prediction future window (s)", &future_window_s, 10.0f, 0.0f, 15552000.0f, "%.0f"))
                 {
                     _prediction_future_window_s = static_cast<double>(std::max(0.0f, future_window_s));
                 }
@@ -610,6 +621,7 @@ namespace Game
         ImGui::End();
 
         draw_maneuver_nodes_panel(ctx);
+        draw_maneuver_imgui_gizmo(ctx);
     }
 
     void GameplayState::reset_time_warp_state()
