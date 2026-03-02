@@ -256,6 +256,11 @@ namespace Game
             double total_dv_mps{0.0};
             WorldVec3 position_world{0.0, 0.0, 0.0};
             glm::dvec3 burn_direction_world{0.0, 0.0, 0.0};
+            glm::dvec3 basis_r_world{1.0, 0.0, 0.0};
+            glm::dvec3 basis_t_world{0.0, 1.0, 0.0};
+            glm::dvec3 basis_n_world{0.0, 0.0, 1.0};
+            float gizmo_scale_m{1.0f};
+            bool gizmo_valid{false};
         };
 
         struct ManeuverPlanState
@@ -315,7 +320,62 @@ namespace Game
             }
         };
 
+        enum class ManeuverHandleAxis
+        {
+            None = 0,
+            Hub,
+            ProgradePos,
+            ProgradeNeg,
+            RadialPos,
+            RadialNeg,
+            NormalPos,
+            NormalNeg,
+        };
+
+        struct ManeuverGizmoStyle
+        {
+            enum class Preset
+            {
+                Classic = 0,
+                Minimal,
+                Flat
+            };
+
+            Preset preset{Preset::Classic};
+            glm::vec4 icon_color{0.30f, 0.80f, 1.00f, 0.90f};
+            float icon_size_px{30.0f};
+            float min_scale_m{500.0f};
+            float max_scale_m{100'000'000.0f};
+            float quantize_ratio{1.15f};
+            float hysteresis{0.12f};
+            bool icon_billboard{true};
+            bool show_axis_labels{true};
+            float drag_sensitivity_mps_per_m{0.025f};
+        };
+
+        struct ManeuverGizmoInteraction
+        {
+            enum class State
+            {
+                Idle = 0,
+                HoverAxis,
+                DragAxis
+            };
+
+            State state{State::Idle};
+            int node_id{-1};
+            ManeuverHandleAxis axis{ManeuverHandleAxis::None};
+            glm::dvec3 start_dv_rtn_mps{0.0, 0.0, 0.0};
+            double start_axis_t_m{0.0};
+            bool applied_delta{false};
+        };
+
         void draw_maneuver_nodes_panel(GameStateContext &ctx);
+        void refresh_maneuver_node_runtime_cache(GameStateContext &ctx);
+        void sync_maneuver_gizmo_instances(GameStateContext &ctx);
+        void update_maneuver_gizmo_interaction(GameStateContext &ctx);
+        void clear_maneuver_gizmo_instances(GameStateContext &ctx);
+        void update_maneuver_gizmo_materials(GameStateContext &ctx);
         void update_maneuver_nodes_time_warp(GameStateContext &ctx, float fixed_dt);
         void update_maneuver_nodes_execution(GameStateContext &ctx);
 
@@ -323,6 +383,10 @@ namespace Game
         bool _maneuver_nodes_debug_draw{true};
         double _maneuver_timeline_window_s{3600.0};
         ManeuverPlanState _maneuver_state{};
+        ManeuverGizmoStyle _maneuver_gizmo_style{};
+        ManeuverGizmoInteraction _maneuver_gizmo_interaction{};
+        bool _maneuver_gizmo_materials_dirty{true};
+        std::vector<std::string> _maneuver_gizmo_instances{};
 
         // Warp/execute helpers for maneuver nodes
         bool _warp_to_time_active{false};

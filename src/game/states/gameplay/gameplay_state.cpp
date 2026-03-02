@@ -38,6 +38,9 @@ namespace Game
         _maneuver_state.nodes.clear();
         _maneuver_state.selected_node_id = -1;
         _maneuver_state.next_node_id = 0;
+        _maneuver_gizmo_interaction = {};
+        _maneuver_gizmo_instances.clear();
+        _maneuver_gizmo_materials_dirty = true;
         _reset_requested = false;
         _scenario_io_status.clear();
         _scenario_io_status_ok = true;
@@ -64,6 +67,8 @@ namespace Game
 
     void GameplayState::on_exit(GameStateContext &ctx)
     {
+        clear_maneuver_gizmo_instances(ctx);
+
         _world.clear_rebase_anchor();
         _world.clear();
         _world.set_physics(nullptr);
@@ -83,6 +88,9 @@ namespace Game
         _maneuver_state.nodes.clear();
         _maneuver_state.selected_node_id = -1;
         _maneuver_state.next_node_id = 0;
+        _maneuver_gizmo_interaction = {};
+        _maneuver_gizmo_instances.clear();
+        _maneuver_gizmo_materials_dirty = true;
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (ctx.renderer && ctx.renderer->_context)
@@ -120,6 +128,10 @@ namespace Game
         ComponentContext comp_ctx = build_component_context(ctx, alpha);
         _world.entities().update_components(comp_ctx, dt);
         _world.entities().sync_to_render(*ctx.api, alpha);
+
+        refresh_maneuver_node_runtime_cache(ctx);
+        update_maneuver_gizmo_interaction(ctx);
+        sync_maneuver_gizmo_instances(ctx);
 
         // Draw orbit debug using the same interpolation alpha as rendering to avoid visual offset.
         emit_orbit_prediction_debug(ctx);
