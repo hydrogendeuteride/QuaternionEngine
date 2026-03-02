@@ -327,7 +327,7 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
         indsSpan = tmpInds;
         break;
     case MeshGeometryDesc::Type::Capsule:
-        primitives::buildCapsule(tmpVerts, tmpInds);
+        primitives::buildCapsule(tmpVerts, tmpInds, info.geometry.sectors, info.geometry.stacks);
         vertsSpan = tmpVerts;
         indsSpan = tmpInds;
         break;

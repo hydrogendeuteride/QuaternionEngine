@@ -22,6 +22,11 @@ namespace Game
         constexpr double kPi = 3.14159265358979323846;
         constexpr double kEscapeDefaultPeriodS = 7200.0;
         constexpr double kOrbitDrawMaxDtS = 1.0; // visual subdivision step (reduces polyline chord error)
+        constexpr double kPredictionMaxHorizonS = 15'552'000.0; // 180 days
+        constexpr double kPredictionMaxSampleDtS = 900.0;
+        constexpr int kOrbitDrawMaxSegmentsSolid = 4'000;
+        constexpr int kOrbitDrawMaxSegmentsDashed = 2'500;
+        constexpr double kOrbitDashedPickMaxSpanS = 4'000.0;
 
         double safe_length(const glm::dvec3 &v)
         {
@@ -144,9 +149,9 @@ namespace Game
                                                                     const glm::dvec3 &v_mps)
         {
             const double period_s = estimate_orbital_period_s(mu_m3_s2, r_m, v_mps);
-            const double horizon_s = std::clamp(period_s * 1.1, 60.0, 36'000.0);
-            const double target_samples = std::clamp(horizon_s / 2.0, 500.0, 2000.0);
-            const double dt_s = std::clamp(horizon_s / target_samples, 0.01, 60.0);
+            const double horizon_s = std::clamp(period_s * 1.1, 60.0, kPredictionMaxHorizonS);
+            const double target_samples = std::clamp(horizon_s / 2.0, 500.0, 24'000.0);
+            const double dt_s = std::clamp(horizon_s / target_samples, 0.01, kPredictionMaxSampleDtS);
             return {horizon_s, dt_s};
         }
 
@@ -282,6 +287,20 @@ namespace Game
             rebuild_prediction = dt_since_build_s >= _prediction_periodic_refresh_s;
         }
 
+        // While editing maneuver nodes, keep updates live but cap rebuild frequency to avoid
+        // solver spikes on long horizons.
+        if (rebuild_prediction &&
+            _prediction_cache.valid &&
+            _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
+        {
+            constexpr double kDragRebuildMinIntervalS = 0.10; // 10 Hz
+            const double dt_since_build_s = now_s - _prediction_cache.build_time_s;
+            if (dt_since_build_s < kDragRebuildMinIntervalS)
+            {
+                rebuild_prediction = false;
+            }
+        }
+
         // Ensure the cache covers the desired future window; otherwise the highlighted segment will
         // shrink and clamp at the end of the current trajectory.
         if (!rebuild_prediction && _prediction_cache.valid && !_prediction_cache.trajectory_bci.empty())
@@ -308,8 +327,11 @@ namespace Game
                 }
             }
 
-            const double margin_s = std::max(0.0, static_cast<double>(fixed_dt));
-            rebuild_prediction = (cache_end_s - now_s) < (required_ahead_s + margin_s);
+            // Use a small epsilon in the "have enough coverage?" test to avoid rebuild thrashing when
+            // cache_end-now and required_ahead are nearly equal (common with maneuver-planned horizons).
+            // Without this, planned trajectories can trigger a rebuild every fixed tick at long windows.
+            const double coverage_epsilon_s = std::max(1.0e-3, std::min(0.25, std::max(0.0, static_cast<double>(fixed_dt)) * 0.5));
+            rebuild_prediction = (cache_end_s - now_s + coverage_epsilon_s) < required_ahead_s;
         }
 
         if (rebuild_prediction)
@@ -426,9 +448,9 @@ namespace Game
         const auto [horizon_s_auto, dt_s_auto] = select_prediction_horizon_and_dt(
                 mu_ref_m3_s2, ship_rel_pos_m, ship_rel_vel_mps);
 
-        double horizon_s = std::clamp(horizon_s_auto, 60.0, 36'000.0);
-        double dt_s = std::clamp(dt_s_auto, 0.01, 60.0);
-        int max_steps = 2'000;
+        double horizon_s = std::clamp(horizon_s_auto, 60.0, kPredictionMaxHorizonS);
+        double dt_s = std::clamp(dt_s_auto, 0.01, kPredictionMaxSampleDtS);
+        int max_steps = 24'000;
         double min_horizon_s = horizon_s;
 
         if (_maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
@@ -455,16 +477,16 @@ namespace Game
             // While thrusting, prioritize responsiveness over long-horizon stability.
             // A shorter horizon lets us rebuild more frequently without visible hitching.
             const double thrust_horizon_cap_s =
-                    std::clamp(std::max(120.0, _prediction_future_window_s * 1.25), 120.0, 3'600.0);
+                    std::clamp(std::max(120.0, _prediction_future_window_s * 1.25), 120.0, 172'800.0);
             horizon_s = std::min(horizon_s, thrust_horizon_cap_s);
             horizon_s = std::max(horizon_s, min_horizon_s);
 
-            const double target_samples = std::clamp(horizon_s / 1.0, 300.0, 800.0);
-            dt_s = std::clamp(horizon_s / target_samples, 0.02, 20.0);
-            max_steps = 1'000;
+            const double target_samples = std::clamp(horizon_s / 2.0, 300.0, 3'000.0);
+            dt_s = std::clamp(horizon_s / target_samples, 0.02, 120.0);
+            max_steps = 4'000;
         }
 
-        horizon_s = std::clamp(horizon_s, dt_s, 36'000.0);
+        horizon_s = std::clamp(horizon_s, dt_s, kPredictionMaxHorizonS);
         const int steps = std::clamp(static_cast<int>(std::ceil(horizon_s / dt_s)), 2, max_steps);
 
         auto fill_cache_from_trajectory = [&](std::vector<orbitsim::TrajectorySample> trajectory_bci) -> bool {
@@ -652,6 +674,38 @@ namespace Game
         const glm::vec4 color_orbit_future = scaled_line_color(color_orbit_future_current);
         const glm::vec4 color_orbit_plan = scaled_line_color(color_orbit_planned);
 
+        glm::dvec3 camera_world = ctx.api->get_camera_position_d();
+        float viewport_h_px = 720.0f;
+        float camera_fov_deg = 70.0f;
+        if (ctx.renderer && ctx.renderer->_sceneManager)
+        {
+            const Camera &cam = ctx.renderer->_sceneManager->getMainCamera();
+            camera_world = cam.position_world;
+            camera_fov_deg = cam.fovDegrees;
+            if (ctx.renderer->_logicalRenderExtent.height > 0)
+            {
+                viewport_h_px = static_cast<float>(ctx.renderer->_logicalRenderExtent.height);
+            }
+        }
+        const double tan_half_fov =
+                std::tan(glm::radians(static_cast<double>(camera_fov_deg)) * 0.5);
+        const double safe_viewport_h_px = std::max(1.0, static_cast<double>(viewport_h_px));
+        const double fallback_meters_per_px = 1.0;
+
+        auto meters_per_px_at_world = [&](const WorldVec3 &p_world) -> double {
+            const double dist_m = safe_length(glm::dvec3(p_world) - camera_world);
+            if (!std::isfinite(dist_m) || dist_m <= 1.0e-3 || !std::isfinite(tan_half_fov) || tan_half_fov <= 1.0e-8)
+            {
+                return fallback_meters_per_px;
+            }
+            const double mpp = (2.0 * tan_half_fov * dist_m) / safe_viewport_h_px;
+            if (!std::isfinite(mpp) || mpp <= 1.0e-6)
+            {
+                return fallback_meters_per_px;
+            }
+            return mpp;
+        };
+
         WorldVec3 ship_pos_world_state{0.0, 0.0, 0.0};
         glm::dvec3 ship_vel_world(0.0);
         glm::vec3 ship_vel_local_f(0.0f);
@@ -772,12 +826,16 @@ namespace Game
             size_t seg = (i_start_hi == 0) ? 0 : (i_start_hi - 1);
             double t = std::clamp(t_start_s, traj.front().t_s, traj.back().t_s);
             const double t_end = std::clamp(t_end_s, traj.front().t_s, traj.back().t_s);
+            const double span_s = std::max(0.0, t_end - t);
+            const int max_segments = dashed ? kOrbitDrawMaxSegmentsDashed : kOrbitDrawMaxSegmentsSolid;
+            const double draw_dt_s = std::max(kOrbitDrawMaxDtS, span_s / static_cast<double>(std::max(1, max_segments)));
+            const bool allow_pick_segments = !dashed || (span_s <= kOrbitDashedPickMaxSpanS);
 
-            const double dash_on_m = 30'000.0;
-            const double dash_off_m = 20'000.0;
-            double dash_accum_m = 0.0;
+            const double dash_on_px = 14.0;
+            const double dash_off_px = 9.0;
+            double dash_accum_px = 0.0;
             bool dash_on = true;
-            double dash_limit_m = dash_on_m;
+            double dash_limit_px = dash_on_px;
             double prev_t_s = t_start_s;
 
             while (t < t_end && (seg + 1) < n)
@@ -794,7 +852,7 @@ namespace Game
                     continue;
                 }
 
-                const int sub = std::max(1, static_cast<int>(std::ceil(seg_len / kOrbitDrawMaxDtS)));
+                const int sub = std::max(1, static_cast<int>(std::ceil(seg_len / draw_dt_s)));
                 for (int j = 1; j <= sub; ++j)
                 {
                     const double u = static_cast<double>(j) / static_cast<double>(sub);
@@ -807,15 +865,18 @@ namespace Game
                         const double seg_m = glm::length(glm::dvec3(p - prev_world));
                         if (std::isfinite(seg_m) && seg_m > 0.0)
                         {
-                            dash_accum_m += seg_m;
+                            const glm::dvec3 seg_mid = glm::mix(glm::dvec3(prev_world), glm::dvec3(p), 0.5);
+                            const double seg_mpp = meters_per_px_at_world(WorldVec3(seg_mid));
+                            const double seg_px = seg_m / std::max(1.0e-6, seg_mpp);
+                            dash_accum_px += seg_px;
                         }
                         draw = dash_on;
 
-                        while (dash_accum_m >= dash_limit_m)
+                        while (dash_accum_px >= dash_limit_px)
                         {
-                            dash_accum_m -= dash_limit_m;
+                            dash_accum_px -= dash_limit_px;
                             dash_on = !dash_on;
-                            dash_limit_m = dash_on ? dash_on_m : dash_off_m;
+                            dash_limit_px = dash_on ? dash_on_px : dash_off_px;
                         }
                     }
 
@@ -836,7 +897,7 @@ namespace Game
                             }
                         }
 
-                        if (picking && pick_group_id != kInvalidPickGroup)
+                        if (allow_pick_segments && picking && pick_group_id != kInvalidPickGroup)
                         {
                             picking->add_line_pick_segment(pick_group_id,
                                                            prev_world,
