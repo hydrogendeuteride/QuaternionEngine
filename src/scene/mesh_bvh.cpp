@@ -62,9 +62,9 @@ std::unique_ptr<MeshBVH> build_mesh_bvh(const MeshAsset &mesh,
             // Store the triangle in mesh-local space and let the library
             // compute/update the AABB used for hierarchy construction.
             bvh2::PrimitiveF prim{};
-            prim.v0 = Vec3<float>(p0.x, p0.y, p0.z);
-            prim.v1 = Vec3<float>(p1.x, p1.y, p1.z);
-            prim.v2 = Vec3<float>(p2.x, p2.y, p2.z);
+            prim.v0 = bvh2::Vec3<float>(p0.x, p0.y, p0.z);
+            prim.v1 = bvh2::Vec3<float>(p1.x, p1.y, p1.z);
+            prim.v2 = bvh2::Vec3<float>(p2.x, p2.y, p2.z);
             prim.updateBounds();
             result->primitives.push_back(prim);
 
@@ -123,8 +123,8 @@ bool intersect_ray_mesh_bvh(const MeshBVH &bvh,
     }
     dirLocal = glm::normalize(dirLocal);
 
-    Ray ray(Vec3<float>(originLocal.x, originLocal.y, originLocal.z),
-            Vec3<float>(dirLocal.x, dirLocal.y, dirLocal.z));
+    bvh2::Ray ray(bvh2::Vec3<float>(originLocal.x, originLocal.y, originLocal.z),
+                  bvh2::Vec3<float>(dirLocal.x, dirLocal.y, dirLocal.z));
 
     uint32_t primIdx = 0;
     float tLocal = 0.0f;
