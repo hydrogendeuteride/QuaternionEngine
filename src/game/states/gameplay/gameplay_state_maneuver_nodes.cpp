@@ -17,9 +17,6 @@
 #include <cmath>
 #include <limits>
 #include <string>
-#include <unordered_set>
-#include <string_view>
-#include <glm/gtx/quaternion.hpp>
 
 namespace Game
 {
@@ -167,51 +164,6 @@ namespace Game
                 ImVec2(p.x - r_px, p.y),
             };
             dl->AddConvexPolyFilled(pts, 4, col);
-        }
-
-        struct ParsedManeuverInstance
-        {
-            bool valid{false};
-            int node_id{-1};
-            std::string suffix{};
-        };
-
-        ParsedManeuverInstance parse_maneuver_instance_name(const std::string &name)
-        {
-            ParsedManeuverInstance out{};
-            if (name.rfind("mn_", 0) != 0)
-            {
-                return out;
-            }
-
-            const size_t id_begin = 3;
-            const size_t id_end = name.find('_', id_begin);
-            if (id_end == std::string::npos || id_end <= id_begin)
-            {
-                return out;
-            }
-
-            const std::string_view id_sv{name.data() + id_begin, id_end - id_begin};
-            int id = 0;
-            for (const char ch : id_sv)
-            {
-                if (ch < '0' || ch > '9')
-                {
-                    return out;
-                }
-                id = id * 10 + (ch - '0');
-            }
-
-            const size_t suffix_begin = id_end + 1;
-            if (suffix_begin >= name.size())
-            {
-                return out;
-            }
-
-            out.valid = true;
-            out.node_id = id;
-            out.suffix = name.substr(suffix_begin);
-            return out;
         }
 
         struct CameraRay
@@ -376,62 +328,6 @@ namespace Game
             out_line_t = t;
             return std::isfinite(out_line_t);
         }
-
-        glm::quat quat_from_y_to_dir(const glm::dvec3 &dir_world, const glm::quat &fallback = glm::quat(1, 0, 0, 0))
-        {
-            const glm::dvec3 dir_n = normalized_or(dir_world, glm::dvec3(0.0, 1.0, 0.0));
-            if (!finite3(dir_n))
-            {
-                return fallback;
-            }
-
-            const glm::vec3 from(0.0f, 1.0f, 0.0f);
-            const glm::vec3 to = glm::normalize(glm::vec3(dir_n));
-            if (!std::isfinite(to.x) || !std::isfinite(to.y) || !std::isfinite(to.z))
-            {
-                return fallback;
-            }
-
-            const float dotv = glm::clamp(glm::dot(from, to), -1.0f, 1.0f);
-            if (dotv > 0.9999f)
-            {
-                return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-            }
-            if (dotv < -0.9999f)
-            {
-                return glm::angleAxis(3.14159265358979323846f, glm::vec3(1.0f, 0.0f, 0.0f));
-            }
-            return glm::rotation(from, to);
-        }
-
-        float quantize_scale(float raw_scale_m, float ratio)
-        {
-            if (!std::isfinite(raw_scale_m) || !(raw_scale_m > 0.0f))
-            {
-                return 1.0f;
-            }
-            if (!std::isfinite(ratio) || ratio <= 1.001f)
-            {
-                return raw_scale_m;
-            }
-
-            const double r = static_cast<double>(ratio);
-            const double q = std::round(std::log(static_cast<double>(raw_scale_m)) / std::log(r));
-            const double out = std::pow(r, q);
-            if (!std::isfinite(out) || !(out > 0.0))
-            {
-                return raw_scale_m;
-            }
-            return static_cast<float>(out);
-        }
-
-        constexpr const char *kMatHub = "mn.material.hub";
-        constexpr const char *kMatHubSelected = "mn.material.hub.selected";
-        constexpr const char *kMatAxisRadial = "mn.material.axis.radial";
-        constexpr const char *kMatAxisPrograde = "mn.material.axis.prograde";
-        constexpr const char *kMatAxisNormal = "mn.material.axis.normal";
-        constexpr const char *kMatAxisHover = "mn.material.axis.hover";
-        constexpr const char *kMatAxisActive = "mn.material.axis.active";
 
     } // namespace
 
