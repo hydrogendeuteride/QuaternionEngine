@@ -122,8 +122,8 @@ public:
         Type type = Type::Provided;
         std::span<Vertex> vertices{};
         std::span<uint32_t> indices{};
-        int sectors = 24;
-        int stacks = 24;
+        int sectors = 32;
+        int stacks = 32;
     };
 
     struct MeshMaterialDesc

@@ -690,8 +690,8 @@ void VulkanEngine::initDefaultData()
         AssetManager::MeshCreateInfo ci{};
         ci.name = "Sphere";
         ci.geometry.type = AssetManager::MeshGeometryDesc::Type::Sphere;
-        ci.geometry.sectors = 16;
-        ci.geometry.stacks = 16;
+        ci.geometry.sectors = 32;
+        ci.geometry.stacks = 32;
         ci.material.kind = AssetManager::MeshMaterialDesc::Kind::Default;
         sphereMesh = _assetManager->createMesh(ci);
     }
@@ -812,6 +812,16 @@ bool VulkanEngine::addPrimitiveInstance(const std::string &instanceName,
     AssetManager::MeshCreateInfo ci{};
     ci.name = meshName;
     ci.geometry.type = geomType;
+    if (geomType == AssetManager::MeshGeometryDesc::Type::Sphere)
+    {
+        ci.geometry.sectors = 32;
+        ci.geometry.stacks = 32;
+    }
+    else if (geomType == AssetManager::MeshGeometryDesc::Type::Capsule)
+    {
+        ci.geometry.sectors = 32;
+        ci.geometry.stacks = 24;
+    }
     ci.material = material;
     ci.boundsType = boundsTypeOverride;
 
