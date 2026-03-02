@@ -334,23 +334,11 @@ namespace Game
 
         struct ManeuverGizmoStyle
         {
-            enum class Preset
-            {
-                Classic = 0,
-                Minimal,
-                Flat
-            };
-
-            Preset preset{Preset::Classic};
             glm::vec4 icon_color{0.30f, 0.80f, 1.00f, 0.90f};
             float icon_size_px{30.0f};
-            float min_scale_m{500.0f};
-            float max_scale_m{100'000'000.0f};
-            float quantize_ratio{1.15f};
-            float hysteresis{0.12f};
-            bool icon_billboard{true};
+            float overlay_scale{1.0f};
             bool show_axis_labels{true};
-            float drag_sensitivity_mps_per_m{0.025f};
+            float drag_sensitivity_mps_per_m{0.0025f};
         };
 
         struct ManeuverGizmoInteraction
@@ -371,11 +359,9 @@ namespace Game
         };
 
         void draw_maneuver_nodes_panel(GameStateContext &ctx);
+        void draw_maneuver_imgui_gizmo(GameStateContext &ctx);
         void refresh_maneuver_node_runtime_cache(GameStateContext &ctx);
-        void sync_maneuver_gizmo_instances(GameStateContext &ctx);
-        void update_maneuver_gizmo_interaction(GameStateContext &ctx);
         void clear_maneuver_gizmo_instances(GameStateContext &ctx);
-        void update_maneuver_gizmo_materials(GameStateContext &ctx);
         void update_maneuver_nodes_time_warp(GameStateContext &ctx, float fixed_dt);
         void update_maneuver_nodes_execution(GameStateContext &ctx);
 
@@ -385,8 +371,6 @@ namespace Game
         ManeuverPlanState _maneuver_state{};
         ManeuverGizmoStyle _maneuver_gizmo_style{};
         ManeuverGizmoInteraction _maneuver_gizmo_interaction{};
-        bool _maneuver_gizmo_materials_dirty{true};
-        std::vector<std::string> _maneuver_gizmo_instances{};
 
         // Warp/execute helpers for maneuver nodes
         bool _warp_to_time_active{false};

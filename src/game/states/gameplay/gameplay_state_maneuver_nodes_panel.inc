@@ -79,51 +79,23 @@
         bool style_changed = false;
         if (ImGui::CollapsingHeader("Gizmo Style", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            int preset = static_cast<int>(_maneuver_gizmo_style.preset);
-            if (ImGui::Combo("Preset", &preset, "Classic\0Minimal\0Flat\0"))
-            {
-                _maneuver_gizmo_style.preset = static_cast<ManeuverGizmoStyle::Preset>(std::clamp(preset, 0, 2));
-                switch (_maneuver_gizmo_style.preset)
-                {
-                    case ManeuverGizmoStyle::Preset::Classic:
-                        _maneuver_gizmo_style.icon_size_px = 30.0f;
-                        _maneuver_gizmo_style.drag_sensitivity_mps_per_m = 0.025f;
-                        break;
-                    case ManeuverGizmoStyle::Preset::Minimal:
-                        _maneuver_gizmo_style.icon_size_px = 22.0f;
-                        _maneuver_gizmo_style.drag_sensitivity_mps_per_m = 0.018f;
-                        break;
-                    case ManeuverGizmoStyle::Preset::Flat:
-                        _maneuver_gizmo_style.icon_size_px = 26.0f;
-                        _maneuver_gizmo_style.drag_sensitivity_mps_per_m = 0.030f;
-                        break;
-                }
-                style_changed = true;
-            }
-
             style_changed |= ImGui::ColorEdit4("Icon Color", &_maneuver_gizmo_style.icon_color.x,
                                                ImGuiColorEditFlags_NoInputs);
-            style_changed |= ImGui::DragFloat("Icon Size (px)", &_maneuver_gizmo_style.icon_size_px, 0.25f, 8.0f,
+            style_changed |= ImGui::DragFloat("Overlay Size (px)", &_maneuver_gizmo_style.icon_size_px, 0.25f, 8.0f,
                                               160.0f, "%.1f");
-            style_changed |= ImGui::DragFloat("Min Scale (m)", &_maneuver_gizmo_style.min_scale_m, 5.0f, 1.0f,
-                                              1'000'000.0f, "%.1f");
-            style_changed |= ImGui::DragFloat("Max Scale (m)", &_maneuver_gizmo_style.max_scale_m, 50.0f, 1.0f,
-                                              1'000'000'000.0f, "%.1f");
+            style_changed |= ImGui::DragFloat("Overlay Scale", &_maneuver_gizmo_style.overlay_scale, 0.01f, 0.25f,
+                                              6.0f, "%.2f");
             style_changed |= ImGui::DragFloat("Drag Sensitivity", &_maneuver_gizmo_style.drag_sensitivity_mps_per_m,
-                                              0.001f, 0.0001f, 2.0f, "%.4f");
-            style_changed |= ImGui::Checkbox("Billboard Hub", &_maneuver_gizmo_style.icon_billboard);
+                                              0.0001f, 0.00001f, 1.0f, "%.5f");
             style_changed |= ImGui::Checkbox("Show Axis Overlay", &_maneuver_gizmo_style.show_axis_labels);
         }
 
         if (style_changed)
         {
             _maneuver_gizmo_style.icon_size_px = std::clamp(_maneuver_gizmo_style.icon_size_px, 8.0f, 160.0f);
-            _maneuver_gizmo_style.min_scale_m = std::max(1.0f, _maneuver_gizmo_style.min_scale_m);
-            _maneuver_gizmo_style.max_scale_m = std::max(_maneuver_gizmo_style.min_scale_m,
-                                                         _maneuver_gizmo_style.max_scale_m);
+            _maneuver_gizmo_style.overlay_scale = std::clamp(_maneuver_gizmo_style.overlay_scale, 0.25f, 6.0f);
             _maneuver_gizmo_style.drag_sensitivity_mps_per_m =
-                    std::clamp(_maneuver_gizmo_style.drag_sensitivity_mps_per_m, 0.0001f, 2.0f);
-            _maneuver_gizmo_materials_dirty = true;
+                    std::clamp(_maneuver_gizmo_style.drag_sensitivity_mps_per_m, 0.00001f, 1.0f);
         }
 
         if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
