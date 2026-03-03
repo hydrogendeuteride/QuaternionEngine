@@ -20,6 +20,8 @@
 #include <limits>
 #include <algorithm>
 
+struct ImDrawList;
+
 namespace Game
 {
     // ============================================================================
@@ -357,6 +359,77 @@ namespace Game
             double start_axis_t_m{0.0};
             bool applied_delta{false};
         };
+
+        struct ManeuverGizmoViewContext
+        {
+            glm::dvec3 camera_world{0.0, 0.0, 0.0};
+            glm::dmat3 world_to_cam{1.0};
+            double logical_w{0.0};
+            double logical_h{0.0};
+            double aspect{1.0};
+            double tan_half_fov{0.0};
+            VkRect2D letterbox_rect{};
+            double draw_from_swap_x{1.0};
+            double draw_from_swap_y{1.0};
+            double window_from_draw_x{1.0};
+            double window_from_draw_y{1.0};
+            bool depth_occluder_valid{false};
+            WorldVec3 depth_occluder_center{0.0, 0.0, 0.0};
+            double depth_occluder_radius{0.0};
+        };
+
+        struct ManeuverHubMarker
+        {
+            int node_id{-1};
+            glm::vec2 screen{0.0f, 0.0f};
+            double depth_m{0.0};
+        };
+
+        struct ManeuverAxisMarker
+        {
+            int node_id{-1};
+            ManeuverHandleAxis axis{ManeuverHandleAxis::None};
+            glm::vec2 hub_screen{0.0f, 0.0f};
+            glm::vec2 handle_screen{0.0f, 0.0f};
+            uint32_t base_color{0};
+            const char *label{""};
+            double depth_m{0.0};
+        };
+
+        bool build_maneuver_gizmo_view_context(const GameStateContext &ctx, ManeuverGizmoViewContext &out_view) const;
+        bool maneuver_gizmo_is_occluded(const ManeuverGizmoViewContext &view, const WorldVec3 &point_world) const;
+        bool project_maneuver_gizmo_point(const ManeuverGizmoViewContext &view,
+                                          const WorldVec3 &point_world,
+                                          glm::vec2 &out_screen,
+                                          double &out_depth_m) const;
+        bool resolve_maneuver_axis(const ManeuverNode &node,
+                                   ManeuverHandleAxis axis,
+                                   glm::dvec3 &out_axis_dir_world,
+                                   int &out_component,
+                                   double &out_sign) const;
+        const char *maneuver_axis_label(ManeuverHandleAxis axis) const;
+        uint32_t maneuver_axis_color(ManeuverHandleAxis axis) const;
+        bool begin_maneuver_axis_drag(GameStateContext &ctx, int node_id, ManeuverHandleAxis axis);
+        void apply_maneuver_axis_drag(GameStateContext &ctx, ManeuverNode &node, const glm::vec2 &mouse_pos_window);
+        void build_maneuver_gizmo_markers(const ManeuverGizmoViewContext &view,
+                                          float overlay_size_px,
+                                          std::vector<ManeuverHubMarker> &out_hubs,
+                                          std::vector<ManeuverAxisMarker> &out_handles) const;
+        void find_maneuver_gizmo_hover(const std::vector<ManeuverHubMarker> &hubs,
+                                       const std::vector<ManeuverAxisMarker> &handles,
+                                       const glm::vec2 &mouse_pos,
+                                       float hub_hit_px2,
+                                       float axis_hit_px2,
+                                       int &out_hovered_hub_idx,
+                                       int &out_hovered_handle_idx) const;
+        void draw_maneuver_gizmo_markers(ImDrawList *draw_list,
+                                         const std::vector<ManeuverHubMarker> &hubs,
+                                         const std::vector<ManeuverAxisMarker> &handles,
+                                         int hovered_hub_idx,
+                                         int hovered_handle_idx,
+                                         float hub_hit_px,
+                                         float axis_hit_px) const;
+        void draw_maneuver_gizmo_hover_tooltip(const std::vector<ManeuverAxisMarker> &handles, int hovered_handle_idx) const;
 
         void draw_maneuver_nodes_panel(GameStateContext &ctx);
         void draw_maneuver_imgui_gizmo(GameStateContext &ctx);
