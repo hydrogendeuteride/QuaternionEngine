@@ -116,6 +116,8 @@ namespace Game
                 _prediction_cache.build_vel_world = ship_vel_world;
                 _prediction_cache.trajectory_bci = std::move(result.trajectory_bci);
                 _prediction_cache.trajectory_bci_planned = std::move(result.trajectory_bci_planned);
+                _prediction_cache.trajectory_segments_bci = std::move(result.trajectory_segments_bci);
+                _prediction_cache.trajectory_segments_bci_planned = std::move(result.trajectory_segments_bci_planned);
                 _prediction_cache.altitude_km = std::move(result.altitude_km);
                 _prediction_cache.speed_kmps = std::move(result.speed_kmps);
                 _prediction_cache.semi_major_axis_m = result.semi_major_axis_m;
@@ -227,7 +229,16 @@ namespace Game
         // shrink and clamp at the end of the current trajectory.
         if (!rebuild_prediction && _prediction_cache.valid && !_prediction_cache.trajectory_bci.empty())
         {
-            const double cache_end_s = _prediction_cache.trajectory_bci.back().t_s;
+            double cache_end_s = _prediction_cache.trajectory_bci.back().t_s;
+            if (!_prediction_cache.trajectory_segments_bci.empty())
+            {
+                const orbitsim::TrajectorySegment &last_segment = _prediction_cache.trajectory_segments_bci.back();
+                const double segment_end_s = last_segment.t0_s + last_segment.dt_s;
+                if (std::isfinite(segment_end_s))
+                {
+                    cache_end_s = segment_end_s;
+                }
+            }
             double required_ahead_s = std::max(0.0, _prediction_draw_future_segment ? _prediction_future_window_s : 0.0);
 
             if (_maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
@@ -449,6 +460,8 @@ namespace Game
 
             _prediction_cache.trajectory_bci = std::move(trajectory_bci);
             _prediction_cache.trajectory_bci_planned.clear();
+            _prediction_cache.trajectory_segments_bci.clear();
+            _prediction_cache.trajectory_segments_bci_planned.clear();
             _prediction_cache.altitude_km.reserve(_prediction_cache.trajectory_bci.size());
             _prediction_cache.speed_kmps.reserve(_prediction_cache.trajectory_bci.size());
 

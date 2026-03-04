@@ -17,6 +17,37 @@ namespace Game
         {
             return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
         }
+
+        orbitsim::TrajectorySegment to_body_centered_segment(const orbitsim::TrajectorySegment &segment,
+                                                             const orbitsim::State &reference_start,
+                                                             const orbitsim::State &reference_end)
+        {
+            orbitsim::TrajectorySegment out = segment;
+            out.start.position_m = segment.start.position_m - reference_start.position_m;
+            out.start.velocity_mps = segment.start.velocity_mps - reference_start.velocity_mps;
+            out.end.position_m = segment.end.position_m - reference_end.position_m;
+            out.end.velocity_mps = segment.end.velocity_mps - reference_end.velocity_mps;
+            return out;
+        }
+
+        std::vector<orbitsim::TrajectorySegment> trajectory_segments_to_body_centered_inertial(
+                const std::vector<orbitsim::TrajectorySegment> &segments_inertial,
+                const orbitsim::CelestialEphemeris &ephemeris,
+                const orbitsim::BodyId reference_body_id)
+        {
+            std::vector<orbitsim::TrajectorySegment> out;
+            out.reserve(segments_inertial.size());
+
+            for (const orbitsim::TrajectorySegment &segment : segments_inertial)
+            {
+                const double t1_s = segment.t0_s + segment.dt_s;
+                const orbitsim::State reference_start = ephemeris.body_state_at_by_id(reference_body_id, segment.t0_s);
+                const orbitsim::State reference_end = ephemeris.body_state_at_by_id(reference_body_id, t1_s);
+                out.push_back(to_body_centered_segment(segment, reference_start, reference_end));
+            }
+
+            return out;
+        }
     } // namespace
 
     OrbitPredictionService::OrbitPredictionService()
@@ -252,9 +283,26 @@ namespace Game
         opt.include_end = true;
         opt.stop_on_impact = false;
 
+        orbitsim::TrajectorySegmentOptions segment_opt{};
+        segment_opt.duration_s = horizon_s;
+        segment_opt.max_segments = std::max<std::size_t>(1, (opt.max_samples > 0) ? (opt.max_samples - 1) : 0);
+        segment_opt.include_start = true;
+        segment_opt.include_end = true;
+        segment_opt.stop_on_impact = false;
+
         const orbitsim::CelestialEphemeris eph = orbitsim::build_celestial_ephemeris(sim, opt);
+        const std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_baseline =
+                orbitsim::predict_spacecraft_trajectory_segments(sim, eph, ship_h.id, segment_opt);
+        if (traj_segments_inertial_baseline.empty())
+        {
+            return out;
+        }
+
+        out.trajectory_segments_bci =
+                trajectory_segments_to_body_centered_inertial(traj_segments_inertial_baseline, eph, ref_sim->id);
+
         const std::vector<orbitsim::TrajectorySample> traj_inertial_baseline =
-                orbitsim::predict_spacecraft_trajectory(sim, eph, ship_h.id, opt);
+                orbitsim::sample_trajectory_segments_uniform_dt(traj_segments_inertial_baseline, opt);
         if (traj_inertial_baseline.size() < 2)
         {
             return out;
@@ -316,10 +364,15 @@ namespace Game
             orbitsim::sort_impulses_by_time(plan);
             sim.maneuver_plan() = std::move(plan);
 
-            const std::vector<orbitsim::TrajectorySample> traj_inertial_planned =
-                    orbitsim::predict_spacecraft_trajectory(sim, eph, ship_h.id, opt);
-            if (traj_inertial_planned.size() >= 2)
+            const std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_planned =
+                    orbitsim::predict_spacecraft_trajectory_segments(sim, eph, ship_h.id, segment_opt);
+            if (!traj_segments_inertial_planned.empty())
             {
+                out.trajectory_segments_bci_planned =
+                        trajectory_segments_to_body_centered_inertial(traj_segments_inertial_planned, eph, ref_sim->id);
+
+                const std::vector<orbitsim::TrajectorySample> traj_inertial_planned =
+                        orbitsim::sample_trajectory_segments_uniform_dt(traj_segments_inertial_planned, opt);
                 std::vector<orbitsim::TrajectorySample> traj_centered_planned =
                         orbitsim::trajectory_to_body_centered_inertial(traj_inertial_planned, eph, *ref_sim);
                 if (traj_centered_planned.size() >= 2)

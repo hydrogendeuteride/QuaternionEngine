@@ -201,6 +201,8 @@ namespace Game
             // BCI = body-centered inertial (relative to the current reference body)
             std::vector<orbitsim::TrajectorySample> trajectory_bci;
             std::vector<orbitsim::TrajectorySample> trajectory_bci_planned;
+            std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci;
+            std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci_planned;
 
             // Cached world-space polyline refreshed from trajectory_bci each frame.
             std::vector<WorldVec3> points_world;
@@ -223,6 +225,8 @@ namespace Game
                 build_vel_world = glm::dvec3(0.0, 0.0, 0.0);
                 trajectory_bci.clear();
                 trajectory_bci_planned.clear();
+                trajectory_segments_bci.clear();
+                trajectory_segments_bci_planned.clear();
                 points_world.clear();
                 points_world_planned.clear();
                 altitude_km.clear();
