@@ -1,0 +1,41 @@
+#pragma once
+
+namespace Game::OrbitPredictionTuning
+{
+    // Scale applied to the estimated orbital period when selecting the default prediction horizon.
+    // 2.0 means "about two periods" for closed orbits (unless clamped by other limits).
+    inline constexpr double kBaseHorizonFromPeriodScale = 2.0;
+
+    // How many orbital periods to draw when full-orbit visualization is enabled.
+    inline constexpr double kFullOrbitDrawPeriodScale = 2.0;
+
+    // Fallback orbital period used when orbit elements cannot be estimated reliably.
+    inline constexpr double kEscapeDefaultPeriodS = 7'200.0;
+
+    // Global horizon bounds (in seconds) used by both gameplay and worker prediction code.
+    inline constexpr double kMinHorizonS = 60.0;
+    inline constexpr double kMaxHorizonS = 15'552'000.0; // 180 days
+
+    // Generic trajectory sampling limits.
+    inline constexpr double kMaxSampleDtS = 900.0;
+    inline constexpr double kTargetSamplesDivisorS = 2.0; // horizon / 2
+    inline constexpr double kTargetSamplesMin = 500.0;
+    inline constexpr double kTargetSamplesMax = 24'000.0;
+    inline constexpr int kMaxStepsNormal = 24'000;
+
+    // Extra coverage requested after the last maneuver node so the post-node path stays visible.
+    inline constexpr double kPostNodeCoverageMinS = 120.0;
+
+    // While thrusting, shorten the horizon so updates can happen more often.
+    inline constexpr double kThrustHorizonMinS = 120.0;
+    inline constexpr double kThrustHorizonWindowScale = 1.25;
+    inline constexpr double kThrustHorizonMaxS = 172'800.0; // 48 hours
+    inline constexpr double kThrustTargetSamplesMin = 300.0;
+    inline constexpr double kThrustTargetSamplesMax = 3'000.0;
+    inline constexpr double kThrustMinSampleDtS = 0.02;
+    inline constexpr double kThrustMaxSampleDtS = 120.0;
+    inline constexpr int kMaxStepsThrust = 4'000;
+
+    // Maneuver-gizmo drag rebuild cap. Lower is more responsive, higher reduces CPU work.
+    inline constexpr double kDragRebuildMinIntervalS = 0.03; // ~33 Hz
+}
