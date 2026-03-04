@@ -5,6 +5,7 @@
 #include "core/engine.h"
 #include "core/game_api.h"
 #include "core/input/input_system.h"
+#include "core/orbit_plot/orbit_plot.h"
 #include "core/util/logger.h"
 
 #include "imgui.h"
@@ -45,6 +46,11 @@ namespace Game
         _prediction_service.reset();
         _prediction_request_pending = false;
 
+        if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
+        {
+            ctx.renderer->_context->orbit_plot->clear_all();
+        }
+
         // Try loading scenario from JSON; fall back to compiled default.
         // NOTE: JSON data is authoritative when present, including orbiter body mass.
         if (ctx.renderer && ctx.renderer->_assetManager)
@@ -81,6 +87,10 @@ namespace Game
         _prediction_dirty = true;
         _prediction_service.reset();
         _prediction_request_pending = false;
+        if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
+        {
+            ctx.renderer->_context->orbit_plot->clear_all();
+        }
         reset_time_warp_state();
         _warp_to_time_active = false;
         _warp_to_time_target_s = 0.0;
@@ -433,6 +443,7 @@ namespace Game
             ImGui::Separator();
             if (ImGui::CollapsingHeader("Orbit", ImGuiTreeNodeFlags_DefaultOpen))
             {
+                ImGui::TextUnformatted("Orbit plot renders in a dedicated pass (independent from Debug draw).");
                 ImGui::Checkbox("Prediction full orbit", &_prediction_draw_full_orbit);
                 ImGui::Checkbox("Prediction future segment", &_prediction_draw_future_segment);
 

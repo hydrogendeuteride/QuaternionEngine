@@ -17,6 +17,8 @@ add_executable (vulkan_engine
   core/picking/picking_system.cpp
   core/debug_draw/debug_draw.h
   core/debug_draw/debug_draw.cpp
+  core/orbit_plot/orbit_plot.h
+  core/orbit_plot/orbit_plot.cpp
   core/debug_draw/engine_debug_draw.h
   core/debug_draw/engine_debug_draw.cpp
   core/game_api.h
@@ -123,6 +125,8 @@ add_executable (vulkan_engine
   render/passes/auto_exposure.cpp
   render/passes/tonemap.h
   render/passes/tonemap.cpp
+  render/passes/orbit_plot.h
+  render/passes/orbit_plot.cpp
   render/passes/debug_draw.h
   render/passes/debug_draw.cpp
   # render graph

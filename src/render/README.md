@@ -31,7 +31,7 @@ render/
 | Subfolder / File | Primary Class | Role |
 |------------------|--------------|------|
 | `graph/` | `RenderGraph`, `RGResourceRegistry`, `RGPassBuilder` | DAG-based pass scheduling with automatic barrier insertion, layout transitions, and transient resource management |
-| `passes/` | `IRenderPass` implementations | 16 render passes: shadow, background, sun disk, geometry, lighting, SSR, volumetrics, atmosphere, particles, mesh VFX, transparent, auto-exposure, tonemap, FXAA, debug draw, ImGui |
+| `passes/` | `IRenderPass` implementations | 17 render passes: shadow, background, sun disk, geometry, lighting, SSR, volumetrics, atmosphere, particles, mesh VFX, transparent, auto-exposure, tonemap, orbit plot, debug draw, FXAA, ImGui |
 | `renderpass.h` | `IRenderPass`, `RenderPassManager` | Abstract pass interface (`init`/`cleanup`/`execute`/`getName`) and pass registry with typed lookup |
 | `materials.h` | `GLTFMetallic_Roughness` | PBR metallic-roughness material: opaque/transparent/mesh-VFX/G-Buffer pipeline variants, descriptor set writing for 5 texture maps + constants |
 | `pipelines.h` | `PipelineBuilder` | Fluent builder for `VkGraphicsPipeline`: shader stages, topology, rasterizer, blending, depth, MRT formats |
@@ -69,9 +69,9 @@ The full deferred PBR pipeline, executed via RenderGraph each frame:
 ├─────────────────────────────────────────────────────────┤
 │ AutoExposure     — compute luminance measurement        │
 │ Tonemap + Bloom  — HDR → LDR (ACES/Reinhard)           │
-│ FXAA             — post-process AA (LDR)                │
-├─────────────────────────────────────────────────────────┤
+│ OrbitPlot        — dedicated orbit line overlays        │
 │ DebugDraw        — wireframe overlays                   │
+│ FXAA             — post-process AA (LDR)                │
 │ ImGui            — debug UI on swapchain                │
 │ PresentChain     — letterbox blit → PRESENT_SRC         │
 └─────────────────────────────────────────────────────────┘
@@ -91,8 +91,9 @@ VulkanEngine::init()
   │   ├─ CloudPass::init()
   │   ├─ AtmospherePass::init()
   │   ├─ ParticlePass::init()
-  │   ├─ FxaaPass::init()
+  │   ├─ OrbitPlotPass::init()
   │   ├─ DebugDrawPass::init()
+  │   ├─ FxaaPass::init()
   │   ├─ TransparentPass::init()
   │   ├─ AutoExposurePass::init()
   │   └─ TonemapPass::init()
@@ -111,11 +112,12 @@ VulkanEngine::init()
   CloudPass::register_graph()
   AtmospherePass::register_graph()
   ParticlePass::register_graph()
+  TransparentPass::register_graph()
   AutoExposurePass::register_graph()
   TonemapPass::register_graph()
-  FxaaPass::register_graph()
-  TransparentPass::register_graph()
+  OrbitPlotPass::register_graph()
   DebugDrawPass::register_graph()
+  FxaaPass::register_graph()
   RenderGraph::add_present_chain()
   ImGuiPass::register_graph()
   RenderGraph::compile()
