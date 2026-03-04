@@ -1,6 +1,7 @@
 #pragma once
 
 #include "orbitsim/game_sim.hpp"
+#include "orbitsim/trajectory_segments.hpp"
 #include "orbitsim/trajectory_types.hpp"
 
 #include <condition_variable>
@@ -53,6 +54,8 @@ namespace Game
 
             std::vector<orbitsim::TrajectorySample> trajectory_bci;
             std::vector<orbitsim::TrajectorySample> trajectory_bci_planned;
+            std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci;
+            std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci_planned;
             std::vector<float> altitude_km;
             std::vector<float> speed_kmps;
 
