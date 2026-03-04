@@ -38,6 +38,7 @@ class TextureCache;
 class IBLManager;
 class InputSystem;
 class DebugDrawSystem;
+class OrbitPlotSystem;
 namespace Physics {
     class PhysicsContext;
 }
@@ -297,6 +298,7 @@ public:
     SDL_Window* window = nullptr;                // SDL window handle
     InputSystem* input = nullptr;                // input system (engine-owned)
     DebugDrawSystem* debug_draw = nullptr;       // debug 3D draw collector (engine-owned)
+    OrbitPlotSystem* orbit_plot = nullptr;       // orbit plot line collector (engine-owned)
     Physics::PhysicsContext* physics_context = nullptr;  // optional physics coordinate context (game-owned)
 
     // Frequently used values
