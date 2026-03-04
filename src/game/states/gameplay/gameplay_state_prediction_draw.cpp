@@ -4,6 +4,7 @@
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "core/engine.h"
 #include "core/game_api.h"
+#include "core/orbit_plot/orbit_plot.h"
 
 #include <algorithm>
 #include <cmath>
@@ -29,7 +30,14 @@ namespace Game
             picking->clear_line_picks();
         }
 
-        if (!_prediction_enabled || !_debug_draw_enabled)
+        OrbitPlotSystem *orbit_plot =
+                (ctx.renderer && ctx.renderer->_context) ? ctx.renderer->_context->orbit_plot : nullptr;
+        if (orbit_plot)
+        {
+            orbit_plot->clear_pending();
+        }
+
+        if (!_prediction_enabled)
         {
             return;
         }
@@ -77,8 +85,8 @@ namespace Game
 
         now_s = std::clamp(now_s, t0, t1);
 
-        // Debug commands are pruned in engine draw begin_frame(dt) after update_scene(), so ttl must
-        // be > dt to survive until the current frame is rendered.
+        // Debug velocity ray is emitted into DebugDrawSystem, which prunes commands in
+        // engine draw begin_frame(dt) after update_scene(), so ttl must be > dt.
         const float ttl_s = std::clamp(ctx.delta_time(), 0.0f, 0.1f) + 0.002f;
 
         constexpr glm::vec4 color_orbit_full_current{0.75f, 0.20f, 0.92f, 0.22f};
@@ -308,18 +316,20 @@ namespace Game
 
                     if (draw)
                     {
-                        ctx.api->debug_draw_line(glm::dvec3(prev_world), glm::dvec3(p), color, ttl_s, true);
+                        if (orbit_plot)
+                        {
+                            orbit_plot->add_line(prev_world, p, color, OrbitPlotDepth::DepthTested);
+                        }
                         if (line_overlay_boost > 0.0f)
                         {
                             glm::vec4 overlay_color = color;
                             overlay_color.a = std::clamp(overlay_color.a * line_overlay_boost, 0.0f, 1.0f);
                             if (overlay_color.a > 0.0f)
                             {
-                                ctx.api->debug_draw_line(glm::dvec3(prev_world),
-                                                         glm::dvec3(p),
-                                                         overlay_color,
-                                                         ttl_s,
-                                                         false);
+                                if (orbit_plot)
+                                {
+                                    orbit_plot->add_line(prev_world, p, overlay_color, OrbitPlotDepth::AlwaysOnTop);
+                                }
                             }
                         }
 
@@ -425,7 +435,7 @@ namespace Game
             }
         }
 
-        if (_prediction_draw_velocity_ray)
+        if (_prediction_draw_velocity_ray && _debug_draw_enabled)
         {
             const double speed_mps = glm::length(ship_vel_world);
             double len_m = 40.0;

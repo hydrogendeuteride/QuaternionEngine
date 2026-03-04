@@ -17,6 +17,7 @@
 #include "passes/mesh_vfx.h"
 #include "passes/tonemap.h"
 #include "passes/auto_exposure.h"
+#include "passes/orbit_plot.h"
 #include "passes/shadow.h"
 #include "passes/punctual_shadow.h"
 
@@ -83,6 +84,10 @@ void RenderPassManager::init(EngineContext *context)
     auto fxaaPass = std::make_unique<FxaaPass>();
     fxaaPass->init(context);
     addPass(std::move(fxaaPass));
+
+    auto orbitPlotPass = std::make_unique<OrbitPlotPass>();
+    orbitPlotPass->init(context);
+    addPass(std::move(orbitPlotPass));
 
     auto debugDrawPass = std::make_unique<DebugDrawPass>();
     debugDrawPass->init(context);

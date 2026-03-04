@@ -42,10 +42,16 @@
 #include "core/input/input_system.h"
 
 class DebugDrawSystem;
+class OrbitPlotSystem;
 
 struct DebugDrawDeleter
 {
     void operator()(DebugDrawSystem *p) const;
+};
+
+struct OrbitPlotDeleter
+{
+    void operator()(OrbitPlotSystem *p) const;
 };
 
 // Number of frames-in-flight. Affects per-frame command buffers, fences,
@@ -94,7 +100,8 @@ public:
     std::unique_ptr<PickingSystem> _picking;
     std::unique_ptr<InputSystem> _input;
     std::unique_ptr<DebugDrawSystem, DebugDrawDeleter> _debugDraw;
-	std::unique_ptr<PipelineManager> _pipelineManager;
+    std::unique_ptr<OrbitPlotSystem, OrbitPlotDeleter> _orbitPlot;
+    std::unique_ptr<PipelineManager> _pipelineManager;
 	std::unique_ptr<AssetManager> _assetManager;
 	std::unique_ptr<AsyncAssetLoader> _asyncLoader;
     std::unique_ptr<RenderGraph> _renderGraph;

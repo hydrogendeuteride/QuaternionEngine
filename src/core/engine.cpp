@@ -44,6 +44,7 @@
 #include "core/picking/picking_system.h"
 #include "core/debug_draw/debug_draw.h"
 #include "core/debug_draw/engine_debug_draw.h"
+#include "core/orbit_plot/orbit_plot.h"
 #include "render/passes/geometry.h"
 #include "render/passes/decal.h"
 #include "render/passes/imgui_pass.h"
@@ -58,6 +59,7 @@
 #include "render/passes/fxaa.h"
 #include "render/passes/tonemap.h"
 #include "render/passes/auto_exposure.h"
+#include "render/passes/orbit_plot.h"
 #include "render/passes/debug_draw.h"
 #include "render/passes/shadow.h"
 #include "render/passes/punctual_shadow.h"
@@ -75,6 +77,11 @@ VulkanEngine *loadedEngine = nullptr;
 VulkanEngine::~VulkanEngine() = default;
 
 void DebugDrawDeleter::operator()(DebugDrawSystem *p) const
+{
+    delete p;
+}
+
+void OrbitPlotDeleter::operator()(OrbitPlotSystem *p) const
 {
     delete p;
 }
@@ -260,6 +267,9 @@ void VulkanEngine::init()
 
     _debugDraw.reset(new DebugDrawSystem());
     _context->debug_draw = _debugDraw.get();
+
+    _orbitPlot.reset(new OrbitPlotSystem());
+    _context->orbit_plot = _orbitPlot.get();
 
     _context->device = _deviceManager;
     _context->resources = _resourceManager;
@@ -957,6 +967,14 @@ void VulkanEngine::cleanup()
             }
             _debugDraw.reset();
         }
+        if (_orbitPlot)
+        {
+            if (_context)
+            {
+                _context->orbit_plot = nullptr;
+            }
+            _orbitPlot.reset();
+        }
 
         // Invalidate per-frame descriptor sets before destroying frame-owned
         // resources referenced by those sets.
@@ -1093,6 +1111,11 @@ void VulkanEngine::draw()
         }
         _debugDraw->begin_frame(debug_dt_s);
         _frame_delta_time_s = 0.0f;
+    }
+
+    if (_orbitPlot)
+    {
+        _orbitPlot->begin_frame();
     }
 
     // Update IBL based on camera position and user-defined reflection volumes.
@@ -1512,6 +1535,11 @@ void VulkanEngine::draw()
             {
                 finalColor = tonemap->register_graph(_renderGraph.get(), hdrTarget);
 
+                if (auto *orbitPlot = _renderPassManager->getPass<OrbitPlotPass>())
+                {
+                    orbitPlot->register_graph(_renderGraph.get(), finalColor, hDepth, true /*LDR*/);
+                }
+
                 // Debug lines after tonemap and before FXAA so line edges can be anti-aliased.
                 if (auto *debugDraw = _renderPassManager->getPass<DebugDrawPass>())
                 {
@@ -1528,6 +1556,11 @@ void VulkanEngine::draw()
             {
                 // If tonemapping is disabled, present whichever HDR buffer we ended up with.
                 finalColor = hdrTarget;
+
+                if (auto *orbitPlot = _renderPassManager->getPass<OrbitPlotPass>())
+                {
+                    orbitPlot->register_graph(_renderGraph.get(), finalColor, hDepth, false /*HDR*/);
+                }
 
                 // Debug lines onto HDR target when tonemapping is disabled.
                 if (auto *debugDraw = _renderPassManager->getPass<DebugDrawPass>())

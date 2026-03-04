@@ -27,6 +27,7 @@ passes/
 ├── auto_exposure.h / .cpp   — compute average luminance + CPU readback for exposure
 ├── tonemap.h / .cpp         — HDR→LDR tonemap (ACES/Reinhard) with bloom
 ├── fxaa.h / .cpp            — FXAA anti-aliasing on LDR output
+├── orbit_plot.h / .cpp      — dedicated orbit trajectory polylines (gameplay)
 ├── transparent.h / .cpp     — forward-rendered transparent objects (alpha blend)
 ├── debug_draw.h / .cpp      — wireframe debug primitives (lines, boxes, spheres)
 └── imgui_pass.h / .cpp      — Dear ImGui rendering onto swapchain
@@ -51,10 +52,11 @@ Passes are registered on the `RenderGraph` each frame in this order
 11. Transparent    — forward alpha-blended objects (HDR)
 12. AutoExposure   — compute luminance measurement
 13. Tonemap        — HDR → LDR with bloom
-14. FXAA           — anti-aliasing (LDR)
+14. OrbitPlot      — dedicated orbit plot overlays (LDR/HDR target)
 15. DebugDraw      — wireframe overlays
-16. ImGui          — debug UI on swapchain
-17. PresentChain   — letterbox blit + layout transition to PRESENT_SRC
+16. FXAA           — anti-aliasing (LDR)
+17. ImGui          — debug UI on swapchain
+18. PresentChain   — letterbox blit + layout transition to PRESENT_SRC
 ```
 
 ## Key Types
@@ -76,6 +78,7 @@ Passes are registered on the `RenderGraph` each frame in this order
 | `AutoExposurePass` | Compute average log-luminance, CPU readback, smooth exposure adaptation |
 | `TonemapPass` | HDR→LDR tonemap (ACES default), bloom threshold/intensity controls |
 | `FxaaPass` | FXAA post-process anti-aliasing with configurable edge thresholds |
+| `OrbitPlotPass` | Dedicated orbit trajectory line overlay from `OrbitPlotSystem` |
 | `TransparentPass` | Forward-rendered transparent objects with alpha blending |
 | `DebugDrawPass` | Wireframe debug primitives from `DebugDrawSystem` |
 | `ImGuiPass` | Dear ImGui draw data recording onto swapchain image |
