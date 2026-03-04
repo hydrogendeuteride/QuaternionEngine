@@ -9,6 +9,7 @@
 #include "physics/physics_context.h"
 #include "orbit_helpers.h"
 #include "time_warp_state.h"
+#include "game/orbit/orbit_prediction_service.h"
 #include "orbitsim/trajectory_types.hpp"
 #include "orbitsim/maneuvers_types.hpp"
 
@@ -245,6 +246,8 @@ namespace Game
         double _prediction_thrust_refresh_s{0.1};    // rebuild at most this often while thrusting
         double _prediction_future_window_s{600.0};
         OrbitPredictionCache _prediction_cache{};
+        OrbitPredictionService _prediction_service{};
+        bool _prediction_request_pending{false};
 
         // Maneuver nodes (planning UI + prediction)
         struct ManeuverNode

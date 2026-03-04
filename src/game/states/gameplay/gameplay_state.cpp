@@ -42,6 +42,8 @@ namespace Game
         _reset_requested = false;
         _scenario_io_status.clear();
         _scenario_io_status_ok = true;
+        _prediction_service.reset();
+        _prediction_request_pending = false;
 
         // Try loading scenario from JSON; fall back to compiled default.
         // NOTE: JSON data is authoritative when present, including orbiter body mass.
@@ -77,6 +79,8 @@ namespace Game
         _contact_log.clear();
         _prediction_cache.clear();
         _prediction_dirty = true;
+        _prediction_service.reset();
+        _prediction_request_pending = false;
         reset_time_warp_state();
         _warp_to_time_active = false;
         _warp_to_time_target_s = 0.0;
