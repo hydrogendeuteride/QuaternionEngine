@@ -1,4 +1,5 @@
 #include "game/orbit/orbit_prediction_service.h"
+#include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 
 #include "orbitsim/maneuvers_types.hpp"
@@ -12,142 +13,9 @@ namespace Game
 {
     namespace
     {
-        constexpr double kPi = 3.14159265358979323846;
-
-        double safe_length(const glm::dvec3 &v)
-        {
-            const double len2 = glm::dot(v, v);
-            if (!std::isfinite(len2) || len2 <= 0.0)
-            {
-                return 0.0;
-            }
-            return std::sqrt(len2);
-        }
-
         bool finite_vec3(const glm::dvec3 &v)
         {
             return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-        }
-
-        double estimate_orbital_period_s(const double mu_m3_s2, const glm::dvec3 &r_m, const glm::dvec3 &v_mps)
-        {
-            const double r = safe_length(r_m);
-            const double v = safe_length(v_mps);
-            if (!(mu_m3_s2 > 0.0) || !(r > 0.0) || !std::isfinite(mu_m3_s2) || !std::isfinite(r) || !std::isfinite(v))
-            {
-                return OrbitPredictionTuning::kEscapeDefaultPeriodS;
-            }
-
-            const double specific_energy = 0.5 * (v * v) - mu_m3_s2 / r;
-            if (!std::isfinite(specific_energy) || specific_energy >= 0.0)
-            {
-                return OrbitPredictionTuning::kEscapeDefaultPeriodS;
-            }
-
-            const double a_m = -mu_m3_s2 / (2.0 * specific_energy);
-            if (!(a_m > 0.0) || !std::isfinite(a_m))
-            {
-                return OrbitPredictionTuning::kEscapeDefaultPeriodS;
-            }
-
-            const double period_s = 2.0 * kPi * std::sqrt((a_m * a_m * a_m) / mu_m3_s2);
-            if (!std::isfinite(period_s) || period_s <= 0.0)
-            {
-                return OrbitPredictionTuning::kEscapeDefaultPeriodS;
-            }
-            return period_s;
-        }
-
-        struct OrbitalElementsEstimate
-        {
-            bool valid{false};
-            double semi_major_axis_m{0.0};
-            double eccentricity{0.0};
-            double orbital_period_s{0.0};
-            double periapsis_m{0.0};
-            double apoapsis_m{std::numeric_limits<double>::infinity()};
-        };
-
-        OrbitalElementsEstimate compute_orbital_elements(const double mu_m3_s2, const glm::dvec3 &r_m,
-                                                         const glm::dvec3 &v_mps)
-        {
-            OrbitalElementsEstimate out{};
-            if (!(mu_m3_s2 > 0.0) || !std::isfinite(mu_m3_s2))
-            {
-                return out;
-            }
-
-            const double r = safe_length(r_m);
-            const double v2 = glm::dot(v_mps, v_mps);
-            if (!(r > 0.0) || !std::isfinite(r) || !std::isfinite(v2))
-            {
-                return out;
-            }
-
-            const glm::dvec3 h = glm::cross(r_m, v_mps);
-            const double h2 = glm::dot(h, h);
-
-            const glm::dvec3 e_vec = (glm::cross(v_mps, h) / mu_m3_s2) - (r_m / r);
-            const double e = safe_length(e_vec);
-            if (!std::isfinite(e))
-            {
-                return out;
-            }
-
-            const double specific_energy = 0.5 * v2 - mu_m3_s2 / r;
-            if (!std::isfinite(specific_energy))
-            {
-                return out;
-            }
-
-            out.eccentricity = std::max(0.0, e);
-
-            if (std::abs(specific_energy) > 1e-12)
-            {
-                out.semi_major_axis_m = -mu_m3_s2 / (2.0 * specific_energy);
-            }
-
-            if (out.semi_major_axis_m > 0.0 && std::isfinite(out.semi_major_axis_m) && out.eccentricity < 1.0)
-            {
-                out.orbital_period_s = 2.0 * kPi *
-                                       std::sqrt((out.semi_major_axis_m * out.semi_major_axis_m *
-                                                  out.semi_major_axis_m) /
-                                                 mu_m3_s2);
-                out.periapsis_m = out.semi_major_axis_m * (1.0 - out.eccentricity);
-                out.apoapsis_m = out.semi_major_axis_m * (1.0 + out.eccentricity);
-            }
-            else if (h2 > 0.0 && std::isfinite(h2))
-            {
-                const double denom = mu_m3_s2 * (1.0 + out.eccentricity);
-                if (denom > 0.0 && std::isfinite(denom))
-                {
-                    out.periapsis_m = h2 / denom;
-                }
-                out.orbital_period_s = 0.0;
-                out.apoapsis_m = std::numeric_limits<double>::infinity();
-            }
-
-            if (!std::isfinite(out.periapsis_m) || out.periapsis_m <= 0.0)
-            {
-                out.periapsis_m = r;
-            }
-
-            out.valid = true;
-            return out;
-        }
-
-        std::pair<double, double> select_prediction_horizon_and_dt(const double mu_m3_s2, const glm::dvec3 &r_m,
-                                                                    const glm::dvec3 &v_mps)
-        {
-            const double period_s = estimate_orbital_period_s(mu_m3_s2, r_m, v_mps);
-            const double horizon_s = std::clamp(period_s * OrbitPredictionTuning::kBaseHorizonFromPeriodScale,
-                                                OrbitPredictionTuning::kMinHorizonS,
-                                                OrbitPredictionTuning::kMaxHorizonS);
-            const double target_samples = std::clamp(horizon_s / OrbitPredictionTuning::kTargetSamplesDivisorS,
-                                                     OrbitPredictionTuning::kTargetSamplesMin,
-                                                     OrbitPredictionTuning::kTargetSamplesMax);
-            const double dt_s = std::clamp(horizon_s / target_samples, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
-            return {horizon_s, dt_s};
         }
     } // namespace
 
@@ -312,7 +180,7 @@ namespace Game
         out.ship_rel_velocity_mps = ship_rel_vel_mps;
 
         const auto [horizon_s_auto, dt_s_auto] =
-                select_prediction_horizon_and_dt(mu_ref_m3_s2, ship_rel_pos_m, ship_rel_vel_mps);
+                OrbitPredictionMath::select_prediction_horizon_and_dt(mu_ref_m3_s2, ship_rel_pos_m, ship_rel_vel_mps);
 
         double horizon_s = std::clamp(horizon_s_auto, OrbitPredictionTuning::kMinHorizonS, OrbitPredictionTuning::kMaxHorizonS);
         double dt_s = std::clamp(dt_s_auto, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
@@ -405,15 +273,15 @@ namespace Game
 
         for (const orbitsim::TrajectorySample &sample : out.trajectory_bci)
         {
-            const double r_m = safe_length(sample.position_m);
+            const double r_m = OrbitPredictionMath::safe_length(sample.position_m);
             const double alt_km = (r_m - request.reference_body_radius_m) * 1.0e-3;
-            const double spd_kmps = safe_length(sample.velocity_mps) * 1.0e-3;
+            const double spd_kmps = OrbitPredictionMath::safe_length(sample.velocity_mps) * 1.0e-3;
             out.altitude_km.push_back(static_cast<float>(alt_km));
             out.speed_kmps.push_back(static_cast<float>(spd_kmps));
         }
 
-        const OrbitalElementsEstimate elements =
-                compute_orbital_elements(mu_ref_m3_s2, ship_rel_pos_m, ship_rel_vel_mps);
+        const OrbitPredictionMath::OrbitalElementsEstimate elements =
+                OrbitPredictionMath::compute_orbital_elements(mu_ref_m3_s2, ship_rel_pos_m, ship_rel_vel_mps);
         if (elements.valid)
         {
             out.semi_major_axis_m = elements.semi_major_axis_m;

@@ -207,6 +207,8 @@ add_executable (vulkan_engine
   game/component/component.h
   game/component/ship_controller.h
   game/component/ship_controller.cpp
+  game/orbit/orbit_prediction_math.h
+  game/orbit/orbit_prediction_math.cpp
   game/orbit/orbit_prediction_tuning.h
   game/orbit/orbit_prediction_service.h
   game/orbit/orbit_prediction_service.cpp
@@ -230,6 +232,7 @@ add_executable (vulkan_engine
   game/states/gameplay/gameplay_state_scene.cpp
   game/states/gameplay/gameplay_state_sim.cpp
   game/states/gameplay/gameplay_state_prediction.cpp
+  game/states/gameplay/gameplay_state_prediction_draw.cpp
   game/states/gameplay/gameplay_state_maneuver_nodes.cpp
   game/states/gameplay/scenario_loader.h
   game/states/gameplay/scenario_loader.cpp
