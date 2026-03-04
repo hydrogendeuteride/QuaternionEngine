@@ -1,5 +1,6 @@
 #include "gameplay_state.h"
 #include "orbit_helpers.h"
+#include "game/orbit/orbit_prediction_tuning.h"
 #include "core/engine.h"
 #include "core/game_api.h"
 
@@ -20,13 +21,11 @@ namespace Game
     namespace
     {
         constexpr double kPi = 3.14159265358979323846;
-        constexpr double kEscapeDefaultPeriodS = 7200.0;
         constexpr double kOrbitDrawMaxDtS = 1.0; // visual subdivision step (reduces polyline chord error)
-        constexpr double kPredictionMaxHorizonS = 15'552'000.0; // 180 days
-        constexpr double kPredictionMaxSampleDtS = 900.0;
         constexpr int kOrbitDrawMaxSegmentsSolid = 4'000;
         constexpr int kOrbitDrawMaxSegmentsDashed = 2'500;
         constexpr double kOrbitDashedPickMaxSpanS = 4'000.0;
+        constexpr bool kPredictionDrawPlannedAsDashed = true;
 
         double safe_length(const glm::dvec3 &v)
         {
@@ -44,25 +43,25 @@ namespace Game
             const double v = safe_length(v_mps);
             if (!(mu_m3_s2 > 0.0) || !(r > 0.0) || !std::isfinite(mu_m3_s2) || !std::isfinite(r) || !std::isfinite(v))
             {
-                return kEscapeDefaultPeriodS;
+                return OrbitPredictionTuning::kEscapeDefaultPeriodS;
             }
 
             const double specific_energy = 0.5 * (v * v) - mu_m3_s2 / r;
             if (!std::isfinite(specific_energy) || specific_energy >= 0.0)
             {
-                return kEscapeDefaultPeriodS;
+                return OrbitPredictionTuning::kEscapeDefaultPeriodS;
             }
 
             const double a_m = -mu_m3_s2 / (2.0 * specific_energy);
             if (!(a_m > 0.0) || !std::isfinite(a_m))
             {
-                return kEscapeDefaultPeriodS;
+                return OrbitPredictionTuning::kEscapeDefaultPeriodS;
             }
 
             const double period_s = 2.0 * kPi * std::sqrt((a_m * a_m * a_m) / mu_m3_s2);
             if (!std::isfinite(period_s) || period_s <= 0.0)
             {
-                return kEscapeDefaultPeriodS;
+                return OrbitPredictionTuning::kEscapeDefaultPeriodS;
             }
             return period_s;
         }
@@ -149,9 +148,13 @@ namespace Game
                                                                     const glm::dvec3 &v_mps)
         {
             const double period_s = estimate_orbital_period_s(mu_m3_s2, r_m, v_mps);
-            const double horizon_s = std::clamp(period_s * 1.1, 60.0, kPredictionMaxHorizonS);
-            const double target_samples = std::clamp(horizon_s / 2.0, 500.0, 24'000.0);
-            const double dt_s = std::clamp(horizon_s / target_samples, 0.01, kPredictionMaxSampleDtS);
+            const double horizon_s = std::clamp(period_s * OrbitPredictionTuning::kBaseHorizonFromPeriodScale,
+                                                OrbitPredictionTuning::kMinHorizonS,
+                                                OrbitPredictionTuning::kMaxHorizonS);
+            const double target_samples = std::clamp(horizon_s / OrbitPredictionTuning::kTargetSamplesDivisorS,
+                                                     OrbitPredictionTuning::kTargetSamplesMin,
+                                                     OrbitPredictionTuning::kTargetSamplesMax);
+            const double dt_s = std::clamp(horizon_s / target_samples, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
             return {horizon_s, dt_s};
         }
 
@@ -256,6 +259,8 @@ namespace Game
         {
             _prediction_cache.clear();
             _prediction_dirty = true;
+            _prediction_service.reset();
+            _prediction_request_pending = false;
             return;
         }
 
@@ -267,12 +272,108 @@ namespace Game
         {
             _prediction_cache.clear();
             _prediction_dirty = true;
+            _prediction_service.reset();
+            _prediction_request_pending = false;
             return;
         }
 
         const double now_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
-
         const bool thrusting = player_thrust_applied_this_tick();
+
+        if (auto completed = _prediction_service.poll_completed())
+        {
+            _prediction_request_pending = false;
+            const bool keep_dirty_for_followup = _prediction_dirty;
+
+            OrbitPredictionService::Result result = std::move(*completed);
+            if (result.valid && result.trajectory_bci.size() >= 2)
+            {
+                _prediction_cache.clear();
+                _prediction_cache.build_time_s = now_s;
+                _prediction_cache.build_pos_world = ship_pos_world;
+                _prediction_cache.build_vel_world = ship_vel_world;
+                _prediction_cache.trajectory_bci = std::move(result.trajectory_bci);
+                _prediction_cache.trajectory_bci_planned = std::move(result.trajectory_bci_planned);
+                _prediction_cache.altitude_km = std::move(result.altitude_km);
+                _prediction_cache.speed_kmps = std::move(result.speed_kmps);
+                _prediction_cache.semi_major_axis_m = result.semi_major_axis_m;
+                _prediction_cache.eccentricity = result.eccentricity;
+                _prediction_cache.orbital_period_s = result.orbital_period_s;
+                _prediction_cache.periapsis_alt_km = result.periapsis_alt_km;
+                _prediction_cache.apoapsis_alt_km = result.apoapsis_alt_km;
+                _prediction_cache.valid = true;
+                refresh_prediction_world_points();
+                _prediction_dirty = keep_dirty_for_followup;
+            }
+            else
+            {
+                _prediction_cache.clear();
+                _prediction_dirty = true;
+            }
+        }
+
+        auto request_prediction_async = [&]() -> bool {
+            if (!_orbitsim)
+            {
+                return false;
+            }
+
+            const CelestialBodyInfo *ref_info = _orbitsim->reference_body();
+            const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+            if (!ref_info || !ref_sim || ref_sim->id == orbitsim::kInvalidBodyId || !(ref_info->mass_kg > 0.0))
+            {
+                return false;
+            }
+
+            const WorldVec3 ref_body_world = prediction_reference_body_world();
+            const glm::dvec3 ship_rel_pos_m = glm::dvec3(ship_pos_world - ref_body_world);
+            const glm::dvec3 ship_rel_vel_mps = ship_vel_world;
+            const glm::dvec3 ship_bary_pos_m = ref_sim->state.position_m + ship_rel_pos_m;
+            const glm::dvec3 ship_bary_vel_mps = ref_sim->state.velocity_mps + ship_rel_vel_mps;
+            if (!std::isfinite(ship_bary_pos_m.x) || !std::isfinite(ship_bary_pos_m.y) || !std::isfinite(ship_bary_pos_m.z) ||
+                !std::isfinite(ship_bary_vel_mps.x) || !std::isfinite(ship_bary_vel_mps.y) || !std::isfinite(ship_bary_vel_mps.z))
+            {
+                return false;
+            }
+
+            OrbitPredictionService::Request request{};
+            request.sim_time_s = now_s;
+            request.sim_config = _orbitsim->sim.config();
+            request.massive_bodies = _orbitsim->sim.massive_bodies();
+            request.reference_body_id = ref_sim->id;
+            request.reference_body_mass_kg = ref_info->mass_kg;
+            request.reference_body_radius_m = ref_info->radius_m;
+            request.ship_bary_position_m = ship_bary_pos_m;
+            request.ship_bary_velocity_mps = ship_bary_vel_mps;
+            request.thrusting = thrusting;
+            request.future_window_s = std::max(0.0, _prediction_future_window_s);
+            request.max_maneuver_time_s = now_s;
+
+            if (_maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
+            {
+                request.maneuver_impulses.reserve(_maneuver_state.nodes.size());
+                for (const ManeuverNode &node : _maneuver_state.nodes)
+                {
+                    if (!std::isfinite(node.time_s))
+                    {
+                        continue;
+                    }
+
+                    request.max_maneuver_time_s = std::max(request.max_maneuver_time_s, node.time_s);
+
+                    OrbitPredictionService::ManeuverImpulse impulse{};
+                    impulse.t_s = node.time_s;
+                    impulse.primary_body_id = node.primary_body_id;
+                    impulse.dv_rtn_mps = node.dv_rtn_mps;
+                    request.maneuver_impulses.push_back(impulse);
+                }
+            }
+
+            _prediction_service.request(std::move(request));
+            _prediction_request_pending = true;
+            return true;
+        };
+
         bool rebuild_prediction = _prediction_dirty || !_prediction_cache.valid;
 
         if (!rebuild_prediction && thrusting)
@@ -293,9 +394,8 @@ namespace Game
             _prediction_cache.valid &&
             _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
         {
-            constexpr double kDragRebuildMinIntervalS = 0.10; // 10 Hz
             const double dt_since_build_s = now_s - _prediction_cache.build_time_s;
-            if (dt_since_build_s < kDragRebuildMinIntervalS)
+            if (dt_since_build_s < OrbitPredictionTuning::kDragRebuildMinIntervalS)
             {
                 rebuild_prediction = false;
             }
@@ -322,7 +422,8 @@ namespace Game
                 if (max_node_time_s > now_s)
                 {
                     // Ensure we can render a useful post-node segment (planned trajectory).
-                    const double post_node_window_s = std::max(120.0, _prediction_future_window_s);
+                    const double post_node_window_s =
+                            std::max(OrbitPredictionTuning::kPostNodeCoverageMinS, _prediction_future_window_s);
                     required_ahead_s = std::max(required_ahead_s, (max_node_time_s - now_s) + post_node_window_s);
                 }
             }
@@ -336,8 +437,20 @@ namespace Game
 
         if (rebuild_prediction)
         {
-            update_orbit_prediction_cache(ship_pos_world, ship_vel_world, thrusting);
-            _prediction_dirty = !_prediction_cache.valid;
+            if (!_prediction_request_pending)
+            {
+                const bool requested = request_prediction_async();
+                _prediction_dirty = !requested;
+                if (!requested)
+                {
+                    _prediction_cache.clear();
+                    _prediction_request_pending = false;
+                }
+            }
+            else
+            {
+                _prediction_dirty = true;
+            }
         }
     }
 
@@ -448,9 +561,11 @@ namespace Game
         const auto [horizon_s_auto, dt_s_auto] = select_prediction_horizon_and_dt(
                 mu_ref_m3_s2, ship_rel_pos_m, ship_rel_vel_mps);
 
-        double horizon_s = std::clamp(horizon_s_auto, 60.0, kPredictionMaxHorizonS);
-        double dt_s = std::clamp(dt_s_auto, 0.01, kPredictionMaxSampleDtS);
-        int max_steps = 24'000;
+        double horizon_s = std::clamp(horizon_s_auto, OrbitPredictionTuning::kMinHorizonS, OrbitPredictionTuning::kMaxHorizonS);
+        double dt_s = std::clamp(dt_s_auto, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
+        int max_steps = OrbitPredictionTuning::kMaxStepsNormal;
+        double dt_min_s = 0.01;
+        double dt_max_s = OrbitPredictionTuning::kMaxSampleDtS;
         double min_horizon_s = horizon_s;
 
         if (_maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
@@ -466,7 +581,7 @@ namespace Game
 
             if (max_node_time_s > build_sim_time_s)
             {
-                const double extra_s = std::max(120.0, _prediction_future_window_s);
+                const double extra_s = std::max(OrbitPredictionTuning::kPostNodeCoverageMinS, _prediction_future_window_s);
                 min_horizon_s = std::max(min_horizon_s, (max_node_time_s - build_sim_time_s) + extra_s);
                 horizon_s = std::max(horizon_s, min_horizon_s);
             }
@@ -477,16 +592,31 @@ namespace Game
             // While thrusting, prioritize responsiveness over long-horizon stability.
             // A shorter horizon lets us rebuild more frequently without visible hitching.
             const double thrust_horizon_cap_s =
-                    std::clamp(std::max(120.0, _prediction_future_window_s * 1.25), 120.0, 172'800.0);
+                    std::clamp(std::max(OrbitPredictionTuning::kThrustHorizonMinS,
+                                        _prediction_future_window_s * OrbitPredictionTuning::kThrustHorizonWindowScale),
+                               OrbitPredictionTuning::kThrustHorizonMinS,
+                               OrbitPredictionTuning::kThrustHorizonMaxS);
             horizon_s = std::min(horizon_s, thrust_horizon_cap_s);
             horizon_s = std::max(horizon_s, min_horizon_s);
 
-            const double target_samples = std::clamp(horizon_s / 2.0, 300.0, 3'000.0);
-            dt_s = std::clamp(horizon_s / target_samples, 0.02, 120.0);
-            max_steps = 4'000;
+            const double target_samples = std::clamp(horizon_s / OrbitPredictionTuning::kTargetSamplesDivisorS,
+                                                     OrbitPredictionTuning::kThrustTargetSamplesMin,
+                                                     OrbitPredictionTuning::kThrustTargetSamplesMax);
+            dt_min_s = OrbitPredictionTuning::kThrustMinSampleDtS;
+            dt_max_s = OrbitPredictionTuning::kThrustMaxSampleDtS;
+            dt_s = std::clamp(horizon_s / target_samples, dt_min_s, dt_max_s);
+            max_steps = OrbitPredictionTuning::kMaxStepsThrust;
         }
 
-        horizon_s = std::clamp(horizon_s, dt_s, kPredictionMaxHorizonS);
+        // Keep the full horizon visible without exceeding the sample budget.
+        // If horizon/dt would produce too many samples, coarsen dt instead of truncating duration.
+        const double min_dt_for_step_budget = horizon_s / static_cast<double>(std::max(1, max_steps));
+        if (std::isfinite(min_dt_for_step_budget) && min_dt_for_step_budget > 0.0)
+        {
+            dt_s = std::max(dt_s, min_dt_for_step_budget);
+        }
+        dt_s = std::clamp(dt_s, dt_min_s, dt_max_s);
+        horizon_s = std::clamp(horizon_s, dt_s, OrbitPredictionTuning::kMaxHorizonS);
         const int steps = std::clamp(static_cast<int>(std::ceil(horizon_s / dt_s)), 2, max_steps);
 
         auto fill_cache_from_trajectory = [&](std::vector<orbitsim::TrajectorySample> trajectory_bci) -> bool {
@@ -660,7 +790,7 @@ namespace Game
 
         constexpr glm::vec4 color_orbit_full_current{0.75f, 0.20f, 0.92f, 0.22f};
         constexpr glm::vec4 color_orbit_future_current{0.75f, 0.20f, 0.92f, 0.80f};
-        constexpr glm::vec4 color_orbit_planned{1.00f, 0.62f, 0.10f, 0.90f}; // dashed
+        constexpr glm::vec4 color_orbit_planned{1.00f, 0.62f, 0.10f, 0.90f};
         constexpr glm::vec4 color_velocity{1.0f, 0.35f, 0.1f, 1.0f};
 
         const float line_alpha_scale = std::clamp(_prediction_line_alpha_scale, 0.1f, 8.0f);
@@ -833,9 +963,8 @@ namespace Game
 
             const double dash_on_px = 14.0;
             const double dash_off_px = 9.0;
-            double dash_accum_px = 0.0;
-            bool dash_on = true;
-            double dash_limit_px = dash_on_px;
+            const double dash_period_px = dash_on_px + dash_off_px;
+            double dash_phase_px = 0.0;
             double prev_t_s = t_start_s;
 
             while (t < t_end && (seg + 1) < n)
@@ -862,21 +991,25 @@ namespace Game
                     bool draw = true;
                     if (dashed)
                     {
+                        draw = dash_phase_px < dash_on_px;
+
                         const double seg_m = glm::length(glm::dvec3(p - prev_world));
                         if (std::isfinite(seg_m) && seg_m > 0.0)
                         {
                             const glm::dvec3 seg_mid = glm::mix(glm::dvec3(prev_world), glm::dvec3(p), 0.5);
                             const double seg_mpp = meters_per_px_at_world(WorldVec3(seg_mid));
-                            const double seg_px = seg_m / std::max(1.0e-6, seg_mpp);
-                            dash_accum_px += seg_px;
-                        }
-                        draw = dash_on;
-
-                        while (dash_accum_px >= dash_limit_px)
-                        {
-                            dash_accum_px -= dash_limit_px;
-                            dash_on = !dash_on;
-                            dash_limit_px = dash_on ? dash_on_px : dash_off_px;
+                            if (std::isfinite(seg_mpp) && seg_mpp > 1.0e-6)
+                            {
+                                const double seg_px = seg_m / seg_mpp;
+                                if (std::isfinite(seg_px) && seg_px > 0.0)
+                                {
+                                    dash_phase_px += seg_px;
+                                    if (dash_phase_px >= dash_period_px)
+                                    {
+                                        dash_phase_px = std::fmod(dash_phase_px, dash_period_px);
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -924,7 +1057,9 @@ namespace Game
             double t_full_end = t1;
             if (_prediction_cache.orbital_period_s > 0.0 && std::isfinite(_prediction_cache.orbital_period_s))
             {
-                t_full_end = std::min(t0 + _prediction_cache.orbital_period_s, t1);
+                t_full_end = std::min(t0 + (_prediction_cache.orbital_period_s *
+                                            OrbitPredictionTuning::kFullOrbitDrawPeriodScale),
+                                      t1);
             }
 
             if (!_prediction_draw_future_segment)
@@ -976,7 +1111,9 @@ namespace Game
                     double t_full_end = t1p;
                     if (_prediction_cache.orbital_period_s > 0.0 && std::isfinite(_prediction_cache.orbital_period_s))
                     {
-                        t_full_end = std::min(t0p + _prediction_cache.orbital_period_s, t1p);
+                        t_full_end = std::min(t0p + (_prediction_cache.orbital_period_s *
+                                                     OrbitPredictionTuning::kFullOrbitDrawPeriodScale),
+                                              t1p);
                     }
                     t_plan_end = t_full_end;
                 }
@@ -984,7 +1121,13 @@ namespace Game
                 if (t_plan_end > t_plan_start)
                 {
                     const WorldVec3 p_start = draw_position_at(traj_planned, points_planned, t_plan_start);
-                    draw_window(traj_planned, t_plan_start, t_plan_end, color_orbit_plan, p_start, true, pick_group_planned);
+                    draw_window(traj_planned,
+                                t_plan_start,
+                                t_plan_end,
+                                color_orbit_plan,
+                                p_start,
+                                kPredictionDrawPlannedAsDashed,
+                                pick_group_planned);
                 }
             }
         }

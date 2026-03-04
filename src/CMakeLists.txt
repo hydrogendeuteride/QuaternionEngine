@@ -207,6 +207,9 @@ add_executable (vulkan_engine
   game/component/component.h
   game/component/ship_controller.h
   game/component/ship_controller.cpp
+  game/orbit/orbit_prediction_tuning.h
+  game/orbit/orbit_prediction_service.h
+  game/orbit/orbit_prediction_service.cpp
   game/main_game.h
   game/main_game.cpp
   # game/state — state machine infrastructure
