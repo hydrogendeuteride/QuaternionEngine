@@ -34,7 +34,7 @@ namespace Game::OrbitPredictionTuning
     inline constexpr double kThrustTargetSamplesMax = 3'000.0;
     inline constexpr double kThrustMinSampleDtS = 0.02;
     inline constexpr double kThrustMaxSampleDtS = 120.0;
-    inline constexpr int kMaxStepsThrust = 4'000;
+    inline constexpr int kMaxStepsThrust = 24'000;
 
     // Maneuver-gizmo drag rebuild cap. Lower is more responsive, higher reduces CPU work.
     inline constexpr double kDragRebuildMinIntervalS = 0.03; // ~33 Hz
