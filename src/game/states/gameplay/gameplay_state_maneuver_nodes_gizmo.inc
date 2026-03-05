@@ -801,8 +801,7 @@
                 continue;
             }
 
-            const orbitsim::RtnFrame f = orbitsim::compute_rtn_frame(orbitsim::Vec3{s.r_rel_m.x, s.r_rel_m.y, s.r_rel_m.z},
-                                                                     orbitsim::Vec3{s.v_rel_mps.x, s.v_rel_mps.y, s.v_rel_mps.z});
+            const orbitsim::RtnFrame f = compute_maneuver_rtf_frame(s.r_rel_m, s.v_rel_mps);
 
             node.basis_r_world = normalized_or(glm::dvec3(f.R.x, f.R.y, f.R.z), glm::dvec3(1.0, 0.0, 0.0));
             node.basis_t_world = normalized_or(glm::dvec3(f.T.x, f.T.y, f.T.z), glm::dvec3(0.0, 1.0, 0.0));

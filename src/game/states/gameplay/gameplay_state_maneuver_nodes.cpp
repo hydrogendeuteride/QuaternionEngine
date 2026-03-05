@@ -47,6 +47,56 @@ namespace Game
             return v / len;
         }
 
+        // Maneuver-node frame (velocity-aligned in-plane frame):
+        // - T: instantaneous flight/prograde direction (velocity-aligned)
+        // - N: orbit normal from angular momentum
+        // - R: in-plane outward axis orthogonal to T (R = T x N)
+        //
+        // This avoids "circular tangent" bias and keeps node gizmo axes orthonormal.
+        orbitsim::RtnFrame compute_maneuver_rtf_frame(const glm::dvec3 &r_rel_m,
+                                                      const glm::dvec3 &v_rel_mps)
+        {
+            const orbitsim::RtnFrame fallback =
+                    orbitsim::compute_rtn_frame(orbitsim::Vec3{r_rel_m.x, r_rel_m.y, r_rel_m.z},
+                                                orbitsim::Vec3{v_rel_mps.x, v_rel_mps.y, v_rel_mps.z});
+
+            const glm::dvec3 fallback_r = glm::dvec3(fallback.R.x, fallback.R.y, fallback.R.z);
+            const glm::dvec3 fallback_t = glm::dvec3(fallback.T.x, fallback.T.y, fallback.T.z);
+            const glm::dvec3 fallback_n = glm::dvec3(fallback.N.x, fallback.N.y, fallback.N.z);
+
+            const glm::dvec3 t_hat = normalized_or(v_rel_mps, fallback_t);
+            glm::dvec3 n_hat = normalized_or(glm::cross(r_rel_m, v_rel_mps), fallback_n);
+            glm::dvec3 r_hat = normalized_or(glm::cross(t_hat, n_hat), fallback_r);
+
+            if (!finite3(r_hat) || !finite3(t_hat) || !finite3(n_hat))
+            {
+                return fallback;
+            }
+
+            // Degenerate when angular momentum is tiny (nearly radial flight).
+            const double plane_area = safe_length(glm::cross(r_rel_m, v_rel_mps));
+            if (!(plane_area > 1.0e-8))
+            {
+                return fallback;
+            }
+
+            // Keep R pointing roughly outward from the primary while preserving handedness.
+            if (glm::dot(r_hat, r_rel_m) < 0.0)
+            {
+                r_hat = -r_hat;
+                n_hat = -n_hat;
+            }
+
+            n_hat = normalized_or(glm::cross(r_hat, t_hat), n_hat);
+            r_hat = normalized_or(glm::cross(t_hat, n_hat), r_hat);
+
+            return orbitsim::RtnFrame{
+                    orbitsim::Vec3{r_hat.x, r_hat.y, r_hat.z},
+                    orbitsim::Vec3{t_hat.x, t_hat.y, t_hat.z},
+                    orbitsim::Vec3{n_hat.x, n_hat.y, n_hat.z},
+            };
+        }
+
         double clamp_sane(double x, double lo, double hi, double fallback = 0.0)
         {
             if (!std::isfinite(x))
