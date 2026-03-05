@@ -127,6 +127,8 @@ add_executable (vulkan_engine
   render/passes/tonemap.cpp
   render/passes/orbit_plot.h
   render/passes/orbit_plot.cpp
+  render/passes/orbit_plot_generate.h
+  render/passes/orbit_plot_generate.cpp
   render/passes/debug_draw.h
   render/passes/debug_draw.cpp
   # render graph
@@ -213,6 +215,8 @@ add_executable (vulkan_engine
   game/component/ship_controller.cpp
   game/orbit/orbit_prediction_math.h
   game/orbit/orbit_prediction_math.cpp
+  game/orbit/orbit_plot_lod_builder.h
+  game/orbit/orbit_plot_lod_builder.cpp
   game/orbit/orbit_prediction_tuning.h
   game/orbit/orbit_prediction_service.h
   game/orbit/orbit_prediction_service.cpp

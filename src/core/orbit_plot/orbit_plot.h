@@ -4,7 +4,9 @@
 
 #include <glm/glm.hpp>
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 enum class OrbitPlotDepth : uint8_t
@@ -27,8 +29,12 @@ public:
     struct Settings
     {
         bool enabled = true;
+        bool gpu_generate_enabled = false;
         float line_width_px = 2.0f;
         float line_aa_px = 1.0f;
+        double render_error_px = 0.75;
+        std::size_t render_max_segments_gpu = 200'000ull;
+        std::size_t upload_budget_bytes = 32ull * 1024ull * 1024ull;
     };
 
     struct LineVertexLists
@@ -38,8 +44,57 @@ public:
         uint32_t overlay_vertex_count = 0;
     };
 
+    struct Stats
+    {
+        uint32_t active_line_count = 0;
+        uint32_t pending_line_count = 0;
+        uint32_t active_gpu_root_count = 0;
+        uint32_t pending_gpu_root_count = 0;
+
+        uint32_t depth_segment_count = 0;
+        uint32_t overlay_segment_count = 0;
+
+        std::size_t upload_budget_bytes = 0;
+        std::size_t upload_bytes_last_frame = 0;
+        std::size_t upload_bytes_peak = 0;
+        double upload_ms_last_frame = 0.0;
+        double upload_ms_peak = 0.0;
+
+        bool upload_cap_hit_last_frame = false;
+        uint64_t upload_cap_hits_total = 0;
+
+        bool gpu_path_active_last_frame = false;
+        bool gpu_generate_cap_hit_last_frame = false;
+        uint64_t gpu_generate_cap_hits_total = 0;
+        uint64_t gpu_fallback_count = 0;
+    };
+
+    struct LineCommand
+    {
+        WorldVec3 a_world{0.0, 0.0, 0.0};
+        WorldVec3 b_world{0.0, 0.0, 0.0};
+        glm::vec4 color{1.0f};
+        OrbitPlotDepth depth{OrbitPlotDepth::DepthTested};
+    };
+
+    struct GpuRootSegment
+    {
+        glm::dvec3 p0_bci{0.0, 0.0, 0.0};
+        glm::dvec3 v0_bci{0.0, 0.0, 0.0};
+        glm::dvec3 p1_bci{0.0, 0.0, 0.0};
+        glm::dvec3 v1_bci{0.0, 0.0, 0.0};
+        double dt_s{0.0};
+        double clip_u0{0.0};
+        double clip_u1{1.0};
+        float dash_phase_start_px{0.0f};
+        bool dashed{false};
+        glm::vec4 color{1.0f};
+        OrbitPlotDepth depth{OrbitPlotDepth::DepthTested};
+    };
+
     Settings &settings() { return _settings; }
     const Settings &settings() const { return _settings; }
+    const Stats &stats() const { return _stats; }
 
     void clear_pending();
     void clear_all();
@@ -51,18 +106,42 @@ public:
                   OrbitPlotDepth depth = OrbitPlotDepth::DepthTested);
 
     bool has_active_lines() const;
+    std::span<const LineCommand> active_lines() const;
+    bool has_active_gpu_root_segments() const;
+    std::span<const GpuRootSegment> active_gpu_root_segments() const;
+    const WorldVec3 &gpu_reference_body_world() const { return _gpu_reference_body_world; }
+    const WorldVec3 &gpu_align_delta_world() const { return _gpu_align_delta_world; }
     LineVertexLists build_line_vertices(const WorldVec3 &origin_world) const;
 
-private:
-    struct CmdLine
-    {
-        WorldVec3 a_world{0.0, 0.0, 0.0};
-        WorldVec3 b_world{0.0, 0.0, 0.0};
-        glm::vec4 color{1.0f};
-        OrbitPlotDepth depth{OrbitPlotDepth::DepthTested};
-    };
+    void record_upload_stats(std::size_t upload_bytes,
+                             std::size_t upload_budget_bytes,
+                             double upload_ms,
+                             bool upload_cap_hit,
+                             uint32_t depth_segment_count,
+                             uint32_t overlay_segment_count);
+    void record_gpu_path_stats(bool gpu_path_active, bool gpu_generate_cap_hit, bool fallback);
 
+    void set_gpu_frame_reference(const WorldVec3 &reference_body_world,
+                                 const WorldVec3 &align_delta_world);
+    void add_gpu_root_segment(double dt_s,
+                              const glm::dvec3 &p0_bci,
+                              const glm::dvec3 &v0_bci,
+                              const glm::dvec3 &p1_bci,
+                              const glm::dvec3 &v1_bci,
+                              double clip_u0,
+                              double clip_u1,
+                              bool dashed,
+                              float dash_phase_start_px,
+                              const glm::vec4 &color,
+                              OrbitPlotDepth depth = OrbitPlotDepth::DepthTested);
+
+private:
     Settings _settings{};
-    std::vector<CmdLine> _pending_lines{};
-    std::vector<CmdLine> _active_lines{};
+    Stats _stats{};
+    std::vector<LineCommand> _pending_lines{};
+    std::vector<LineCommand> _active_lines{};
+    std::vector<GpuRootSegment> _pending_gpu_root_segments{};
+    std::vector<GpuRootSegment> _active_gpu_root_segments{};
+    WorldVec3 _gpu_reference_body_world{0.0, 0.0, 0.0};
+    WorldVec3 _gpu_align_delta_world{0.0, 0.0, 0.0};
 };
