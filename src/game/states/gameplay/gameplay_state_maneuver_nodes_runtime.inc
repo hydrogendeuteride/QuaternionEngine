@@ -81,8 +81,7 @@
         const glm::dvec3 r_rel_m = glm::dvec3(ship_pos_world - ref_body_world);
         const glm::dvec3 v_rel_mps = ship_vel_world;
 
-        const orbitsim::RtnFrame f = orbitsim::compute_rtn_frame(orbitsim::Vec3{r_rel_m.x, r_rel_m.y, r_rel_m.z},
-                                                                 orbitsim::Vec3{v_rel_mps.x, v_rel_mps.y, v_rel_mps.z});
+        const orbitsim::RtnFrame f = compute_maneuver_rtf_frame(r_rel_m, v_rel_mps);
 
         const glm::dvec3 dv_rtn = node->dv_rtn_mps;
         glm::dvec3 dv_world =
