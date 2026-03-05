@@ -11,6 +11,7 @@
 
 #include "orbitsim/trajectories.hpp"
 #include "orbitsim/trajectory_transforms.hpp"
+#include "orbitsim/coordinate_frames.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -19,6 +20,126 @@
 
 namespace Game
 {
+    namespace
+    {
+        bool finite_vec3d(const glm::dvec3 &v)
+        {
+            return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+        }
+
+        double safe_length_d(const glm::dvec3 &v)
+        {
+            const double len2 = glm::dot(v, v);
+            if (!std::isfinite(len2) || len2 <= 0.0)
+            {
+                return 0.0;
+            }
+            return std::sqrt(len2);
+        }
+
+        glm::dvec3 normalized_or_d(const glm::dvec3 &v, const glm::dvec3 &fallback)
+        {
+            const double len = safe_length_d(v);
+            if (!(len > 0.0))
+            {
+                return fallback;
+            }
+            return v / len;
+        }
+
+        struct SampledTrajectoryState
+        {
+            bool valid{false};
+            glm::dvec3 r_rel_m{0.0, 0.0, 0.0};
+            glm::dvec3 v_rel_mps{0.0, 0.0, 0.0};
+        };
+
+        SampledTrajectoryState sample_trajectory_bci_linear(const std::vector<orbitsim::TrajectorySample> &traj_bci,
+                                                            const double t_s)
+        {
+            SampledTrajectoryState out{};
+            if (traj_bci.size() < 2 || !std::isfinite(t_s))
+            {
+                return out;
+            }
+
+            const double t0 = traj_bci.front().t_s;
+            const double t1 = traj_bci.back().t_s;
+            if (!(t1 > t0))
+            {
+                return out;
+            }
+
+            const double t_clamped = std::clamp(t_s, t0, t1);
+            auto it_hi = std::lower_bound(traj_bci.cbegin(),
+                                          traj_bci.cend(),
+                                          t_clamped,
+                                          [](const orbitsim::TrajectorySample &s, const double t) {
+                                              return s.t_s < t;
+                                          });
+            size_t i_hi = static_cast<size_t>(std::distance(traj_bci.cbegin(), it_hi));
+            if (i_hi >= traj_bci.size())
+            {
+                i_hi = traj_bci.size() - 1;
+            }
+            const size_t i_lo = (i_hi == 0) ? 0 : (i_hi - 1);
+
+            const orbitsim::TrajectorySample &a = traj_bci[i_lo];
+            const orbitsim::TrajectorySample &b = traj_bci[i_hi];
+            const double dt = b.t_s - a.t_s;
+
+            double u = 0.0;
+            if (std::isfinite(dt) && dt > 1.0e-9)
+            {
+                u = (t_clamped - a.t_s) / dt;
+            }
+            u = std::clamp(u, 0.0, 1.0);
+
+            out.r_rel_m = glm::mix(glm::dvec3(a.position_m), glm::dvec3(b.position_m), u);
+            out.v_rel_mps = glm::mix(glm::dvec3(a.velocity_mps), glm::dvec3(b.velocity_mps), u);
+            out.valid = finite_vec3d(out.r_rel_m) && finite_vec3d(out.v_rel_mps);
+            return out;
+        }
+
+        orbitsim::Vec3 convert_dv_rtf_to_solver_rtn(const glm::dvec3 &dv_rtf_mps,
+                                                    const glm::dvec3 &r_rel_m,
+                                                    const glm::dvec3 &v_rel_mps)
+        {
+            const orbitsim::RtnFrame solver_frame = orbitsim::compute_rtn_frame(r_rel_m, v_rel_mps);
+
+            const glm::dvec3 solver_r = glm::dvec3(solver_frame.R.x, solver_frame.R.y, solver_frame.R.z);
+            const glm::dvec3 solver_t = glm::dvec3(solver_frame.T.x, solver_frame.T.y, solver_frame.T.z);
+            const glm::dvec3 solver_n = glm::dvec3(solver_frame.N.x, solver_frame.N.y, solver_frame.N.z);
+
+            const glm::dvec3 t_hat = normalized_or_d(v_rel_mps, solver_t);
+            glm::dvec3 n_hat = normalized_or_d(glm::cross(r_rel_m, v_rel_mps), solver_n);
+            glm::dvec3 r_hat = normalized_or_d(glm::cross(t_hat, n_hat), solver_r);
+
+            const double plane_area = safe_length_d(glm::cross(r_rel_m, v_rel_mps));
+            if (!finite_vec3d(r_hat) || !finite_vec3d(t_hat) || !finite_vec3d(n_hat) || !(plane_area > 1.0e-8))
+            {
+                // Degenerate fallback: keep components as-is.
+                return orbitsim::Vec3{dv_rtf_mps.x, dv_rtf_mps.y, dv_rtf_mps.z};
+            }
+
+            if (glm::dot(r_hat, r_rel_m) < 0.0)
+            {
+                r_hat = -r_hat;
+                n_hat = -n_hat;
+            }
+
+            n_hat = normalized_or_d(glm::cross(r_hat, t_hat), n_hat);
+            r_hat = normalized_or_d(glm::cross(t_hat, n_hat), r_hat);
+
+            const glm::dvec3 dv_world = r_hat * dv_rtf_mps.x + t_hat * dv_rtf_mps.y + n_hat * dv_rtf_mps.z;
+            return orbitsim::Vec3{
+                    glm::dot(dv_world, solver_r),
+                    glm::dot(dv_world, solver_t),
+                    glm::dot(dv_world, solver_n),
+            };
+        }
+    } // namespace
+
     bool GameplayState::get_player_world_state(WorldVec3 &out_pos_world,
                                                glm::dvec3 &out_vel_world,
                                                glm::vec3 &out_vel_local) const
@@ -189,7 +310,19 @@ namespace Game
                     OrbitPredictionService::ManeuverImpulse impulse{};
                     impulse.t_s = node.time_s;
                     impulse.primary_body_id = node.primary_body_id;
-                    impulse.dv_rtn_mps = node.dv_rtn_mps;
+
+                    // UI/editing uses velocity-aligned RTF T axis. Convert to solver RTN so
+                    // prediction/execution stay consistent without modifying orbitsim internals.
+                    impulse.dv_rtn_mps = orbitsim::Vec3{node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z};
+                    if (_prediction_cache.valid && _prediction_cache.trajectory_bci.size() >= 2)
+                    {
+                        const SampledTrajectoryState s =
+                                sample_trajectory_bci_linear(_prediction_cache.trajectory_bci, node.time_s);
+                        if (s.valid)
+                        {
+                            impulse.dv_rtn_mps = convert_dv_rtf_to_solver_rtn(node.dv_rtn_mps, s.r_rel_m, s.v_rel_mps);
+                        }
+                    }
                     request.maneuver_impulses.push_back(impulse);
                 }
             }
