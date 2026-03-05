@@ -69,6 +69,7 @@ The full deferred PBR pipeline, executed via RenderGraph each frame:
 ├─────────────────────────────────────────────────────────┤
 │ AutoExposure     — compute luminance measurement        │
 │ Tonemap + Bloom  — HDR → LDR (ACES/Reinhard)           │
+│ OrbitPlot.Generate — compute orbit line generation      │
 │ OrbitPlot        — dedicated orbit line overlays        │
 │ DebugDraw        — wireframe overlays                   │
 │ FXAA             — post-process AA (LDR)                │

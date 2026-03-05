@@ -201,6 +201,8 @@ namespace Game
             // BCI = body-centered inertial (relative to the current reference body)
             std::vector<orbitsim::TrajectorySample> trajectory_bci;
             std::vector<orbitsim::TrajectorySample> trajectory_bci_planned;
+            std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci;
+            std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci_planned;
 
             // Cached world-space polyline refreshed from trajectory_bci each frame.
             std::vector<WorldVec3> points_world;
@@ -223,6 +225,8 @@ namespace Game
                 build_vel_world = glm::dvec3(0.0, 0.0, 0.0);
                 trajectory_bci.clear();
                 trajectory_bci_planned.clear();
+                trajectory_segments_bci.clear();
+                trajectory_segments_bci_planned.clear();
                 points_world.clear();
                 points_world_planned.clear();
                 altitude_km.clear();
@@ -245,6 +249,29 @@ namespace Game
         double _prediction_periodic_refresh_s{0.0}; // 0 = never (cache is extended when horizon runs out)
         double _prediction_thrust_refresh_s{0.1};    // rebuild at most this often while thrusting
         double _prediction_future_window_s{600.0};
+        double _orbit_plot_render_error_px{0.75};
+        int _orbit_plot_render_max_segments_cpu{4'000};
+        int _orbit_plot_pick_max_segments{8'000};
+        double _orbit_plot_pick_frustum_margin_ratio{0.05};
+
+        struct OrbitPlotPerfStats
+        {
+            double solver_ms_last{0.0};
+            double render_lod_ms_last{0.0};
+            double pick_lod_ms_last{0.0};
+
+            uint32_t solver_segments_base{0};
+            uint32_t solver_segments_planned{0};
+            uint32_t pick_segments_before_cull{0};
+            uint32_t pick_segments{0};
+
+            bool render_cap_hit_last_frame{false};
+            bool pick_cap_hit_last_frame{false};
+            uint64_t render_cap_hits_total{0};
+            uint64_t pick_cap_hits_total{0};
+        };
+
+        OrbitPlotPerfStats _orbit_plot_perf{};
         OrbitPredictionCache _prediction_cache{};
         OrbitPredictionService _prediction_service{};
         bool _prediction_request_pending{false};
