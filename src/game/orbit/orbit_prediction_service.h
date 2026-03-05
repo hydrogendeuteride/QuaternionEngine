@@ -47,6 +47,7 @@ namespace Game
         {
             uint64_t generation_id{0};
             bool valid{false};
+            double compute_time_ms{0.0};
 
             double build_time_s{0.0};
             orbitsim::Vec3 ship_rel_position_m{0.0, 0.0, 0.0};

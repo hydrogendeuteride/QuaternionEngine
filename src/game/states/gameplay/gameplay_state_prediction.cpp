@@ -108,6 +108,7 @@ namespace Game
             const bool keep_dirty_for_followup = _prediction_dirty;
 
             OrbitPredictionService::Result result = std::move(*completed);
+            _orbit_plot_perf.solver_ms_last = std::max(0.0, result.compute_time_ms);
             if (result.valid && result.trajectory_bci.size() >= 2)
             {
                 _prediction_cache.clear();

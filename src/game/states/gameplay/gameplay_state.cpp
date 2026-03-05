@@ -45,6 +45,7 @@ namespace Game
         _scenario_io_status_ok = true;
         _prediction_service.reset();
         _prediction_request_pending = false;
+        _orbit_plot_perf = {};
 
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
         {
@@ -87,6 +88,7 @@ namespace Game
         _prediction_dirty = true;
         _prediction_service.reset();
         _prediction_request_pending = false;
+        _orbit_plot_perf = {};
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
         {
             ctx.renderer->_context->orbit_plot->clear_all();
@@ -444,6 +446,9 @@ namespace Game
             if (ImGui::CollapsingHeader("Orbit", ImGuiTreeNodeFlags_DefaultOpen))
             {
                 ImGui::TextUnformatted("Orbit plot renders in a dedicated pass (independent from Debug draw).");
+                OrbitPlotSystem *orbit_plot =
+                        (ctx.renderer && ctx.renderer->_context) ? ctx.renderer->_context->orbit_plot : nullptr;
+
                 ImGui::Checkbox("Prediction full orbit", &_prediction_draw_full_orbit);
                 ImGui::Checkbox("Prediction future segment", &_prediction_draw_future_segment);
 
@@ -499,6 +504,80 @@ namespace Game
                 }
                 ImGui::SameLine();
                 ImGui::TextUnformatted("(0 = depth-only)");
+
+                float render_error_px = static_cast<float>(_orbit_plot_render_error_px);
+                if (ImGui::DragFloat("Render error (px)", &render_error_px, 0.01f, 0.05f, 4.0f, "%.2f"))
+                {
+                    _orbit_plot_render_error_px = std::clamp(static_cast<double>(render_error_px), 0.05, 4.0);
+                }
+
+                int render_max_segments_cpu = _orbit_plot_render_max_segments_cpu;
+                if (ImGui::DragInt("Render max segments (CPU)",
+                                   &render_max_segments_cpu,
+                                   50.0f,
+                                   64,
+                                   200000))
+                {
+                    _orbit_plot_render_max_segments_cpu = std::clamp(render_max_segments_cpu, 64, 200000);
+                }
+
+                int pick_max_segments = _orbit_plot_pick_max_segments;
+                if (ImGui::DragInt("Pick max segments", &pick_max_segments, 50.0f, 64, 32000))
+                {
+                    _orbit_plot_pick_max_segments = std::clamp(pick_max_segments, 64, 32000);
+                }
+
+                if (orbit_plot)
+                {
+                    int upload_budget_mib = static_cast<int>(std::clamp<std::size_t>(
+                            orbit_plot->settings().upload_budget_bytes / (1024ull * 1024ull),
+                            1ull,
+                            256ull));
+                    if (ImGui::SliderInt("Orbit upload budget (MiB)", &upload_budget_mib, 1, 256))
+                    {
+                        orbit_plot->settings().upload_budget_bytes =
+                                static_cast<std::size_t>(upload_budget_mib) * 1024ull * 1024ull;
+                    }
+
+                    const OrbitPlotSystem::Stats &plot_stats = orbit_plot->stats();
+                    const OrbitPlotPerfStats &perf = _orbit_plot_perf;
+                    const double upload_mib =
+                            static_cast<double>(plot_stats.upload_bytes_last_frame) / (1024.0 * 1024.0);
+                    const double budget_mib =
+                            static_cast<double>(plot_stats.upload_budget_bytes) / (1024.0 * 1024.0);
+                    const double peak_mib =
+                            static_cast<double>(plot_stats.upload_bytes_peak) / (1024.0 * 1024.0);
+
+                    ImGui::Text("Solver segments (base/planned): %u / %u",
+                                perf.solver_segments_base,
+                                perf.solver_segments_planned);
+                    ImGui::Text("Orbit lines (active/pending): %u / %u",
+                                plot_stats.active_line_count,
+                                plot_stats.pending_line_count);
+                    ImGui::Text("Orbit segments (depth/overlay): %u / %u",
+                                plot_stats.depth_segment_count,
+                                plot_stats.overlay_segment_count);
+                    ImGui::Text("Pick segments (before/after): %u / %u",
+                                perf.pick_segments_before_cull,
+                                perf.pick_segments);
+
+                    ImGui::Text("Timing ms (solver/render_lod/pick_lod/upload): %.3f / %.3f / %.3f / %.3f",
+                                perf.solver_ms_last,
+                                perf.render_lod_ms_last,
+                                perf.pick_lod_ms_last,
+                                plot_stats.upload_ms_last_frame);
+                    ImGui::Text("Orbit upload: %.2f MiB / %.2f MiB%s",
+                                upload_mib,
+                                budget_mib,
+                                plot_stats.upload_cap_hit_last_frame ? " [cap]" : "");
+                    ImGui::Text("Cap hits (render/pick/upload): %llu / %llu / %llu",
+                                static_cast<unsigned long long>(perf.render_cap_hits_total),
+                                static_cast<unsigned long long>(perf.pick_cap_hits_total),
+                                static_cast<unsigned long long>(plot_stats.upload_cap_hits_total));
+                    ImGui::Text("Orbit upload peak: %.2f MiB, upload ms peak: %.3f",
+                                peak_mib,
+                                plot_stats.upload_ms_peak);
+                }
 
                 WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
                 glm::dvec3 ship_vel_world(0.0);
