@@ -290,6 +290,10 @@ namespace Game
                 (std::isfinite(_orbit_plot_render_error_px) && _orbit_plot_render_error_px > 0.0)
                         ? _orbit_plot_render_error_px
                         : 0.75;
+        if (orbit_plot)
+        {
+            orbit_plot->settings().render_error_px = render_error_px;
+        }
         const std::size_t render_max_segments =
                 static_cast<std::size_t>(std::max(1, _orbit_plot_render_max_segments_cpu));
 
@@ -301,6 +305,161 @@ namespace Game
             if (!(t_end_s > t_start_s) || traj_segments.empty())
             {
                 return;
+            }
+
+            const double dash_on_px = 14.0;
+            const double dash_off_px = 9.0;
+            const double dash_period_px = dash_on_px + dash_off_px;
+
+            auto eval_segment_world_pos = [&](const orbitsim::TrajectorySegment &segment, const double t_s) {
+                if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
+                {
+                    return ref_body_world + WorldVec3(glm::dvec3(segment.start.position_m)) + align_delta;
+                }
+
+                double u = (t_s - segment.t0_s) / segment.dt_s;
+                if (!std::isfinite(u))
+                {
+                    u = 0.0;
+                }
+                u = std::clamp(u, 0.0, 1.0);
+
+                const double u2 = u * u;
+                const double u3 = u2 * u;
+                const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
+                const double h10 = u3 - (2.0 * u2) + u;
+                const double h01 = (-2.0 * u3) + (3.0 * u2);
+                const double h11 = u3 - u2;
+
+                const glm::dvec3 p0 = glm::dvec3(segment.start.position_m);
+                const glm::dvec3 p1 = glm::dvec3(segment.end.position_m);
+                const glm::dvec3 m0 = glm::dvec3(segment.start.velocity_mps) * segment.dt_s;
+                const glm::dvec3 m1 = glm::dvec3(segment.end.velocity_mps) * segment.dt_s;
+                const glm::dvec3 local = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
+                return ref_body_world + WorldVec3(local) + align_delta;
+            };
+
+            const bool gpu_subdivision_enabled =
+                    orbit_plot && orbit_plot->settings().gpu_generate_enabled;
+            if (gpu_subdivision_enabled)
+            {
+                orbit_plot->set_gpu_frame_reference(ref_body_world, align_delta);
+
+                auto emit_root_segments = [&](const glm::vec4 &emit_color, const OrbitPlotDepth depth) {
+                    double dash_phase_px = 0.0;
+                    for (const orbitsim::TrajectorySegment &segment : traj_segments)
+                    {
+                        if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
+                        {
+                            continue;
+                        }
+
+                        const double seg_t0_s = segment.t0_s;
+                        const double seg_t1_s = seg_t0_s + segment.dt_s;
+                        const double clip_t0_s = std::max(seg_t0_s, t_start_s);
+                        const double clip_t1_s = std::min(seg_t1_s, t_end_s);
+                        if (!(clip_t1_s > clip_t0_s))
+                        {
+                            continue;
+                        }
+
+                        float dash_phase_start_px = 0.0f;
+                        if (dashed)
+                        {
+                            const WorldVec3 a_world = eval_segment_world_pos(segment, clip_t0_s);
+                            const WorldVec3 b_world = eval_segment_world_pos(segment, clip_t1_s);
+                            const double seg_m = glm::length(glm::dvec3(b_world - a_world));
+                            if (std::isfinite(seg_m) && seg_m > 1.0e-9)
+                            {
+                                const glm::dvec3 mid_world = glm::mix(glm::dvec3(a_world), glm::dvec3(b_world), 0.5);
+                                const double seg_mpp = meters_per_px_at_world(WorldVec3(mid_world));
+                                if (std::isfinite(seg_mpp) && seg_mpp > 1.0e-6)
+                                {
+                                    const double seg_px = seg_m / seg_mpp;
+                                    dash_phase_start_px = static_cast<float>(std::fmod(dash_phase_px, dash_period_px));
+                                    if (std::isfinite(seg_px) && seg_px > 0.0)
+                                    {
+                                        dash_phase_px = std::fmod(dash_phase_px + seg_px, dash_period_px);
+                                    }
+                                }
+                            }
+                        }
+
+                        const double clip_u0 = (clip_t0_s - seg_t0_s) / segment.dt_s;
+                        const double clip_u1 = (clip_t1_s - seg_t0_s) / segment.dt_s;
+                        orbit_plot->add_gpu_root_segment(segment.dt_s,
+                                                         glm::dvec3(segment.start.position_m),
+                                                         glm::dvec3(segment.start.velocity_mps),
+                                                         glm::dvec3(segment.end.position_m),
+                                                         glm::dvec3(segment.end.velocity_mps),
+                                                         clip_u0,
+                                                         clip_u1,
+                                                         dashed,
+                                                         dash_phase_start_px,
+                                                         emit_color,
+                                                         depth);
+                    }
+                };
+
+                emit_root_segments(color, OrbitPlotDepth::DepthTested);
+                if (line_overlay_boost > 0.0f)
+                {
+                    glm::vec4 overlay_color = color;
+                    overlay_color.a = std::clamp(overlay_color.a * line_overlay_boost, 0.0f, 1.0f);
+                    if (overlay_color.a > 0.0f)
+                    {
+                        emit_root_segments(overlay_color, OrbitPlotDepth::AlwaysOnTop);
+                    }
+                }
+
+                // If GPU path wasn't active in the last frame, emit a coarse CPU fallback
+                // (single clipped chord per adaptive segment) to avoid losing trajectory visuals.
+                if (orbit_plot->stats().gpu_path_active_last_frame)
+                {
+                    return;
+                }
+
+                if (dashed)
+                {
+                    // Dashed planned orbit keeps CPU fallback for the first frame when GPU path is not yet active.
+                    // Once GPU path activates, this window returns above.
+                }
+                else
+                {
+                    // If GPU path wasn't active in the last frame, emit a coarse CPU fallback
+                    // (single clipped chord per adaptive segment) to avoid losing trajectory visuals.
+                    for (const orbitsim::TrajectorySegment &segment : traj_segments)
+                    {
+                        if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
+                        {
+                            continue;
+                        }
+
+                        const double seg_t0_s = segment.t0_s;
+                        const double seg_t1_s = seg_t0_s + segment.dt_s;
+                        const double clip_t0_s = std::max(seg_t0_s, t_start_s);
+                        const double clip_t1_s = std::min(seg_t1_s, t_end_s);
+                        if (!(clip_t1_s > clip_t0_s))
+                        {
+                            continue;
+                        }
+
+                        const WorldVec3 a_world = eval_segment_world_pos(segment, clip_t0_s);
+                        const WorldVec3 b_world = eval_segment_world_pos(segment, clip_t1_s);
+                        orbit_plot->add_line(a_world, b_world, color, OrbitPlotDepth::DepthTested);
+
+                        if (line_overlay_boost > 0.0f)
+                        {
+                            glm::vec4 overlay_color = color;
+                            overlay_color.a = std::clamp(overlay_color.a * line_overlay_boost, 0.0f, 1.0f);
+                            if (overlay_color.a > 0.0f)
+                            {
+                                orbit_plot->add_line(a_world, b_world, overlay_color, OrbitPlotDepth::AlwaysOnTop);
+                            }
+                        }
+                    }
+                    return;
+                }
             }
 
             OrbitPlotLodBuilder::RenderSettings lod_settings{};
@@ -329,9 +488,6 @@ namespace Game
                 return;
             }
 
-            const double dash_on_px = 14.0;
-            const double dash_off_px = 9.0;
-            const double dash_period_px = dash_on_px + dash_off_px;
             double dash_phase_px = 0.0;
 
             auto emit_segment = [&](const WorldVec3 &a_world, const WorldVec3 &b_world) {
