@@ -127,6 +127,8 @@ add_executable (vulkan_engine
   render/passes/tonemap.cpp
   render/passes/orbit_plot.h
   render/passes/orbit_plot.cpp
+  render/passes/orbit_plot_generate.h
+  render/passes/orbit_plot_generate.cpp
   render/passes/debug_draw.h
   render/passes/debug_draw.cpp
   # render graph
