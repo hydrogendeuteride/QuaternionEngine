@@ -3,6 +3,9 @@
 #include <render/renderpass.h>
 #include <render/graph/types.h>
 
+#include <array>
+#include <cstddef>
+
 class EngineContext;
 class RenderGraph;
 class RGPassResources;
@@ -22,10 +25,19 @@ public:
                         bool is_ldr_target);
 
 private:
+    static constexpr std::size_t k_upload_ring_slots = 3;
+
+    struct UploadSlot
+    {
+        AllocatedBuffer buffer{};
+        std::size_t capacity_bytes = 0;
+    };
+
     void draw_orbit_plot(VkCommandBuffer cmd,
                          EngineContext *ctx,
                          bool is_ldr_target);
 
     EngineContext *_context = nullptr;
     DeletionQueue _deletionQueue;
+    std::array<UploadSlot, k_upload_ring_slots> _upload_ring{};
 };

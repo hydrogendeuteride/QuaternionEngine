@@ -4,6 +4,7 @@
 
 #include <glm/glm.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -29,6 +30,7 @@ public:
         bool enabled = true;
         float line_width_px = 2.0f;
         float line_aa_px = 1.0f;
+        std::size_t upload_budget_bytes = 32ull * 1024ull * 1024ull;
     };
 
     struct LineVertexLists
@@ -38,8 +40,27 @@ public:
         uint32_t overlay_vertex_count = 0;
     };
 
+    struct Stats
+    {
+        uint32_t active_line_count = 0;
+        uint32_t pending_line_count = 0;
+
+        uint32_t depth_segment_count = 0;
+        uint32_t overlay_segment_count = 0;
+
+        std::size_t upload_budget_bytes = 0;
+        std::size_t upload_bytes_last_frame = 0;
+        std::size_t upload_bytes_peak = 0;
+        double upload_ms_last_frame = 0.0;
+        double upload_ms_peak = 0.0;
+
+        bool upload_cap_hit_last_frame = false;
+        uint64_t upload_cap_hits_total = 0;
+    };
+
     Settings &settings() { return _settings; }
     const Settings &settings() const { return _settings; }
+    const Stats &stats() const { return _stats; }
 
     void clear_pending();
     void clear_all();
@@ -53,6 +74,13 @@ public:
     bool has_active_lines() const;
     LineVertexLists build_line_vertices(const WorldVec3 &origin_world) const;
 
+    void record_upload_stats(std::size_t upload_bytes,
+                             std::size_t upload_budget_bytes,
+                             double upload_ms,
+                             bool upload_cap_hit,
+                             uint32_t depth_segment_count,
+                             uint32_t overlay_segment_count);
+
 private:
     struct CmdLine
     {
@@ -63,6 +91,7 @@ private:
     };
 
     Settings _settings{};
+    Stats _stats{};
     std::vector<CmdLine> _pending_lines{};
     std::vector<CmdLine> _active_lines{};
 };

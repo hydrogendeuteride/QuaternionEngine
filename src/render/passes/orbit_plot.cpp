@@ -12,6 +12,7 @@
 #include <scene/vk_scene.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 
 namespace
@@ -38,6 +39,26 @@ namespace
     constexpr const char *k_ldr_overlay = "orbit_lines.ldr.overlay";
     constexpr const char *k_hdr_depth = "orbit_lines.hdr.depth";
     constexpr const char *k_hdr_overlay = "orbit_lines.hdr.overlay";
+
+    constexpr std::size_t k_min_upload_capacity_bytes = 4ull * 1024ull;
+
+    std::size_t round_up_upload_capacity(const std::size_t required_bytes,
+                                         const std::size_t hard_cap_bytes,
+                                         const std::size_t current_capacity_bytes)
+    {
+        std::size_t capacity = std::max(current_capacity_bytes, k_min_upload_capacity_bytes);
+        while (capacity < required_bytes && capacity < hard_cap_bytes)
+        {
+            const std::size_t next = capacity * 2ull;
+            if (next <= capacity)
+            {
+                break;
+            }
+            capacity = std::min(next, hard_cap_bytes);
+        }
+        capacity = std::max(capacity, required_bytes);
+        return std::min(capacity, hard_cap_bytes);
+    }
 } // namespace
 
 void OrbitPlotPass::init(EngineContext *context)
@@ -102,6 +123,19 @@ void OrbitPlotPass::init(EngineContext *context)
 
 void OrbitPlotPass::cleanup()
 {
+    if (_context && _context->getResources())
+    {
+        ResourceManager *rm = _context->getResources();
+        for (UploadSlot &slot : _upload_ring)
+        {
+            if (slot.buffer.buffer != VK_NULL_HANDLE)
+            {
+                rm->destroy_buffer(slot.buffer);
+            }
+            slot.buffer = {};
+            slot.capacity_bytes = 0;
+        }
+    }
     _deletionQueue.flush();
 }
 
@@ -169,34 +203,91 @@ void OrbitPlotPass::draw_orbit_plot(VkCommandBuffer cmd,
         return;
     }
 
-    const VkDeviceSize bytes = static_cast<VkDeviceSize>(lists.vertices.size() * sizeof(OrbitPlotVertex));
-    if (bytes == 0)
-    {
-        return;
-    }
-
     ResourceManager *rm = ctx_local->getResources();
     DeviceManager *dm = ctx_local->getDevice();
+    const auto upload_start_tp = std::chrono::steady_clock::now();
 
-    AllocatedBuffer vb = rm->create_buffer(
-            static_cast<size_t>(bytes),
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-            VMA_MEMORY_USAGE_CPU_TO_GPU);
-    if (vb.buffer == VK_NULL_HANDLE || vb.allocation == VK_NULL_HANDLE || vb.info.pMappedData == nullptr)
+    std::size_t upload_budget_bytes = plot->settings().upload_budget_bytes;
+    const std::size_t min_upload_budget_bytes = sizeof(OrbitPlotVertex) * 2ull;
+    if (upload_budget_bytes < min_upload_budget_bytes)
     {
+        upload_budget_bytes = min_upload_budget_bytes;
+    }
+
+    std::size_t max_upload_vertices = upload_budget_bytes / sizeof(OrbitPlotVertex);
+    max_upload_vertices &= ~std::size_t(1);
+    max_upload_vertices = std::max<std::size_t>(2ull, max_upload_vertices);
+
+    uint32_t depth_vertex_count = lists.depth_vertex_count & ~1u;
+    uint32_t overlay_vertex_count = lists.overlay_vertex_count & ~1u;
+    bool upload_cap_hit = false;
+
+    if (lists.vertices.size() > max_upload_vertices)
+    {
+        upload_cap_hit = true;
+        depth_vertex_count = static_cast<uint32_t>(std::min<std::size_t>(max_upload_vertices, depth_vertex_count));
+        depth_vertex_count &= ~1u;
+
+        if (depth_vertex_count >= lists.depth_vertex_count)
+        {
+            const std::size_t remaining_vertices = max_upload_vertices - static_cast<std::size_t>(depth_vertex_count);
+            overlay_vertex_count = static_cast<uint32_t>(std::min<std::size_t>(remaining_vertices, overlay_vertex_count));
+            overlay_vertex_count &= ~1u;
+        }
+        else
+        {
+            overlay_vertex_count = 0;
+        }
+    }
+
+    const std::size_t upload_vertex_count =
+            static_cast<std::size_t>(depth_vertex_count) + static_cast<std::size_t>(overlay_vertex_count);
+    const std::size_t upload_bytes = upload_vertex_count * sizeof(OrbitPlotVertex);
+    if (upload_vertex_count == 0 || upload_bytes == 0)
+    {
+        plot->record_upload_stats(0, upload_budget_bytes, 0.0, true, 0, 0);
         return;
     }
 
-    std::memcpy(vb.info.pMappedData, lists.vertices.data(), static_cast<size_t>(bytes));
-    vmaFlushAllocation(dm->allocator(), vb.allocation, 0, bytes);
+    const std::size_t ring_slot = static_cast<std::size_t>(ctx_local->frameIndex) % k_upload_ring_slots;
+    UploadSlot &slot = _upload_ring[ring_slot];
 
-    ctx_local->currentFrame->_deletionQueue.push_function([rm, vb]() {
-        rm->destroy_buffer(vb);
-    });
+    if (slot.buffer.buffer == VK_NULL_HANDLE || slot.buffer.allocation == VK_NULL_HANDLE ||
+        slot.buffer.info.pMappedData == nullptr || slot.capacity_bytes < upload_bytes)
+    {
+        const std::size_t previous_capacity = slot.capacity_bytes;
+        if (slot.buffer.buffer != VK_NULL_HANDLE)
+        {
+            rm->destroy_buffer(slot.buffer);
+            slot.buffer = {};
+            slot.capacity_bytes = 0;
+        }
+
+        const std::size_t hard_cap_bytes = std::max(upload_budget_bytes, upload_bytes);
+        const std::size_t new_capacity_bytes =
+                round_up_upload_capacity(upload_bytes, hard_cap_bytes, previous_capacity);
+
+        slot.buffer = rm->create_buffer(
+                new_capacity_bytes,
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                VMA_MEMORY_USAGE_CPU_TO_GPU);
+        slot.capacity_bytes = new_capacity_bytes;
+    }
+
+    if (slot.buffer.buffer == VK_NULL_HANDLE || slot.buffer.allocation == VK_NULL_HANDLE || slot.buffer.info.pMappedData == nullptr)
+    {
+        slot.buffer = {};
+        slot.capacity_bytes = 0;
+        plot->record_upload_stats(0, upload_budget_bytes, 0.0, true, 0, 0);
+        return;
+    }
+
+    std::memcpy(slot.buffer.info.pMappedData, lists.vertices.data(), upload_bytes);
+    vmaFlushAllocation(dm->allocator(), slot.buffer.allocation, 0, upload_bytes);
 
     VkBufferDeviceAddressInfo addr_info{};
     addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    addr_info.buffer = vb.buffer;
+    addr_info.buffer = slot.buffer.buffer;
     const VkDeviceAddress addr = vkGetBufferDeviceAddress(dm->device(), &addr_info);
 
     OrbitPlotPushConstants pc{};
@@ -211,8 +302,17 @@ void OrbitPlotPass::draw_orbit_plot(VkCommandBuffer cmd,
     pc.half_line_width_px = 0.5f * width_px;
     pc.aa_px = aa_px;
 
-    const uint32_t depth_segment_count = lists.depth_vertex_count / 2u;
-    const uint32_t overlay_segment_count = lists.overlay_vertex_count / 2u;
+    const uint32_t depth_segment_count = depth_vertex_count / 2u;
+    const uint32_t overlay_segment_count = overlay_vertex_count / 2u;
+    const double upload_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - upload_start_tp)
+                                     .count();
+    plot->record_upload_stats(upload_bytes,
+                              upload_budget_bytes,
+                              upload_ms,
+                              upload_cap_hit,
+                              depth_segment_count,
+                              overlay_segment_count);
 
     VkViewport vp{0.f, 0.f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.f, 1.f};
     VkRect2D sc{{0, 0}, extent};

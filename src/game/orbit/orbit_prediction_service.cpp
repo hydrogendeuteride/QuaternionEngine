@@ -7,6 +7,7 @@
 #include "orbitsim/trajectory_transforms.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 namespace Game
@@ -153,6 +154,24 @@ namespace Game
                                                                               const Request &request)
     {
         Result out{};
+        struct ScopedComputeTimer
+        {
+            Result *result{nullptr};
+            std::chrono::steady_clock::time_point start{};
+            ~ScopedComputeTimer()
+            {
+                if (!result)
+                {
+                    return;
+                }
+                result->compute_time_ms =
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            }
+        };
+        ScopedComputeTimer timer{};
+        timer.result = &out;
+        timer.start = std::chrono::steady_clock::now();
+
         out.generation_id = generation_id;
         out.build_time_s = request.sim_time_s;
 
