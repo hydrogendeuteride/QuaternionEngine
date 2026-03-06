@@ -1,4 +1,4 @@
-#include "scenario_loader.h"
+#include "game/states/gameplay/scenario/scenario_loader.h"
 #include "core/util/logger.h"
 
 #include <nlohmann/json.hpp>
