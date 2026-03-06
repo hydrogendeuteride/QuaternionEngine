@@ -1,8 +1,9 @@
 #pragma once
 
-#include "gameplay_state.h"
-#include <string>
+#include "game/states/gameplay/scenario/scenario_config.h"
+
 #include <optional>
+#include <string>
 
 namespace Game
 {

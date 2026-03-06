@@ -1,4 +1,4 @@
-#include "game/states/gameplay/scenario_loader.h"
+#include "game/states/gameplay/scenario/scenario_loader.h"
 
 #include <nlohmann/json.hpp>
 #include <gtest/gtest.h>
