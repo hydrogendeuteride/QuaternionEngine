@@ -1,6 +1,7 @@
 #include "gameplay_state.h"
 #include "orbit_helpers.h"
-#include "scenario_loader.h"
+#include "game/states/gameplay/scenario/scenario_loader.h"
+#include "game/component/ship_controller.h"
 #include "game/states/pause_state.h"
 #include "core/engine.h"
 #include "core/game_api.h"

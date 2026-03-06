@@ -8,7 +8,7 @@ endif()
 
 add_executable(scenario_loader_tests
   scenario_loader_tests.cpp
-  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/scenario_loader.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/scenario/scenario_loader.cpp"
   "${PROJECT_SOURCE_DIR}/src/core/util/logger.cpp"
 )
 
@@ -105,8 +105,8 @@ add_executable(gameplay_prediction_maneuver_tests
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_math.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_service.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_sim.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_prediction.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_maneuver_nodes.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/gameplay_state_prediction.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/gameplay_state_maneuver_nodes.cpp"
   "${PROJECT_SOURCE_DIR}/third_party/imgui/imgui.cpp"
   "${PROJECT_SOURCE_DIR}/third_party/imgui/imgui_draw.cpp"
   "${PROJECT_SOURCE_DIR}/third_party/imgui/imgui_tables.cpp"

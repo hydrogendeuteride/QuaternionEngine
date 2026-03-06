@@ -1,9 +1,10 @@
-#include "gameplay_state.h"
-#include "orbit_helpers.h"
+#include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/orbit_helpers.h"
 #include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "core/engine.h"
 #include "core/game_api.h"
+#include "game/component/ship_controller.h"
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
 #include "physics/jolt/jolt_physics_world.h"

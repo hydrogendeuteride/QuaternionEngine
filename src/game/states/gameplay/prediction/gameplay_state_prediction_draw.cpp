@@ -1,4 +1,4 @@
-#include "gameplay_state.h"
+#include "game/states/gameplay/gameplay_state.h"
 
 #include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_plot_lod_builder.h"

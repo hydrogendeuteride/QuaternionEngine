@@ -1,4 +1,4 @@
-#include "gameplay_state.h"
+#include "game/states/gameplay/gameplay_state.h"
 
 #include "core/engine.h"
 #include "core/game_api.h"
