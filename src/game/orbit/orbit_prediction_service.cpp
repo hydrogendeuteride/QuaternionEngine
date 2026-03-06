@@ -2,6 +2,7 @@
 #include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 
+#include "orbitsim/coordinate_frames.hpp"
 #include "orbitsim/maneuvers_types.hpp"
 #include "orbitsim/trajectories.hpp"
 #include "orbitsim/trajectory_transforms.hpp"
@@ -17,6 +18,133 @@ namespace Game
         bool finite_vec3(const glm::dvec3 &v)
         {
             return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+        }
+
+        double safe_length(const glm::dvec3 &v)
+        {
+            const double len2 = glm::dot(v, v);
+            if (!std::isfinite(len2) || len2 <= 0.0)
+            {
+                return 0.0;
+            }
+            return std::sqrt(len2);
+        }
+
+        glm::dvec3 normalized_or(const glm::dvec3 &v, const glm::dvec3 &fallback)
+        {
+            const double len = safe_length(v);
+            if (!(len > 0.0) || !std::isfinite(len))
+            {
+                return fallback;
+            }
+            return v / len;
+        }
+
+        orbitsim::Vec3 convert_dv_rtf_to_solver_rtn(const glm::dvec3 &dv_rtf_mps,
+                                                    const glm::dvec3 &r_rel_m,
+                                                    const glm::dvec3 &v_rel_mps)
+        {
+            const orbitsim::RtnFrame solver_frame = orbitsim::compute_rtn_frame(r_rel_m, v_rel_mps);
+
+            const glm::dvec3 solver_r = glm::dvec3(solver_frame.R.x, solver_frame.R.y, solver_frame.R.z);
+            const glm::dvec3 solver_t = glm::dvec3(solver_frame.T.x, solver_frame.T.y, solver_frame.T.z);
+            const glm::dvec3 solver_n = glm::dvec3(solver_frame.N.x, solver_frame.N.y, solver_frame.N.z);
+
+            const glm::dvec3 t_hat = normalized_or(v_rel_mps, solver_t);
+            glm::dvec3 n_hat = normalized_or(glm::cross(r_rel_m, v_rel_mps), solver_n);
+            glm::dvec3 r_hat = normalized_or(glm::cross(t_hat, n_hat), solver_r);
+
+            const double plane_area = safe_length(glm::cross(r_rel_m, v_rel_mps));
+            if (!finite_vec3(r_hat) || !finite_vec3(t_hat) || !finite_vec3(n_hat) || !(plane_area > 1.0e-8))
+            {
+                return orbitsim::Vec3{dv_rtf_mps.x, dv_rtf_mps.y, dv_rtf_mps.z};
+            }
+
+            if (glm::dot(r_hat, r_rel_m) < 0.0)
+            {
+                r_hat = -r_hat;
+                n_hat = -n_hat;
+            }
+
+            n_hat = normalized_or(glm::cross(r_hat, t_hat), n_hat);
+            r_hat = normalized_or(glm::cross(t_hat, n_hat), r_hat);
+
+            const glm::dvec3 dv_world = r_hat * dv_rtf_mps.x + t_hat * dv_rtf_mps.y + n_hat * dv_rtf_mps.z;
+            return orbitsim::Vec3{
+                    glm::dot(dv_world, solver_r),
+                    glm::dot(dv_world, solver_t),
+                    glm::dot(dv_world, solver_n),
+            };
+        }
+
+        bool build_maneuver_preview(orbitsim::GameSimulation &sim,
+                                    const orbitsim::CelestialEphemeris &ephemeris,
+                                    const orbitsim::SpacecraftId ship_id,
+                                    const orbitsim::BodyId reference_body_id,
+                                    const double sim_time_s,
+                                    const double node_time_s,
+                                    const double sample_dt_s,
+                                    const orbitsim::ManeuverPlan &prefix_plan,
+                                    OrbitPredictionService::ManeuverNodePreview &out_preview)
+        {
+            out_preview.valid = false;
+
+            const orbitsim::Spacecraft *ship = sim.spacecraft_by_id(ship_id);
+            if (!ship)
+            {
+                return false;
+            }
+
+            double preview_time_s = node_time_s;
+            if (preview_time_s > sim_time_s)
+            {
+                preview_time_s = std::max(sim_time_s, preview_time_s - 1.0e-3);
+            }
+
+            if (!std::isfinite(preview_time_s))
+            {
+                return false;
+            }
+
+            preview_time_s = std::max(sim_time_s, preview_time_s);
+            orbitsim::State ship_state = ship->state;
+
+            if (preview_time_s > sim_time_s + 1.0e-9)
+            {
+                sim.maneuver_plan() = prefix_plan;
+
+                orbitsim::TrajectorySegmentOptions preview_opt{};
+                preview_opt.duration_s = preview_time_s - sim_time_s;
+                preview_opt.max_segments = std::max<std::size_t>(
+                        1,
+                        static_cast<std::size_t>(std::ceil(preview_opt.duration_s / std::max(0.01, sample_dt_s))));
+                preview_opt.include_start = true;
+                preview_opt.include_end = true;
+                preview_opt.stop_on_impact = false;
+                preview_opt.lookup_dt_s = sample_dt_s;
+
+                const std::vector<orbitsim::TrajectorySegment> preview_segments =
+                        orbitsim::predict_spacecraft_trajectory_segments(sim, ephemeris, ship_id, preview_opt);
+                if (preview_segments.empty())
+                {
+                    return false;
+                }
+
+                ship_state = preview_segments.back().end;
+            }
+
+            const orbitsim::State reference_state = ephemeris.body_state_at_by_id(reference_body_id, preview_time_s);
+            const glm::dvec3 rel_position_m = ship_state.position_m - reference_state.position_m;
+            const glm::dvec3 rel_velocity_mps = ship_state.velocity_mps - reference_state.velocity_mps;
+            if (!finite_vec3(rel_position_m) || !finite_vec3(rel_velocity_mps))
+            {
+                return false;
+            }
+
+            out_preview.rel_position_m = rel_position_m;
+            out_preview.rel_velocity_mps = rel_velocity_mps;
+            out_preview.valid = true;
+            return true;
         }
 
         orbitsim::TrajectorySegment to_body_centered_segment(const orbitsim::TrajectorySegment &segment,
@@ -362,20 +490,50 @@ namespace Game
 
         if (!request.maneuver_impulses.empty())
         {
-            orbitsim::ManeuverPlan plan{};
-            plan.impulses.reserve(request.maneuver_impulses.size());
+            std::vector<ManeuverImpulse> maneuver_impulses = request.maneuver_impulses;
+            std::stable_sort(maneuver_impulses.begin(),
+                             maneuver_impulses.end(),
+                             [](const ManeuverImpulse &a, const ManeuverImpulse &b) { return a.t_s < b.t_s; });
 
-            for (const ManeuverImpulse &src : request.maneuver_impulses)
+            orbitsim::ManeuverPlan plan{};
+            plan.impulses.reserve(maneuver_impulses.size());
+            out.maneuver_previews.reserve(maneuver_impulses.size());
+
+            for (const ManeuverImpulse &src : maneuver_impulses)
             {
                 if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rtn_mps))
                 {
                     continue;
                 }
 
+                ManeuverNodePreview preview{};
+                preview.node_id = src.node_id;
+                preview.t_s = src.t_s;
+
+                if (build_maneuver_preview(sim,
+                                           eph,
+                                           ship_h.id,
+                                           ref_sim->id,
+                                           request.sim_time_s,
+                                           src.t_s,
+                                           dt_s,
+                                           plan,
+                                           preview))
+                {
+                    out.maneuver_previews.push_back(preview);
+                }
+
+                orbitsim::Vec3 solver_dv_rtn = src.dv_rtn_mps;
+                if (preview.valid)
+                {
+                    solver_dv_rtn =
+                            convert_dv_rtf_to_solver_rtn(src.dv_rtn_mps, preview.rel_position_m, preview.rel_velocity_mps);
+                }
+
                 orbitsim::ImpulseSegment impulse{};
                 impulse.t_s = src.t_s;
                 impulse.primary_body_id = src.primary_body_id;
-                impulse.dv_rtn_mps = src.dv_rtn_mps;
+                impulse.dv_rtn_mps = solver_dv_rtn;
                 impulse.spacecraft_id = ship_h.id;
                 plan.impulses.push_back(impulse);
             }

@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <memory>
 
 namespace GameplayTestHooks
@@ -52,6 +53,29 @@ namespace
         scenario->bodies.push_back(ref_info);
         scenario->reference_body_index = 0;
         return scenario;
+    }
+
+    Game::OrbitPredictionService::Request make_prediction_request(const double time_s)
+    {
+        Game::OrbitPredictionService::Request request{};
+        request.sim_time_s = time_s;
+        request.sim_config = orbitsim::GameSimulation::Config{};
+        request.sim_config.enable_events = false;
+        request.reference_body_mass_kg = 5.972e24;
+        request.reference_body_radius_m = 6'371'000.0;
+        request.ship_bary_position_m = orbitsim::Vec3{7'000'000.0, 0.0, 0.0};
+        request.ship_bary_velocity_mps = orbitsim::Vec3{0.0, 7500.0, 0.0};
+        request.future_window_s = 120.0;
+        request.max_maneuver_time_s = time_s;
+
+        orbitsim::MassiveBody ref{};
+        ref.mass_kg = request.reference_body_mass_kg;
+        ref.radius_m = request.reference_body_radius_m;
+        ref.id = 1;
+        ref.state = orbitsim::make_state(glm::dvec3(0.0), glm::dvec3(0.0));
+        request.reference_body_id = ref.id;
+        request.massive_bodies.push_back(ref);
+        return request;
     }
 
     class GameplayPredictionManeuverTests : public ::testing::Test
@@ -214,6 +238,99 @@ TEST_F(GameplayPredictionManeuverTests, ExecutingArmedNodeAppliesImpulseAndConsu
     EXPECT_FALSE(state._execute_node_armed);
     EXPECT_EQ(state._execute_node_id, -1);
     EXPECT_TRUE(state._prediction_dirty);
+}
+
+TEST_F(GameplayPredictionManeuverTests, PredictionServiceBuildsSecondNodePreviewFromPrefixPlan)
+{
+    Game::OrbitPredictionService::Request request = make_prediction_request(0.0);
+
+    Game::OrbitPredictionService::ManeuverImpulse first{};
+    first.node_id = 1;
+    first.t_s = 10.0;
+    first.primary_body_id = request.reference_body_id;
+    first.dv_rtn_mps = glm::dvec3(0.0, 0.0, 50.0);
+    request.maneuver_impulses.push_back(first);
+
+    Game::OrbitPredictionService::ManeuverImpulse second{};
+    second.node_id = 2;
+    second.t_s = 20.0;
+    second.primary_body_id = request.reference_body_id;
+    second.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
+    request.maneuver_impulses.push_back(second);
+    request.max_maneuver_time_s = second.t_s;
+
+    const Game::OrbitPredictionService::Result result =
+            Game::OrbitPredictionService::compute_prediction(1, request);
+
+    ASSERT_TRUE(result.valid);
+    ASSERT_GE(result.maneuver_previews.size(), 2u);
+
+    const auto find_preview = [&](const int node_id) -> const Game::OrbitPredictionService::ManeuverNodePreview * {
+        for (const auto &preview : result.maneuver_previews)
+        {
+            if (preview.node_id == node_id)
+            {
+                return &preview;
+            }
+        }
+        return nullptr;
+    };
+
+    const auto *first_preview = find_preview(1);
+    const auto *second_preview = find_preview(2);
+    ASSERT_NE(first_preview, nullptr);
+    ASSERT_NE(second_preview, nullptr);
+    EXPECT_TRUE(first_preview->valid);
+    EXPECT_TRUE(second_preview->valid);
+    EXPECT_NEAR(first_preview->rel_velocity_mps.z, 0.0, 1.0e-3);
+    EXPECT_GT(std::abs(second_preview->rel_velocity_mps.z), 10.0);
+}
+
+TEST_F(GameplayPredictionManeuverTests, RuntimeCacheUsesNodePreviewBeforeBaselineTrajectory)
+{
+    Game::GameplayState state{};
+    Game::GameStateContext ctx{};
+
+    state._scenario_config.system_center = WorldVec3(0.0, 0.0, 0.0);
+    state._orbitsim = make_reference_orbitsim(10.0);
+    ASSERT_NE(state._orbitsim, nullptr);
+
+    Game::Entity player(Game::EntityId{4}, "player");
+    player.set_position_world(WorldVec3(7'000'000.0, 0.0, 0.0));
+    GameplayTestHooks::register_entity(&player);
+    add_player_orbiter(state, player);
+
+    Game::GameplayState::ManeuverNode node{};
+    node.id = 7;
+    node.time_s = 20.0;
+    node.dv_rtn_mps = glm::dvec3(0.0, 10.0, 0.0);
+    node.primary_body_id = state._orbitsim->reference_body()->sim_id;
+    state._maneuver_state.nodes.push_back(node);
+    state._maneuver_state.selected_node_id = node.id;
+
+    state._prediction_cache.clear();
+    state._prediction_cache.valid = true;
+    state._prediction_cache.trajectory_bci = {
+            make_sample(10.0, 7'000'000.0),
+            make_sample(20.0, 7'000'100.0),
+            make_sample(30.0, 7'000'200.0),
+    };
+
+    Game::GameplayState::OrbitPredictionCache::ManeuverNodePreview preview{};
+    preview.node_id = node.id;
+    preview.t_s = node.time_s;
+    preview.valid = true;
+    preview.rel_position_m = glm::dvec3(7'000'050.0, 0.0, 1500.0);
+    preview.rel_velocity_mps = glm::dvec3(0.0, 7490.0, 45.0);
+    state._prediction_cache.maneuver_previews.push_back(preview);
+
+    state.refresh_maneuver_node_runtime_cache(ctx);
+
+    ASSERT_EQ(state._maneuver_state.nodes.size(), 1u);
+    const Game::GameplayState::ManeuverNode &runtime_node = state._maneuver_state.nodes.front();
+    EXPECT_TRUE(runtime_node.gizmo_valid);
+    EXPECT_NEAR(runtime_node.position_world.z, 1500.0, 1.0e-6);
+    EXPECT_GT(std::abs(runtime_node.basis_n_world.x) + std::abs(runtime_node.basis_n_world.y), 1.0e-6);
 }
 
 int main(int argc, char **argv)
