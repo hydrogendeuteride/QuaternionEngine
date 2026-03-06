@@ -117,19 +117,95 @@
         const double t_end_s = now_s + std::max(60.0, _maneuver_timeline_window_s);
         const double span_s = t_end_s - t_start_s;
 
+        const PickingSystem *picking = nullptr;
         const PickingSystem::PickInfo *orbit_pick = nullptr;
+        const bool allow_base_pick = _maneuver_state.nodes.empty();
+        const bool allow_planned_pick = !_maneuver_state.nodes.empty();
+        auto pick_allowed_for_node_add = [&](const PickingSystem::PickInfo &pick) {
+            if (!pick.valid || pick.kind != PickingSystem::PickInfo::Kind::Line)
+            {
+                return false;
+            }
+            if (allow_base_pick && pick.ownerName == "OrbitPlot/Base")
+            {
+                return true;
+            }
+            if (allow_planned_pick && pick.ownerName == "OrbitPlot/Planned")
+            {
+                return true;
+            }
+            return false;
+        };
         if (ctx.renderer)
         {
-            if (const PickingSystem *picking = ctx.renderer->picking())
+            picking = ctx.renderer->picking();
+            if (picking)
             {
                 const auto &pick = picking->last_pick();
-                if (pick.valid &&
-                    pick.kind == PickingSystem::PickInfo::Kind::Line &&
-                    pick.ownerName.rfind("OrbitPlot/", 0) == 0)
+                if (pick.ownerName.rfind("OrbitPlot/", 0) == 0 &&
+                    pick_allowed_for_node_add(pick))
                 {
                     orbit_pick = &pick;
                 }
             }
+        }
+
+        auto add_maneuver_node_at_time = [&](const double time_s) {
+            ManeuverNode n{};
+            n.id = _maneuver_state.next_node_id++;
+            n.time_s = time_s;
+            n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
+            n.primary_body_id = (_orbitsim && _orbitsim->reference_body())
+                                    ? _orbitsim->reference_body()->sim_id
+                                    : orbitsim::kInvalidBodyId;
+            n.total_dv_mps = 0.0;
+            _maneuver_state.nodes.push_back(n);
+            _maneuver_state.selected_node_id = n.id;
+            _maneuver_state.sort_by_time();
+            mark_prediction_dirty();
+        };
+
+        auto draw_orbit_pick_overlay = [&](const PickingSystem::PickInfo &pick,
+                                           const float inner_radius_px,
+                                           const float outer_radius_px,
+                                           const ImU32 ring_color,
+                                           const ImU32 outer_color) {
+            ManeuverGizmoViewContext overlay_view{};
+            glm::vec2 overlay_screen{0.0f, 0.0f};
+            double overlay_depth_m = 0.0;
+            if (!build_maneuver_gizmo_view_context(ctx, overlay_view) ||
+                !project_maneuver_gizmo_point(overlay_view, pick.worldPos, overlay_screen, overlay_depth_m))
+            {
+                return;
+            }
+
+            if (ImDrawList *overlay_dl = ImGui::GetForegroundDrawList())
+            {
+                const ImVec2 overlay_pos{overlay_screen.x, overlay_screen.y};
+                overlay_dl->AddCircle(overlay_pos, inner_radius_px, ring_color, 24, 2.0f);
+                overlay_dl->AddCircle(overlay_pos, outer_radius_px, outer_color, 24, 1.0f);
+            }
+        };
+
+        if (picking)
+        {
+            const PickingSystem::PickInfo &hover_pick = picking->hover_pick();
+            if (hover_pick.ownerName.rfind("OrbitPlot/", 0) == 0 &&
+                pick_allowed_for_node_add(hover_pick))
+            {
+                const ImU32 ring_color = (hover_pick.ownerName == "OrbitPlot/Planned")
+                                                 ? IM_COL32(255, 190, 80, 230)
+                                                 : IM_COL32(170, 120, 255, 220);
+                draw_orbit_pick_overlay(hover_pick, 10.0f, 16.0f, ring_color, IM_COL32(255, 255, 255, 80));
+            }
+        }
+
+        if (orbit_pick)
+        {
+            const ImU32 ring_color = (orbit_pick->ownerName == "OrbitPlot/Planned")
+                                             ? IM_COL32(255, 190, 80, 255)
+                                             : IM_COL32(170, 120, 255, 245);
+            draw_orbit_pick_overlay(*orbit_pick, 14.0f, 22.0f, ring_color, IM_COL32(255, 255, 255, 120));
         }
 
         if (orbit_pick)
@@ -148,18 +224,7 @@
             ImGui::BeginDisabled(!can_add);
             if (ImGui::Button("Add Node @ Pick"))
             {
-                ManeuverNode n{};
-                n.id = _maneuver_state.next_node_id++;
-                n.time_s = orbit_pick->time_s;
-                n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
-                n.primary_body_id = (_orbitsim && _orbitsim->reference_body())
-                                        ? _orbitsim->reference_body()->sim_id
-                                        : orbitsim::kInvalidBodyId;
-                n.total_dv_mps = 0.0;
-                _maneuver_state.nodes.push_back(n);
-                _maneuver_state.selected_node_id = n.id;
-                _maneuver_state.sort_by_time();
-                mark_prediction_dirty();
+                add_maneuver_node_at_time(orbit_pick->time_s);
             }
             ImGui::EndDisabled();
         }

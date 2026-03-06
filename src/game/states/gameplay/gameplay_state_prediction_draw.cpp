@@ -30,6 +30,7 @@ namespace Game
         {
             // Orbit plot is emitted per-frame, so refresh pickable segments the same way.
             picking->clear_line_picks();
+            picking->settings().enable_line_hover = _prediction_enabled;
         }
 
         OrbitPlotSystem *orbit_plot =
@@ -229,6 +230,8 @@ namespace Game
         const bool have_planned = !traj_planned_segments->empty();
         _orbit_plot_perf.solver_segments_base = static_cast<uint32_t>(traj_base_segments->size());
         _orbit_plot_perf.solver_segments_planned = static_cast<uint32_t>(traj_planned_segments->size());
+        const bool allow_base_pick = _maneuver_state.nodes.empty();
+        const bool allow_planned_pick = !_maneuver_state.nodes.empty();
 
         auto snap_time_past_straddling_segment = [](const std::vector<orbitsim::TrajectorySegment> &traj_segments,
                                                     double t_s) {
@@ -763,7 +766,10 @@ namespace Game
                                     std::llround(static_cast<double>(pick_max_segments) * kOrbitPickPlannedReserveRatio)))));
             std::size_t remaining_pick_budget = pick_max_segments;
 
-            if (base_pick_window_valid && pick_group_base != kInvalidPickGroup && remaining_pick_budget > 0)
+            if (allow_base_pick &&
+                base_pick_window_valid &&
+                pick_group_base != kInvalidPickGroup &&
+                remaining_pick_budget > 0)
             {
                 const std::size_t planned_reserve =
                         planned_pick_window_valid
@@ -822,7 +828,10 @@ namespace Game
                 }
             }
 
-            if (planned_pick_window_valid && pick_group_planned != kInvalidPickGroup && remaining_pick_budget > 0)
+            if (allow_planned_pick &&
+                planned_pick_window_valid &&
+                pick_group_planned != kInvalidPickGroup &&
+                remaining_pick_budget > 0)
             {
                 OrbitPlotLodBuilder::PickSettings pick_settings{};
                 pick_settings.max_segments = remaining_pick_budget;
