@@ -17,10 +17,22 @@ namespace Game
     class OrbitPredictionService
     {
     public:
+        struct ManeuverNodePreview
+        {
+            int node_id{-1};
+            double t_s{0.0};
+            bool valid{false};
+            orbitsim::Vec3 rel_position_m{0.0, 0.0, 0.0};
+            orbitsim::Vec3 rel_velocity_mps{0.0, 0.0, 0.0};
+        };
+
         struct ManeuverImpulse
         {
+            int node_id{-1};
             double t_s{0.0};
             orbitsim::BodyId primary_body_id{orbitsim::kInvalidBodyId};
+            // Gameplay UI authors node DV in a velocity-aligned maneuver frame.
+            // The worker converts this into solver RTN using the prefix-planned pre-burn state.
             orbitsim::Vec3 dv_rtn_mps{0.0, 0.0, 0.0};
         };
 
@@ -57,6 +69,7 @@ namespace Game
             std::vector<orbitsim::TrajectorySample> trajectory_bci_planned;
             std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci;
             std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci_planned;
+            std::vector<ManeuverNodePreview> maneuver_previews;
             std::vector<float> altitude_km;
             std::vector<float> speed_kmps;
 

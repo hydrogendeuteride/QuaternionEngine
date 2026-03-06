@@ -6,6 +6,8 @@
 #include "game/component/ship_controller.h"
 #include "game/entity_manager.h"
 
+#include <glm/gtc/quaternion.hpp>
+
 #include <unordered_map>
 
 namespace
@@ -160,6 +162,46 @@ bool InputState::key_pressed(Key key) const
     (void) key;
     return false;
 }
+
+bool InputState::mouse_down(MouseButton button) const
+{
+    (void) button;
+    return false;
+}
+
+bool InputState::mouse_pressed(MouseButton button) const
+{
+    (void) button;
+    return false;
+}
+
+glm::mat4 Camera::getRotationMatrix() const
+{
+    return glm::mat4_cast(orientation);
+}
+
+namespace vkutil
+{
+    VkRect2D compute_letterbox_rect(VkExtent2D srcSize, VkExtent2D dstSize)
+    {
+        (void) srcSize;
+        return VkRect2D{
+                .offset = {0, 0},
+                .extent = dstSize,
+        };
+    }
+
+    bool map_window_to_letterbox_src(const glm::vec2 &windowPosPixels,
+                                     VkExtent2D srcSize,
+                                     VkExtent2D dstSize,
+                                     glm::vec2 &outSrcPosPixels)
+    {
+        (void) srcSize;
+        (void) dstSize;
+        outSrcPosPixels = windowPosPixels;
+        return true;
+    }
+} // namespace vkutil
 
 namespace Game
 {
