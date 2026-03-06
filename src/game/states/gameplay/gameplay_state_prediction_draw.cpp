@@ -30,6 +30,7 @@ namespace Game
         {
             // Orbit plot is emitted per-frame, so refresh pickable segments the same way.
             picking->clear_line_picks();
+            picking->settings().enable_line_hover = _prediction_enabled;
         }
 
         OrbitPlotSystem *orbit_plot =
@@ -229,6 +230,34 @@ namespace Game
         const bool have_planned = !traj_planned_segments->empty();
         _orbit_plot_perf.solver_segments_base = static_cast<uint32_t>(traj_base_segments->size());
         _orbit_plot_perf.solver_segments_planned = static_cast<uint32_t>(traj_planned_segments->size());
+        const bool allow_base_pick = _maneuver_state.nodes.empty();
+        const bool allow_planned_pick = !_maneuver_state.nodes.empty();
+
+        auto snap_time_past_straddling_segment = [](const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                                                    double t_s) {
+            double snapped_t_s = t_s;
+            for (const orbitsim::TrajectorySegment &segment : traj_segments)
+            {
+                if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
+                {
+                    continue;
+                }
+
+                const double seg_t0_s = segment.t0_s;
+                const double seg_t1_s = seg_t0_s + segment.dt_s;
+                if (!std::isfinite(seg_t0_s) || !std::isfinite(seg_t1_s))
+                {
+                    continue;
+                }
+
+                if (seg_t0_s < t_s && t_s < seg_t1_s)
+                {
+                    snapped_t_s = seg_t1_s;
+                    break;
+                }
+            }
+            return snapped_t_s;
+        };
 
         constexpr uint32_t kInvalidPickGroup = std::numeric_limits<uint32_t>::max();
         const uint32_t pick_group_base = picking ? picking->add_line_pick_group("OrbitPlot/Base") : kInvalidPickGroup;
@@ -640,15 +669,6 @@ namespace Game
                            t_s <= (t1p + kOrbitNodeTimeToleranceS);
                 };
 
-                double selected_node_time_s = std::numeric_limits<double>::infinity();
-                if (const ManeuverNode *selected = _maneuver_state.find_node(_maneuver_state.selected_node_id))
-                {
-                    if (node_time_in_planned_range(selected->time_s))
-                    {
-                        selected_node_time_s = selected->time_s;
-                    }
-                }
-
                 double first_future_node_time_s = std::numeric_limits<double>::infinity();
                 double first_relevant_node_time_s = std::numeric_limits<double>::infinity();
                 for (const ManeuverNode &node : _maneuver_state.nodes)
@@ -665,11 +685,10 @@ namespace Game
                     }
                 }
 
-                double anchor_time_s = selected_node_time_s;
-                if (!std::isfinite(anchor_time_s))
-                {
-                    anchor_time_s = first_future_node_time_s;
-                }
+                // Keep the dashed plan anchored to the first future burn in the plan so it does
+                // not visually start at the spacecraft. If every planned burn is already in the
+                // past, fall back to the earliest node that still contributes to the cached plan.
+                double anchor_time_s = first_future_node_time_s;
                 if (!std::isfinite(anchor_time_s))
                 {
                     anchor_time_s = first_relevant_node_time_s;
@@ -677,7 +696,15 @@ namespace Game
 
                 if (std::isfinite(anchor_time_s))
                 {
-                    const double t_plan_start = std::clamp(anchor_time_s, t0p, t1p);
+                    // Planned trajectory should visually start on the post-burn branch.
+                    // Sampling inside a segment that straddles an impulse can smear the curve back
+                    // toward the pre-burn state. Bias slightly forward, then skip to the next
+                    // segment boundary if needed so the dashed path starts cleanly after the burn.
+                    double t_plan_start = std::clamp(anchor_time_s + kOrbitNodeTimeToleranceS, t0p, t1p);
+                    t_plan_start = std::clamp(
+                            snap_time_past_straddling_segment(*traj_planned_segments, t_plan_start),
+                            t0p,
+                            t1p);
 
                     double t_plan_end = t_plan_start;
                     const double window_s = std::max(0.0, _prediction_future_window_s);
@@ -739,7 +766,10 @@ namespace Game
                                     std::llround(static_cast<double>(pick_max_segments) * kOrbitPickPlannedReserveRatio)))));
             std::size_t remaining_pick_budget = pick_max_segments;
 
-            if (base_pick_window_valid && pick_group_base != kInvalidPickGroup && remaining_pick_budget > 0)
+            if (allow_base_pick &&
+                base_pick_window_valid &&
+                pick_group_base != kInvalidPickGroup &&
+                remaining_pick_budget > 0)
             {
                 const std::size_t planned_reserve =
                         planned_pick_window_valid
@@ -798,7 +828,10 @@ namespace Game
                 }
             }
 
-            if (planned_pick_window_valid && pick_group_planned != kInvalidPickGroup && remaining_pick_budget > 0)
+            if (allow_planned_pick &&
+                planned_pick_window_valid &&
+                pick_group_planned != kInvalidPickGroup &&
+                remaining_pick_budget > 0)
             {
                 OrbitPlotLodBuilder::PickSettings pick_settings{};
                 pick_settings.max_segments = remaining_pick_budget;
