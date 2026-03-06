@@ -733,9 +733,11 @@
             now_s -= (1.0 - static_cast<double>(alpha_f)) * interp_dt_s;
         }
 
-        const auto &traj = _prediction_cache.trajectory_bci;
-        const double t0 = traj.front().t_s;
-        const double t1 = traj.back().t_s;
+        const auto &traj_base = _prediction_cache.trajectory_bci;
+        const auto &traj_planned = _prediction_cache.trajectory_bci_planned;
+        const auto &traj_now = traj_base;
+        const double t0 = traj_now.front().t_s;
+        const double t1 = traj_now.back().t_s;
         if (!std::isfinite(now_s) || !(t1 > t0))
         {
             return;
@@ -759,20 +761,20 @@
 
         const WorldVec3 ref_body_world = prediction_reference_body_world();
 
-        auto it_hi = std::lower_bound(traj.cbegin(),
-                                      traj.cend(),
+        auto it_hi = std::lower_bound(traj_now.cbegin(),
+                                      traj_now.cend(),
                                       now_s,
                                       [](const orbitsim::TrajectorySample &s, double t) { return s.t_s < t; });
-        const size_t i_hi = static_cast<size_t>(std::distance(traj.cbegin(), it_hi));
-        if (i_hi >= traj.size())
+        const size_t i_hi = static_cast<size_t>(std::distance(traj_now.cbegin(), it_hi));
+        if (i_hi >= traj_now.size())
         {
             return;
         }
 
-        WorldVec3 predicted_now_world = ref_body_world + WorldVec3(traj[i_hi].position_m);
+        WorldVec3 predicted_now_world = ref_body_world + WorldVec3(traj_now[i_hi].position_m);
         if (i_hi > 0)
         {
-            predicted_now_world = hermite_position_world(ref_body_world, traj[i_hi - 1], traj[i_hi], now_s);
+            predicted_now_world = hermite_position_world(ref_body_world, traj_now[i_hi - 1], traj_now[i_hi], now_s);
         }
 
         WorldVec3 align_delta = ship_pos_world - predicted_now_world;
@@ -789,19 +791,62 @@
                 continue;
             }
 
-            double t_basis = node.time_s;
-            if (t_basis > t0)
+            const OrbitPredictionCache::ManeuverNodePreview *preview = nullptr;
+            for (const OrbitPredictionCache::ManeuverNodePreview &candidate : _prediction_cache.maneuver_previews)
             {
-                t_basis = std::max(t0, t_basis - 1e-3);
+                if (candidate.node_id == node.id)
+                {
+                    preview = &candidate;
+                    break;
+                }
             }
 
-            const TrajectorySampledState s = sample_trajectory_state(traj, ref_body_world, t_basis);
-            if (!s.valid)
+            glm::dvec3 r_rel_m{0.0, 0.0, 0.0};
+            glm::dvec3 v_rel_mps{0.0, 0.0, 0.0};
+            WorldVec3 node_position_world{0.0, 0.0, 0.0};
+            bool have_runtime_state = false;
+
+            if (preview && preview->valid)
+            {
+                r_rel_m = preview->rel_position_m;
+                v_rel_mps = preview->rel_velocity_mps;
+                node_position_world = ref_body_world + WorldVec3(preview->rel_position_m) + align_delta;
+                have_runtime_state = true;
+            }
+            else
+            {
+                const auto &traj_node = traj_planned.size() >= 2 ? traj_planned : traj_base;
+                const double traj_node_t0 = traj_node.front().t_s;
+                const double traj_node_t1 = traj_node.back().t_s;
+                if (node.time_s < traj_node_t0 || node.time_s > traj_node_t1)
+                {
+                    continue;
+                }
+
+                double t_basis = node.time_s;
+                if (t_basis > traj_node_t0)
+                {
+                    t_basis = std::max(traj_node_t0, t_basis - 1e-3);
+                }
+
+                const TrajectorySampledState s = sample_trajectory_state(traj_node, ref_body_world, t_basis);
+                if (!s.valid)
+                {
+                    continue;
+                }
+
+                r_rel_m = s.r_rel_m;
+                v_rel_mps = s.v_rel_mps;
+                node_position_world = s.position_world + align_delta;
+                have_runtime_state = true;
+            }
+
+            if (!have_runtime_state)
             {
                 continue;
             }
 
-            const orbitsim::RtnFrame f = compute_maneuver_rtf_frame(s.r_rel_m, s.v_rel_mps);
+            const orbitsim::RtnFrame f = compute_maneuver_rtf_frame(r_rel_m, v_rel_mps);
 
             node.basis_r_world = normalized_or(glm::dvec3(f.R.x, f.R.y, f.R.z), glm::dvec3(1.0, 0.0, 0.0));
             node.basis_t_world = normalized_or(glm::dvec3(f.T.x, f.T.y, f.T.z), glm::dvec3(0.0, 1.0, 0.0));
@@ -813,7 +858,7 @@
                     node.basis_n_world * node.dv_rtn_mps.z;
 
             node.burn_direction_world = normalized_or(dv_world, node.basis_t_world);
-            node.position_world = s.position_world + align_delta;
+            node.position_world = node_position_world;
 
             if (!std::isfinite(node.gizmo_scale_m) || node.gizmo_scale_m <= 0.0f)
             {

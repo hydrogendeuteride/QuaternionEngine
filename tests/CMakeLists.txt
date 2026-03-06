@@ -102,6 +102,8 @@ add_executable(gameplay_prediction_maneuver_tests
   gameplay_prediction_maneuver_tests.cpp
   gameplay_prediction_maneuver_test_stubs.cpp
   "${PROJECT_SOURCE_DIR}/src/game/entity.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_math.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_service.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_sim.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_prediction.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_maneuver_nodes.cpp"
@@ -130,6 +132,7 @@ target_link_libraries(gameplay_prediction_maneuver_tests PRIVATE
   gtest
   fmt::fmt
   glm
+  SDL2::SDL2
   orbitsim
 )
 

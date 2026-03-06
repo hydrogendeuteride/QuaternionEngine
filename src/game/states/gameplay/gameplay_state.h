@@ -193,6 +193,8 @@ namespace Game
         // Orbit prediction (UI + debug draw)
         struct OrbitPredictionCache
         {
+            using ManeuverNodePreview = OrbitPredictionService::ManeuverNodePreview;
+
             bool valid{false};
             double build_time_s{0.0};
             WorldVec3 build_pos_world{0.0, 0.0, 0.0};
@@ -203,6 +205,7 @@ namespace Game
             std::vector<orbitsim::TrajectorySample> trajectory_bci_planned;
             std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci;
             std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci_planned;
+            std::vector<ManeuverNodePreview> maneuver_previews;
 
             // Cached world-space polyline refreshed from trajectory_bci each frame.
             std::vector<WorldVec3> points_world;
@@ -227,6 +230,7 @@ namespace Game
                 trajectory_bci_planned.clear();
                 trajectory_segments_bci.clear();
                 trajectory_segments_bci_planned.clear();
+                maneuver_previews.clear();
                 points_world.clear();
                 points_world_planned.clear();
                 altitude_km.clear();
@@ -281,7 +285,7 @@ namespace Game
         {
             int id{-1};                         // unique ID (stable)
             double time_s{0.0};                 // sim time (absolute)
-            glm::dvec3 dv_rtn_mps{0.0, 0.0, 0.0}; // (Radial, Tangential/Prograde, Normal) [m/s]
+            glm::dvec3 dv_rtn_mps{0.0, 0.0, 0.0}; // UI-authored maneuver-frame DV (Radial, Tangential/Prograde, Normal) [m/s]
             orbitsim::BodyId primary_body_id{orbitsim::kInvalidBodyId}; // RTN primary body
 
             // Cached/derived values (updated by gameplay state)
