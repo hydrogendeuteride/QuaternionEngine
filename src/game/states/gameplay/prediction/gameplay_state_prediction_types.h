@@ -11,6 +11,28 @@
 
 namespace Game
 {
+    // Centralized style and tuning knobs for orbit prediction drawing.
+    struct OrbitPredictionDrawPalette
+    {
+        glm::vec4 orbit_full{0.75f, 0.20f, 0.92f, 0.22f};
+        glm::vec4 orbit_future{0.75f, 0.20f, 0.92f, 0.80f};
+        glm::vec4 orbit_planned{1.00f, 0.62f, 0.10f, 0.90f};
+        glm::vec4 velocity_ray{1.0f, 0.35f, 0.1f, 1.0f};
+    };
+
+    // Draw-time tuning shared by orbit plotting, dashed plans, and picking.
+    struct OrbitPredictionDrawConfig
+    {
+        OrbitPredictionDrawPalette palette{};
+        std::size_t pick_planned_reserve_segments{2'000};
+        double pick_planned_reserve_ratio{0.25};
+        double node_time_tolerance_s{1.0e-3};
+        double dashed_segment_on_px{14.0};
+        double dashed_segment_off_px{9.0};
+        int dash_max_chunks_per_segment{4096};
+        bool draw_planned_as_dashed{true};
+    };
+
     struct OrbitPredictionCache
     {
         using ManeuverNodePreview = OrbitPredictionService::ManeuverNodePreview;
@@ -40,6 +62,7 @@ namespace Game
         double periapsis_alt_km{0.0};
         double apoapsis_alt_km{std::numeric_limits<double>::infinity()};
 
+        // Reset every cached prediction artifact so the next update rebuilds from scratch.
         void clear()
         {
             valid = false;
