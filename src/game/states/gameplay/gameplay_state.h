@@ -75,9 +75,6 @@ namespace Game
 
         // Orbit prediction
         void update_prediction(GameStateContext &ctx, float fixed_dt);
-        void update_orbit_prediction_cache(const WorldVec3 &ship_pos_world,
-                                          const glm::dvec3 &ship_vel_world,
-                                          bool thrusting);
         void refresh_prediction_world_points();
         WorldVec3 prediction_reference_body_world() const;
         bool player_thrust_applied_this_tick() const;
@@ -165,6 +162,7 @@ namespace Game
         double _orbit_plot_pick_frustum_margin_ratio{0.05};
 
         OrbitPlotPerfStats _orbit_plot_perf{};
+        OrbitPredictionDrawConfig _prediction_draw_config{};
         OrbitPredictionCache _prediction_cache{};
         OrbitPredictionService _prediction_service{};
         bool _prediction_request_pending{false};
