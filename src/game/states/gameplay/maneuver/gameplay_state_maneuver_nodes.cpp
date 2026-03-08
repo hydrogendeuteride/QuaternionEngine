@@ -56,6 +56,7 @@ namespace Game
         orbitsim::RtnFrame compute_maneuver_rtf_frame(const glm::dvec3 &r_rel_m,
                                                       const glm::dvec3 &v_rel_mps)
         {
+            // Keep a conventional RTN basis as a robust fallback for degenerate states.
             const orbitsim::RtnFrame fallback =
                     orbitsim::compute_rtn_frame(orbitsim::Vec3{r_rel_m.x, r_rel_m.y, r_rel_m.z},
                                                 orbitsim::Vec3{v_rel_mps.x, v_rel_mps.y, v_rel_mps.z});
@@ -111,6 +112,7 @@ namespace Game
                                          const orbitsim::TrajectorySample &b,
                                          const double t_s)
         {
+            // Use sample velocities as tangents so node markers stay visually smooth on the orbit arc.
             const double ta = a.t_s;
             const double tb = b.t_s;
             const double h = tb - ta;
@@ -198,7 +200,7 @@ namespace Game
             // Position: hermite for smoother marker placement.
             out.position_world = hermite_position_world(ref_body_world, a, b, t_clamped);
 
-            // RTN basis: linear interpolation is sufficient.
+            // Basis inputs only need to be locally consistent; linear interpolation is stable enough here.
             out.r_rel_m = glm::mix(glm::dvec3(a.position_m), glm::dvec3(b.position_m), u);
             out.v_rel_mps = glm::mix(glm::dvec3(a.velocity_mps), glm::dvec3(b.velocity_mps), u);
             out.valid = finite3(out.r_rel_m) && finite3(out.v_rel_mps);
@@ -281,6 +283,7 @@ namespace Game
             }
 
             glm::vec2 logical_pos{};
+            // Undo the renderer's letterboxing so the ray matches the scene camera rather than the swapchain surface.
             if (!vkutil::map_window_to_letterbox_src(swapchain_pos, logical_extent, swap_extent, logical_pos))
             {
                 return false;
@@ -336,6 +339,8 @@ namespace Game
         {
             out_line_t = 0.0;
 
+            // Solve the closest-points problem between a ray and an infinite line by minimizing squared distance.
+            // This is the 2x2 least-squares / normal-equations form for two skew lines, then clamped to the ray.
             const double uu = glm::dot(ray_dir_local, ray_dir_local);
             const double vv = glm::dot(line_dir_local, line_dir_local);
             if (!(uu > 0.0) || !(vv > 0.0) || !std::isfinite(uu) || !std::isfinite(vv))

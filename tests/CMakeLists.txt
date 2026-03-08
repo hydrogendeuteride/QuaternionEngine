@@ -20,6 +20,10 @@ target_include_directories(scenario_loader_tests PRIVATE
   "${PROJECT_SOURCE_DIR}/third_party/taskflow/3rd-party"
 )
 
+target_compile_definitions(scenario_loader_tests PRIVATE
+  SCENARIO_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets/scenarios"
+)
+
 target_link_libraries(scenario_loader_tests PRIVATE
   gtest
   fmt::fmt
@@ -75,6 +79,8 @@ add_executable(gameplay_time_warp_transition_tests
   gameplay_time_warp_transition_tests.cpp
   gameplay_state_test_stubs.cpp
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_sim.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_math.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_service.cpp"
 )
 
 set_property(TARGET gameplay_time_warp_transition_tests PROPERTY CXX_STANDARD 20)

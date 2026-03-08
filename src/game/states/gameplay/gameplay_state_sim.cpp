@@ -18,6 +18,7 @@ namespace Game
 
     namespace
     {
+        // Integrates rails-warp angular velocity and orientation using gameplay-tuned torque/SAS rules.
         void update_rails_rotation(OrbiterInfo::RailsState &rs,
                                    const glm::vec3 &world_torque_dir,
                                    const float torque_strength,
@@ -62,6 +63,7 @@ namespace Game
 
     // ---- Physics simulation ----
 
+    // Updates render/world-space celestial body transforms from the orbit simulation frame.
     void GameplayState::sync_celestial_render_entities(GameStateContext &ctx)
     {
         if (!_orbitsim || _orbitsim->bodies.empty())
@@ -91,10 +93,11 @@ namespace Game
                 continue;
             }
 
+            // Convert barycentric simulation coordinates into the gameplay world frame centered on the reference body.
             const WorldVec3 body_pos_world =
                     cfg.system_center + WorldVec3(sim_body->state.position_m - ref_sim->state.position_m);
 
-            if (body_info.has_terrain && ctx.api)
+            if (ctx.api)
             {
                 (void) ctx.api->set_planet_center(body_info.name, glm::dvec3(body_pos_world));
             }
@@ -112,6 +115,7 @@ namespace Game
         }
     }
 
+    // Advances one fixed-step physics tick, including orbit sim gravity and moving-origin bookkeeping.
     void GameplayState::step_physics(GameStateContext &ctx, float fixed_dt)
     {
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
@@ -133,6 +137,7 @@ namespace Game
             sync_celestial_render_entities(ctx);
         }
 
+        // Sample gravity in gameplay world coordinates by converting into the reference-body-centered orbit frame.
         auto gravity_accel_world_at = [&](const WorldVec3 &p_world) -> glm::dvec3 {
             if (!use_orbitsim)
             {
@@ -168,6 +173,7 @@ namespace Game
                     const double dt = static_cast<double>(fixed_dt);
                     if (per_step_sync)
                     {
+                        // Shift the velocity origin so the anchor stays near rest in local physics space.
                         const glm::vec3 v_local_f = _physics->get_linear_velocity(anchor_body);
                         const glm::dvec3 v_world = _physics_context->velocity_origin_world() + glm::dvec3(v_local_f);
                         (void) _physics_context->set_velocity_origin_world(v_world);
@@ -175,6 +181,7 @@ namespace Game
                     }
                     else
                     {
+                        // Make the moving frame free-fall with the anchor so nearby objects see only relative gravity.
                         const glm::dvec3 p_local_anchor = _physics->get_position(anchor_body);
                         const WorldVec3 p_world_anchor = physics_origin_world + WorldVec3(p_local_anchor);
                         anchor_accel_world = gravity_accel_world_at(p_world_anchor);
@@ -191,6 +198,7 @@ namespace Game
         const glm::dvec3 frame_accel_world =
                 (!per_step_sync && have_anchor_accel) ? anchor_accel_world : glm::dvec3(0.0);
 
+        // Applies gravity as a velocity update in the local physics frame used by Jolt.
         auto apply_gravity_accel = [&](EntityId id) {
             Entity *ent = _world.entities().find(id);
             if (!ent || !ent->has_physics())
@@ -207,6 +215,7 @@ namespace Game
             const glm::dvec3 p_local = _physics->get_position(body_id);
             const WorldVec3 p_world = local_to_world_d(p_local, physics_origin_world);
 
+            // In a free-fall frame we subtract the frame acceleration so only relative/tidal acceleration remains.
             const glm::dvec3 a_local = gravity_accel_world_at(p_world) - frame_accel_world;
 
             glm::vec3 v_local = _physics->get_linear_velocity(body_id);
@@ -241,6 +250,7 @@ namespace Game
 
     // ---- Time warp ----
 
+    // Changes warp level and performs rails-warp enter/exit transitions when the mode boundary is crossed.
     void GameplayState::set_time_warp_level(GameStateContext &ctx, const int level)
     {
         const int clamped = std::clamp(level, 0, TimeWarpState::kMaxWarpLevel);
@@ -265,6 +275,7 @@ namespace Game
         }
     }
 
+    // Converts active orbiters from physics bodies into lightweight orbit-sim spacecraft for high-rate warp.
     void GameplayState::enter_rails_warp(GameStateContext &ctx)
     {
         if (_rails_warp_active)
@@ -324,6 +335,7 @@ namespace Game
             }
 #endif
 
+            // Convert gameplay world state into barycentric spacecraft state relative to the reference body.
             const glm::dvec3 rel_pos_m = glm::dvec3(pos_world - _scenario_config.system_center);
             const glm::dvec3 rel_vel_mps = vel_world;
 
@@ -381,6 +393,7 @@ namespace Game
         _rails_warp_active = true;
     }
 
+    // Restores orbiters from rails spacecraft back into entity/physics state when leaving rails warp.
     void GameplayState::exit_rails_warp(GameStateContext &ctx)
     {
         if (!_rails_warp_active)
@@ -418,6 +431,7 @@ namespace Game
         glm::dvec3 anchor_vel_world(0.0);
 
         {
+            // Pick a resume anchor so the restored physics origin stays near a meaningful nearby body.
             const EntityId anchor_eid = select_rebase_anchor_entity();
             const OrbiterInfo *anchor_orbiter = nullptr;
             for (const auto &o : _orbiters)
@@ -488,6 +502,7 @@ namespace Game
                 const Physics::BodyId body_id{ent->physics_body_value()};
                 if (_physics->is_body_valid(body_id))
                 {
+                    // Re-express world-space warp results in the local moving frame used by the physics world.
                     const glm::dvec3 pos_local = world_to_local_d(pos_world, _physics_context->origin_world());
                     _physics->set_transform(body_id, pos_local, rot);
 
@@ -526,6 +541,7 @@ namespace Game
         _rails_warp_active = false;
     }
 
+    // Runs one rails-warp tick: player input, orbit-sim advancement, and entity transform sync.
     void GameplayState::rails_warp_step(GameStateContext &ctx, const double dt_s)
     {
         _rails_thrust_applied_this_tick = false;
@@ -573,6 +589,7 @@ namespace Game
                 }
             }
 
+            // Reuse ship-controller bindings, but apply them directly to the rails state instead of rigid-body physics.
             ThrustInput input = ShipController::read_input(ctx.input, ui_capture_keyboard,
                                                            player_orbiter->rails.sas_toggle_prev_down);
             if (input.sas_toggled)
@@ -609,6 +626,7 @@ namespace Game
                 orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(player_orbiter->rails.sc_id);
                 if (sc)
                 {
+                    // Rails thrust is modeled as an instantaneous dv on the spacecraft state for this tick.
                     const glm::dvec3 dir_world = glm::dvec3(player_orbiter->rails.rotation * input.local_thrust_dir);
                     const double mass_kg = std::max(1.0, sc->mass_kg());
                     const double dv = (static_cast<double>(thrust_force_N) / mass_kg) * dt_s;

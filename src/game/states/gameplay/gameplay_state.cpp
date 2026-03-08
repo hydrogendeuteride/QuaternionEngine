@@ -45,7 +45,9 @@ namespace Game
         _scenario_io_status.clear();
         _scenario_io_status_ok = true;
         _prediction_service.reset();
-        _prediction_request_pending = false;
+        _prediction_tracks.clear();
+        _prediction_groups.clear();
+        _prediction_selection.clear();
         _orbit_plot_perf = {};
 
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
@@ -85,10 +87,11 @@ namespace Game
         _orbitsim.reset();
         _orbiters.clear();
         _contact_log.clear();
-        _prediction_cache.clear();
+        _prediction_tracks.clear();
+        _prediction_groups.clear();
+        _prediction_selection.clear();
         _prediction_dirty = true;
         _prediction_service.reset();
-        _prediction_request_pending = false;
         _orbit_plot_perf = {};
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
         {
@@ -449,14 +452,191 @@ namespace Game
                 ImGui::TextUnformatted("Orbit plot renders in a dedicated pass (independent from Debug draw).");
                 OrbitPlotSystem *orbit_plot =
                         (ctx.renderer && ctx.renderer->_context) ? ctx.renderer->_context->orbit_plot : nullptr;
+                rebuild_prediction_subjects();
+
+                const PredictionTrackState *active_prediction = active_prediction_track();
+                std::string active_prediction_label = active_prediction
+                                                            ? prediction_subject_label(active_prediction->key)
+                                                            : std::string("None");
+
+                if (ImGui::BeginCombo("Active prediction", active_prediction_label.c_str()))
+                {
+                    for (const PredictionTrackState &track : _prediction_tracks)
+                    {
+                        const bool selected = active_prediction && track.key == active_prediction->key;
+                        const std::string label = prediction_subject_label(track.key);
+                        if (ImGui::Selectable(label.c_str(), selected))
+                        {
+                            _prediction_selection.active_subject = track.key;
+                            _prediction_selection.overlay_subjects.erase(
+                                    std::remove(_prediction_selection.overlay_subjects.begin(),
+                                                _prediction_selection.overlay_subjects.end(),
+                                                track.key),
+                                    _prediction_selection.overlay_subjects.end());
+                            _prediction_selection.selected_group_index = -1;
+                            _prediction_dirty = true;
+                        }
+                        if (selected)
+                        {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+
+                if (!_prediction_groups.empty())
+                {
+                    std::string active_group_label = "Custom";
+                    if (_prediction_selection.selected_group_index >= 0 &&
+                        _prediction_selection.selected_group_index < static_cast<int>(_prediction_groups.size()))
+                    {
+                        active_group_label = _prediction_groups[static_cast<size_t>(_prediction_selection.selected_group_index)].name;
+                    }
+
+                    if (ImGui::BeginCombo("Prediction group", active_group_label.c_str()))
+                    {
+                        const bool custom_selected = _prediction_selection.selected_group_index < 0;
+                        if (ImGui::Selectable("Custom", custom_selected))
+                        {
+                            _prediction_selection.selected_group_index = -1;
+                        }
+                        if (custom_selected)
+                        {
+                            ImGui::SetItemDefaultFocus();
+                        }
+
+                        for (size_t group_index = 0; group_index < _prediction_groups.size(); ++group_index)
+                        {
+                            const PredictionGroup &group = _prediction_groups[group_index];
+                            const bool selected =
+                                    _prediction_selection.selected_group_index == static_cast<int>(group_index);
+                            if (ImGui::Selectable(group.name.c_str(), selected))
+                            {
+                                _prediction_selection.selected_group_index = static_cast<int>(group_index);
+                                _prediction_selection.active_subject = group.primary_subject;
+                                _prediction_selection.overlay_subjects.clear();
+                                for (PredictionSubjectKey member : group.members)
+                                {
+                                    if (member != group.primary_subject)
+                                    {
+                                        _prediction_selection.overlay_subjects.push_back(member);
+                                    }
+                                }
+                                _prediction_dirty = true;
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                }
+
+                if (ImGui::TreeNode("Overlay subjects"))
+                {
+                    for (const PredictionTrackState &track : _prediction_tracks)
+                    {
+                        if (track.key == _prediction_selection.active_subject)
+                        {
+                            continue;
+                        }
+
+                        bool enabled =
+                                std::find(_prediction_selection.overlay_subjects.begin(),
+                                          _prediction_selection.overlay_subjects.end(),
+                                          track.key) != _prediction_selection.overlay_subjects.end();
+                        const std::string label = prediction_subject_label(track.key);
+                        if (ImGui::Checkbox(label.c_str(), &enabled))
+                        {
+                            _prediction_selection.selected_group_index = -1;
+                            if (enabled)
+                            {
+                                if (std::find(_prediction_selection.overlay_subjects.begin(),
+                                              _prediction_selection.overlay_subjects.end(),
+                                              track.key) == _prediction_selection.overlay_subjects.end())
+                                {
+                                    _prediction_selection.overlay_subjects.push_back(track.key);
+                                }
+                            }
+                            else
+                            {
+                                _prediction_selection.overlay_subjects.erase(
+                                        std::remove(_prediction_selection.overlay_subjects.begin(),
+                                                    _prediction_selection.overlay_subjects.end(),
+                                                    track.key),
+                                        _prediction_selection.overlay_subjects.end());
+                            }
+                            _prediction_dirty = true;
+                        }
+                    }
+                    ImGui::TreePop();
+                }
+
+                if (ImGui::Button("Show demo trio"))
+                {
+                    if (const PredictionTrackState *player_track = player_prediction_track())
+                    {
+                        _prediction_selection.active_subject = player_track->key;
+                    }
+
+                    _prediction_selection.overlay_subjects.clear();
+                    for (const PredictionTrackState &track : _prediction_tracks)
+                    {
+                        if (track.key == _prediction_selection.active_subject)
+                        {
+                            continue;
+                        }
+
+                        if (track.key.kind == PredictionSubjectKind::Orbiter)
+                        {
+                            _prediction_selection.overlay_subjects.push_back(track.key);
+                            break;
+                        }
+                    }
+                    for (const PredictionTrackState &track : _prediction_tracks)
+                    {
+                        if (track.key.kind == PredictionSubjectKind::Celestial)
+                        {
+                            _prediction_selection.overlay_subjects.push_back(track.key);
+                            break;
+                        }
+                    }
+                    _prediction_selection.selected_group_index = -1;
+                    _prediction_dirty = true;
+                }
+                ImGui::SameLine();
+                ImGui::TextUnformatted("Shows ship + probe + first celestial overlay together.");
+
+                std::string visible_prediction_summary = active_prediction
+                                                             ? prediction_subject_label(active_prediction->key)
+                                                             : std::string("None");
+                for (PredictionSubjectKey key : _prediction_selection.overlay_subjects)
+                {
+                    const std::string label = prediction_subject_label(key);
+                    if (!label.empty())
+                    {
+                        visible_prediction_summary += visible_prediction_summary.empty() ? label : ", " + label;
+                    }
+                }
+                ImGui::TextWrapped("Visible prediction subjects: %s", visible_prediction_summary.c_str());
 
                 ImGui::Checkbox("Prediction full orbit", &_prediction_draw_full_orbit);
                 ImGui::Checkbox("Prediction future segment", &_prediction_draw_future_segment);
 
-                float future_window_s = static_cast<float>(_prediction_future_window_s);
-                if (ImGui::DragFloat("Prediction future window (s)", &future_window_s, 10.0f, 0.0f, 15552000.0f, "%.0f"))
+                float future_window_orbiter_s = static_cast<float>(_prediction_future_window_orbiter_s);
+                if (ImGui::DragFloat("Orbiter future window (s)", &future_window_orbiter_s, 10.0f, 0.0f, 15552000.0f, "%.0f"))
                 {
-                    _prediction_future_window_s = static_cast<double>(std::max(0.0f, future_window_s));
+                    _prediction_future_window_orbiter_s =
+                            static_cast<double>(std::max(0.0f, future_window_orbiter_s));
+                }
+
+                float future_window_celestial_s = static_cast<float>(_prediction_future_window_celestial_s);
+                if (ImGui::DragFloat("Celestial future window (s)",
+                                     &future_window_celestial_s,
+                                     60.0f,
+                                     0.0f,
+                                     15552000.0f,
+                                     "%.0f"))
+                {
+                    _prediction_future_window_celestial_s =
+                            static_cast<double>(std::max(0.0f, future_window_celestial_s));
                 }
 
                 float refresh_s = static_cast<float>(_prediction_periodic_refresh_s);
@@ -608,9 +788,9 @@ namespace Game
                                 plot_stats.upload_ms_peak);
                 }
 
-                WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
-                glm::dvec3 ship_vel_world(0.0);
-                glm::vec3 ship_vel_local_f(0.0f);
+                WorldVec3 subject_pos_world{0.0, 0.0, 0.0};
+                glm::dvec3 subject_vel_world(0.0);
+                glm::vec3 subject_vel_local_f(0.0f);
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
                 if (_physics && _physics_context)
@@ -623,7 +803,7 @@ namespace Game
                                 (mode_idx == 0)
                                     ? VelocityOriginMode::PerStepAnchorSync
                                     : VelocityOriginMode::FreeFallAnchorFrame;
-                        _prediction_dirty = true;
+                        mark_prediction_dirty();
                     }
 
                     // Keep local velocities bounded (Jolt stores them as float).
@@ -663,17 +843,27 @@ namespace Game
                 }
 #endif
 
-                const bool have_player = get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f);
-                if (!have_player)
+                active_prediction = active_prediction_track();
+                active_prediction_label = active_prediction
+                                              ? prediction_subject_label(active_prediction->key)
+                                              : std::string("None");
+                const bool have_subject =
+                        active_prediction &&
+                        get_prediction_subject_world_state(active_prediction->key,
+                                                           subject_pos_world,
+                                                           subject_vel_world,
+                                                           subject_vel_local_f);
+                if (!have_subject)
                 {
-                    ImGui::TextUnformatted("Ship state unavailable.");
+                    ImGui::TextUnformatted("Prediction subject state unavailable.");
                 }
                 else
                 {
-                    if (_prediction_cache.valid && _orbitsim)
+                    ImGui::Text("Active subject: %s", active_prediction_label.c_str());
+                    if (active_prediction && active_prediction->cache.valid && _orbitsim)
                     {
-                        const double age_s = _orbitsim->sim.time_s() - _prediction_cache.build_time_s;
-                        ImGui::Text("Prediction: %zu pts, age %.1f s", _prediction_cache.points_world.size(), age_s);
+                        const double age_s = _orbitsim->sim.time_s() - active_prediction->cache.build_time_s;
+                        ImGui::Text("Prediction: %zu pts, age %.1f s", active_prediction->cache.points_world.size(), age_s);
                     }
 
                     const auto &cfg = _scenario_config;
@@ -682,10 +872,10 @@ namespace Game
                                 ? _orbitsim->reference_body()->radius_m
                                 : (cfg.celestials.empty() ? 0.0 : cfg.celestials[0].radius_m);
 
-                    const glm::dvec3 p_rel = glm::dvec3(ship_pos_world - cfg.system_center);
+                    const glm::dvec3 p_rel = glm::dvec3(subject_pos_world - prediction_reference_body_world());
                     const double r_m = glm::length(p_rel);
                     const double alt_m = r_m - planet_radius_m;
-                    const double speed_mps = glm::length(ship_vel_world);
+                    const double speed_mps = glm::length(subject_vel_world);
 
                     const double speed_scale = std::max(0.0, cfg.speed_scale);
                     const double mu = cfg.mu_base * speed_scale * speed_scale;
@@ -693,21 +883,22 @@ namespace Game
 
                     ImGui::Text("Altitude: %.0f m", alt_m);
                     ImGui::Text("Speed:    %.3f km/s (v_circ est %.3f km/s)", speed_mps * 1.0e-3, v_circ_est * 1.0e-3);
-                    if (_prediction_cache.valid)
+                    if (active_prediction && active_prediction->cache.valid && !active_prediction->is_celestial)
                     {
-                        ImGui::Text("Predicted Pe: %.1f km", _prediction_cache.periapsis_alt_km);
-                        if (std::isfinite(_prediction_cache.apoapsis_alt_km))
+                        ImGui::Text("Predicted Pe: %.1f km", active_prediction->cache.periapsis_alt_km);
+                        if (std::isfinite(active_prediction->cache.apoapsis_alt_km))
                         {
-                            ImGui::Text("Predicted Ap: %.1f km", _prediction_cache.apoapsis_alt_km);
+                            ImGui::Text("Predicted Ap: %.1f km", active_prediction->cache.apoapsis_alt_km);
                         }
                         else
                         {
                             ImGui::TextUnformatted("Predicted Ap: escape");
                         }
 
-                        if (_prediction_cache.orbital_period_s > 0.0 && std::isfinite(_prediction_cache.orbital_period_s))
+                        if (active_prediction->cache.orbital_period_s > 0.0 &&
+                            std::isfinite(active_prediction->cache.orbital_period_s))
                         {
-                            ImGui::Text("Predicted Period: %.2f min", _prediction_cache.orbital_period_s / 60.0);
+                            ImGui::Text("Predicted Period: %.2f min", active_prediction->cache.orbital_period_s / 60.0);
                         }
                         else
                         {
@@ -717,13 +908,15 @@ namespace Game
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
                     const EntityId player_eid = player_entity();
-                    if (_physics && _physics_context && player_eid.is_valid())
+                    if (_physics && _physics_context && player_eid.is_valid() &&
+                        active_prediction &&
+                        prediction_subject_is_player(active_prediction->key))
                     {
                         const glm::dvec3 v_origin_world = _physics_context->velocity_origin_world();
                         ImGui::Text("v_origin: %.1f, %.1f, %.1f m/s", v_origin_world.x, v_origin_world.y,
                                     v_origin_world.z);
-                        ImGui::Text("v_local:  %.2f, %.2f, %.2f m/s", ship_vel_local_f.x, ship_vel_local_f.y,
-                                    ship_vel_local_f.z);
+                        ImGui::Text("v_local:  %.2f, %.2f, %.2f m/s", subject_vel_local_f.x, subject_vel_local_f.y,
+                                    subject_vel_local_f.z);
 
                         const Entity *player = _world.entities().find(player_eid);
                         if (player && player->has_physics())

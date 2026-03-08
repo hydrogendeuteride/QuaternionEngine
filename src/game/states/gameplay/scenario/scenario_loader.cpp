@@ -462,6 +462,10 @@ namespace Game
             o.relative_velocity = parse_dvec3(
                     *json_required_object(j, "relative_velocity", path),
                     child_path(path, "relative_velocity"));
+            if (const auto it = j.find("prediction_group"); it != j.end() && !it->is_null())
+            {
+                o.prediction_group = json_required<std::string>(j, "prediction_group", path);
+            }
             o.primitive = parse_primitive_type(
                     json_required<std::string>(j, "primitive", path),
                     child_path(path, "primitive"));
@@ -497,6 +501,10 @@ namespace Game
             j["orbit_altitude_m"] = o.orbit_altitude_m;
             j["offset_from_player"] = {{"x", o.offset_from_player.x}, {"y", o.offset_from_player.y}, {"z", o.offset_from_player.z}};
             j["relative_velocity"] = {{"x", o.relative_velocity.x}, {"y", o.relative_velocity.y}, {"z", o.relative_velocity.z}};
+            if (!o.prediction_group.empty())
+            {
+                j["prediction_group"] = o.prediction_group;
+            }
             j["primitive"] = primitive_type_string(o.primitive);
             j["render_scale"] = {{"x", o.render_scale.x}, {"y", o.render_scale.y}, {"z", o.render_scale.z}};
             j["body_settings"] = serialize_body_settings(o.body_settings);
