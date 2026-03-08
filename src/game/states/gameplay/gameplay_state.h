@@ -15,6 +15,7 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct ImDrawList;
@@ -34,6 +35,11 @@ namespace Game
         // Compatibility aliases for gameplay internals referenced by tests/tools.
         using OrbitPredictionCache = Game::OrbitPredictionCache;
         using OrbitPlotPerfStats = Game::OrbitPlotPerfStats;
+        using PredictionSubjectKey = Game::PredictionSubjectKey;
+        using PredictionSubjectKind = Game::PredictionSubjectKind;
+        using PredictionTrackState = Game::PredictionTrackState;
+        using PredictionGroup = Game::PredictionGroup;
+        using PredictionSelectionState = Game::PredictionSelectionState;
         using ManeuverNode = Game::ManeuverNode;
         using ManeuverPlanState = Game::ManeuverPlanState;
         using ManeuverHandleAxis = Game::ManeuverHandleAxis;
@@ -72,12 +78,56 @@ namespace Game
         bool get_player_world_state(WorldVec3 &out_pos_world,
                                     glm::dvec3 &out_vel_world,
                                     glm::vec3 &out_vel_local) const;
+        bool get_orbiter_world_state(const OrbiterInfo &orbiter,
+                                     WorldVec3 &out_pos_world,
+                                     glm::dvec3 &out_vel_world,
+                                     glm::vec3 &out_vel_local) const;
+        bool get_prediction_subject_world_state(PredictionSubjectKey key,
+                                                WorldVec3 &out_pos_world,
+                                                glm::dvec3 &out_vel_world,
+                                                glm::vec3 &out_vel_local) const;
 
         // Orbit prediction
         void update_prediction(GameStateContext &ctx, float fixed_dt);
-        void refresh_prediction_world_points();
+        void clear_prediction_runtime();
+        void clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects);
+        void apply_completed_prediction_result(OrbitPredictionService::Result result);
+        bool should_rebuild_prediction_track(const PredictionTrackState &track,
+                                             double now_s,
+                                             float fixed_dt,
+                                             bool thrusting,
+                                             bool with_maneuvers) const;
+        bool request_orbiter_prediction_async(PredictionTrackState &track,
+                                              const WorldVec3 &subject_pos_world,
+                                              const glm::dvec3 &subject_vel_world,
+                                              double now_s,
+                                              bool thrusting,
+                                              bool with_maneuvers);
+        void update_orbiter_prediction_track(PredictionTrackState &track,
+                                             double now_s,
+                                             bool thrusting,
+                                             bool with_maneuvers);
+        void rebuild_celestial_prediction_track(PredictionTrackState &track,
+                                                const CelestialBodyInfo &ref_info,
+                                                double now_s);
+        void refresh_prediction_world_points(PredictionTrackState &track);
         WorldVec3 prediction_reference_body_world() const;
-        bool player_thrust_applied_this_tick() const;
+        bool prediction_subject_thrust_applied_this_tick(PredictionSubjectKey key) const;
+        void rebuild_prediction_subjects();
+        void sync_prediction_dirty_flag();
+        std::vector<PredictionSubjectKey> collect_visible_prediction_subjects() const;
+        double prediction_future_window_s(PredictionSubjectKey key) const;
+        PredictionTrackState *find_prediction_track(PredictionSubjectKey key);
+        const PredictionTrackState *find_prediction_track(PredictionSubjectKey key) const;
+        PredictionTrackState *active_prediction_track();
+        const PredictionTrackState *active_prediction_track() const;
+        PredictionTrackState *player_prediction_track();
+        const PredictionTrackState *player_prediction_track() const;
+        OrbitPredictionCache *player_prediction_cache();
+        const OrbitPredictionCache *player_prediction_cache() const;
+        bool prediction_subject_is_player(PredictionSubjectKey key) const;
+        bool prediction_subject_supports_maneuvers(PredictionSubjectKey key) const;
+        std::string prediction_subject_label(PredictionSubjectKey key) const;
 
         void emit_orbit_prediction_debug(GameStateContext &ctx);
         void emit_maneuver_node_debug_overlay(GameStateContext &ctx);
@@ -94,6 +144,7 @@ namespace Game
 
         // Orbiter helpers
         const OrbiterInfo *find_player_orbiter() const;
+        const OrbiterInfo *find_orbiter(EntityId entity) const;
         EntityId player_entity() const;
         EntityId select_rebase_anchor_entity() const;
         void update_rebase_anchor();
@@ -155,7 +206,8 @@ namespace Game
         float _prediction_line_overlay_boost{0.0f}; // extra always-on-top alpha fraction
         double _prediction_periodic_refresh_s{0.0}; // 0 = never (cache is extended when horizon runs out)
         double _prediction_thrust_refresh_s{0.1};    // rebuild at most this often while thrusting
-        double _prediction_future_window_s{600.0};
+        double _prediction_future_window_orbiter_s{600.0};
+        double _prediction_future_window_celestial_s{21600.0};
         double _orbit_plot_render_error_px{0.75};
         int _orbit_plot_render_max_segments_cpu{4'000};
         int _orbit_plot_pick_max_segments{8'000};
@@ -163,9 +215,10 @@ namespace Game
 
         OrbitPlotPerfStats _orbit_plot_perf{};
         OrbitPredictionDrawConfig _prediction_draw_config{};
-        OrbitPredictionCache _prediction_cache{};
         OrbitPredictionService _prediction_service{};
-        bool _prediction_request_pending{false};
+        std::vector<PredictionTrackState> _prediction_tracks{};
+        std::vector<PredictionGroup> _prediction_groups{};
+        PredictionSelectionState _prediction_selection{};
 
         bool build_maneuver_gizmo_view_context(const GameStateContext &ctx, ManeuverGizmoViewContext &out_view) const;
         bool maneuver_gizmo_is_occluded(const ManeuverGizmoViewContext &view, const WorldVec3 &point_world) const;

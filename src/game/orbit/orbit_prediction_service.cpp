@@ -189,8 +189,8 @@ namespace Game
         {
             std::lock_guard<std::mutex> lock(_mutex);
             _running = false;
-            _has_pending = false;
-            _completed.reset();
+            _pending_jobs.clear();
+            _completed.clear();
         }
         _cv.notify_all();
 
@@ -205,10 +205,29 @@ namespace Game
         {
             std::lock_guard<std::mutex> lock(_mutex);
             const uint64_t generation_id = _next_generation_id++;
-            _latest_requested_generation_id = generation_id;
-            _pending.generation_id = generation_id;
-            _pending.request = std::move(request);
-            _has_pending = true;
+            const uint64_t track_id = request.track_id;
+            const uint64_t request_epoch = _request_epoch;
+            _latest_requested_generation_by_track[track_id] = generation_id;
+
+            auto existing = std::find_if(_pending_jobs.begin(),
+                                         _pending_jobs.end(),
+                                         [track_id](const PendingJob &job) { return job.track_id == track_id; });
+            if (existing != _pending_jobs.end())
+            {
+                existing->track_id = track_id;
+                existing->request_epoch = request_epoch;
+                existing->generation_id = generation_id;
+                existing->request = std::move(request);
+            }
+            else
+            {
+                PendingJob job{};
+                job.track_id = track_id;
+                job.request_epoch = request_epoch;
+                job.generation_id = generation_id;
+                job.request = std::move(request);
+                _pending_jobs.push_back(std::move(job));
+            }
         }
         _cv.notify_one();
     }
@@ -216,22 +235,38 @@ namespace Game
     std::optional<OrbitPredictionService::Result> OrbitPredictionService::poll_completed()
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        if (!_completed.has_value())
+        if (_completed.empty())
         {
             return std::nullopt;
         }
 
-        std::optional<Result> out = std::move(_completed);
-        _completed.reset();
+        Result out = std::move(_completed.front());
+        _completed.pop_front();
         return out;
     }
 
     void OrbitPredictionService::reset()
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        _has_pending = false;
-        _completed.reset();
-        _latest_requested_generation_id = _next_generation_id;
+        ++_request_epoch;
+        _pending_jobs.clear();
+        _completed.clear();
+        _latest_requested_generation_by_track.clear();
+    }
+
+    bool OrbitPredictionService::should_publish_result(
+            const PendingJob &job,
+            const uint64_t current_request_epoch,
+            const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track)
+    {
+        if (job.request_epoch != current_request_epoch)
+        {
+            return false;
+        }
+
+        const auto latest_it = latest_requested_generation_by_track.find(job.track_id);
+        return latest_it == latest_requested_generation_by_track.end() ||
+               job.generation_id >= latest_it->second;
     }
 
     void OrbitPredictionService::worker_loop()
@@ -242,21 +277,21 @@ namespace Game
             {
                 std::unique_lock<std::mutex> lock(_mutex);
                 _cv.wait(lock, [this]() {
-                    return !_running || _has_pending;
+                    return !_running || !_pending_jobs.empty();
                 });
 
-                if (!_running && !_has_pending)
+                if (!_running && _pending_jobs.empty())
                 {
                     return;
                 }
 
-                if (!_has_pending)
+                if (_pending_jobs.empty())
                 {
                     continue;
                 }
 
-                job = std::move(_pending);
-                _has_pending = false;
+                job = std::move(_pending_jobs.front());
+                _pending_jobs.pop_front();
             }
 
             Result result = compute_prediction(job.generation_id, job.request);
@@ -268,12 +303,12 @@ namespace Game
                     return;
                 }
 
-                if (job.generation_id < _latest_requested_generation_id)
+                if (!should_publish_result(job, _request_epoch, _latest_requested_generation_by_track))
                 {
                     continue;
                 }
 
-                _completed = std::move(result);
+                _completed.push_back(std::move(result));
             }
         }
     }
@@ -301,6 +336,7 @@ namespace Game
         timer.start = std::chrono::steady_clock::now();
 
         out.generation_id = generation_id;
+        out.track_id = request.track_id;
         out.build_time_s = request.sim_time_s;
 
         if (!std::isfinite(request.sim_time_s))
