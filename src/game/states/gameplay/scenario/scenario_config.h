@@ -32,7 +32,7 @@ namespace Game
             double height_max_m{0.0};
             std::string emission_dir;
             glm::vec3 emission_factor{0.0f};
-            float render_scale{1.0f}; // visual scale for non-terrain celestials
+            float render_scale{1.0f}; // legacy fallback scale for non-planet-system celestial rendering
         };
 
         struct OrbiterDef
@@ -41,6 +41,7 @@ namespace Game
             double orbit_altitude_m{0.0};      // altitude above reference body surface
             glm::dvec3 offset_from_player{0.0}; // relative spawn offset for non-player orbiters
             glm::dvec3 relative_velocity{0.0};  // initial velocity relative to player
+            std::string prediction_group;       // optional authored orbit overlay group
             GameAPI::PrimitiveType primitive{GameAPI::PrimitiveType::Capsule};
             glm::vec3 render_scale{1.0f};
             Physics::BodySettings body_settings{};

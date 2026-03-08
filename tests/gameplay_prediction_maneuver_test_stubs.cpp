@@ -13,6 +13,8 @@
 namespace
 {
     std::unordered_map<uint32_t, Game::Entity *> g_entities;
+    bool g_has_ship_controller_input_override = false;
+    Game::ThrustInput g_ship_controller_input_override{};
 }
 
 namespace GameplayTestHooks
@@ -29,6 +31,18 @@ namespace GameplayTestHooks
     void clear_entities()
     {
         g_entities.clear();
+    }
+
+    void set_ship_controller_input_override(const Game::ThrustInput &input)
+    {
+        g_ship_controller_input_override = input;
+        g_has_ship_controller_input_override = true;
+    }
+
+    void clear_ship_controller_input_override()
+    {
+        g_has_ship_controller_input_override = false;
+        g_ship_controller_input_override = {};
     }
 } // namespace GameplayTestHooks
 
@@ -105,6 +119,24 @@ namespace Game
         return p ? p->entity : EntityId{};
     }
 
+    const OrbiterInfo *GameplayState::find_orbiter(const EntityId entity) const
+    {
+        if (!entity.is_valid())
+        {
+            return nullptr;
+        }
+
+        for (const auto &orbiter : _orbiters)
+        {
+            if (orbiter.entity == entity)
+            {
+                return &orbiter;
+            }
+        }
+
+        return nullptr;
+    }
+
     EntityId GameplayState::select_rebase_anchor_entity() const
     {
         for (const auto &orbiter : _orbiters)
@@ -131,7 +163,20 @@ namespace Game
         return EntityId{};
     }
 
-    void GameplayState::update_rebase_anchor() {}
+    void GameplayState::update_rebase_anchor()
+    {
+        const EntityId next_anchor = select_rebase_anchor_entity();
+        if (!next_anchor.is_valid())
+        {
+            _world.clear_rebase_anchor();
+            return;
+        }
+
+        if (next_anchor != _world.rebase_anchor())
+        {
+            _world.set_rebase_anchor(next_anchor);
+        }
+    }
 
     void GameStateContext::quit() {}
     float GameStateContext::delta_time() const { return 0.0f; }
@@ -210,6 +255,10 @@ namespace Game
         (void) input;
         (void) ui_capture_keyboard;
         sas_toggle_prev_down = false;
+        if (g_has_ship_controller_input_override)
+        {
+            return g_ship_controller_input_override;
+        }
         return {};
     }
 

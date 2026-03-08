@@ -1,5 +1,6 @@
 void GameplayState::update_maneuver_nodes_time_warp(GameStateContext &ctx, const float fixed_dt)
 {
+    // Drive warp-to-node by selecting the fastest rails warp step that still lands on or before the target time.
     if (!_warp_to_time_active)
     {
         return;
@@ -50,6 +51,7 @@ void GameplayState::update_maneuver_nodes_execution(GameStateContext &ctx)
 {
     (void) ctx;
 
+    // Burns execute as one-shot impulses once the armed node's scheduled time has arrived.
     if (!_execute_node_armed || _execute_node_id < 0)
     {
         return;
@@ -84,6 +86,7 @@ void GameplayState::update_maneuver_nodes_execution(GameStateContext &ctx)
     const orbitsim::RtnFrame f = compute_maneuver_rtf_frame(r_rel_m, v_rel_mps);
 
     const glm::dvec3 dv_rtn = node->dv_rtn_mps;
+    // Nodes are authored in maneuver-frame RTN coordinates, so convert them at execution time into world DV.
     glm::dvec3 dv_world =
             glm::dvec3(f.R.x, f.R.y, f.R.z) * dv_rtn.x +
             glm::dvec3(f.T.x, f.T.y, f.T.z) * dv_rtn.y +
@@ -99,6 +102,7 @@ void GameplayState::update_maneuver_nodes_execution(GameStateContext &ctx)
 
     if (rails && _orbitsim)
     {
+        // In rails mode the authoritative velocity lives in orbitsim, so patch the sim state directly.
         const OrbiterInfo *p = find_player_orbiter();
         if (p && p->rails.active())
         {
@@ -113,6 +117,7 @@ void GameplayState::update_maneuver_nodes_execution(GameStateContext &ctx)
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
     if (!applied)
     {
+        // Otherwise push the same world-space DV into the active physics body.
         const EntityId player_eid = player_entity();
         if (_physics && _physics_context && player_eid.is_valid())
         {
@@ -166,6 +171,7 @@ void GameplayState::update_maneuver_nodes_execution(GameStateContext &ctx)
 
 void GameplayState::emit_maneuver_node_debug_overlay(GameStateContext &ctx)
 {
+    // World-space debug overlay mirrors the screen-space gizmo state for inspection and tuning.
     if (!_maneuver_nodes_enabled || !_maneuver_nodes_debug_draw)
     {
         return;

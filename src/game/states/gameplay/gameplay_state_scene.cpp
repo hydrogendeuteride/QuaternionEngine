@@ -19,6 +19,18 @@ namespace Game
     using detail::circular_orbit_relative_state_xz;
     using detail::two_body_circular_barycentric_xz;
 
+    namespace
+    {
+        glm::vec4 celestial_mesh_base_color(const std::string &name)
+        {
+            if (name == "moon")
+            {
+                return glm::vec4(0.74f, 0.74f, 0.78f, 1.0f);
+            }
+            return glm::vec4(0.86f, 0.86f, 0.88f, 1.0f);
+        }
+    } // namespace
+
     // ---- Default scenario ----
 
     ScenarioConfig default_earth_moon_config()
@@ -55,7 +67,6 @@ namespace Game
             moon.radius_m = 1'737'400.0;
             moon.soi_radius_m = 6.61e7;
             moon.orbit_distance_m = 384'400'000.0;
-            moon.render_scale = 150'000.0f;
             cfg.celestials.push_back(std::move(moon));
         }
 
@@ -64,6 +75,7 @@ namespace Game
             ScenarioConfig::OrbiterDef ship{};
             ship.name = "ship";
             ship.orbit_altitude_m = 400'000.0;
+            ship.prediction_group = "flight";
             ship.is_player = true;
             ship.is_rebase_anchor = true;
             ship.primitive = GameAPI::PrimitiveType::Capsule;
@@ -91,9 +103,10 @@ namespace Game
         {
             ScenarioConfig::OrbiterDef probe{};
             probe.name = "probe";
+            probe.prediction_group = "flight";
             probe.is_player = false;
-            probe.offset_from_player = glm::dvec3(0.0, -2.0, 30.0);
-            probe.relative_velocity = glm::dvec3(0.0, 0.0, -10.0);
+            probe.offset_from_player = glm::dvec3(100'000.0, 45'000.0, 0.0);
+            probe.relative_velocity = glm::dvec3(0.0, 700.0, -56.5);
             probe.primitive = GameAPI::PrimitiveType::Sphere;
             probe.render_scale = glm::vec3(2.0f);
 
@@ -109,6 +122,30 @@ namespace Game
                     .set_mass(1000.0f);
 
             cfg.orbiters.push_back(std::move(probe));
+        }
+
+        // Collision experiment target
+        {
+            ScenarioConfig::OrbiterDef collision_test{};
+            collision_test.name = "collision_test";
+            collision_test.is_player = false;
+            collision_test.offset_from_player = glm::dvec3(0.0, 0.0, 150.0);
+            collision_test.relative_velocity = glm::dvec3(0.0, 0.0, -25.0);
+            collision_test.primitive = GameAPI::PrimitiveType::Cube;
+            collision_test.render_scale = glm::vec3(3.0f);
+
+            collision_test.body_settings
+                    .set_shape(Physics::CollisionShape::Box(1.5f, 1.5f, 1.5f))
+                    .set_dynamic()
+                    .set_layer(Physics::Layer::Dynamic)
+                    .set_gravity_scale(0.0f)
+                    .set_friction(0.2f)
+                    .set_restitution(0.1f)
+                    .set_linear_damping(0.0f)
+                    .set_angular_damping(0.0f)
+                    .set_mass(500.0f);
+
+            cfg.orbiters.push_back(std::move(collision_test));
         }
 
         return cfg;
@@ -132,8 +169,11 @@ namespace Game
         _maneuver_gizmo_interaction = {};
         _reset_requested = false;
         _contact_log.clear();
-        _prediction_cache.clear();
+        _prediction_tracks.clear();
+        _prediction_groups.clear();
+        _prediction_selection.clear();
         _prediction_dirty = true;
+        _prediction_service.reset();
 
         _world.clear_rebase_anchor();
         _world.clear();
@@ -289,56 +329,7 @@ namespace Game
             _orbiters.push_back(std::move(info));
         }
 
-        // Spawn celestial body render entities (non-terrain ones that need a mesh)
-        if (_orbitsim)
-        {
-            const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
-
-            for (auto &body_info : _orbitsim->bodies)
-            {
-                // Terrain bodies are rendered by planet terrain system, not as primitive meshes.
-                if (body_info.has_terrain)
-                {
-                    continue;
-                }
-
-                // Compute world position relative to reference body
-                WorldVec3 body_pos_world = cfg.system_center;
-                if (ref_sim)
-                {
-                    const orbitsim::MassiveBody *sim_body = _orbitsim->sim.body_by_id(body_info.sim_id);
-                    if (sim_body)
-                    {
-                        body_pos_world = cfg.system_center +
-                                WorldVec3(sim_body->state.position_m - ref_sim->state.position_m);
-                    }
-                }
-
-                // Find the matching CelestialDef for render_scale
-                float render_scale = 1.0f;
-                for (const auto &cdef : cfg.celestials)
-                {
-                    if (cdef.name == body_info.name)
-                    {
-                        render_scale = cdef.render_scale;
-                        break;
-                    }
-                }
-
-                Transform tr{};
-                tr.position_world = body_pos_world;
-                tr.rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-                tr.scale = glm::vec3(render_scale);
-
-                if (Entity *ent = _world.builder(body_info.name)
-                        .transform(tr)
-                        .render_primitive(GameAPI::PrimitiveType::Sphere)
-                        .build())
-                {
-                    body_info.render_entity = ent->id();
-                }
-            }
-        }
+        rebuild_prediction_subjects();
 
         // Configure explicit rebase anchor and camera target.
         {
@@ -455,22 +446,12 @@ namespace Game
         }
 
         const auto &cfg = _scenario_config;
-        bool atmosphere_set = false;
         const orbitsim::MassiveBody *ref_sim = _orbitsim ? _orbitsim->reference_sim_body() : nullptr;
-
-        for (const auto &cdef : cfg.celestials)
-        {
-            if (!cdef.has_terrain)
-            {
-                continue;
-            }
-
-            GameAPI::PlanetTerrain planet{};
-            planet.name = cdef.name;
+        const auto celestial_world_position = [&](const std::string &name) {
             WorldVec3 planet_center_world = cfg.system_center;
             if (_orbitsim && ref_sim)
             {
-                if (const CelestialBodyInfo *info = _orbitsim->find_body(cdef.name))
+                if (const CelestialBodyInfo *info = _orbitsim->find_body(name))
                 {
                     if (const orbitsim::MassiveBody *sim_body = _orbitsim->sim.body_by_id(info->sim_id))
                     {
@@ -479,32 +460,63 @@ namespace Game
                     }
                 }
             }
-            planet.center = glm::dvec3(planet_center_world);
+            return planet_center_world;
+        };
+
+        bool any_planets_added = false;
+        bool atmosphere_set = false;
+
+        for (const auto &cdef : cfg.celestials)
+        {
+            if (cdef.has_terrain)
+            {
+                GameAPI::PlanetTerrain planet{};
+                planet.name = cdef.name;
+                planet.center = glm::dvec3(celestial_world_position(cdef.name));
+                planet.radius_m = cdef.radius_m;
+                planet.visible = true;
+                planet.base_color = glm::vec4(1.0f);
+                planet.metallic = 0.0f;
+                planet.roughness = 1.0f;
+                planet.albedo_dir = cdef.albedo_dir;
+                planet.height_dir = cdef.height_dir;
+                planet.height_max_m = cdef.height_max_m;
+                planet.emission_dir = cdef.emission_dir;
+                planet.emission_factor = cdef.emission_factor;
+
+                any_planets_added |= ctx.api->add_planet_terrain(planet);
+
+                // Atmosphere for the first terrain body (reference body)
+                if (!atmosphere_set)
+                {
+                    ctx.api->set_atmosphere_enabled(true);
+                    ctx.api->reset_atmosphere_to_earth();
+
+                    auto atmo = ctx.api->get_atmosphere_settings();
+                    atmo.bodyName = cdef.name;
+                    ctx.api->set_atmosphere_settings(atmo);
+                    atmosphere_set = true;
+                }
+                continue;
+            }
+
+            GameAPI::PlanetSphere planet{};
+            planet.name = cdef.name;
+            planet.center = glm::dvec3(celestial_world_position(cdef.name));
             planet.radius_m = cdef.radius_m;
             planet.visible = true;
-            planet.base_color = glm::vec4(1.0f);
+            planet.base_color = celestial_mesh_base_color(cdef.name);
             planet.metallic = 0.0f;
-            planet.roughness = 1.0f;
-            planet.albedo_dir = cdef.albedo_dir;
-            planet.height_dir = cdef.height_dir;
-            planet.height_max_m = cdef.height_max_m;
-            planet.emission_dir = cdef.emission_dir;
-            planet.emission_factor = cdef.emission_factor;
+            planet.roughness = 0.98f;
+            planet.sectors = 64;
+            planet.stacks = 32;
 
-            (void) ctx.api->add_planet_terrain(planet);
+            any_planets_added |= ctx.api->add_planet_sphere(planet);
+        }
 
-            // Atmosphere for the first terrain body (reference body)
-            if (!atmosphere_set)
-            {
-                ctx.api->set_planet_system_enabled(true);
-                ctx.api->set_atmosphere_enabled(true);
-                ctx.api->reset_atmosphere_to_earth();
-
-                auto atmo = ctx.api->get_atmosphere_settings();
-                atmo.bodyName = cdef.name;
-                ctx.api->set_atmosphere_settings(atmo);
-                atmosphere_set = true;
-            }
+        if (any_planets_added)
+        {
+            ctx.api->set_planet_system_enabled(true);
         }
     }
 
@@ -643,6 +655,24 @@ namespace Game
                 return &o;
             }
         }
+        return nullptr;
+    }
+
+    const OrbiterInfo *GameplayState::find_orbiter(const EntityId entity) const
+    {
+        if (!entity.is_valid())
+        {
+            return nullptr;
+        }
+
+        for (const auto &orbiter : _orbiters)
+        {
+            if (orbiter.entity == entity)
+            {
+                return &orbiter;
+            }
+        }
+
         return nullptr;
     }
 

@@ -1,5 +1,6 @@
 void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
 {
+    // Main editor window for the maneuver plan: creation, selection, timeline editing, and execution controls.
     const ImGuiViewport *viewport = ImGui::GetMainViewport();
     if (!viewport)
     {
@@ -121,6 +122,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     const PickingSystem::PickInfo *orbit_pick = nullptr;
     const bool allow_base_pick = _maneuver_state.nodes.empty();
     const bool allow_planned_pick = !_maneuver_state.nodes.empty();
+    // First node is placed on the base orbit; once a plan exists, additional nodes snap to the planned orbit instead.
     auto pick_allowed_for_node_add = [&](const PickingSystem::PickInfo &pick) {
         if (!pick.valid || pick.kind != PickingSystem::PickInfo::Kind::Line)
         {
@@ -170,6 +172,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
                                        const float outer_radius_px,
                                        const ImU32 ring_color,
                                        const ImU32 outer_color) {
+        // Reuse the gizmo projection path so the pick highlight lands on the same pixel as the in-world markers.
         ManeuverGizmoViewContext overlay_view{};
         glm::vec2 overlay_screen{0.0f, 0.0f};
         double overlay_depth_m = 0.0;
@@ -232,6 +235,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     ImGui::Separator();
 
     // --- Timeline bar ---
+    // This is both a readout and a direct-manipulation editor: marker drag writes back to node.time_s.
     ImDrawList *dl = ImGui::GetWindowDrawList();
     const float bar_h = 28.0f;
     const float bar_w = std::max(200.0f, ImGui::GetContentRegionAvail().x);
@@ -292,6 +296,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
             const double u_drag = (p1.x > p0.x)
                                       ? (static_cast<double>(mp.x - p0.x) / static_cast<double>(p1.x - p0.x))
                                       : 0.0;
+            // Keep dragged nodes inside the visible timeline window and never allow them into the past.
             const double u_clamped = std::clamp(u_drag, 0.0, 1.0);
             const double t_new = t_start_s + u_clamped * span_s;
             node.time_s = std::max(now_s, t_new);
@@ -436,6 +441,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     ImGui::SameLine();
     if (ImGui::Button("Warp to Node"))
     {
+        // The runtime update picks an appropriate rails warp factor each frame to stop on the target time.
         _warp_to_time_active = true;
         _warp_to_time_target_s = sel->time_s;
         _warp_to_time_restore_level = 0;
@@ -444,6 +450,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     ImGui::SameLine();
     if (ImGui::Button("Execute"))
     {
+        // Arming defers the burn until sim time reaches the node; future nodes auto-trigger warp first.
         _execute_node_armed = true;
         _execute_node_id = sel->id;
 
@@ -512,6 +519,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         static_cast<float>(sel->dv_rtn_mps.y),
         static_cast<float>(sel->dv_rtn_mps.z)
     };
+    // DV is always edited in node-local RTN order so the panel and gizmo write the same underlying data.
     if (ImGui::DragFloat3("DV RTN (m/s)", dv, 0.1f, -50'000.0f, 50'000.0f, "%.2f"))
     {
         sel->dv_rtn_mps = glm::dvec3(dv[0], dv[1], dv[2]);

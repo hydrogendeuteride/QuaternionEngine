@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/orbit_helpers.h"
+#include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "core/engine.h"
 #include "core/game_api.h"
@@ -9,9 +10,9 @@
 #include "physics/jolt/jolt_physics_world.h"
 #endif
 
+#include "orbitsim/coordinate_frames.hpp"
 #include "orbitsim/trajectories.hpp"
 #include "orbitsim/trajectory_transforms.hpp"
-#include "orbitsim/coordinate_frames.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -20,30 +21,60 @@
 
 namespace Game
 {
+    namespace
+    {
+        template<typename T>
+        // Return true when a subject key is already present in a small linear container.
+        bool contains_key(const std::vector<T> &items, const T &needle)
+        {
+            return std::find(items.begin(), items.end(), needle) != items.end();
+        }
 
-    // Read the player's current world-space position and velocity from the active simulation mode.
+        // Guard async solver requests from non-finite positions or velocities.
+        bool finite_vec3(const glm::dvec3 &v)
+        {
+            return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+        }
+
+    } // namespace
+
     bool GameplayState::get_player_world_state(WorldVec3 &out_pos_world,
                                                glm::dvec3 &out_vel_world,
                                                glm::vec3 &out_vel_local) const
     {
-        const EntityId player_eid = player_entity();
-        const Entity *player = _world.entities().find(player_eid);
-        if (!player)
+        // Resolve the player orbiter into the common world-state format.
+        const OrbiterInfo *player = find_player_orbiter();
+        return player && get_orbiter_world_state(*player, out_pos_world, out_vel_world, out_vel_local);
+    }
+
+    bool GameplayState::get_orbiter_world_state(const OrbiterInfo &orbiter,
+                                                WorldVec3 &out_pos_world,
+                                                glm::dvec3 &out_vel_world,
+                                                glm::vec3 &out_vel_local) const
+    {
+        // Look up the live entity that currently represents this orbiter.
+        if (!orbiter.entity.is_valid())
         {
             return false;
         }
 
-        out_pos_world = player->position_world();
+        const Entity *entity = _world.entities().find(orbiter.entity);
+        if (!entity)
+        {
+            return false;
+        }
+
+        out_pos_world = entity->position_world();
         out_vel_world = glm::dvec3(0.0);
         out_vel_local = glm::vec3(0.0f);
 
+        // During rails warp, prefer the authoritative orbit-sim spacecraft state.
         if (_rails_warp_active && _orbitsim)
         {
-            const OrbiterInfo *p = find_player_orbiter();
             const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
-            if (p && p->rails.active() && ref_sim)
+            if (orbiter.rails.active() && ref_sim)
             {
-                if (const orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(p->rails.sc_id))
+                if (const orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id))
                 {
                     out_pos_world = _scenario_config.system_center +
                             WorldVec3(sc->state.position_m - ref_sim->state.position_m);
@@ -55,9 +86,10 @@ namespace Game
         }
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-        if (_physics && _physics_context && player->has_physics())
+        // Outside rails warp, derive current velocity from the physics body when available.
+        if (_physics && _physics_context && entity->has_physics())
         {
-            const Physics::BodyId body_id{player->physics_body_value()};
+            const Physics::BodyId body_id{entity->physics_body_value()};
             if (_physics->is_body_valid(body_id))
             {
                 out_vel_local = _physics->get_linear_velocity(body_id);
@@ -69,237 +101,853 @@ namespace Game
         return true;
     }
 
-    // Mark the cached prediction stale so the next update requests a rebuild.
-    void GameplayState::mark_prediction_dirty()
+    bool GameplayState::get_prediction_subject_world_state(PredictionSubjectKey key,
+                                                           WorldVec3 &out_pos_world,
+                                                           glm::dvec3 &out_vel_world,
+                                                           glm::vec3 &out_vel_local) const
     {
-        _prediction_dirty = true;
+        // Normalize any prediction subject into a shared world-space state snapshot.
+        out_pos_world = WorldVec3(0.0);
+        out_vel_world = glm::dvec3(0.0);
+        out_vel_local = glm::vec3(0.0f);
+
+        if (!key.valid())
+        {
+            return false;
+        }
+
+        if (key.kind == PredictionSubjectKind::Orbiter)
+        {
+            // Orbiters resolve through the gameplay entity/runtime state.
+            const OrbiterInfo *orbiter = find_orbiter(EntityId{key.value});
+            return orbiter && get_orbiter_world_state(*orbiter, out_pos_world, out_vel_world, out_vel_local);
+        }
+
+        if (!_orbitsim)
+        {
+            return false;
+        }
+
+        const CelestialBodyInfo *body_info = nullptr;
+        for (const CelestialBodyInfo &candidate : _orbitsim->bodies)
+        {
+            if (static_cast<uint32_t>(candidate.sim_id) == key.value)
+            {
+                body_info = &candidate;
+                break;
+            }
+        }
+
+        const orbitsim::MassiveBody *body = body_info ? _orbitsim->sim.body_by_id(body_info->sim_id) : nullptr;
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        if (!body || !ref_sim)
+        {
+            return false;
+        }
+
+        // Celestials are expressed relative to the active reference body frame.
+        out_pos_world = _scenario_config.system_center + WorldVec3(body->state.position_m - ref_sim->state.position_m);
+        out_vel_world = body->state.velocity_mps - ref_sim->state.velocity_mps;
+        if (body_info && body_info->render_entity.is_valid())
+        {
+            if (const Entity *render_entity = _world.entities().find(body_info->render_entity))
+            {
+                out_pos_world = render_entity->position_world();
+            }
+        }
+
+        return true;
     }
 
-    // Advance the prediction cache lifecycle and schedule async solver work when coverage is stale.
+    void GameplayState::rebuild_prediction_subjects()
+    {
+        // Rebuild the subject list while preserving any reusable runtime cache/state.
+        const PredictionSubjectKey old_active = _prediction_selection.active_subject;
+        const std::vector<PredictionSubjectKey> old_overlays = _prediction_selection.overlay_subjects;
+        std::vector<PredictionTrackState> old_tracks = std::move(_prediction_tracks);
+
+        _prediction_tracks.clear();
+        _prediction_groups.clear();
+
+        const auto find_old_track = [&](PredictionSubjectKey key) -> PredictionTrackState * {
+            auto it = std::find_if(old_tracks.begin(),
+                                   old_tracks.end(),
+                                   [key](const PredictionTrackState &track) { return track.key == key; });
+            return (it != old_tracks.end()) ? &(*it) : nullptr;
+        };
+
+        // Register every live orbiter as a prediction track.
+        for (const OrbiterInfo &orbiter : _orbiters)
+        {
+            if (!orbiter.entity.is_valid())
+            {
+                continue;
+            }
+
+            PredictionSubjectKey key{};
+            key.kind = PredictionSubjectKind::Orbiter;
+            key.value = orbiter.entity.value;
+
+            PredictionTrackState track{};
+            if (PredictionTrackState *old = find_old_track(key))
+            {
+                track = std::move(*old);
+            }
+
+            track.key = key;
+            track.label = orbiter.name;
+            track.supports_maneuvers = orbiter.is_player;
+            track.is_celestial = false;
+            _prediction_tracks.push_back(std::move(track));
+        }
+
+        // Add non-reference celestial bodies so overlays can compare against them.
+        if (_orbitsim)
+        {
+            const CelestialBodyInfo *ref_info = _orbitsim->reference_body();
+            for (const CelestialBodyInfo &body : _orbitsim->bodies)
+            {
+                if (ref_info && body.sim_id == ref_info->sim_id)
+                {
+                    continue;
+                }
+
+                PredictionSubjectKey key{};
+                key.kind = PredictionSubjectKind::Celestial;
+                key.value = static_cast<uint32_t>(body.sim_id);
+
+                PredictionTrackState track{};
+                if (PredictionTrackState *old = find_old_track(key))
+                {
+                    track = std::move(*old);
+                }
+
+                track.key = key;
+                track.label = body.name;
+                track.supports_maneuvers = false;
+                track.is_celestial = true;
+                _prediction_tracks.push_back(std::move(track));
+            }
+        }
+
+        std::unordered_map<std::string, std::vector<PredictionSubjectKey>> group_members;
+        for (const auto &orbiter_def : _scenario_config.orbiters)
+        {
+            if (orbiter_def.prediction_group.empty())
+            {
+                continue;
+            }
+
+            auto runtime = std::find_if(_orbiters.begin(),
+                                        _orbiters.end(),
+                                        [&](const OrbiterInfo &orbiter) { return orbiter.name == orbiter_def.name; });
+            if (runtime == _orbiters.end() || !runtime->entity.is_valid())
+            {
+                continue;
+            }
+
+            group_members[orbiter_def.prediction_group].push_back(
+                    PredictionSubjectKey{PredictionSubjectKind::Orbiter, runtime->entity.value});
+        }
+
+        for (auto &[name, members] : group_members)
+        {
+            if (members.size() < 2)
+            {
+                continue;
+            }
+
+            PredictionGroup group{};
+            group.name = name;
+            group.members = members;
+            group.primary_subject = members.front();
+
+            for (const PredictionSubjectKey member : members)
+            {
+                if (prediction_subject_is_player(member))
+                {
+                    group.primary_subject = member;
+                    break;
+                }
+            }
+
+            _prediction_groups.push_back(std::move(group));
+        }
+
+        auto track_exists = [&](PredictionSubjectKey key) {
+            return find_prediction_track(key) != nullptr;
+        };
+
+        // Restore the last selection when possible, otherwise fall back to a sane default.
+        if (track_exists(old_active))
+        {
+            _prediction_selection.active_subject = old_active;
+        }
+        else if (const PredictionTrackState *player_track = player_prediction_track())
+        {
+            _prediction_selection.active_subject = player_track->key;
+        }
+        else if (!_prediction_tracks.empty())
+        {
+            _prediction_selection.active_subject = _prediction_tracks.front().key;
+        }
+        else
+        {
+            _prediction_selection.active_subject = {};
+        }
+
+        _prediction_selection.overlay_subjects.clear();
+        for (PredictionSubjectKey key : old_overlays)
+        {
+            if (key != _prediction_selection.active_subject && track_exists(key))
+            {
+                _prediction_selection.overlay_subjects.push_back(key);
+            }
+        }
+
+        const bool had_explicit_selection =
+                old_active.valid() ||
+                !old_overlays.empty() ||
+                _prediction_selection.selected_group_index >= 0;
+        if (!had_explicit_selection)
+        {
+            // Seed a useful default overlay set for the first time the UI appears.
+            bool orbiter_overlay_added = false;
+            for (const PredictionTrackState &track : _prediction_tracks)
+            {
+                if (track.key == _prediction_selection.active_subject)
+                {
+                    continue;
+                }
+
+                if (!orbiter_overlay_added && track.key.kind == PredictionSubjectKind::Orbiter)
+                {
+                    _prediction_selection.overlay_subjects.push_back(track.key);
+                    orbiter_overlay_added = true;
+                }
+            }
+
+            for (const PredictionTrackState &track : _prediction_tracks)
+            {
+                if (track.key.kind == PredictionSubjectKind::Celestial)
+                {
+                    _prediction_selection.overlay_subjects.push_back(track.key);
+                    break;
+                }
+            }
+        }
+
+        sync_prediction_dirty_flag();
+    }
+
+    std::vector<GameplayState::PredictionSubjectKey> GameplayState::collect_visible_prediction_subjects() const
+    {
+        // Return the deduplicated subject set that the UI wants drawn this frame.
+        std::vector<PredictionSubjectKey> out;
+        if (_prediction_selection.active_subject.valid())
+        {
+            out.push_back(_prediction_selection.active_subject);
+        }
+        for (PredictionSubjectKey key : _prediction_selection.overlay_subjects)
+        {
+            if (key.valid() && !contains_key(out, key))
+            {
+                out.push_back(key);
+            }
+        }
+        return out;
+    }
+
+    double GameplayState::prediction_future_window_s(const PredictionSubjectKey key) const
+    {
+        // Celestials and spacecraft use different minimum look-ahead windows.
+        if (key.kind == PredictionSubjectKind::Celestial)
+        {
+            return std::max(0.0, _prediction_future_window_celestial_s);
+        }
+
+        return std::max(0.0, _prediction_future_window_orbiter_s);
+    }
+
+    GameplayState::PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key)
+    {
+        // Resolve mutable track state by stable subject key.
+        auto it = std::find_if(_prediction_tracks.begin(),
+                               _prediction_tracks.end(),
+                               [key](const PredictionTrackState &track) { return track.key == key; });
+        return (it != _prediction_tracks.end()) ? &(*it) : nullptr;
+    }
+
+    const GameplayState::PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key) const
+    {
+        // Resolve immutable track state by stable subject key.
+        auto it = std::find_if(_prediction_tracks.begin(),
+                               _prediction_tracks.end(),
+                               [key](const PredictionTrackState &track) { return track.key == key; });
+        return (it != _prediction_tracks.end()) ? &(*it) : nullptr;
+    }
+
+    GameplayState::PredictionTrackState *GameplayState::active_prediction_track()
+    {
+        // Return the track currently focused by the prediction UI.
+        return find_prediction_track(_prediction_selection.active_subject);
+    }
+
+    const GameplayState::PredictionTrackState *GameplayState::active_prediction_track() const
+    {
+        // Return the track currently focused by the prediction UI.
+        return find_prediction_track(_prediction_selection.active_subject);
+    }
+
+    GameplayState::PredictionTrackState *GameplayState::player_prediction_track()
+    {
+        // Resolve the local player's prediction track if one exists.
+        const EntityId player_eid = player_entity();
+        if (!player_eid.is_valid())
+        {
+            return nullptr;
+        }
+        return find_prediction_track(PredictionSubjectKey{PredictionSubjectKind::Orbiter, player_eid.value});
+    }
+
+    const GameplayState::PredictionTrackState *GameplayState::player_prediction_track() const
+    {
+        // Resolve the local player's prediction track if one exists.
+        const EntityId player_eid = player_entity();
+        if (!player_eid.is_valid())
+        {
+            return nullptr;
+        }
+        return find_prediction_track(PredictionSubjectKey{PredictionSubjectKind::Orbiter, player_eid.value});
+    }
+
+    OrbitPredictionCache *GameplayState::player_prediction_cache()
+    {
+        // Expose the player's cached prediction data for HUD/UI consumers.
+        PredictionTrackState *track = player_prediction_track();
+        return track ? &track->cache : nullptr;
+    }
+
+    const OrbitPredictionCache *GameplayState::player_prediction_cache() const
+    {
+        // Expose the player's cached prediction data for HUD/UI consumers.
+        const PredictionTrackState *track = player_prediction_track();
+        return track ? &track->cache : nullptr;
+    }
+
+    bool GameplayState::prediction_subject_is_player(PredictionSubjectKey key) const
+    {
+        // Only the player ship is treated as the maneuver-authoring subject.
+        return key.kind == PredictionSubjectKind::Orbiter && key.value == player_entity().value;
+    }
+
+    bool GameplayState::prediction_subject_supports_maneuvers(PredictionSubjectKey key) const
+    {
+        // Maneuver planning currently applies only to the player prediction.
+        return prediction_subject_is_player(key);
+    }
+
+    std::string GameplayState::prediction_subject_label(PredictionSubjectKey key) const
+    {
+        // Build a UI label that reflects subject type and player ownership.
+        const PredictionTrackState *track = find_prediction_track(key);
+        if (!track)
+        {
+            return {};
+        }
+
+        if (key.kind == PredictionSubjectKind::Orbiter && prediction_subject_is_player(key))
+        {
+            return track->label + " (player)";
+        }
+        if (key.kind == PredictionSubjectKind::Celestial)
+        {
+            return track->label + " (celestial)";
+        }
+        return track->label;
+    }
+
+    void GameplayState::sync_prediction_dirty_flag()
+    {
+        // Collapse per-track dirty/pending state into one cheap UI-facing flag.
+        _prediction_dirty = false;
+        for (const PredictionTrackState &track : _prediction_tracks)
+        {
+            if (track.dirty || track.request_pending)
+            {
+                _prediction_dirty = true;
+                return;
+            }
+        }
+    }
+
+    void GameplayState::mark_prediction_dirty()
+    {
+        // Force every cached track to rebuild on the next prediction update.
+        for (PredictionTrackState &track : _prediction_tracks)
+        {
+            track.dirty = true;
+        }
+        sync_prediction_dirty_flag();
+    }
+
+    void GameplayState::clear_prediction_runtime()
+    {
+        // Drop every cached artifact when the feature is disabled.
+        for (PredictionTrackState &track : _prediction_tracks)
+        {
+            track.cache.clear();
+            track.request_pending = false;
+            track.dirty = false;
+        }
+        _prediction_service.reset();
+        _prediction_dirty = false;
+    }
+
+    void GameplayState::clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects)
+    {
+        // Only reset tracks that are on screen so hidden caches can stay untouched.
+        for (PredictionTrackState &track : _prediction_tracks)
+        {
+            if (contains_key(visible_subjects, track.key))
+            {
+                track.clear_runtime();
+            }
+        }
+    }
+
+    void GameplayState::apply_completed_prediction_result(OrbitPredictionService::Result result)
+    {
+        // Fold worker output back into the owning track cache.
+        PredictionTrackState *track = nullptr;
+        for (PredictionTrackState &candidate : _prediction_tracks)
+        {
+            if (candidate.key.track_id() == result.track_id)
+            {
+                track = &candidate;
+                break;
+            }
+        }
+
+        if (!track)
+        {
+            return;
+        }
+
+        track->request_pending = false;
+        const bool keep_dirty_for_followup = track->dirty;
+        track->solver_ms_last = std::max(0.0, result.compute_time_ms);
+
+        if (!result.valid || result.trajectory_bci.size() < 2)
+        {
+            track->cache.clear();
+            track->dirty = true;
+            return;
+        }
+
+        WorldVec3 build_pos_world{0.0, 0.0, 0.0};
+        glm::dvec3 build_vel_world{0.0};
+        glm::vec3 build_vel_local{0.0f};
+        (void) get_prediction_subject_world_state(track->key, build_pos_world, build_vel_world, build_vel_local);
+
+        track->cache.clear();
+        track->cache.build_time_s = result.build_time_s;
+        track->cache.build_pos_world = build_pos_world;
+        track->cache.build_vel_world = build_vel_world;
+        track->cache.trajectory_bci = std::move(result.trajectory_bci);
+        track->cache.trajectory_bci_planned = std::move(result.trajectory_bci_planned);
+        track->cache.trajectory_segments_bci = std::move(result.trajectory_segments_bci);
+        track->cache.trajectory_segments_bci_planned = std::move(result.trajectory_segments_bci_planned);
+        track->cache.maneuver_previews = std::move(result.maneuver_previews);
+        track->cache.altitude_km = std::move(result.altitude_km);
+        track->cache.speed_kmps = std::move(result.speed_kmps);
+        track->cache.semi_major_axis_m = result.semi_major_axis_m;
+        track->cache.eccentricity = result.eccentricity;
+        track->cache.orbital_period_s = result.orbital_period_s;
+        track->cache.periapsis_alt_km = result.periapsis_alt_km;
+        track->cache.apoapsis_alt_km = result.apoapsis_alt_km;
+        track->cache.valid = true;
+        refresh_prediction_world_points(*track);
+        track->dirty = keep_dirty_for_followup;
+    }
+
+    bool GameplayState::should_rebuild_prediction_track(const PredictionTrackState &track,
+                                                        const double now_s,
+                                                        const float fixed_dt,
+                                                        const bool thrusting,
+                                                        const bool with_maneuvers) const
+    {
+        // Rebuild when cache state, thrusting, timing, or horizon coverage says we must.
+        bool rebuild = track.dirty || !track.cache.valid;
+
+        if (!rebuild && thrusting)
+        {
+            const double dt_since_build_s = now_s - track.cache.build_time_s;
+            rebuild = dt_since_build_s >= _prediction_thrust_refresh_s;
+        }
+
+        if (!rebuild && _prediction_periodic_refresh_s > 0.0)
+        {
+            const double dt_since_build_s = now_s - track.cache.build_time_s;
+            rebuild = dt_since_build_s >= _prediction_periodic_refresh_s;
+        }
+
+        // Throttle live gizmo drags so the async solver does not thrash every tick.
+        if (rebuild &&
+            track.cache.valid &&
+            with_maneuvers &&
+            _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
+        {
+            const double dt_since_build_s = now_s - track.cache.build_time_s;
+            if (dt_since_build_s < OrbitPredictionTuning::kDragRebuildMinIntervalS)
+            {
+                rebuild = false;
+            }
+        }
+
+        if (rebuild || !track.cache.valid || track.cache.trajectory_bci.empty())
+        {
+            return rebuild;
+        }
+
+        double cache_end_s = track.cache.trajectory_bci.back().t_s;
+        if (!track.cache.trajectory_segments_bci.empty())
+        {
+            const orbitsim::TrajectorySegment &last_segment = track.cache.trajectory_segments_bci.back();
+            const double segment_end_s = last_segment.t0_s + last_segment.dt_s;
+            if (std::isfinite(segment_end_s))
+            {
+                cache_end_s = segment_end_s;
+            }
+        }
+
+        double required_ahead_s = std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(track.key) : 0.0);
+        if (with_maneuvers)
+        {
+            double max_node_time_s = now_s;
+            for (const ManeuverNode &node : _maneuver_state.nodes)
+            {
+                if (std::isfinite(node.time_s))
+                {
+                    max_node_time_s = std::max(max_node_time_s, node.time_s);
+                }
+            }
+
+            if (max_node_time_s > now_s)
+            {
+                const double future_window_s = prediction_future_window_s(track.key);
+                const double post_node_window_s =
+                        std::max(OrbitPredictionTuning::kPostNodeCoverageMinS, future_window_s);
+                required_ahead_s = std::max(required_ahead_s, (max_node_time_s - now_s) + post_node_window_s);
+            }
+        }
+
+        // Add a small epsilon so tiny fixed-step jitter does not trigger rebuild churn.
+        const double coverage_epsilon_s =
+                std::max(1.0e-3, std::min(0.25, std::max(0.0, static_cast<double>(fixed_dt)) * 0.5));
+        return (cache_end_s - now_s + coverage_epsilon_s) < required_ahead_s;
+    }
+
+    bool GameplayState::request_orbiter_prediction_async(PredictionTrackState &track,
+                                                         const WorldVec3 &subject_pos_world,
+                                                         const glm::dvec3 &subject_vel_world,
+                                                         const double now_s,
+                                                         const bool thrusting,
+                                                         const bool with_maneuvers)
+    {
+        // Package the current spacecraft state into a worker request.
+        if (!_orbitsim)
+        {
+            return false;
+        }
+
+        const CelestialBodyInfo *ref_info = _orbitsim->reference_body();
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        if (!ref_info || !ref_sim || ref_sim->id == orbitsim::kInvalidBodyId || !(ref_info->mass_kg > 0.0))
+        {
+            return false;
+        }
+
+        const WorldVec3 ref_body_world = prediction_reference_body_world();
+        const glm::dvec3 ship_rel_pos_m = glm::dvec3(subject_pos_world - ref_body_world);
+        const glm::dvec3 ship_rel_vel_mps = subject_vel_world;
+        const glm::dvec3 ship_bary_pos_m = ref_sim->state.position_m + ship_rel_pos_m;
+        const glm::dvec3 ship_bary_vel_mps = ref_sim->state.velocity_mps + ship_rel_vel_mps;
+        if (!finite_vec3(ship_bary_pos_m) || !finite_vec3(ship_bary_vel_mps))
+        {
+            return false;
+        }
+
+        OrbitPredictionService::Request request{};
+        request.track_id = track.key.track_id();
+        request.sim_time_s = now_s;
+        request.sim_config = _orbitsim->sim.config();
+        request.massive_bodies = _orbitsim->sim.massive_bodies();
+        request.reference_body_id = ref_sim->id;
+        request.reference_body_mass_kg = ref_info->mass_kg;
+        request.reference_body_radius_m = ref_info->radius_m;
+        request.ship_bary_position_m = ship_bary_pos_m;
+        request.ship_bary_velocity_mps = ship_bary_vel_mps;
+        request.thrusting = thrusting;
+        request.future_window_s = prediction_future_window_s(track.key);
+        request.max_maneuver_time_s = now_s;
+
+        // Copy currently authored maneuver nodes so the worker can include planned burns.
+        if (with_maneuvers)
+        {
+            request.maneuver_impulses.reserve(_maneuver_state.nodes.size());
+            for (const ManeuverNode &node : _maneuver_state.nodes)
+            {
+                if (!std::isfinite(node.time_s))
+                {
+                    continue;
+                }
+
+                request.max_maneuver_time_s = std::max(request.max_maneuver_time_s, node.time_s);
+
+                OrbitPredictionService::ManeuverImpulse impulse{};
+                impulse.node_id = node.id;
+                impulse.t_s = node.time_s;
+                impulse.primary_body_id = node.primary_body_id;
+                impulse.dv_rtn_mps = orbitsim::Vec3{node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z};
+                request.maneuver_impulses.push_back(impulse);
+            }
+        }
+
+        _prediction_service.request(std::move(request));
+        track.request_pending = true;
+        return true;
+    }
+
+    void GameplayState::update_orbiter_prediction_track(PredictionTrackState &track,
+                                                        const double now_s,
+                                                        const bool thrusting,
+                                                        const bool with_maneuvers)
+    {
+        // Orbiters rebuild asynchronously from their current world-space snapshot.
+        WorldVec3 subject_pos_world{0.0, 0.0, 0.0};
+        glm::dvec3 subject_vel_world{0.0};
+        glm::vec3 subject_vel_local{0.0f};
+        if (!get_prediction_subject_world_state(track.key, subject_pos_world, subject_vel_world, subject_vel_local))
+        {
+            track.cache.clear();
+            track.dirty = true;
+            track.request_pending = false;
+            return;
+        }
+
+        if (track.request_pending)
+        {
+            track.dirty = true;
+            return;
+        }
+
+        const bool requested =
+                request_orbiter_prediction_async(track, subject_pos_world, subject_vel_world, now_s, thrusting, with_maneuvers);
+        track.dirty = !requested;
+        if (!requested)
+        {
+            track.cache.clear();
+            track.request_pending = false;
+        }
+    }
+
+    void GameplayState::rebuild_celestial_prediction_track(PredictionTrackState &track,
+                                                           const CelestialBodyInfo &ref_info,
+                                                           const double now_s)
+    {
+        // Celestial predictions are cheap enough to rebuild inline from ephemeris data.
+        if (!_orbitsim)
+        {
+            track.cache.clear();
+            track.dirty = true;
+            return;
+        }
+
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        const orbitsim::MassiveBody *body = _orbitsim->sim.body_by_id(static_cast<orbitsim::BodyId>(track.key.value));
+        if (!ref_sim || !body)
+        {
+            track.cache.clear();
+            track.dirty = true;
+            return;
+        }
+
+        const glm::dvec3 rel_pos_m = glm::dvec3(body->state.position_m - ref_sim->state.position_m);
+        const glm::dvec3 rel_vel_mps = glm::dvec3(body->state.velocity_mps - ref_sim->state.velocity_mps);
+        const double mu_ref_m3_s2 = _orbitsim->sim.config().gravitational_constant * ref_info.mass_kg;
+
+        const auto [horizon_s_auto, dt_s_auto] =
+                OrbitPredictionMath::select_prediction_horizon_and_dt(mu_ref_m3_s2, rel_pos_m, rel_vel_mps);
+
+        double horizon_s = std::clamp(horizon_s_auto, OrbitPredictionTuning::kMinHorizonS, OrbitPredictionTuning::kMaxHorizonS);
+        horizon_s = std::max(horizon_s, std::max(1.0, prediction_future_window_s(track.key)));
+        double dt_s = std::clamp(dt_s_auto, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
+        const int max_steps = OrbitPredictionTuning::kMaxStepsNormal;
+        const double min_dt_for_step_budget = horizon_s / static_cast<double>(std::max(1, max_steps));
+        if (std::isfinite(min_dt_for_step_budget) && min_dt_for_step_budget > 0.0)
+        {
+            dt_s = std::max(dt_s, min_dt_for_step_budget);
+        }
+        dt_s = std::clamp(dt_s, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
+        horizon_s = std::clamp(horizon_s, dt_s, OrbitPredictionTuning::kMaxHorizonS);
+
+        orbitsim::TrajectoryOptions opt{};
+        opt.duration_s = horizon_s;
+        opt.sample_dt_s = dt_s;
+        opt.spacecraft_sample_dt_s = dt_s;
+        opt.spacecraft_lookup_dt_s = dt_s;
+        opt.celestial_dt_s = dt_s;
+        opt.max_samples = static_cast<size_t>(std::clamp(static_cast<int>(std::ceil(horizon_s / dt_s)) + 1, 2, max_steps));
+        opt.include_start = true;
+        opt.include_end = true;
+        opt.stop_on_impact = false;
+
+        const orbitsim::CelestialEphemeris eph = orbitsim::build_celestial_ephemeris(_orbitsim->sim, opt);
+        std::vector<orbitsim::TrajectorySample> traj_inertial =
+                orbitsim::predict_body_trajectory(_orbitsim->sim, eph, body->id, opt);
+        if (traj_inertial.size() < 2)
+        {
+            track.cache.clear();
+            track.dirty = true;
+            return;
+        }
+
+        std::vector<orbitsim::TrajectorySample> traj_bci =
+                orbitsim::trajectory_to_body_centered_inertial(traj_inertial, eph, *ref_sim);
+        if (traj_bci.size() < 2)
+        {
+            track.cache.clear();
+            track.dirty = true;
+            return;
+        }
+
+        track.cache.clear();
+        track.cache.build_time_s = now_s;
+
+        // Cache the current rendered anchor so world-space lines stay stable.
+        WorldVec3 body_pos_world{0.0, 0.0, 0.0};
+        glm::dvec3 body_vel_world{0.0};
+        glm::vec3 body_vel_local{0.0f};
+        (void) get_prediction_subject_world_state(track.key, body_pos_world, body_vel_world, body_vel_local);
+        track.cache.build_pos_world = body_pos_world;
+        track.cache.build_vel_world = body_vel_world;
+        track.cache.trajectory_bci = std::move(traj_bci);
+        track.cache.altitude_km.reserve(track.cache.trajectory_bci.size());
+        track.cache.speed_kmps.reserve(track.cache.trajectory_bci.size());
+        for (const orbitsim::TrajectorySample &sample : track.cache.trajectory_bci)
+        {
+            const double r_m = OrbitPredictionMath::safe_length(sample.position_m);
+            const double alt_km = (r_m - ref_info.radius_m) * 1.0e-3;
+            const double spd_kmps = OrbitPredictionMath::safe_length(sample.velocity_mps) * 1.0e-3;
+            track.cache.altitude_km.push_back(static_cast<float>(alt_km));
+            track.cache.speed_kmps.push_back(static_cast<float>(spd_kmps));
+        }
+
+        // Recompute orbital elements so the HUD uses the same fresh reference frame.
+        const OrbitPredictionMath::OrbitalElementsEstimate elements =
+                OrbitPredictionMath::compute_orbital_elements(mu_ref_m3_s2, rel_pos_m, rel_vel_mps);
+        if (elements.valid)
+        {
+            track.cache.semi_major_axis_m = elements.semi_major_axis_m;
+            track.cache.eccentricity = elements.eccentricity;
+            track.cache.orbital_period_s = elements.orbital_period_s;
+            track.cache.periapsis_alt_km = (elements.periapsis_m - ref_info.radius_m) * 1.0e-3;
+            track.cache.apoapsis_alt_km = std::isfinite(elements.apoapsis_m)
+                                                  ? (elements.apoapsis_m - ref_info.radius_m) * 1.0e-3
+                                                  : std::numeric_limits<double>::infinity();
+        }
+
+        track.cache.valid = true;
+        refresh_prediction_world_points(track);
+        track.dirty = false;
+    }
+
     void GameplayState::update_prediction(GameStateContext &ctx, float fixed_dt)
     {
         (void) ctx;
 
         if (!_prediction_enabled)
         {
-            _prediction_cache.clear();
-            _prediction_dirty = true;
-            _prediction_service.reset();
-            _prediction_request_pending = false;
+            // Fully disable runtime state when the overlay is turned off.
+            clear_prediction_runtime();
             return;
         }
 
-        WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
-        glm::dvec3 ship_vel_world(0.0);
-        glm::vec3 ship_vel_local_f(0.0f);
-
-        if (!get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
-        {
-            _prediction_cache.clear();
-            _prediction_dirty = true;
-            _prediction_service.reset();
-            _prediction_request_pending = false;
-            return;
-        }
+        // Keep the subject list aligned with the current gameplay scene.
+        rebuild_prediction_subjects();
 
         const double now_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
-        const bool thrusting = player_thrust_applied_this_tick();
-
-        // Apply completed async work first so the latest result can satisfy the current frame.
-        if (auto completed = _prediction_service.poll_completed())
+        // Pull any finished async jobs into the visible cache set.
+        while (auto completed = _prediction_service.poll_completed())
         {
-            _prediction_request_pending = false;
-            const bool keep_dirty_for_followup = _prediction_dirty;
-
-            OrbitPredictionService::Result result = std::move(*completed);
-            _orbit_plot_perf.solver_ms_last = std::max(0.0, result.compute_time_ms);
-            if (result.valid && result.trajectory_bci.size() >= 2)
-            {
-                _prediction_cache.clear();
-                _prediction_cache.build_time_s = now_s;
-                _prediction_cache.build_pos_world = ship_pos_world;
-                _prediction_cache.build_vel_world = ship_vel_world;
-                _prediction_cache.trajectory_bci = std::move(result.trajectory_bci);
-                _prediction_cache.trajectory_bci_planned = std::move(result.trajectory_bci_planned);
-                _prediction_cache.trajectory_segments_bci = std::move(result.trajectory_segments_bci);
-                _prediction_cache.trajectory_segments_bci_planned = std::move(result.trajectory_segments_bci_planned);
-                _prediction_cache.maneuver_previews = std::move(result.maneuver_previews);
-                _prediction_cache.altitude_km = std::move(result.altitude_km);
-                _prediction_cache.speed_kmps = std::move(result.speed_kmps);
-                _prediction_cache.semi_major_axis_m = result.semi_major_axis_m;
-                _prediction_cache.eccentricity = result.eccentricity;
-                _prediction_cache.orbital_period_s = result.orbital_period_s;
-                _prediction_cache.periapsis_alt_km = result.periapsis_alt_km;
-                _prediction_cache.apoapsis_alt_km = result.apoapsis_alt_km;
-                _prediction_cache.valid = true;
-                refresh_prediction_world_points();
-                _prediction_dirty = keep_dirty_for_followup;
-            }
-            else
-            {
-                _prediction_cache.clear();
-                _prediction_dirty = true;
-            }
+            apply_completed_prediction_result(std::move(*completed));
         }
 
-        // Package the current ship/reference-body state into a solver request.
-        auto request_prediction_async = [&]() -> bool {
-            if (!_orbitsim)
-            {
-                return false;
-            }
-
-            const CelestialBodyInfo *ref_info = _orbitsim->reference_body();
-            const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
-            if (!ref_info || !ref_sim || ref_sim->id == orbitsim::kInvalidBodyId || !(ref_info->mass_kg > 0.0))
-            {
-                return false;
-            }
-
-            const WorldVec3 ref_body_world = prediction_reference_body_world();
-            const glm::dvec3 ship_rel_pos_m = glm::dvec3(ship_pos_world - ref_body_world);
-            const glm::dvec3 ship_rel_vel_mps = ship_vel_world;
-            const glm::dvec3 ship_bary_pos_m = ref_sim->state.position_m + ship_rel_pos_m;
-            const glm::dvec3 ship_bary_vel_mps = ref_sim->state.velocity_mps + ship_rel_vel_mps;
-            if (!std::isfinite(ship_bary_pos_m.x) || !std::isfinite(ship_bary_pos_m.y) || !std::isfinite(ship_bary_pos_m.z) ||
-                !std::isfinite(ship_bary_vel_mps.x) || !std::isfinite(ship_bary_vel_mps.y) || !std::isfinite(ship_bary_vel_mps.z))
-            {
-                return false;
-            }
-
-            OrbitPredictionService::Request request{};
-            request.sim_time_s = now_s;
-            request.sim_config = _orbitsim->sim.config();
-            request.massive_bodies = _orbitsim->sim.massive_bodies();
-            request.reference_body_id = ref_sim->id;
-            request.reference_body_mass_kg = ref_info->mass_kg;
-            request.reference_body_radius_m = ref_info->radius_m;
-            request.ship_bary_position_m = ship_bary_pos_m;
-            request.ship_bary_velocity_mps = ship_bary_vel_mps;
-            request.thrusting = thrusting;
-            request.future_window_s = std::max(0.0, _prediction_future_window_s);
-            request.max_maneuver_time_s = now_s;
-
-            if (_maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
-            {
-                request.maneuver_impulses.reserve(_maneuver_state.nodes.size());
-                for (const ManeuverNode &node : _maneuver_state.nodes)
-                {
-                    if (!std::isfinite(node.time_s))
-                    {
-                        continue;
-                    }
-
-                    request.max_maneuver_time_s = std::max(request.max_maneuver_time_s, node.time_s);
-
-                    OrbitPredictionService::ManeuverImpulse impulse{};
-                    impulse.node_id = node.id;
-                    impulse.t_s = node.time_s;
-                    impulse.primary_body_id = node.primary_body_id;
-                    impulse.dv_rtn_mps = orbitsim::Vec3{node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z};
-                    request.maneuver_impulses.push_back(impulse);
-                }
-            }
-
-            _prediction_service.request(std::move(request));
-            _prediction_request_pending = true;
-            return true;
-        };
-
-        // Rebuild when the cache is invalid, explicitly dirtied, or too old for current motion.
-        bool rebuild_prediction = _prediction_dirty || !_prediction_cache.valid;
-
-        if (!rebuild_prediction && thrusting)
+        const std::vector<PredictionSubjectKey> visible_subjects = collect_visible_prediction_subjects();
+        if (!_orbitsim)
         {
-            const double dt_since_build_s = now_s - _prediction_cache.build_time_s;
-            rebuild_prediction = !_prediction_cache.valid || dt_since_build_s >= _prediction_thrust_refresh_s;
+            // Without orbit-sim there is no stable frame to predict against.
+            clear_visible_prediction_runtime(visible_subjects);
+            _prediction_service.reset();
+            sync_prediction_dirty_flag();
+            return;
         }
 
-        if (!rebuild_prediction && _prediction_periodic_refresh_s > 0.0)
+        const CelestialBodyInfo *ref_info = _orbitsim->reference_body();
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        if (!ref_info || !ref_sim || ref_sim->id == orbitsim::kInvalidBodyId || !(ref_info->mass_kg > 0.0))
         {
-            const double dt_since_build_s = now_s - _prediction_cache.build_time_s;
-            rebuild_prediction = dt_since_build_s >= _prediction_periodic_refresh_s;
+            // Bail out when the reference body is not ready for a stable inertial frame.
+            clear_visible_prediction_runtime(visible_subjects);
+            _prediction_service.reset();
+            sync_prediction_dirty_flag();
+            return;
         }
 
-        // While editing maneuver nodes, keep updates live but cap rebuild frequency to avoid
-        // solver spikes on long horizons.
-        if (rebuild_prediction &&
-            _prediction_cache.valid &&
-            _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
+        // Rebuild or refresh only the subjects that are actually visible.
+        for (PredictionTrackState &track : _prediction_tracks)
         {
-            const double dt_since_build_s = now_s - _prediction_cache.build_time_s;
-            if (dt_since_build_s < OrbitPredictionTuning::kDragRebuildMinIntervalS)
+            if (!contains_key(visible_subjects, track.key))
             {
-                rebuild_prediction = false;
+                continue;
             }
+
+            const bool with_maneuvers =
+                    prediction_subject_supports_maneuvers(track.key) &&
+                    _maneuver_nodes_enabled &&
+                    !_maneuver_state.nodes.empty();
+            const bool thrusting = prediction_subject_thrust_applied_this_tick(track.key);
+            const bool rebuild = should_rebuild_prediction_track(track, now_s, fixed_dt, thrusting, with_maneuvers);
+            if (!rebuild)
+            {
+                continue;
+            }
+
+            if (track.key.kind == PredictionSubjectKind::Celestial)
+            {
+                rebuild_celestial_prediction_track(track, *ref_info, now_s);
+                continue;
+            }
+
+            update_orbiter_prediction_track(track, now_s, thrusting, with_maneuvers);
         }
 
-        // Ensure the cache covers the desired future window; otherwise the highlighted segment will
-        // shrink and clamp at the end of the current trajectory.
-        if (!rebuild_prediction && _prediction_cache.valid && !_prediction_cache.trajectory_bci.empty())
-        {
-            double cache_end_s = _prediction_cache.trajectory_bci.back().t_s;
-            if (!_prediction_cache.trajectory_segments_bci.empty())
-            {
-                const orbitsim::TrajectorySegment &last_segment = _prediction_cache.trajectory_segments_bci.back();
-                const double segment_end_s = last_segment.t0_s + last_segment.dt_s;
-                if (std::isfinite(segment_end_s))
-                {
-                    cache_end_s = segment_end_s;
-                }
-            }
-            double required_ahead_s = std::max(0.0, _prediction_draw_future_segment ? _prediction_future_window_s : 0.0);
-
-            if (_maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
-            {
-                double max_node_time_s = now_s;
-                for (const ManeuverNode &node : _maneuver_state.nodes)
-                {
-                    if (std::isfinite(node.time_s))
-                    {
-                        max_node_time_s = std::max(max_node_time_s, node.time_s);
-                    }
-                }
-
-                if (max_node_time_s > now_s)
-                {
-                    // Ensure we can render a useful post-node segment (planned trajectory).
-                    const double post_node_window_s =
-                            std::max(OrbitPredictionTuning::kPostNodeCoverageMinS, _prediction_future_window_s);
-                    required_ahead_s = std::max(required_ahead_s, (max_node_time_s - now_s) + post_node_window_s);
-                }
-            }
-
-            // Use a small epsilon in the "have enough coverage?" test to avoid rebuild thrashing when
-            // cache_end-now and required_ahead are nearly equal (common with maneuver-planned horizons).
-            // Without this, planned trajectories can trigger a rebuild every fixed tick at long windows.
-            const double coverage_epsilon_s = std::max(1.0e-3, std::min(0.25, std::max(0.0, static_cast<double>(fixed_dt)) * 0.5));
-            rebuild_prediction = (cache_end_s - now_s + coverage_epsilon_s) < required_ahead_s;
-        }
-
-        // Only queue one async request at a time; if one is already running, leave the dirty bit set.
-        if (rebuild_prediction)
-        {
-            if (!_prediction_request_pending)
-            {
-                const bool requested = request_prediction_async();
-                _prediction_dirty = !requested;
-                if (!requested)
-                {
-                    _prediction_cache.clear();
-                    _prediction_request_pending = false;
-                }
-            }
-            else
-            {
-                _prediction_dirty = true;
-            }
-        }
+        // Mirror the active track's last solver time into the shared debug HUD stats.
+        PredictionTrackState *active_track = active_prediction_track();
+        _orbit_plot_perf.solver_ms_last = active_track ? active_track->solver_ms_last : 0.0;
+        sync_prediction_dirty_flag();
     }
 
-    // Report whether the player applied thrust during this tick in the current simulation mode.
-    bool GameplayState::player_thrust_applied_this_tick() const
+    bool GameplayState::prediction_subject_thrust_applied_this_tick(PredictionSubjectKey key) const
     {
+        // Thrust-triggered refresh only matters for the actively piloted subject.
+        if (!prediction_subject_is_player(key))
+        {
+            return false;
+        }
+
+        // Rails warp uses a separate thrust path from the physics-driven ship controller.
         if (_rails_warp_active && _time_warp.mode == TimeWarpState::Mode::RailsWarp)
         {
             return _rails_thrust_applied_this_tick;
@@ -321,9 +969,9 @@ namespace Game
         return sc && sc->thrust_applied_this_tick();
     }
 
-    // Resolve the world-space origin used to place body-centered prediction samples.
     WorldVec3 GameplayState::prediction_reference_body_world() const
     {
+        // Use the rendered reference body position when available, otherwise fall back to system center.
         if (!_orbitsim)
         {
             return _scenario_config.system_center;
@@ -341,36 +989,36 @@ namespace Game
         return _scenario_config.system_center;
     }
 
-    // Rebuild world-space polylines from cached body-centered trajectory samples.
-    void GameplayState::refresh_prediction_world_points()
+    void GameplayState::refresh_prediction_world_points(PredictionTrackState &track)
     {
-        if (!_prediction_cache.valid || _prediction_cache.trajectory_bci.empty())
+        // Convert cached BCI samples into world-space polylines for drawing and picking.
+        if (!track.cache.valid || track.cache.trajectory_bci.empty())
         {
-            _prediction_cache.points_world.clear();
-            _prediction_cache.points_world_planned.clear();
+            track.cache.points_world.clear();
+            track.cache.points_world_planned.clear();
             return;
         }
 
         const WorldVec3 ref_body_world = prediction_reference_body_world();
-        _prediction_cache.points_world.resize(_prediction_cache.trajectory_bci.size());
-
-        for (size_t i = 0; i < _prediction_cache.trajectory_bci.size(); ++i)
+        track.cache.points_world.resize(track.cache.trajectory_bci.size());
+        for (size_t i = 0; i < track.cache.trajectory_bci.size(); ++i)
         {
-            _prediction_cache.points_world[i] =
-                    ref_body_world + WorldVec3(_prediction_cache.trajectory_bci[i].position_m);
+            track.cache.points_world[i] =
+                    ref_body_world + WorldVec3(track.cache.trajectory_bci[i].position_m);
         }
 
-        if (_prediction_cache.trajectory_bci_planned.empty())
+        // Planned trajectories are stored separately so the UI can style them independently.
+        if (track.cache.trajectory_bci_planned.empty())
         {
-            _prediction_cache.points_world_planned.clear();
+            track.cache.points_world_planned.clear();
             return;
         }
 
-        _prediction_cache.points_world_planned.resize(_prediction_cache.trajectory_bci_planned.size());
-        for (size_t i = 0; i < _prediction_cache.trajectory_bci_planned.size(); ++i)
+        track.cache.points_world_planned.resize(track.cache.trajectory_bci_planned.size());
+        for (size_t i = 0; i < track.cache.trajectory_bci_planned.size(); ++i)
         {
-            _prediction_cache.points_world_planned[i] =
-                    ref_body_world + WorldVec3(_prediction_cache.trajectory_bci_planned[i].position_m);
+            track.cache.points_world_planned[i] =
+                    ref_body_world + WorldVec3(track.cache.trajectory_bci_planned[i].position_m);
         }
     }
 

@@ -21,6 +21,7 @@ namespace Game
         orbitsim::BodyId primary_body_id{orbitsim::kInvalidBodyId}; // RTN primary body
 
         // Cached/derived values (updated by gameplay state)
+        // These drive the in-world gizmo, debug overlay, and node execution preview.
         double total_dv_mps{0.0};
         WorldVec3 position_world{0.0, 0.0, 0.0};
         glm::dvec3 burn_direction_world{0.0, 0.0, 0.0};
@@ -37,6 +38,7 @@ namespace Game
         int selected_node_id{-1};
         int next_node_id{0};
 
+        // IDs stay stable even if nodes are time-sorted, so selection/interaction can follow the same node.
         ManeuverNode *find_node(const int id)
         {
             for (auto &n : nodes)
@@ -68,6 +70,7 @@ namespace Game
             });
         }
 
+        // Convert the editor-facing plan into the orbitsim impulse plan consumed by prediction/runtime.
         orbitsim::ManeuverPlan to_orbitsim_plan(const orbitsim::SpacecraftId sc_id) const
         {
             orbitsim::ManeuverPlan plan{};
@@ -118,6 +121,7 @@ namespace Game
             DragAxis
         };
 
+        // Captures drag state in RTN component space plus the world-space axis parameter used by the solver.
         State state{State::Idle};
         int node_id{-1};
         ManeuverHandleAxis axis{ManeuverHandleAxis::None};
@@ -128,6 +132,7 @@ namespace Game
 
     struct ManeuverGizmoViewContext
     {
+        // Cached projection state shared by screen-space marker generation, hit-testing, and picking.
         glm::dvec3 camera_world{0.0, 0.0, 0.0};
         glm::dmat3 world_to_cam{1.0};
         double logical_w{0.0};
@@ -153,6 +158,7 @@ namespace Game
 
     struct ManeuverAxisMarker
     {
+        // Screen-space endpoints for the currently selected node's draggable axis handles.
         int node_id{-1};
         ManeuverHandleAxis axis{ManeuverHandleAxis::None};
         glm::vec2 hub_screen{0.0f, 0.0f};

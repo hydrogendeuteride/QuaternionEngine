@@ -7,6 +7,7 @@ void GameplayState::clear_maneuver_gizmo_instances(GameStateContext &ctx)
 bool GameplayState::build_maneuver_gizmo_view_context(const GameStateContext &ctx,
                                                       ManeuverGizmoViewContext &out_view) const
 {
+    // Gather the camera and render-space transforms needed to project world-space node markers into ImGui space.
     out_view = {};
 
     if (!ctx.renderer || !ctx.renderer->_sceneManager || !ctx.renderer->_swapchainManager || !ctx.renderer->_window)
@@ -72,6 +73,8 @@ bool GameplayState::build_maneuver_gizmo_view_context(const GameStateContext &ct
     out_view.draw_from_swap_y = static_cast<double>(draw_h) / static_cast<double>(swap_extent.height);
     out_view.window_from_draw_x = static_cast<double>(win_w) / static_cast<double>(draw_w);
     out_view.window_from_draw_y = static_cast<double>(win_h) / static_cast<double>(draw_h);
+    // ImGui mouse coordinates live in window pixels, while projection starts from logical render space.
+    // Cache the conversion chain once so projection and picking use exactly the same path.
     if (!std::isfinite(out_view.draw_from_swap_x) || !std::isfinite(out_view.draw_from_swap_y) ||
         !std::isfinite(out_view.window_from_draw_x) || !std::isfinite(out_view.window_from_draw_y))
     {
@@ -89,6 +92,7 @@ bool GameplayState::build_maneuver_gizmo_view_context(const GameStateContext &ct
 
 bool GameplayState::maneuver_gizmo_is_occluded(const ManeuverGizmoViewContext &view, const WorldVec3 &point_world) const
 {
+    // Approximate occlusion against the current reference body as a sphere so hidden markers do not bleed through.
     if (!view.depth_occluder_valid)
     {
         return false;
@@ -129,6 +133,7 @@ bool GameplayState::project_maneuver_gizmo_point(const ManeuverGizmoViewContext 
                                                  glm::vec2 &out_screen,
                                                  double &out_depth_m) const
 {
+    // Project through camera space into logical render space, then map back out to the actual window pixel location.
     out_screen = glm::vec2(0.0f, 0.0f);
     out_depth_m = 0.0;
 
@@ -187,6 +192,7 @@ bool GameplayState::resolve_maneuver_axis(const ManeuverNode &node,
                                           int &out_component,
                                           double &out_sign) const
 {
+    // Map a visible handle to both its world-space drag axis and the RTN component it edits.
     out_axis_dir_world = glm::dvec3(0.0, 1.0, 0.0);
     out_component = 1;
     out_sign = 1.0;
@@ -264,6 +270,7 @@ bool GameplayState::begin_maneuver_axis_drag(GameStateContext &ctx,
                                              const int node_id,
                                              const ManeuverHandleAxis axis)
 {
+    // Capture the initial closest-point parameter so drag updates can be expressed as delta-along-axis.
     if (axis == ManeuverHandleAxis::None || axis == ManeuverHandleAxis::Hub)
     {
         return false;
@@ -344,6 +351,7 @@ void GameplayState::apply_maneuver_axis_drag(GameStateContext &ctx,
         scale *= 0.1;
     }
 
+    // The drag solver works in world meters along the selected axis; convert that signed motion into DV.
     const double delta_mps = delta_axis_m * scale * sign;
     glm::dvec3 dv_new = _maneuver_gizmo_interaction.start_dv_rtn_mps;
     if (component == 0)
@@ -373,6 +381,7 @@ void GameplayState::build_maneuver_gizmo_markers(const ManeuverGizmoViewContext 
                                                  std::vector<ManeuverHubMarker> &out_hubs,
                                                  std::vector<ManeuverAxisMarker> &out_handles) const
 {
+    // Draw hubs for every visible node, but only expose draggable axis handles for the selected node.
     out_hubs.clear();
     out_handles.clear();
 
@@ -474,6 +483,7 @@ void GameplayState::find_maneuver_gizmo_hover(const std::vector<ManeuverHubMarke
                                               int &out_hovered_hub_idx,
                                               int &out_hovered_handle_idx) const
 {
+    // Axis handles win over hubs so editing takes priority over node selection when both overlap on screen.
     out_hovered_hub_idx = -1;
     out_hovered_handle_idx = -1;
 
@@ -515,6 +525,7 @@ void GameplayState::draw_maneuver_gizmo_markers(ImDrawList *draw_list,
                                                 const float hub_hit_px,
                                                 const float axis_hit_px) const
 {
+    // Visual state is entirely screen-space here; the world-space solve already happened during marker generation.
     if (!draw_list)
     {
         return;
@@ -600,6 +611,7 @@ void GameplayState::draw_maneuver_gizmo_hover_tooltip(const std::vector<Maneuver
 
 void GameplayState::draw_maneuver_imgui_gizmo(GameStateContext &ctx)
 {
+    // Per-frame gizmo loop: refresh runtime cache, rebuild markers, resolve hover/drag state, then draw overlay UI.
     if (!_maneuver_nodes_enabled || _maneuver_state.nodes.empty())
     {
         return;
@@ -717,13 +729,21 @@ void GameplayState::draw_maneuver_imgui_gizmo(GameStateContext &ctx)
 
 void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
 {
+    // Rebuild all derived node state so UI/editor code can work from the latest prediction and render interpolation.
     for (ManeuverNode &node: _maneuver_state.nodes)
     {
         node.total_dv_mps = safe_length(node.dv_rtn_mps);
         node.gizmo_valid = false;
     }
 
-    if (!_orbitsim || !_prediction_cache.valid || _prediction_cache.trajectory_bci.size() < 2)
+    if (!_orbitsim || !_prediction_selection.active_subject.valid() ||
+        !prediction_subject_is_player(_prediction_selection.active_subject))
+    {
+        return;
+    }
+
+    const OrbitPredictionCache *prediction_cache = player_prediction_cache();
+    if (!prediction_cache || !prediction_cache->valid || prediction_cache->trajectory_bci.size() < 2)
     {
         return;
     }
@@ -739,8 +759,8 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         now_s -= (1.0 - static_cast<double>(alpha_f)) * interp_dt_s;
     }
 
-    const auto &traj_base = _prediction_cache.trajectory_bci;
-    const auto &traj_planned = _prediction_cache.trajectory_bci_planned;
+    const auto &traj_base = prediction_cache->trajectory_bci;
+    const auto &traj_planned = prediction_cache->trajectory_bci_planned;
     const auto &traj_now = traj_base;
     const double t0 = traj_now.front().t_s;
     const double t1 = traj_now.back().t_s;
@@ -787,6 +807,7 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
     const double align_len = safe_length(glm::dvec3(align_delta));
     if (!std::isfinite(align_len) || align_len > 10'000.0)
     {
+        // If prediction/render diverge too much, stop trying to align rather than placing markers far off-screen.
         align_delta = WorldVec3(0.0, 0.0, 0.0);
     }
 
@@ -798,7 +819,7 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         }
 
         const OrbitPredictionCache::ManeuverNodePreview *preview = nullptr;
-        for (const OrbitPredictionCache::ManeuverNodePreview &candidate: _prediction_cache.maneuver_previews)
+        for (const OrbitPredictionCache::ManeuverNodePreview &candidate: prediction_cache->maneuver_previews)
         {
             if (candidate.node_id == node.id)
             {
@@ -814,6 +835,7 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
 
         if (preview && preview->valid)
         {
+            // Preferred path: use the prediction job's exact preview state at the maneuver instant.
             r_rel_m = preview->rel_position_m;
             v_rel_mps = preview->rel_velocity_mps;
             node_position_world = ref_body_world + WorldVec3(preview->rel_position_m) + align_delta;
@@ -821,6 +843,7 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         }
         else
         {
+            // Fallback when previews are unavailable: sample the plotted trajectory directly.
             const auto &traj_node = traj_planned.size() >= 2 ? traj_planned : traj_base;
             const double traj_node_t0 = traj_node.front().t_s;
             const double traj_node_t1 = traj_node.back().t_s;
@@ -858,6 +881,7 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         node.basis_t_world = normalized_or(glm::dvec3(f.T.x, f.T.y, f.T.z), glm::dvec3(0.0, 1.0, 0.0));
         node.basis_n_world = normalized_or(glm::dvec3(f.N.x, f.N.y, f.N.z), glm::dvec3(0.0, 0.0, 1.0));
 
+        // Burn direction is used purely for debug visualization; zero-DV nodes fall back to the prograde axis.
         const glm::dvec3 dv_world =
                 node.basis_r_world * node.dv_rtn_mps.x +
                 node.basis_t_world * node.dv_rtn_mps.y +
