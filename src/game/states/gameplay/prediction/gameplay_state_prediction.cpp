@@ -36,6 +36,46 @@ namespace Game
             return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
         }
 
+        // Build interpolation-ready segments once so draw code does not rebuild them every frame.
+        std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_samples(
+                const std::vector<orbitsim::TrajectorySample> &samples)
+        {
+            std::vector<orbitsim::TrajectorySegment> out;
+            if (samples.size() < 2)
+            {
+                return out;
+            }
+
+            out.reserve(samples.size() - 1);
+            for (size_t i = 1; i < samples.size(); ++i)
+            {
+                const orbitsim::TrajectorySample &a = samples[i - 1];
+                const orbitsim::TrajectorySample &b = samples[i];
+                const double dt_s = b.t_s - a.t_s;
+                if (!(dt_s > 0.0) || !std::isfinite(dt_s))
+                {
+                    continue;
+                }
+
+                orbitsim::State start{};
+                start.position_m = a.position_m;
+                start.velocity_mps = a.velocity_mps;
+                orbitsim::State end{};
+                end.position_m = b.position_m;
+                end.velocity_mps = b.velocity_mps;
+
+                out.push_back(orbitsim::TrajectorySegment{
+                        .t0_s = a.t_s,
+                        .dt_s = dt_s,
+                        .start = start,
+                        .end = end,
+                        .flags = 0u,
+                });
+            }
+
+            return out;
+        }
+
     } // namespace
 
     bool GameplayState::get_player_world_state(WorldVec3 &out_pos_world,
@@ -506,13 +546,11 @@ namespace Game
 
     void GameplayState::clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects)
     {
-        // Only reset tracks that are on screen so hidden caches can stay untouched.
+        // A service reset invalidates every track, even ones that are currently hidden.
+        (void) visible_subjects;
         for (PredictionTrackState &track : _prediction_tracks)
         {
-            if (contains_key(visible_subjects, track.key))
-            {
-                track.clear_runtime();
-            }
+            track.clear_runtime();
         }
     }
 
@@ -833,6 +871,7 @@ namespace Game
         track.cache.build_pos_world = body_pos_world;
         track.cache.build_vel_world = body_vel_world;
         track.cache.trajectory_bci = std::move(traj_bci);
+        track.cache.trajectory_segments_bci = trajectory_segments_from_samples(track.cache.trajectory_bci);
         track.cache.altitude_km.reserve(track.cache.trajectory_bci.size());
         track.cache.speed_kmps.reserve(track.cache.trajectory_bci.size());
         for (const orbitsim::TrajectorySample &sample : track.cache.trajectory_bci)
