@@ -103,13 +103,14 @@ namespace Game
                                               double now_s,
                                               bool thrusting,
                                               bool with_maneuvers);
+        bool request_celestial_prediction_async(PredictionTrackState &track,
+                                                double now_s);
         void update_orbiter_prediction_track(PredictionTrackState &track,
                                              double now_s,
                                              bool thrusting,
                                              bool with_maneuvers);
-        void rebuild_celestial_prediction_track(PredictionTrackState &track,
-                                                const CelestialBodyInfo &ref_info,
-                                                double now_s);
+        void update_celestial_prediction_track(PredictionTrackState &track,
+                                               double now_s);
         void refresh_prediction_world_points(PredictionTrackState &track);
         WorldVec3 prediction_reference_body_world() const;
         bool prediction_subject_thrust_applied_this_tick(PredictionSubjectKey key) const;
