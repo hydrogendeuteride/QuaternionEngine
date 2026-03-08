@@ -5,12 +5,48 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <vector>
 
 namespace Game
 {
+    enum class PredictionSubjectKind : uint8_t
+    {
+        None = 0,
+        Orbiter,
+        Celestial
+    };
+
+    struct PredictionSubjectKey
+    {
+        PredictionSubjectKind kind{PredictionSubjectKind::None};
+        uint32_t value{0};
+
+        [[nodiscard]] bool valid() const
+        {
+            return kind != PredictionSubjectKind::None && value != 0;
+        }
+
+        [[nodiscard]] uint64_t track_id() const
+        {
+            return (static_cast<uint64_t>(kind) << 32u) | static_cast<uint64_t>(value);
+        }
+
+        friend bool operator==(const PredictionSubjectKey &a, const PredictionSubjectKey &b)
+        {
+            return a.kind == b.kind && a.value == b.value;
+        }
+
+        friend bool operator!=(const PredictionSubjectKey &a, const PredictionSubjectKey &b)
+        {
+            return !(a == b);
+        }
+    };
+
     // Centralized style and tuning knobs for orbit prediction drawing.
     struct OrbitPredictionDrawPalette
     {
@@ -19,6 +55,29 @@ namespace Game
         glm::vec4 orbit_planned{1.00f, 0.62f, 0.10f, 0.90f};
         glm::vec4 velocity_ray{1.0f, 0.35f, 0.1f, 1.0f};
     };
+
+    inline glm::vec4 prediction_overlay_seed_color(const std::size_t index)
+    {
+        static constexpr std::array<glm::vec4, 16> kOverlayColors{{
+                {0.20f, 0.72f, 1.00f, 1.0f},
+                {1.00f, 0.42f, 0.20f, 1.0f},
+                {0.40f, 0.92f, 0.46f, 1.0f},
+                {1.00f, 0.86f, 0.22f, 1.0f},
+                {0.96f, 0.32f, 0.70f, 1.0f},
+                {0.72f, 0.58f, 1.00f, 1.0f},
+                {0.18f, 0.90f, 0.82f, 1.0f},
+                {1.00f, 0.60f, 0.84f, 1.0f},
+                {0.58f, 0.96f, 0.24f, 1.0f},
+                {1.00f, 0.56f, 0.12f, 1.0f},
+                {0.34f, 0.82f, 0.78f, 1.0f},
+                {0.86f, 0.44f, 1.00f, 1.0f},
+                {0.98f, 0.74f, 0.30f, 1.0f},
+                {0.30f, 0.62f, 1.00f, 1.0f},
+                {1.00f, 0.36f, 0.46f, 1.0f},
+                {0.52f, 0.88f, 0.98f, 1.0f},
+        }};
+        return kOverlayColors[index % kOverlayColors.size()];
+    }
 
     // Draw-time tuning shared by orbit plotting, dashed plans, and picking.
     struct OrbitPredictionDrawConfig
@@ -83,6 +142,47 @@ namespace Game
             orbital_period_s = 0.0;
             periapsis_alt_km = 0.0;
             apoapsis_alt_km = std::numeric_limits<double>::infinity();
+        }
+    };
+
+    struct PredictionTrackState
+    {
+        PredictionSubjectKey key{};
+        std::string label{};
+        OrbitPredictionCache cache{};
+        bool dirty{true};
+        bool request_pending{false};
+        bool supports_maneuvers{false};
+        bool is_celestial{false};
+        double solver_ms_last{0.0};
+
+        void clear_runtime()
+        {
+            cache.clear();
+            dirty = true;
+            request_pending = false;
+            solver_ms_last = 0.0;
+        }
+    };
+
+    struct PredictionGroup
+    {
+        std::string name{};
+        PredictionSubjectKey primary_subject{};
+        std::vector<PredictionSubjectKey> members{};
+    };
+
+    struct PredictionSelectionState
+    {
+        PredictionSubjectKey active_subject{};
+        std::vector<PredictionSubjectKey> overlay_subjects{};
+        int selected_group_index{-1};
+
+        void clear()
+        {
+            active_subject = {};
+            overlay_subjects.clear();
+            selected_group_index = -1;
         }
     };
 

@@ -6,10 +6,12 @@
 
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace Game
@@ -38,6 +40,7 @@ namespace Game
 
         struct Request
         {
+            uint64_t track_id{0};
             double sim_time_s{0.0};
             orbitsim::GameSimulation::Config sim_config{};
             std::vector<orbitsim::MassiveBody> massive_bodies;
@@ -57,6 +60,7 @@ namespace Game
 
         struct Result
         {
+            uint64_t track_id{0};
             uint64_t generation_id{0};
             bool valid{false};
             double compute_time_ms{0.0};
@@ -93,11 +97,16 @@ namespace Game
     private:
         struct PendingJob
         {
+            uint64_t track_id{0};
+            uint64_t request_epoch{0};
             uint64_t generation_id{0};
             Request request{};
         };
 
         static Result compute_prediction(uint64_t generation_id, const Request &request);
+        static bool should_publish_result(const PendingJob &job,
+                                          uint64_t current_request_epoch,
+                                          const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track);
         void worker_loop();
 
         std::thread _worker;
@@ -105,11 +114,11 @@ namespace Game
         std::condition_variable _cv;
         bool _running{true};
 
-        bool _has_pending{false};
-        PendingJob _pending{};
-        std::optional<Result> _completed{};
+        std::deque<PendingJob> _pending_jobs{};
+        std::deque<Result> _completed{};
 
+        uint64_t _request_epoch{1};
         uint64_t _next_generation_id{1};
-        uint64_t _latest_requested_generation_id{0};
+        std::unordered_map<uint64_t, uint64_t> _latest_requested_generation_by_track{};
     };
 } // namespace Game

@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -119,6 +120,36 @@ TEST(ScenarioLoader, LoadsValidScenarioDocument)
     ASSERT_TRUE(cfg.has_value());
     EXPECT_FALSE(cfg->celestials.empty());
     EXPECT_FALSE(cfg->orbiters.empty());
+}
+
+TEST(ScenarioLoader, LoadsBundledDefaultGameplayScenario)
+{
+    const std::filesystem::path scenario_path = std::filesystem::path(SCENARIO_ASSETS_DIR) / "default_gameplay.json";
+    auto cfg = Game::load_scenario_config(scenario_path.string());
+    ASSERT_TRUE(cfg.has_value());
+
+    EXPECT_GE(cfg->celestials.size(), 2u);
+    EXPECT_GE(cfg->orbiters.size(), 3u);
+
+    const auto moon_it = std::find_if(cfg->celestials.begin(),
+                                      cfg->celestials.end(),
+                                      [](const Game::ScenarioConfig::CelestialDef &body) { return body.name == "moon"; });
+    ASSERT_NE(moon_it, cfg->celestials.end());
+    EXPECT_FALSE(moon_it->has_terrain);
+
+    const auto probe_it = std::find_if(cfg->orbiters.begin(),
+                                       cfg->orbiters.end(),
+                                       [](const Game::ScenarioConfig::OrbiterDef &orbiter) { return orbiter.name == "probe"; });
+    ASSERT_NE(probe_it, cfg->orbiters.end());
+    EXPECT_EQ(probe_it->prediction_group, "flight");
+
+    const auto collision_it = std::find_if(cfg->orbiters.begin(),
+                                           cfg->orbiters.end(),
+                                           [](const Game::ScenarioConfig::OrbiterDef &orbiter) {
+                                               return orbiter.name == "collision_test";
+                                           });
+    ASSERT_NE(collision_it, cfg->orbiters.end());
+    EXPECT_TRUE(collision_it->body_settings.shape.is_box());
 }
 
 TEST(ScenarioLoader, RejectsMissingRequiredArray)
