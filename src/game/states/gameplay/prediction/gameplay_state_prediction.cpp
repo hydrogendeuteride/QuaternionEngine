@@ -1,6 +1,5 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/orbit_helpers.h"
-#include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "core/engine.h"
 #include "core/game_api.h"
@@ -11,9 +10,6 @@
 #endif
 
 #include "orbitsim/coordinate_frames.hpp"
-#include "orbitsim/trajectories.hpp"
-#include "orbitsim/trajectory_transforms.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -34,46 +30,6 @@ namespace Game
         bool finite_vec3(const glm::dvec3 &v)
         {
             return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-        }
-
-        // Build interpolation-ready segments once so draw code does not rebuild them every frame.
-        std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_samples(
-                const std::vector<orbitsim::TrajectorySample> &samples)
-        {
-            std::vector<orbitsim::TrajectorySegment> out;
-            if (samples.size() < 2)
-            {
-                return out;
-            }
-
-            out.reserve(samples.size() - 1);
-            for (size_t i = 1; i < samples.size(); ++i)
-            {
-                const orbitsim::TrajectorySample &a = samples[i - 1];
-                const orbitsim::TrajectorySample &b = samples[i];
-                const double dt_s = b.t_s - a.t_s;
-                if (!(dt_s > 0.0) || !std::isfinite(dt_s))
-                {
-                    continue;
-                }
-
-                orbitsim::State start{};
-                start.position_m = a.position_m;
-                start.velocity_mps = a.velocity_mps;
-                orbitsim::State end{};
-                end.position_m = b.position_m;
-                end.velocity_mps = b.velocity_mps;
-
-                out.push_back(orbitsim::TrajectorySegment{
-                        .t0_s = a.t_s,
-                        .dt_s = dt_s,
-                        .start = start,
-                        .end = end,
-                        .flags = 0u,
-                });
-            }
-
-            return out;
         }
 
     } // namespace
@@ -757,6 +713,39 @@ namespace Game
         return true;
     }
 
+    bool GameplayState::request_celestial_prediction_async(PredictionTrackState &track, const double now_s)
+    {
+        if (!_orbitsim)
+        {
+            return false;
+        }
+
+        const CelestialBodyInfo *ref_info = _orbitsim->reference_body();
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        const orbitsim::MassiveBody *body = _orbitsim->sim.body_by_id(static_cast<orbitsim::BodyId>(track.key.value));
+        if (!ref_info || !ref_sim || !body || ref_sim->id == orbitsim::kInvalidBodyId || !(ref_info->mass_kg > 0.0))
+        {
+            return false;
+        }
+
+        OrbitPredictionService::Request request{};
+        request.kind = OrbitPredictionService::RequestKind::Celestial;
+        request.track_id = track.key.track_id();
+        request.sim_time_s = now_s;
+        request.sim_config = _orbitsim->sim.config();
+        request.massive_bodies = _orbitsim->sim.massive_bodies();
+        request.subject_body_id = body->id;
+        request.reference_body_id = ref_sim->id;
+        request.reference_body_mass_kg = ref_info->mass_kg;
+        request.reference_body_radius_m = ref_info->radius_m;
+        request.future_window_s = prediction_future_window_s(track.key);
+
+        // Celestial tracks now flow through the same worker queue as spacecraft tracks.
+        _prediction_service.request(std::move(request));
+        track.request_pending = true;
+        return true;
+    }
+
     void GameplayState::update_orbiter_prediction_track(PredictionTrackState &track,
                                                         const double now_s,
                                                         const bool thrusting,
@@ -790,116 +779,31 @@ namespace Game
         }
     }
 
-    void GameplayState::rebuild_celestial_prediction_track(PredictionTrackState &track,
-                                                           const CelestialBodyInfo &ref_info,
-                                                           const double now_s)
+    void GameplayState::update_celestial_prediction_track(PredictionTrackState &track, const double now_s)
     {
-        // Celestial predictions are cheap enough to rebuild inline from ephemeris data.
+        // Celestial predictions rebuild asynchronously so the gameplay thread only packages requests.
         if (!_orbitsim)
         {
             track.cache.clear();
             track.dirty = true;
+            track.request_pending = false;
             return;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
-        const orbitsim::MassiveBody *body = _orbitsim->sim.body_by_id(static_cast<orbitsim::BodyId>(track.key.value));
-        if (!ref_sim || !body)
+        if (track.request_pending)
         {
-            track.cache.clear();
             track.dirty = true;
             return;
         }
 
-        const glm::dvec3 rel_pos_m = glm::dvec3(body->state.position_m - ref_sim->state.position_m);
-        const glm::dvec3 rel_vel_mps = glm::dvec3(body->state.velocity_mps - ref_sim->state.velocity_mps);
-        const double mu_ref_m3_s2 = _orbitsim->sim.config().gravitational_constant * ref_info.mass_kg;
-
-        const auto [horizon_s_auto, dt_s_auto] =
-                OrbitPredictionMath::select_prediction_horizon_and_dt(mu_ref_m3_s2, rel_pos_m, rel_vel_mps);
-
-        double horizon_s = std::clamp(horizon_s_auto, OrbitPredictionTuning::kMinHorizonS, OrbitPredictionTuning::kMaxHorizonS);
-        horizon_s = std::max(horizon_s, std::max(1.0, prediction_future_window_s(track.key)));
-        double dt_s = std::clamp(dt_s_auto, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
-        const int max_steps = OrbitPredictionTuning::kMaxStepsNormal;
-        const double min_dt_for_step_budget = horizon_s / static_cast<double>(std::max(1, max_steps));
-        if (std::isfinite(min_dt_for_step_budget) && min_dt_for_step_budget > 0.0)
-        {
-            dt_s = std::max(dt_s, min_dt_for_step_budget);
-        }
-        dt_s = std::clamp(dt_s, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
-        horizon_s = std::clamp(horizon_s, dt_s, OrbitPredictionTuning::kMaxHorizonS);
-
-        orbitsim::TrajectoryOptions opt{};
-        opt.duration_s = horizon_s;
-        opt.sample_dt_s = dt_s;
-        opt.spacecraft_sample_dt_s = dt_s;
-        opt.spacecraft_lookup_dt_s = dt_s;
-        opt.celestial_dt_s = dt_s;
-        opt.max_samples = static_cast<size_t>(std::clamp(static_cast<int>(std::ceil(horizon_s / dt_s)) + 1, 2, max_steps));
-        opt.include_start = true;
-        opt.include_end = true;
-        opt.stop_on_impact = false;
-
-        const orbitsim::CelestialEphemeris eph = orbitsim::build_celestial_ephemeris(_orbitsim->sim, opt);
-        std::vector<orbitsim::TrajectorySample> traj_inertial =
-                orbitsim::predict_body_trajectory(_orbitsim->sim, eph, body->id, opt);
-        if (traj_inertial.size() < 2)
+        const bool requested = request_celestial_prediction_async(track, now_s);
+        // Keep drawing the previous cache until the worker publishes a replacement.
+        track.dirty = !requested;
+        if (!requested)
         {
             track.cache.clear();
-            track.dirty = true;
-            return;
+            track.request_pending = false;
         }
-
-        std::vector<orbitsim::TrajectorySample> traj_bci =
-                orbitsim::trajectory_to_body_centered_inertial(traj_inertial, eph, *ref_sim);
-        if (traj_bci.size() < 2)
-        {
-            track.cache.clear();
-            track.dirty = true;
-            return;
-        }
-
-        track.cache.clear();
-        track.cache.build_time_s = now_s;
-
-        // Cache the current rendered anchor so world-space lines stay stable.
-        WorldVec3 body_pos_world{0.0, 0.0, 0.0};
-        glm::dvec3 body_vel_world{0.0};
-        glm::vec3 body_vel_local{0.0f};
-        (void) get_prediction_subject_world_state(track.key, body_pos_world, body_vel_world, body_vel_local);
-        track.cache.build_pos_world = body_pos_world;
-        track.cache.build_vel_world = body_vel_world;
-        track.cache.trajectory_bci = std::move(traj_bci);
-        track.cache.trajectory_segments_bci = trajectory_segments_from_samples(track.cache.trajectory_bci);
-        track.cache.altitude_km.reserve(track.cache.trajectory_bci.size());
-        track.cache.speed_kmps.reserve(track.cache.trajectory_bci.size());
-        for (const orbitsim::TrajectorySample &sample : track.cache.trajectory_bci)
-        {
-            const double r_m = OrbitPredictionMath::safe_length(sample.position_m);
-            const double alt_km = (r_m - ref_info.radius_m) * 1.0e-3;
-            const double spd_kmps = OrbitPredictionMath::safe_length(sample.velocity_mps) * 1.0e-3;
-            track.cache.altitude_km.push_back(static_cast<float>(alt_km));
-            track.cache.speed_kmps.push_back(static_cast<float>(spd_kmps));
-        }
-
-        // Recompute orbital elements so the HUD uses the same fresh reference frame.
-        const OrbitPredictionMath::OrbitalElementsEstimate elements =
-                OrbitPredictionMath::compute_orbital_elements(mu_ref_m3_s2, rel_pos_m, rel_vel_mps);
-        if (elements.valid)
-        {
-            track.cache.semi_major_axis_m = elements.semi_major_axis_m;
-            track.cache.eccentricity = elements.eccentricity;
-            track.cache.orbital_period_s = elements.orbital_period_s;
-            track.cache.periapsis_alt_km = (elements.periapsis_m - ref_info.radius_m) * 1.0e-3;
-            track.cache.apoapsis_alt_km = std::isfinite(elements.apoapsis_m)
-                                                  ? (elements.apoapsis_m - ref_info.radius_m) * 1.0e-3
-                                                  : std::numeric_limits<double>::infinity();
-        }
-
-        track.cache.valid = true;
-        refresh_prediction_world_points(track);
-        track.dirty = false;
     }
 
     void GameplayState::update_prediction(GameStateContext &ctx, float fixed_dt)
@@ -965,7 +869,7 @@ namespace Game
 
             if (track.key.kind == PredictionSubjectKind::Celestial)
             {
-                rebuild_celestial_prediction_track(track, *ref_info, now_s);
+                update_celestial_prediction_track(track, now_s);
                 continue;
             }
 

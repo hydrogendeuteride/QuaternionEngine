@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <deque>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -19,6 +20,14 @@ namespace Game
     class OrbitPredictionService
     {
     public:
+        using SharedCelestialEphemeris = std::shared_ptr<const orbitsim::CelestialEphemeris>;
+
+        enum class RequestKind : uint8_t
+        {
+            Spacecraft = 0,
+            Celestial,
+        };
+
         struct ManeuverNodePreview
         {
             int node_id{-1};
@@ -40,11 +49,16 @@ namespace Game
 
         struct Request
         {
+            // The worker handles both spacecraft and celestial prediction jobs.
+            RequestKind kind{RequestKind::Spacecraft};
             uint64_t track_id{0};
             double sim_time_s{0.0};
             orbitsim::GameSimulation::Config sim_config{};
             std::vector<orbitsim::MassiveBody> massive_bodies;
+            SharedCelestialEphemeris shared_ephemeris{};
 
+            // Celestial jobs identify the predicted body directly.
+            orbitsim::BodyId subject_body_id{orbitsim::kInvalidBodyId};
             orbitsim::BodyId reference_body_id{orbitsim::kInvalidBodyId};
             double reference_body_mass_kg{0.0};
             double reference_body_radius_m{0.0};
@@ -84,6 +98,35 @@ namespace Game
             double apoapsis_alt_km{std::numeric_limits<double>::infinity()};
         };
 
+        struct EphemerisSamplingSpec
+        {
+            bool valid{false};
+            double horizon_s{0.0};
+            double sample_dt_s{0.0};
+            std::size_t max_samples{0};
+        };
+
+        struct EphemerisBuildRequest
+        {
+            double sim_time_s{0.0};
+            orbitsim::GameSimulation::Config sim_config{};
+            std::vector<orbitsim::MassiveBody> massive_bodies;
+            double duration_s{0.0};
+            double celestial_dt_s{0.0};
+            std::size_t max_samples{0};
+        };
+
+        struct CachedEphemerisEntry
+        {
+            double sim_time_s{0.0};
+            double duration_s{0.0};
+            double celestial_dt_s{0.0};
+            orbitsim::GameSimulation::Config sim_config{};
+            std::vector<orbitsim::MassiveBody> massive_bodies{};
+            SharedCelestialEphemeris ephemeris{};
+            uint64_t last_use_serial{0};
+        };
+
         OrbitPredictionService();
         ~OrbitPredictionService();
 
@@ -93,6 +136,8 @@ namespace Game
         void request(Request request);
         std::optional<Result> poll_completed();
         void reset();
+        SharedCelestialEphemeris get_or_build_ephemeris(const EphemerisBuildRequest &request);
+        static EphemerisSamplingSpec build_ephemeris_sampling_spec(const Request &request);
 
     private:
         struct PendingJob
@@ -103,7 +148,7 @@ namespace Game
             Request request{};
         };
 
-        static Result compute_prediction(uint64_t generation_id, const Request &request);
+        Result compute_prediction(uint64_t generation_id, const Request &request);
         static bool should_publish_result(const PendingJob &job,
                                           uint64_t current_request_epoch,
                                           const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track);
@@ -120,5 +165,9 @@ namespace Game
         uint64_t _request_epoch{1};
         uint64_t _next_generation_id{1};
         std::unordered_map<uint64_t, uint64_t> _latest_requested_generation_by_track{};
+
+        std::mutex _ephemeris_mutex;
+        std::vector<CachedEphemerisEntry> _ephemeris_cache{};
+        uint64_t _next_ephemeris_use_serial{1};
     };
 } // namespace Game
