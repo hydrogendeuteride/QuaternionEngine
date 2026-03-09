@@ -64,8 +64,8 @@ namespace Game
         out_vel_world = glm::dvec3(0.0);
         out_vel_local = glm::vec3(0.0f);
 
-        // During rails warp, prefer the authoritative orbit-sim spacecraft state.
-        if (_rails_warp_active && _orbitsim)
+        // Prefer the authoritative orbit-sim spacecraft state whenever this orbiter is currently on rails.
+        if (_orbitsim)
         {
             const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
             if (orbiter.rails.active() && ref_sim)
@@ -307,19 +307,43 @@ namespace Game
                 _prediction_selection.selected_group_index >= 0;
         if (!had_explicit_selection)
         {
-            // Seed a useful default overlay set for the first time the UI appears.
-            bool orbiter_overlay_added = false;
-            for (const PredictionTrackState &track : _prediction_tracks)
+            // Prefer an authored group that contains the player so formation overlays appear together.
+            bool seeded_from_group = false;
+            for (size_t group_index = 0; group_index < _prediction_groups.size(); ++group_index)
             {
-                if (track.key == _prediction_selection.active_subject)
+                const PredictionGroup &group = _prediction_groups[group_index];
+                if (!contains_key(group.members, _prediction_selection.active_subject))
                 {
                     continue;
                 }
 
-                if (!orbiter_overlay_added && track.key.kind == PredictionSubjectKind::Orbiter)
+                _prediction_selection.selected_group_index = static_cast<int>(group_index);
+                for (PredictionSubjectKey member : group.members)
                 {
-                    _prediction_selection.overlay_subjects.push_back(track.key);
-                    orbiter_overlay_added = true;
+                    if (member != _prediction_selection.active_subject)
+                    {
+                        _prediction_selection.overlay_subjects.push_back(member);
+                    }
+                }
+                seeded_from_group = !_prediction_selection.overlay_subjects.empty();
+                break;
+            }
+
+            if (!seeded_from_group)
+            {
+                bool orbiter_overlay_added = false;
+                for (const PredictionTrackState &track : _prediction_tracks)
+                {
+                    if (track.key == _prediction_selection.active_subject)
+                    {
+                        continue;
+                    }
+
+                    if (!orbiter_overlay_added && track.key.kind == PredictionSubjectKind::Orbiter)
+                    {
+                        _prediction_selection.overlay_subjects.push_back(track.key);
+                        orbiter_overlay_added = true;
+                    }
                 }
             }
 

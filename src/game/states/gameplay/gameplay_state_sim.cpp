@@ -115,6 +115,243 @@ namespace Game
         }
     }
 
+    void GameplayState::update_runtime_orbiter_rails()
+    {
+        if (_rails_warp_active)
+        {
+            return;
+        }
+
+        const bool can_run_runtime_rails =
+                _runtime_orbiter_rails_enabled &&
+                _runtime_orbiter_rails_distance_m > 0.0 &&
+                _orbitsim &&
+                _physics &&
+                _physics_context &&
+                _orbitsim->reference_sim_body();
+
+        const EntityId anchor_eid = select_rebase_anchor_entity();
+        const Entity *anchor_entity = _world.entities().find(anchor_eid);
+        const WorldVec3 anchor_pos_world = anchor_entity ? anchor_entity->position_world() : _scenario_config.system_center;
+
+        const double promote_distance_m = std::max(0.0, _runtime_orbiter_rails_distance_m);
+        const double return_distance_m = promote_distance_m * kRuntimeOrbiterRailsReturnDistanceRatio;
+
+        for (auto &orbiter : _orbiters)
+        {
+            if (orbiter.is_player || !orbiter.entity.is_valid())
+            {
+                continue;
+            }
+
+            WorldVec3 orbiter_pos_world{0.0, 0.0, 0.0};
+            if (orbiter.rails.active() && _orbitsim)
+            {
+                const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+                const orbitsim::Spacecraft *sc = ref_sim ? _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id) : nullptr;
+                if (ref_sim && sc)
+                {
+                    orbiter_pos_world = _scenario_config.system_center +
+                            WorldVec3(sc->state.position_m - ref_sim->state.position_m);
+                }
+                else if (const Entity *entity = _world.entities().find(orbiter.entity))
+                {
+                    orbiter_pos_world = entity->position_world();
+                }
+            }
+            else if (const Entity *entity = _world.entities().find(orbiter.entity))
+            {
+                orbiter_pos_world = entity->position_world();
+            }
+
+            const double distance_m = glm::length(glm::dvec3(orbiter_pos_world - anchor_pos_world));
+
+            if (!can_run_runtime_rails)
+            {
+                if (orbiter.rails.active())
+                {
+                    (void) demote_orbiter_from_rails(orbiter);
+                }
+                continue;
+            }
+
+            if (orbiter.rails.active())
+            {
+                if (distance_m <= return_distance_m)
+                {
+                    (void) demote_orbiter_from_rails(orbiter);
+                }
+                continue;
+            }
+
+            if (distance_m >= promote_distance_m)
+            {
+                (void) promote_orbiter_to_rails(orbiter);
+            }
+        }
+    }
+
+    void GameplayState::sync_runtime_orbiter_rails(const double dt_s)
+    {
+        if (_rails_warp_active || !_orbitsim)
+        {
+            return;
+        }
+
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        if (!ref_sim)
+        {
+            return;
+        }
+
+        for (auto &orbiter : _orbiters)
+        {
+            if (!orbiter.rails.active() || !orbiter.entity.is_valid())
+            {
+                continue;
+            }
+
+            const orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id);
+            Entity *ent = _world.entities().find(orbiter.entity);
+            if (!sc || !ent)
+            {
+                continue;
+            }
+
+            update_rails_rotation(orbiter.rails,
+                                  glm::vec3(0.0f),
+                                  0.0f,
+                                  0.0f,
+                                  false,
+                                  dt_s);
+
+            const WorldVec3 pos_world = _scenario_config.system_center +
+                    WorldVec3(sc->state.position_m - ref_sim->state.position_m);
+
+            ent->set_position_world(pos_world);
+            ent->set_rotation(orbiter.rails.rotation);
+            if (ent->uses_interpolation())
+            {
+                ent->interpolation().curr_position = pos_world;
+                ent->interpolation().curr_rotation = orbiter.rails.rotation;
+            }
+        }
+    }
+
+    bool GameplayState::promote_orbiter_to_rails(OrbiterInfo &orbiter)
+    {
+        if (_rails_warp_active || !_orbitsim || !_physics_context || !orbiter.entity.is_valid() || orbiter.rails.active())
+        {
+            return false;
+        }
+
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        Entity *ent = _world.entities().find(orbiter.entity);
+        if (!ref_sim || !ent || !ent->has_physics() || !_physics)
+        {
+            return false;
+        }
+
+        const Physics::BodyId body_id{ent->physics_body_value()};
+        if (!_physics->is_body_valid(body_id))
+        {
+            return false;
+        }
+
+        const WorldVec3 pos_world = local_to_world_d(_physics->get_position(body_id), _physics_context->origin_world());
+        const glm::dvec3 vel_world = _physics_context->velocity_origin_world() +
+                                     glm::dvec3(_physics->get_linear_velocity(body_id));
+        const glm::quat rot = _physics->get_rotation(body_id);
+        const glm::vec3 ang_vel = _physics->get_angular_velocity(body_id);
+
+        orbitsim::Spacecraft sc{};
+        sc.state = orbitsim::make_state(ref_sim->state.position_m + glm::dvec3(pos_world - _scenario_config.system_center),
+                                        ref_sim->state.velocity_mps + vel_world);
+        sc.dry_mass_kg = std::max(1.0, orbiter.mass_kg);
+
+        const auto handle = _orbitsim->sim.create_spacecraft(std::move(sc));
+        if (!handle.valid())
+        {
+            return false;
+        }
+
+        _physics->destroy_body(body_id);
+        ent->clear_physics_body();
+
+        orbiter.rails.sc_id = handle.id;
+        orbiter.rails.rotation = rot;
+        orbiter.rails.angular_velocity_radps = ang_vel;
+        orbiter.rails.sas_enabled = false;
+        orbiter.rails.sas_toggle_prev_down = false;
+
+        ent->set_position_world(pos_world);
+        ent->set_rotation(rot);
+        if (ent->uses_interpolation())
+        {
+            ent->interpolation().set_immediate(pos_world, rot);
+        }
+        return true;
+    }
+
+    bool GameplayState::demote_orbiter_from_rails(OrbiterInfo &orbiter)
+    {
+        if (_rails_warp_active || !_orbitsim || !_physics || !_physics_context || !orbiter.rails.active() ||
+            !orbiter.entity.is_valid())
+        {
+            return false;
+        }
+
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        const orbitsim::Spacecraft *sc = ref_sim ? _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id) : nullptr;
+        Entity *ent = _world.entities().find(orbiter.entity);
+        if (!ref_sim || !sc || !ent)
+        {
+            return false;
+        }
+
+        const WorldVec3 pos_world = _scenario_config.system_center +
+                WorldVec3(sc->state.position_m - ref_sim->state.position_m);
+        const glm::dvec3 vel_world = sc->state.velocity_mps - ref_sim->state.velocity_mps;
+        const glm::quat rot = orbiter.rails.rotation;
+
+        Physics::BodyId body_id{};
+        if (ent->has_physics())
+        {
+            body_id = Physics::BodyId{ent->physics_body_value()};
+        }
+        else
+        {
+            Physics::BodySettings settings = orbiter.physics_settings;
+            settings.position = world_to_local_d(pos_world, _physics_context->origin_world());
+            settings.rotation = rot;
+            settings.user_data = static_cast<uint64_t>(ent->id().value);
+            body_id = _physics->create_body(settings);
+            if (!body_id.is_valid())
+            {
+                return false;
+            }
+
+            ent->set_physics_body(body_id.value);
+            ent->set_use_interpolation(orbiter.use_physics_interpolation);
+        }
+
+        _physics->set_transform(body_id, world_to_local_d(pos_world, _physics_context->origin_world()), rot);
+        _physics->set_linear_velocity(body_id, glm::vec3(vel_world - _physics_context->velocity_origin_world()));
+        _physics->set_angular_velocity(body_id, orbiter.rails.angular_velocity_radps);
+        _physics->activate(body_id);
+
+        ent->set_position_world(pos_world);
+        ent->set_rotation(rot);
+        if (ent->uses_interpolation())
+        {
+            ent->interpolation().set_immediate(pos_world, rot);
+        }
+
+        (void) _orbitsim->sim.remove_spacecraft(orbiter.rails.sc_id);
+        orbiter.rails.clear();
+        return true;
+    }
+
     // Advances one fixed-step physics tick, including orbit sim gravity and moving-origin bookkeeping.
     void GameplayState::step_physics(GameStateContext &ctx, float fixed_dt)
     {
@@ -133,8 +370,10 @@ namespace Game
 
         if (use_orbitsim)
         {
+            update_runtime_orbiter_rails();
             _orbitsim->sim.step(static_cast<double>(fixed_dt));
             sync_celestial_render_entities(ctx);
+            sync_runtime_orbiter_rails(static_cast<double>(fixed_dt));
         }
 
         // Sample gravity in gameplay world coordinates by converting into the reference-body-centered orbit frame.
@@ -302,7 +541,26 @@ namespace Game
 
         for (auto &orbiter : _orbiters)
         {
-            orbiter.rails.clear();
+            WorldVec3 pos_world{0.0, 0.0, 0.0};
+            glm::dvec3 vel_world(0.0);
+            glm::quat rot{1.0f, 0.0f, 0.0f, 0.0f};
+            glm::vec3 ang_vel_world(0.0f);
+            bool have_state_snapshot = false;
+
+            if (orbiter.rails.active())
+            {
+                if (const orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id))
+                {
+                    pos_world = _scenario_config.system_center +
+                            WorldVec3(sc->state.position_m - ref_sim->state.position_m);
+                    vel_world = sc->state.velocity_mps - ref_sim->state.velocity_mps;
+                    rot = orbiter.rails.rotation;
+                    ang_vel_world = orbiter.rails.angular_velocity_radps;
+                    have_state_snapshot = true;
+                }
+                (void) _orbitsim->sim.remove_spacecraft(orbiter.rails.sc_id);
+                orbiter.rails.clear();
+            }
 
             if (!orbiter.entity.is_valid())
             {
@@ -315,10 +573,11 @@ namespace Game
                 continue;
             }
 
-            WorldVec3 pos_world = ent->position_world();
-            glm::dvec3 vel_world(0.0);
-            glm::quat rot = ent->rotation();
-            glm::vec3 ang_vel_world(0.0f);
+            if (!have_state_snapshot)
+            {
+                pos_world = ent->position_world();
+                rot = ent->rotation();
+            }
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
             if (_physics && _physics_context && ent->has_physics())
@@ -497,9 +756,27 @@ namespace Game
             }
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-            if (_physics && _physics_context && ent && ent->has_physics())
+            if (_physics && _physics_context && ent)
             {
-                const Physics::BodyId body_id{ent->physics_body_value()};
+                Physics::BodyId body_id{};
+                if (ent->has_physics())
+                {
+                    body_id = Physics::BodyId{ent->physics_body_value()};
+                }
+                else
+                {
+                    Physics::BodySettings settings = orbiter.physics_settings;
+                    settings.position = world_to_local_d(pos_world, _physics_context->origin_world());
+                    settings.rotation = rot;
+                    settings.user_data = static_cast<uint64_t>(ent->id().value);
+                    body_id = _physics->create_body(settings);
+                    if (body_id.is_valid())
+                    {
+                        ent->set_physics_body(body_id.value);
+                        ent->set_use_interpolation(orbiter.use_physics_interpolation);
+                    }
+                }
+
                 if (_physics->is_body_valid(body_id))
                 {
                     // Re-express world-space warp results in the local moving frame used by the physics world.

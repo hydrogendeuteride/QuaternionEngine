@@ -100,6 +100,8 @@ namespace Game
         bool is_player{false}; // HUD/camera/prediction subject candidates
         bool is_rebase_anchor{false};
         double mass_kg{0.0};
+        Physics::BodySettings physics_settings{};
+        bool use_physics_interpolation{true};
 
         struct RailsState
         {

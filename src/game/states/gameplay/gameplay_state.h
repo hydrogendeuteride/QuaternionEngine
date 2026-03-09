@@ -32,6 +32,9 @@ namespace Game
     class GameplayState : public IGameState
     {
     public:
+        static constexpr double kDefaultRuntimeOrbiterRailsDistanceM = 10'000.0;
+        static constexpr double kRuntimeOrbiterRailsReturnDistanceRatio = 0.85;
+
         // Compatibility aliases for gameplay internals referenced by tests/tools.
         using OrbitPredictionCache = Game::OrbitPredictionCache;
         using OrbitPlotPerfStats = Game::OrbitPlotPerfStats;
@@ -141,6 +144,10 @@ namespace Game
         void enter_rails_warp(GameStateContext &ctx);
         void exit_rails_warp(GameStateContext &ctx);
         void rails_warp_step(GameStateContext &ctx, double dt_s);
+        void update_runtime_orbiter_rails();
+        void sync_runtime_orbiter_rails(double dt_s);
+        bool promote_orbiter_to_rails(OrbiterInfo &orbiter);
+        bool demote_orbiter_from_rails(OrbiterInfo &orbiter);
         void sync_celestial_render_entities(GameStateContext &ctx);
 
         // Orbiter helpers
@@ -196,6 +203,8 @@ namespace Game
 
         bool _debug_draw_enabled{true};
         bool _reset_requested{false};
+        bool _runtime_orbiter_rails_enabled{true};
+        double _runtime_orbiter_rails_distance_m{kDefaultRuntimeOrbiterRailsDistanceM};
 
         // Orbit prediction (UI + debug draw)
         bool _prediction_enabled{true};

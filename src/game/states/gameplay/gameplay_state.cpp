@@ -348,6 +348,26 @@ namespace Game
                 }
             }
 
+            if (ImGui::Checkbox("Runtime orbiter rails", &_runtime_orbiter_rails_enabled))
+            {
+                mark_prediction_dirty();
+            }
+            double runtime_rails_distance_m = _runtime_orbiter_rails_distance_m;
+            if (ImGui::DragScalar("Runtime rails distance (m)",
+                                  ImGuiDataType_Double,
+                                  &runtime_rails_distance_m,
+                                  100.0f,
+                                  nullptr,
+                                  nullptr,
+                                  "%.0f"))
+            {
+                _runtime_orbiter_rails_distance_m = std::max(0.0, runtime_rails_distance_m);
+            }
+            ImGui::Text("Promote to rails at >= %.0f m", _runtime_orbiter_rails_distance_m);
+            ImGui::Text("Return to physics at <= %.0f m (%.0f%% hysteresis)",
+                        _runtime_orbiter_rails_distance_m * kRuntimeOrbiterRailsReturnDistanceRatio,
+                        kRuntimeOrbiterRailsReturnDistanceRatio * 100.0);
+
             ImGui::Separator();
             ImGui::Text("Contacts: %zu", _contact_log.size());
 
@@ -569,7 +589,7 @@ namespace Game
                     ImGui::TreePop();
                 }
 
-                if (ImGui::Button("Show demo trio"))
+                if (ImGui::Button("Show group + celestial"))
                 {
                     if (const PredictionTrackState *player_track = player_prediction_track())
                     {
@@ -577,19 +597,47 @@ namespace Game
                     }
 
                     _prediction_selection.overlay_subjects.clear();
-                    for (const PredictionTrackState &track : _prediction_tracks)
+                    _prediction_selection.selected_group_index = -1;
+
+                    for (size_t group_index = 0; group_index < _prediction_groups.size(); ++group_index)
                     {
-                        if (track.key == _prediction_selection.active_subject)
+                        const PredictionGroup &group = _prediction_groups[group_index];
+                        const bool group_contains_active =
+                                std::find(group.members.begin(),
+                                          group.members.end(),
+                                          _prediction_selection.active_subject) != group.members.end();
+                        if (!group_contains_active)
                         {
                             continue;
                         }
 
-                        if (track.key.kind == PredictionSubjectKind::Orbiter)
+                        _prediction_selection.selected_group_index = static_cast<int>(group_index);
+                        for (PredictionSubjectKey member : group.members)
                         {
-                            _prediction_selection.overlay_subjects.push_back(track.key);
-                            break;
+                            if (member != _prediction_selection.active_subject)
+                            {
+                                _prediction_selection.overlay_subjects.push_back(member);
+                            }
+                        }
+                        break;
+                    }
+
+                    if (_prediction_selection.overlay_subjects.empty())
+                    {
+                        for (const PredictionTrackState &track : _prediction_tracks)
+                        {
+                            if (track.key == _prediction_selection.active_subject)
+                            {
+                                continue;
+                            }
+
+                            if (track.key.kind == PredictionSubjectKind::Orbiter)
+                            {
+                                _prediction_selection.overlay_subjects.push_back(track.key);
+                            }
                         }
                     }
+
                     for (const PredictionTrackState &track : _prediction_tracks)
                     {
                         if (track.key.kind == PredictionSubjectKind::Celestial)
@@ -598,11 +646,10 @@ namespace Game
                             break;
                         }
                     }
-                    _prediction_selection.selected_group_index = -1;
                     _prediction_dirty = true;
                 }
                 ImGui::SameLine();
-                ImGui::TextUnformatted("Shows ship + probe + first celestial overlay together.");
+                ImGui::TextUnformatted("Shows the active flight group plus the first celestial overlay.");
 
                 std::string visible_prediction_summary = active_prediction
                                                              ? prediction_subject_label(active_prediction->key)
