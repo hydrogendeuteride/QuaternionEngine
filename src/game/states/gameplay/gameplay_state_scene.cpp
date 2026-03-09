@@ -129,7 +129,8 @@ namespace Game
             ScenarioConfig::OrbiterDef collision_test{};
             collision_test.name = "collision_test";
             collision_test.is_player = false;
-            collision_test.offset_from_player = glm::dvec3(0.0, 0.0, 150.0);
+            collision_test.prediction_group = "flight";
+            collision_test.offset_from_player = glm::dvec3(0.0, -0.5, 150.0);
             collision_test.relative_velocity = glm::dvec3(0.0, 0.0, -25.0);
             collision_test.primitive = GameAPI::PrimitiveType::Cube;
             collision_test.render_scale = glm::vec3(3.0f);
@@ -326,6 +327,8 @@ namespace Game
             info.is_player = is_primary_player;
             info.is_rebase_anchor = orbiter_def.is_rebase_anchor;
             info.mass_kg = std::max(0.0, static_cast<double>(orbiter_def.body_settings.mass));
+            info.physics_settings = orbiter_def.body_settings;
+            info.use_physics_interpolation = true;
             _orbiters.push_back(std::move(info));
         }
 
