@@ -780,7 +780,6 @@ namespace Game
             }
         }
 
-        const WorldVec3 ref_body_world = prediction_reference_body_world();
         const double tan_half_fov = std::tan(glm::radians(static_cast<double>(camera_fov_deg)) * 0.5);
         OrbitPlotLodBuilder::CameraContext lod_camera{};
         lod_camera.camera_world = camera_world;
@@ -821,14 +820,15 @@ namespace Game
             refresh_prediction_world_points(*track);
             if (!track->cache.valid ||
                 track->cache.points_world.size() < 2 ||
-                track->cache.trajectory_bci.size() != track->cache.points_world.size())
+                track->cache.trajectory_frame.size() != track->cache.points_world.size())
             {
                 continue;
             }
 
-            const auto &traj_base = track->cache.trajectory_bci;
+            const auto &traj_base = track->cache.trajectory_frame;
             const auto &points_base = track->cache.points_world;
-            const auto &traj_planned = track->cache.trajectory_bci_planned;
+            const auto &traj_planned = track->cache.trajectory_frame_planned;
+            const WorldVec3 ref_body_world = prediction_frame_origin_world(track->cache);
 
             const double t0 = traj_base.front().t_s;
             const double t1 = traj_base.back().t_s;
@@ -865,7 +865,7 @@ namespace Game
             }
 
             std::vector<orbitsim::TrajectorySegment> base_segments_fallback;
-            const std::vector<orbitsim::TrajectorySegment> *traj_base_segments = &track->cache.trajectory_segments_bci;
+            const std::vector<orbitsim::TrajectorySegment> *traj_base_segments = &track->cache.trajectory_segments_frame;
             if (traj_base_segments->empty())
             {
                 base_segments_fallback = trajectory_segments_from_samples(traj_base);
@@ -877,7 +877,7 @@ namespace Game
             }
 
             std::vector<orbitsim::TrajectorySegment> planned_segments_fallback;
-            const std::vector<orbitsim::TrajectorySegment> *traj_planned_segments = &track->cache.trajectory_segments_bci_planned;
+            const std::vector<orbitsim::TrajectorySegment> *traj_planned_segments = &track->cache.trajectory_segments_frame_planned;
             if (traj_planned_segments->empty() && !traj_planned.empty())
             {
                 planned_segments_fallback = trajectory_segments_from_samples(traj_planned);

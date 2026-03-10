@@ -33,8 +33,8 @@ namespace Game
             int node_id{-1};
             double t_s{0.0};
             bool valid{false};
-            orbitsim::Vec3 rel_position_m{0.0, 0.0, 0.0};
-            orbitsim::Vec3 rel_velocity_mps{0.0, 0.0, 0.0};
+            orbitsim::Vec3 inertial_position_m{0.0, 0.0, 0.0};
+            orbitsim::Vec3 inertial_velocity_mps{0.0, 0.0, 0.0};
         };
 
         struct ManeuverImpulse
@@ -59,9 +59,6 @@ namespace Game
 
             // Celestial jobs identify the predicted body directly.
             orbitsim::BodyId subject_body_id{orbitsim::kInvalidBodyId};
-            orbitsim::BodyId reference_body_id{orbitsim::kInvalidBodyId};
-            double reference_body_mass_kg{0.0};
-            double reference_body_radius_m{0.0};
 
             orbitsim::Vec3 ship_bary_position_m{0.0, 0.0, 0.0};
             orbitsim::Vec3 ship_bary_velocity_mps{0.0, 0.0, 0.0};
@@ -80,22 +77,14 @@ namespace Game
             double compute_time_ms{0.0};
 
             double build_time_s{0.0};
-            orbitsim::Vec3 ship_rel_position_m{0.0, 0.0, 0.0};
-            orbitsim::Vec3 ship_rel_velocity_mps{0.0, 0.0, 0.0};
+            SharedCelestialEphemeris shared_ephemeris{};
+            std::vector<orbitsim::MassiveBody> massive_bodies{};
 
-            std::vector<orbitsim::TrajectorySample> trajectory_bci;
-            std::vector<orbitsim::TrajectorySample> trajectory_bci_planned;
-            std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci;
-            std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci_planned;
+            std::vector<orbitsim::TrajectorySample> trajectory_inertial;
+            std::vector<orbitsim::TrajectorySample> trajectory_inertial_planned;
+            std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial;
+            std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial_planned;
             std::vector<ManeuverNodePreview> maneuver_previews;
-            std::vector<float> altitude_km;
-            std::vector<float> speed_kmps;
-
-            double semi_major_axis_m{0.0};
-            double eccentricity{0.0};
-            double orbital_period_s{0.0};
-            double periapsis_alt_km{0.0};
-            double apoapsis_alt_km{std::numeric_limits<double>::infinity()};
         };
 
         struct EphemerisSamplingSpec
@@ -133,10 +122,15 @@ namespace Game
         OrbitPredictionService(const OrbitPredictionService &) = delete;
         OrbitPredictionService &operator=(const OrbitPredictionService &) = delete;
 
+        // Queue or replace the latest prediction job for a track; work runs on the background thread.
         void request(Request request);
+        // Non-blocking poll for the next completed prediction result.
         std::optional<Result> poll_completed();
+        // Invalidate queued/in-flight work and clear cached ephemerides.
         void reset();
+        // Reuse a compatible cached ephemeris when possible, otherwise build and cache one.
         SharedCelestialEphemeris get_or_build_ephemeris(const EphemerisBuildRequest &request);
+        // Derive spacecraft prediction horizon and cadence from the current orbital state.
         static EphemerisSamplingSpec build_ephemeris_sampling_spec(const Request &request);
 
     private:
@@ -148,10 +142,13 @@ namespace Game
             Request request{};
         };
 
+        // Execute a single queued prediction request on the worker.
         Result compute_prediction(uint64_t generation_id, const Request &request);
+        // Drop stale results after reset() or when a newer request supersedes the same track.
         static bool should_publish_result(const PendingJob &job,
                                           uint64_t current_request_epoch,
                                           const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track);
+        // Background loop that consumes queued jobs and publishes fresh results.
         void worker_loop();
 
         std::thread _worker;

@@ -100,6 +100,9 @@ namespace Game
                                              float fixed_dt,
                                              bool thrusting,
                                              bool with_maneuvers) const;
+        void rebuild_prediction_frame_options();
+        bool set_prediction_frame_spec(const orbitsim::TrajectoryFrameSpec &spec);
+        orbitsim::TrajectoryFrameSpec default_prediction_frame_spec() const;
         bool request_orbiter_prediction_async(PredictionTrackState &track,
                                               const WorldVec3 &subject_pos_world,
                                               const glm::dvec3 &subject_vel_world,
@@ -132,6 +135,16 @@ namespace Game
         bool prediction_subject_is_player(PredictionSubjectKey key) const;
         bool prediction_subject_supports_maneuvers(PredictionSubjectKey key) const;
         std::string prediction_subject_label(PredictionSubjectKey key) const;
+        const CelestialBodyInfo *find_celestial_body_info(orbitsim::BodyId body_id) const;
+        const orbitsim::MassiveBody *find_massive_body(const std::vector<orbitsim::MassiveBody> &bodies,
+                                                       orbitsim::BodyId body_id) const;
+        orbitsim::BodyId resolve_prediction_analysis_body_id(const OrbitPredictionCache &cache,
+                                                             PredictionSubjectKey key,
+                                                             double query_time_s) const;
+        WorldVec3 prediction_world_reference_body_world() const;
+        WorldVec3 prediction_frame_origin_world(const OrbitPredictionCache &cache) const;
+        void refresh_prediction_derived_cache(PredictionTrackState &track);
+        void refresh_all_prediction_derived_caches();
 
         void emit_orbit_prediction_debug(GameStateContext &ctx);
         void emit_maneuver_node_debug_overlay(GameStateContext &ctx);
@@ -229,6 +242,7 @@ namespace Game
         std::vector<PredictionTrackState> _prediction_tracks{};
         std::vector<PredictionGroup> _prediction_groups{};
         PredictionSelectionState _prediction_selection{};
+        PredictionFrameSelectionState _prediction_frame_selection{};
 
         bool build_maneuver_gizmo_view_context(const GameStateContext &ctx, ManeuverGizmoViewContext &out_view) const;
         bool maneuver_gizmo_is_occluded(const ManeuverGizmoViewContext &view, const WorldVec3 &point_world) const;

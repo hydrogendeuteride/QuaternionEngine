@@ -6,6 +6,7 @@
 #include "core/input/input_system.h"
 
 #include "orbitsim/coordinate_frames.hpp"
+#include "orbitsim/trajectory_transforms.hpp"
 
 #include "imgui.h"
 
