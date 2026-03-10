@@ -110,7 +110,7 @@ namespace Game
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial_planned;
 
-        // Derived display-frame data rebuilt locally when the selected analysis frame changes.
+        // Derived display-frame data rebuilt locally when the selected display frame changes.
         std::vector<orbitsim::TrajectorySample> trajectory_frame;
         std::vector<orbitsim::TrajectorySample> trajectory_frame_planned;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame;
@@ -129,6 +129,7 @@ namespace Game
         double orbital_period_s{0.0};
         double periapsis_alt_km{0.0};
         double apoapsis_alt_km{std::numeric_limits<double>::infinity()};
+        orbitsim::BodyId metrics_body_id{orbitsim::kInvalidBodyId};
 
         // Reset every cached prediction artifact so the next update rebuilds from scratch.
         void clear()
@@ -157,6 +158,7 @@ namespace Game
             orbital_period_s = 0.0;
             periapsis_alt_km = 0.0;
             apoapsis_alt_km = std::numeric_limits<double>::infinity();
+            metrics_body_id = orbitsim::kInvalidBodyId;
         }
     };
 
@@ -175,6 +177,38 @@ namespace Game
         void clear()
         {
             spec = orbitsim::TrajectoryFrameSpec::inertial();
+            options.clear();
+            selected_index = -1;
+        }
+    };
+
+    enum class PredictionAnalysisMode : uint8_t
+    {
+        AutoPrimaryBCI = 0,
+        FixedBodyBCI,
+    };
+
+    struct PredictionAnalysisSpec
+    {
+        PredictionAnalysisMode mode{PredictionAnalysisMode::AutoPrimaryBCI};
+        orbitsim::BodyId fixed_body_id{orbitsim::kInvalidBodyId};
+    };
+
+    struct PredictionAnalysisOption
+    {
+        PredictionAnalysisSpec spec{};
+        std::string label{};
+    };
+
+    struct PredictionAnalysisSelectionState
+    {
+        PredictionAnalysisSpec spec{};
+        std::vector<PredictionAnalysisOption> options{};
+        int selected_index{-1};
+
+        void clear()
+        {
+            spec = {};
             options.clear();
             selected_index = -1;
         }

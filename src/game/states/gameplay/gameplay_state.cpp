@@ -49,6 +49,7 @@ namespace Game
         _prediction_groups.clear();
         _prediction_selection.clear();
         _prediction_frame_selection.clear();
+        _prediction_analysis_selection.clear();
         _orbit_plot_perf = {};
 
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
@@ -92,6 +93,7 @@ namespace Game
         _prediction_groups.clear();
         _prediction_selection.clear();
         _prediction_frame_selection.clear();
+        _prediction_analysis_selection.clear();
         _prediction_dirty = true;
         _prediction_service.reset();
         _orbit_plot_perf = {};
@@ -476,6 +478,7 @@ namespace Game
                         (ctx.renderer && ctx.renderer->_context) ? ctx.renderer->_context->orbit_plot : nullptr;
                 rebuild_prediction_subjects();
                 rebuild_prediction_frame_options();
+                rebuild_prediction_analysis_options();
 
                 const PredictionTrackState *active_prediction = active_prediction_track();
                 std::string active_prediction_label = active_prediction
@@ -510,9 +513,10 @@ namespace Game
                 const char *frame_label = (_prediction_frame_selection.selected_index >= 0 &&
                                            _prediction_frame_selection.selected_index <
                                                    static_cast<int>(_prediction_frame_selection.options.size()))
-                                              ? _prediction_frame_selection.options[static_cast<size_t>(_prediction_frame_selection.selected_index)].label.c_str()
+                                              ? _prediction_frame_selection.options[static_cast<size_t>(
+                                                        _prediction_frame_selection.selected_index)].label.c_str()
                                               : "Unknown";
-                if (ImGui::BeginCombo("Prediction frame", frame_label))
+                if (ImGui::BeginCombo("Display frame", frame_label))
                 {
                     for (std::size_t i = 0; i < _prediction_frame_selection.options.size(); ++i)
                     {
@@ -525,6 +529,34 @@ namespace Game
                         if (ImGui::Selectable(option.label.c_str(), selected))
                         {
                             (void) set_prediction_frame_spec(option.spec);
+                        }
+                        if (selected)
+                        {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+
+                const char *analysis_label =
+                        (_prediction_analysis_selection.selected_index >= 0 &&
+                         _prediction_analysis_selection.selected_index <
+                                 static_cast<int>(_prediction_analysis_selection.options.size()))
+                            ? _prediction_analysis_selection
+                                      .options[static_cast<size_t>(_prediction_analysis_selection.selected_index)]
+                                      .label.c_str()
+                            : "Unknown";
+                if (ImGui::BeginCombo("Analysis frame", analysis_label))
+                {
+                    for (std::size_t i = 0; i < _prediction_analysis_selection.options.size(); ++i)
+                    {
+                        const PredictionAnalysisOption &option = _prediction_analysis_selection.options[i];
+                        const bool selected =
+                                option.spec.mode == _prediction_analysis_selection.spec.mode &&
+                                option.spec.fixed_body_id == _prediction_analysis_selection.spec.fixed_body_id;
+                        if (ImGui::Selectable(option.label.c_str(), selected))
+                        {
+                            (void) set_prediction_analysis_spec(option.spec);
                         }
                         if (selected)
                         {
@@ -941,6 +973,15 @@ namespace Game
                     {
                         const double age_s = _orbitsim->sim.time_s() - active_prediction->cache.build_time_s;
                         ImGui::Text("Prediction: %zu pts, age %.1f s", active_prediction->cache.points_world.size(), age_s);
+                        const orbitsim::BodyId analysis_body_id = active_prediction->cache.metrics_body_id;
+                        if (const CelestialBodyInfo *analysis_body = find_celestial_body_info(analysis_body_id))
+                        {
+                            ImGui::Text("Metrics frame: %s BCI", analysis_body->name.c_str());
+                        }
+                        else
+                        {
+                            ImGui::TextUnformatted("Metrics frame: Auto Primary (BCI)");
+                        }
                     }
 
                     if (active_prediction && active_prediction->cache.valid)
