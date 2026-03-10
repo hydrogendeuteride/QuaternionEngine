@@ -8,6 +8,28 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     }
 
     const double now_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+    const PredictionTrackState *player_track = player_prediction_track();
+    const auto default_node_primary_body_id = [&]() -> orbitsim::BodyId {
+        if (_prediction_analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
+            _prediction_analysis_selection.spec.fixed_body_id != orbitsim::kInvalidBodyId)
+        {
+            return _prediction_analysis_selection.spec.fixed_body_id;
+        }
+
+        if (player_track)
+        {
+            if (player_track->cache.valid && !player_track->cache.trajectory_inertial.empty())
+            {
+                return resolve_prediction_analysis_body_id(player_track->cache,
+                                                           player_track->key,
+                                                           now_s);
+            }
+        }
+
+        return (_orbitsim && _orbitsim->world_reference_body())
+                       ? _orbitsim->world_reference_body()->sim_id
+                       : orbitsim::kInvalidBodyId;
+    };
 
     ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - 28.0f,
                                    viewport->WorkPos.y + viewport->WorkSize.y - 28.0f),
@@ -47,9 +69,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         n.id = _maneuver_state.next_node_id++;
         n.time_s = now_s + 60.0;
         n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
-        n.primary_body_id = (_orbitsim && _orbitsim->reference_body())
-                                ? _orbitsim->reference_body()->sim_id
-                                : orbitsim::kInvalidBodyId;
+        n.primary_body_id = default_node_primary_body_id();
         n.total_dv_mps = 0.0;
         _maneuver_state.nodes.push_back(n);
         _maneuver_state.selected_node_id = n.id;
@@ -157,9 +177,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         n.id = _maneuver_state.next_node_id++;
         n.time_s = time_s;
         n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
-        n.primary_body_id = (_orbitsim && _orbitsim->reference_body())
-                                ? _orbitsim->reference_body()->sim_id
-                                : orbitsim::kInvalidBodyId;
+        n.primary_body_id = default_node_primary_body_id();
         n.total_dv_mps = 0.0;
         _maneuver_state.nodes.push_back(n);
         _maneuver_state.selected_node_id = n.id;
@@ -529,6 +547,30 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
 
     sel->total_dv_mps = safe_length(sel->dv_rtn_mps);
     ImGui::Text("DV total: %.2f m/s", sel->total_dv_mps);
+
+    const orbitsim::BodyId analysis_body_id = (player_track && player_track->cache.valid)
+                                                  ? resolve_prediction_analysis_body_id(player_track->cache,
+                                                                                        player_track->key,
+                                                                                        sel->time_s)
+                                                  : default_node_primary_body_id();
+    if (const CelestialBodyInfo *analysis_body = find_celestial_body_info(analysis_body_id))
+    {
+        ImGui::Text("Analysis body: %s", analysis_body->name.c_str());
+        if (ImGui::Button("Use Analysis Body"))
+        {
+            sel->primary_body_id = analysis_body_id;
+            mark_prediction_dirty();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Apply Analysis Body To All"))
+        {
+            for (ManeuverNode &node : _maneuver_state.nodes)
+            {
+                node.primary_body_id = analysis_body_id;
+            }
+            mark_prediction_dirty();
+        }
+    }
 
     ImGui::Spacing();
     ImGui::TextDisabled("Tip: select from the list, drag the timeline marker, or use the gizmo in-world.");

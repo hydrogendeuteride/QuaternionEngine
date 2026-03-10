@@ -9,10 +9,12 @@
 #include "time_warp_state.h"
 #include "physics/physics_context.h"
 #include "physics/physics_world.h"
+#include "orbitsim/spacecraft_lookup.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -100,6 +102,11 @@ namespace Game
                                              float fixed_dt,
                                              bool thrusting,
                                              bool with_maneuvers) const;
+        void rebuild_prediction_frame_options();
+        bool set_prediction_frame_spec(const orbitsim::TrajectoryFrameSpec &spec);
+        orbitsim::TrajectoryFrameSpec default_prediction_frame_spec() const;
+        void rebuild_prediction_analysis_options();
+        bool set_prediction_analysis_spec(const PredictionAnalysisSpec &spec);
         bool request_orbiter_prediction_async(PredictionTrackState &track,
                                               const WorldVec3 &subject_pos_world,
                                               const glm::dvec3 &subject_vel_world,
@@ -114,7 +121,8 @@ namespace Game
                                              bool with_maneuvers);
         void update_celestial_prediction_track(PredictionTrackState &track,
                                                double now_s);
-        void refresh_prediction_world_points(PredictionTrackState &track);
+        void refresh_prediction_world_points(PredictionTrackState &track,
+                                             double display_time_s);
         WorldVec3 prediction_reference_body_world() const;
         bool prediction_subject_thrust_applied_this_tick(PredictionSubjectKey key) const;
         void rebuild_prediction_subjects();
@@ -132,6 +140,40 @@ namespace Game
         bool prediction_subject_is_player(PredictionSubjectKey key) const;
         bool prediction_subject_supports_maneuvers(PredictionSubjectKey key) const;
         std::string prediction_subject_label(PredictionSubjectKey key) const;
+        const CelestialBodyInfo *find_celestial_body_info(orbitsim::BodyId body_id) const;
+        const orbitsim::MassiveBody *find_massive_body(const std::vector<orbitsim::MassiveBody> &bodies,
+                                                       orbitsim::BodyId body_id) const;
+        WorldVec3 prediction_body_world_position(orbitsim::BodyId body_id,
+                                                 const OrbitPredictionCache *cache = nullptr,
+                                                 double query_time_s = std::numeric_limits<double>::quiet_NaN()) const;
+        bool sample_prediction_inertial_state(const std::vector<orbitsim::TrajectorySample> &trajectory,
+                                              double query_time_s,
+                                              orbitsim::State &out_state) const;
+        orbitsim::SpacecraftStateLookup build_prediction_player_lookup() const;
+        orbitsim::TrajectoryFrameSpec resolve_prediction_display_frame_spec(
+                const OrbitPredictionCache &cache,
+                double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
+        bool build_prediction_display_transform(const OrbitPredictionCache &cache,
+                                               WorldVec3 &out_origin_world,
+                                               glm::dmat3 &out_frame_to_world,
+                                               double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
+        WorldVec3 prediction_sample_position_world(const OrbitPredictionCache &cache,
+                                                   const orbitsim::TrajectorySample &sample,
+                                                   double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
+        WorldVec3 prediction_sample_hermite_world(const OrbitPredictionCache &cache,
+                                                  const orbitsim::TrajectorySample &a,
+                                                  const orbitsim::TrajectorySample &b,
+                                                  double t_s,
+                                                  double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
+        orbitsim::BodyId resolve_prediction_analysis_body_id(const OrbitPredictionCache &cache,
+                                                             PredictionSubjectKey key,
+                                                             double query_time_s) const;
+        WorldVec3 prediction_world_reference_body_world() const;
+        WorldVec3 prediction_frame_origin_world(const OrbitPredictionCache &cache,
+                                                double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
+        void refresh_prediction_derived_cache(PredictionTrackState &track,
+                                              double display_time_s = std::numeric_limits<double>::quiet_NaN());
+        void refresh_all_prediction_derived_caches();
 
         void emit_orbit_prediction_debug(GameStateContext &ctx);
         void emit_maneuver_node_debug_overlay(GameStateContext &ctx);
@@ -229,6 +271,8 @@ namespace Game
         std::vector<PredictionTrackState> _prediction_tracks{};
         std::vector<PredictionGroup> _prediction_groups{};
         PredictionSelectionState _prediction_selection{};
+        PredictionFrameSelectionState _prediction_frame_selection{};
+        PredictionAnalysisSelectionState _prediction_analysis_selection{};
 
         bool build_maneuver_gizmo_view_context(const GameStateContext &ctx, ManeuverGizmoViewContext &out_view) const;
         bool maneuver_gizmo_is_occluded(const ManeuverGizmoViewContext &view, const WorldVec3 &point_world) const;

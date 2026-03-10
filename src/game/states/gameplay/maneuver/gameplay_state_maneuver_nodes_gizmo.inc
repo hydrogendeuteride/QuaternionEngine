@@ -81,10 +81,19 @@ bool GameplayState::build_maneuver_gizmo_view_context(const GameStateContext &ct
         return false;
     }
 
-    const CelestialBodyInfo *ref_info = _orbitsim ? _orbitsim->reference_body() : nullptr;
+    const double analysis_time_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+    const PredictionTrackState *player_track = player_prediction_track();
+    const OrbitPredictionCache *player_cache = (player_track && player_track->cache.valid) ? &player_track->cache : nullptr;
+    const orbitsim::BodyId occluder_body_id =
+            (_prediction_analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI)
+                ? _prediction_analysis_selection.spec.fixed_body_id
+                : ((player_track && player_cache)
+                           ? resolve_prediction_analysis_body_id(*player_cache, player_track->key, analysis_time_s)
+                           : orbitsim::kInvalidBodyId);
+    const CelestialBodyInfo *ref_info = find_celestial_body_info(occluder_body_id);
     out_view.depth_occluder_valid = ref_info && std::isfinite(ref_info->radius_m) && ref_info->radius_m > 0.0;
     out_view.depth_occluder_center = out_view.depth_occluder_valid
-                                         ? prediction_reference_body_world()
+                                         ? prediction_body_world_position(occluder_body_id, player_cache, analysis_time_s)
                                          : WorldVec3(0.0, 0.0, 0.0);
     out_view.depth_occluder_radius = out_view.depth_occluder_valid ? ref_info->radius_m : 0.0;
     return true;
@@ -743,7 +752,7 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
     }
 
     const OrbitPredictionCache *prediction_cache = player_prediction_cache();
-    if (!prediction_cache || !prediction_cache->valid || prediction_cache->trajectory_bci.size() < 2)
+    if (!prediction_cache || !prediction_cache->valid || prediction_cache->trajectory_frame.size() < 2)
     {
         return;
     }
@@ -759,8 +768,8 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         now_s -= (1.0 - static_cast<double>(alpha_f)) * interp_dt_s;
     }
 
-    const auto &traj_base = prediction_cache->trajectory_bci;
-    const auto &traj_planned = prediction_cache->trajectory_bci_planned;
+    const auto &traj_base = prediction_cache->trajectory_frame;
+    const auto &traj_planned = prediction_cache->trajectory_frame_planned;
     const auto &traj_now = traj_base;
     const double t0 = traj_now.front().t_s;
     const double t1 = traj_now.back().t_s;
@@ -785,8 +794,6 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         ship_pos_world = player->get_render_position_world(alpha_f);
     }
 
-    const WorldVec3 ref_body_world = prediction_reference_body_world();
-
     auto it_hi = std::lower_bound(traj_now.cbegin(),
                                   traj_now.cend(),
                                   now_s,
@@ -797,10 +804,17 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         return;
     }
 
-    WorldVec3 predicted_now_world = ref_body_world + WorldVec3(traj_now[i_hi].position_m);
+    WorldVec3 predicted_now_world = prediction_cache->points_world[i_hi];
     if (i_hi > 0)
     {
-        predicted_now_world = hermite_position_world(ref_body_world, traj_now[i_hi - 1], traj_now[i_hi], now_s);
+        const double h = traj_now[i_hi].t_s - traj_now[i_hi - 1].t_s;
+        double u = (h > 0.0 && std::isfinite(h)) ? ((now_s - traj_now[i_hi - 1].t_s) / h) : 0.0;
+        if (!std::isfinite(u))
+        {
+            u = 0.0;
+        }
+        u = std::clamp(u, 0.0, 1.0);
+        predicted_now_world = glm::mix(prediction_cache->points_world[i_hi - 1], prediction_cache->points_world[i_hi], u);
     }
 
     WorldVec3 align_delta = ship_pos_world - predicted_now_world;
@@ -835,19 +849,59 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
 
         if (preview && preview->valid)
         {
-            // Preferred path: use the prediction job's exact preview state at the maneuver instant.
-            r_rel_m = preview->rel_position_m;
-            v_rel_mps = preview->rel_velocity_mps;
-            node_position_world = ref_body_world + WorldVec3(preview->rel_position_m) + align_delta;
-            have_runtime_state = true;
+            const orbitsim::BodyId analysis_body_id =
+                    resolve_prediction_analysis_body_id(*prediction_cache, _prediction_selection.active_subject, node.time_s);
+            const orbitsim::MassiveBody *analysis_body = find_massive_body(prediction_cache->massive_bodies, analysis_body_id);
+            if (analysis_body)
+            {
+                const orbitsim::State primary_state =
+                        (prediction_cache->shared_ephemeris && !prediction_cache->shared_ephemeris->empty())
+                            ? prediction_cache->shared_ephemeris->body_state_at_by_id(analysis_body_id, node.time_s)
+                            : analysis_body->state;
+                r_rel_m = preview->inertial_position_m - primary_state.position_m;
+                v_rel_mps = preview->inertial_velocity_mps - primary_state.velocity_mps;
+            }
+
+            std::vector<orbitsim::TrajectorySample> preview_frame;
+            if (_prediction_frame_selection.spec.type == orbitsim::TrajectoryFrameType::Inertial)
+            {
+                preview_frame = {orbitsim::TrajectorySample{
+                        .t_s = node.time_s,
+                        .position_m = preview->inertial_position_m,
+                        .velocity_mps = preview->inertial_velocity_mps,
+                }};
+            }
+            else if (prediction_cache->shared_ephemeris && !prediction_cache->shared_ephemeris->empty())
+            {
+                preview_frame = orbitsim::trajectory_to_frame_spec(
+                        {orbitsim::TrajectorySample{
+                                .t_s = node.time_s,
+                                .position_m = preview->inertial_position_m,
+                                .velocity_mps = preview->inertial_velocity_mps,
+                        }},
+                        *prediction_cache->shared_ephemeris,
+                        prediction_cache->massive_bodies,
+                        _prediction_frame_selection.spec,
+                        build_prediction_player_lookup());
+            }
+
+            if (!preview_frame.empty())
+            {
+                node_position_world = prediction_sample_position_world(*prediction_cache, preview_frame.front()) + align_delta;
+                have_runtime_state = finite3(r_rel_m) && finite3(v_rel_mps);
+            }
         }
         else
         {
             // Fallback when previews are unavailable: sample the plotted trajectory directly.
-            const auto &traj_node = traj_planned.size() >= 2 ? traj_planned : traj_base;
-            const double traj_node_t0 = traj_node.front().t_s;
-            const double traj_node_t1 = traj_node.back().t_s;
-            if (node.time_s < traj_node_t0 || node.time_s > traj_node_t1)
+            const auto &traj_node_world = traj_planned.size() >= 2 ? traj_planned : traj_base;
+            const auto &traj_node_inertial =
+                    prediction_cache->trajectory_inertial_planned.size() >= 2
+                        ? prediction_cache->trajectory_inertial_planned
+                        : prediction_cache->trajectory_inertial;
+            const double traj_node_t0 = traj_node_world.front().t_s;
+            const double traj_node_t1 = traj_node_world.back().t_s;
+            if (node.time_s < traj_node_t0 || node.time_s > traj_node_t1 || traj_node_inertial.size() < 2)
             {
                 continue;
             }
@@ -858,16 +912,49 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
                 t_basis = std::max(traj_node_t0, t_basis - 1e-3);
             }
 
-            const TrajectorySampledState s = sample_trajectory_state(traj_node, ref_body_world, t_basis);
-            if (!s.valid)
+            WorldVec3 sampled_world = prediction_sample_position_world(*prediction_cache, traj_node_world.front());
+            if (traj_node_world.size() >= 2)
+            {
+                auto it_node_hi = std::lower_bound(traj_node_world.cbegin(),
+                                                  traj_node_world.cend(),
+                                                  t_basis,
+                                                  [](const orbitsim::TrajectorySample &s, double t) { return s.t_s < t; });
+                const size_t node_hi = static_cast<size_t>(std::distance(traj_node_world.cbegin(), it_node_hi));
+                if (node_hi < traj_node_world.size())
+                {
+                    sampled_world = (node_hi > 0)
+                                            ? prediction_sample_hermite_world(*prediction_cache,
+                                                                              traj_node_world[node_hi - 1],
+                                                                              traj_node_world[node_hi],
+                                                                              t_basis)
+                                            : prediction_sample_position_world(*prediction_cache, traj_node_world.front());
+                }
+            }
+
+            const orbitsim::BodyId analysis_body_id =
+                    resolve_prediction_analysis_body_id(*prediction_cache, _prediction_selection.active_subject, t_basis);
+            const orbitsim::MassiveBody *analysis_body = find_massive_body(prediction_cache->massive_bodies, analysis_body_id);
+            if (!analysis_body)
             {
                 continue;
             }
 
-            r_rel_m = s.r_rel_m;
-            v_rel_mps = s.v_rel_mps;
-            node_position_world = s.position_world + align_delta;
-            have_runtime_state = true;
+            const TrajectorySampledState inertial_state =
+                    sample_trajectory_state(traj_node_inertial, WorldVec3(0.0), t_basis);
+            if (!inertial_state.valid)
+            {
+                continue;
+            }
+
+            const orbitsim::State primary_state =
+                    (prediction_cache->shared_ephemeris && !prediction_cache->shared_ephemeris->empty())
+                        ? prediction_cache->shared_ephemeris->body_state_at_by_id(analysis_body_id, t_basis)
+                        : analysis_body->state;
+
+            r_rel_m = inertial_state.r_rel_m - primary_state.position_m;
+            v_rel_mps = inertial_state.v_rel_mps - primary_state.velocity_mps;
+            node_position_world = sampled_world + align_delta;
+            have_runtime_state = finite3(r_rel_m) && finite3(v_rel_mps);
         }
 
         if (!have_runtime_state)

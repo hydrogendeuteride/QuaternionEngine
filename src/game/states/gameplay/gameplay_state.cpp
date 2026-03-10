@@ -48,6 +48,8 @@ namespace Game
         _prediction_tracks.clear();
         _prediction_groups.clear();
         _prediction_selection.clear();
+        _prediction_frame_selection.clear();
+        _prediction_analysis_selection.clear();
         _orbit_plot_perf = {};
 
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
@@ -90,6 +92,8 @@ namespace Game
         _prediction_tracks.clear();
         _prediction_groups.clear();
         _prediction_selection.clear();
+        _prediction_frame_selection.clear();
+        _prediction_analysis_selection.clear();
         _prediction_dirty = true;
         _prediction_service.reset();
         _orbit_plot_perf = {};
@@ -473,6 +477,8 @@ namespace Game
                 OrbitPlotSystem *orbit_plot =
                         (ctx.renderer && ctx.renderer->_context) ? ctx.renderer->_context->orbit_plot : nullptr;
                 rebuild_prediction_subjects();
+                rebuild_prediction_frame_options();
+                rebuild_prediction_analysis_options();
 
                 const PredictionTrackState *active_prediction = active_prediction_track();
                 std::string active_prediction_label = active_prediction
@@ -495,6 +501,62 @@ namespace Game
                                     _prediction_selection.overlay_subjects.end());
                             _prediction_selection.selected_group_index = -1;
                             _prediction_dirty = true;
+                        }
+                        if (selected)
+                        {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+
+                const char *frame_label = (_prediction_frame_selection.selected_index >= 0 &&
+                                           _prediction_frame_selection.selected_index <
+                                                   static_cast<int>(_prediction_frame_selection.options.size()))
+                                              ? _prediction_frame_selection.options[static_cast<size_t>(
+                                                        _prediction_frame_selection.selected_index)].label.c_str()
+                                              : "Unknown";
+                if (ImGui::BeginCombo("Display frame", frame_label))
+                {
+                    for (std::size_t i = 0; i < _prediction_frame_selection.options.size(); ++i)
+                    {
+                        const PredictionFrameOption &option = _prediction_frame_selection.options[i];
+                        const bool selected =
+                                option.spec.type == _prediction_frame_selection.spec.type &&
+                                option.spec.primary_body_id == _prediction_frame_selection.spec.primary_body_id &&
+                                option.spec.secondary_body_id == _prediction_frame_selection.spec.secondary_body_id &&
+                                option.spec.target_spacecraft_id == _prediction_frame_selection.spec.target_spacecraft_id;
+                        if (ImGui::Selectable(option.label.c_str(), selected))
+                        {
+                            (void) set_prediction_frame_spec(option.spec);
+                        }
+                        if (selected)
+                        {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+
+                const char *analysis_label =
+                        (_prediction_analysis_selection.selected_index >= 0 &&
+                         _prediction_analysis_selection.selected_index <
+                                 static_cast<int>(_prediction_analysis_selection.options.size()))
+                            ? _prediction_analysis_selection
+                                      .options[static_cast<size_t>(_prediction_analysis_selection.selected_index)]
+                                      .label.c_str()
+                            : "Unknown";
+                if (ImGui::BeginCombo("Analysis frame", analysis_label))
+                {
+                    for (std::size_t i = 0; i < _prediction_analysis_selection.options.size(); ++i)
+                    {
+                        const PredictionAnalysisOption &option = _prediction_analysis_selection.options[i];
+                        const bool selected =
+                                option.spec.mode == _prediction_analysis_selection.spec.mode &&
+                                option.spec.fixed_body_id == _prediction_analysis_selection.spec.fixed_body_id;
+                        if (ImGui::Selectable(option.label.c_str(), selected))
+                        {
+                            (void) set_prediction_analysis_spec(option.spec);
                         }
                         if (selected)
                         {
@@ -911,45 +973,58 @@ namespace Game
                     {
                         const double age_s = _orbitsim->sim.time_s() - active_prediction->cache.build_time_s;
                         ImGui::Text("Prediction: %zu pts, age %.1f s", active_prediction->cache.points_world.size(), age_s);
+                        const orbitsim::BodyId analysis_body_id = active_prediction->cache.metrics_body_id;
+                        if (const CelestialBodyInfo *analysis_body = find_celestial_body_info(analysis_body_id))
+                        {
+                            ImGui::Text("Metrics frame: %s BCI", analysis_body->name.c_str());
+                        }
+                        else
+                        {
+                            ImGui::TextUnformatted("Metrics frame: Auto Primary (BCI)");
+                        }
                     }
 
-                    const auto &cfg = _scenario_config;
-                    const double planet_radius_m =
-                            (_orbitsim && _orbitsim->reference_body())
-                                ? _orbitsim->reference_body()->radius_m
-                                : (cfg.celestials.empty() ? 0.0 : cfg.celestials[0].radius_m);
-
-                    const glm::dvec3 p_rel = glm::dvec3(subject_pos_world - prediction_reference_body_world());
-                    const double r_m = glm::length(p_rel);
-                    const double alt_m = r_m - planet_radius_m;
-                    const double speed_mps = glm::length(subject_vel_world);
-
-                    const double speed_scale = std::max(0.0, cfg.speed_scale);
-                    const double mu = cfg.mu_base * speed_scale * speed_scale;
-                    const double v_circ_est = (r_m > 1.0) ? std::sqrt(mu / r_m) : 0.0;
-
-                    ImGui::Text("Altitude: %.0f m", alt_m);
-                    ImGui::Text("Speed:    %.3f km/s (v_circ est %.3f km/s)", speed_mps * 1.0e-3, v_circ_est * 1.0e-3);
-                    if (active_prediction && active_prediction->cache.valid && !active_prediction->is_celestial)
+                    if (active_prediction && active_prediction->cache.valid)
                     {
-                        ImGui::Text("Predicted Pe: %.1f km", active_prediction->cache.periapsis_alt_km);
-                        if (std::isfinite(active_prediction->cache.apoapsis_alt_km))
+                        if (!active_prediction->cache.altitude_km.empty())
                         {
-                            ImGui::Text("Predicted Ap: %.1f km", active_prediction->cache.apoapsis_alt_km);
+                            ImGui::Text("Altitude: %.0f m", static_cast<double>(active_prediction->cache.altitude_km.front()) * 1000.0);
                         }
                         else
                         {
-                            ImGui::TextUnformatted("Predicted Ap: escape");
+                            ImGui::TextUnformatted("Altitude: N/A");
                         }
 
-                        if (active_prediction->cache.orbital_period_s > 0.0 &&
-                            std::isfinite(active_prediction->cache.orbital_period_s))
+                        if (!active_prediction->cache.speed_kmps.empty())
                         {
-                            ImGui::Text("Predicted Period: %.2f min", active_prediction->cache.orbital_period_s / 60.0);
+                            ImGui::Text("Speed:    %.3f km/s", static_cast<double>(active_prediction->cache.speed_kmps.front()));
                         }
                         else
                         {
-                            ImGui::TextUnformatted("Predicted Period: N/A");
+                            ImGui::TextUnformatted("Speed:    N/A");
+                        }
+
+                        if (!active_prediction->is_celestial)
+                        {
+                            ImGui::Text("Predicted Pe: %.1f km", active_prediction->cache.periapsis_alt_km);
+                            if (std::isfinite(active_prediction->cache.apoapsis_alt_km))
+                            {
+                                ImGui::Text("Predicted Ap: %.1f km", active_prediction->cache.apoapsis_alt_km);
+                            }
+                            else
+                            {
+                                ImGui::TextUnformatted("Predicted Ap: escape");
+                            }
+
+                            if (active_prediction->cache.orbital_period_s > 0.0 &&
+                                std::isfinite(active_prediction->cache.orbital_period_s))
+                            {
+                                ImGui::Text("Predicted Period: %.2f min", active_prediction->cache.orbital_period_s / 60.0);
+                            }
+                            else
+                            {
+                                ImGui::TextUnformatted("Predicted Period: N/A");
+                            }
                         }
                     }
 
