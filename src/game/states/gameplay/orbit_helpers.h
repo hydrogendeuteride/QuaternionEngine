@@ -35,22 +35,22 @@ namespace Game
     {
         orbitsim::GameSimulation sim{};
         std::vector<CelestialBodyInfo> bodies;
-        size_t reference_body_index{0}; // index into bodies[] for the frame center (e.g. earth)
+        size_t world_reference_body_index{0}; // index into bodies[] for the world/render frame center (e.g. earth)
 
-        const CelestialBodyInfo *reference_body() const
+        const CelestialBodyInfo *world_reference_body() const
         {
-            if (reference_body_index < bodies.size())
+            if (world_reference_body_index < bodies.size())
             {
-                return &bodies[reference_body_index];
+                return &bodies[world_reference_body_index];
             }
             return nullptr;
         }
 
-        CelestialBodyInfo *reference_body()
+        CelestialBodyInfo *world_reference_body()
         {
-            if (reference_body_index < bodies.size())
+            if (world_reference_body_index < bodies.size())
             {
-                return &bodies[reference_body_index];
+                return &bodies[world_reference_body_index];
             }
             return nullptr;
         }
@@ -67,9 +67,9 @@ namespace Game
             return nullptr;
         }
 
-        const orbitsim::MassiveBody *reference_sim_body() const
+        const orbitsim::MassiveBody *world_reference_sim_body() const
         {
-            const CelestialBodyInfo *ref = reference_body();
+            const CelestialBodyInfo *ref = world_reference_body();
             if (!ref || ref->sim_id == orbitsim::kInvalidBodyId)
             {
                 return nullptr;
@@ -77,9 +77,9 @@ namespace Game
             return sim.body_by_id(ref->sim_id);
         }
 
-        orbitsim::MassiveBody *reference_sim_body()
+        orbitsim::MassiveBody *world_reference_sim_body()
         {
-            CelestialBodyInfo *ref = reference_body();
+            CelestialBodyInfo *ref = world_reference_body();
             if (!ref || ref->sim_id == orbitsim::kInvalidBodyId)
             {
                 return nullptr;
@@ -237,7 +237,7 @@ namespace Game
         // where barycentric acceleration is computed from all massive bodies(tidal force).
         inline glm::dvec3 nbody_accel_body_centered(const OrbitalScenario &scenario, const glm::dvec3 &p_rel_m)
         {
-            const orbitsim::MassiveBody *ref = scenario.reference_sim_body();
+            const orbitsim::MassiveBody *ref = scenario.world_reference_sim_body();
             if (!ref)
             {
                 return glm::dvec3(0.0);

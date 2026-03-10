@@ -2,6 +2,7 @@
 
 #include "core/world.h"
 #include "game/orbit/orbit_prediction_service.h"
+#include "orbitsim/frame_spec.hpp"
 
 #include <glm/glm.hpp>
 
@@ -100,15 +101,23 @@ namespace Game
         double build_time_s{0.0};
         WorldVec3 build_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 build_vel_world{0.0, 0.0, 0.0};
+        OrbitPredictionService::SharedCelestialEphemeris shared_ephemeris{};
+        std::vector<orbitsim::MassiveBody> massive_bodies;
 
-        // BCI = body-centered inertial (relative to the current reference body)
-        std::vector<orbitsim::TrajectorySample> trajectory_bci;
-        std::vector<orbitsim::TrajectorySample> trajectory_bci_planned;
-        std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci;
-        std::vector<orbitsim::TrajectorySegment> trajectory_segments_bci_planned;
+        // Canonical prediction output always stays in orbitsim's inertial frame.
+        std::vector<orbitsim::TrajectorySample> trajectory_inertial;
+        std::vector<orbitsim::TrajectorySample> trajectory_inertial_planned;
+        std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial;
+        std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial_planned;
+
+        // Derived display-frame data rebuilt locally when the selected display frame changes.
+        std::vector<orbitsim::TrajectorySample> trajectory_frame;
+        std::vector<orbitsim::TrajectorySample> trajectory_frame_planned;
+        std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame;
+        std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame_planned;
         std::vector<ManeuverNodePreview> maneuver_previews;
 
-        // Cached world-space polyline refreshed from trajectory_bci each frame.
+        // Cached world-space polyline refreshed from the selected display frame.
         std::vector<WorldVec3> points_world;
         std::vector<WorldVec3> points_world_planned;
         std::vector<float> altitude_km;
@@ -120,6 +129,7 @@ namespace Game
         double orbital_period_s{0.0};
         double periapsis_alt_km{0.0};
         double apoapsis_alt_km{std::numeric_limits<double>::infinity()};
+        orbitsim::BodyId metrics_body_id{orbitsim::kInvalidBodyId};
 
         // Reset every cached prediction artifact so the next update rebuilds from scratch.
         void clear()
@@ -128,10 +138,16 @@ namespace Game
             build_time_s = 0.0;
             build_pos_world = WorldVec3(0.0, 0.0, 0.0);
             build_vel_world = glm::dvec3(0.0, 0.0, 0.0);
-            trajectory_bci.clear();
-            trajectory_bci_planned.clear();
-            trajectory_segments_bci.clear();
-            trajectory_segments_bci_planned.clear();
+            shared_ephemeris.reset();
+            massive_bodies.clear();
+            trajectory_inertial.clear();
+            trajectory_inertial_planned.clear();
+            trajectory_segments_inertial.clear();
+            trajectory_segments_inertial_planned.clear();
+            trajectory_frame.clear();
+            trajectory_frame_planned.clear();
+            trajectory_segments_frame.clear();
+            trajectory_segments_frame_planned.clear();
             maneuver_previews.clear();
             points_world.clear();
             points_world_planned.clear();
@@ -142,6 +158,59 @@ namespace Game
             orbital_period_s = 0.0;
             periapsis_alt_km = 0.0;
             apoapsis_alt_km = std::numeric_limits<double>::infinity();
+            metrics_body_id = orbitsim::kInvalidBodyId;
+        }
+    };
+
+    struct PredictionFrameOption
+    {
+        orbitsim::TrajectoryFrameSpec spec{};
+        std::string label{};
+    };
+
+    struct PredictionFrameSelectionState
+    {
+        orbitsim::TrajectoryFrameSpec spec = orbitsim::TrajectoryFrameSpec::inertial();
+        std::vector<PredictionFrameOption> options{};
+        int selected_index{-1};
+
+        void clear()
+        {
+            spec = orbitsim::TrajectoryFrameSpec::inertial();
+            options.clear();
+            selected_index = -1;
+        }
+    };
+
+    enum class PredictionAnalysisMode : uint8_t
+    {
+        AutoPrimaryBCI = 0,
+        FixedBodyBCI,
+    };
+
+    struct PredictionAnalysisSpec
+    {
+        PredictionAnalysisMode mode{PredictionAnalysisMode::AutoPrimaryBCI};
+        orbitsim::BodyId fixed_body_id{orbitsim::kInvalidBodyId};
+    };
+
+    struct PredictionAnalysisOption
+    {
+        PredictionAnalysisSpec spec{};
+        std::string label{};
+    };
+
+    struct PredictionAnalysisSelectionState
+    {
+        PredictionAnalysisSpec spec{};
+        std::vector<PredictionAnalysisOption> options{};
+        int selected_index{-1};
+
+        void clear()
+        {
+            spec = {};
+            options.clear();
+            selected_index = -1;
         }
     };
 

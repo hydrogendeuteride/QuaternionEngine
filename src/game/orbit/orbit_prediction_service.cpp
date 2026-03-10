@@ -3,6 +3,7 @@
 #include "game/orbit/orbit_prediction_tuning.h"
 
 #include "orbitsim/coordinate_frames.hpp"
+#include "orbitsim/frame_utils.hpp"
 #include "orbitsim/maneuvers_types.hpp"
 #include "orbitsim/trajectories.hpp"
 #include "orbitsim/trajectory_transforms.hpp"
@@ -17,7 +18,7 @@ namespace Game
     {
         constexpr double kEphemerisDurationEpsilonS = 1.0e-6;
         constexpr double kEphemerisDtEpsilonS = 1.0e-9;
-        constexpr std::size_t kMaxCachedEphemerides = 16;
+        constexpr std::size_t kMaxCachedEphemerides = 64;
 
         bool finite_vec3(const glm::dvec3 &v)
         {
@@ -84,7 +85,6 @@ namespace Game
         bool build_maneuver_preview(orbitsim::GameSimulation &sim,
                                     const orbitsim::CelestialEphemeris &ephemeris,
                                     const orbitsim::SpacecraftId ship_id,
-                                    const orbitsim::BodyId reference_body_id,
                                     const double sim_time_s,
                                     const double node_time_s,
                                     const double sample_dt_s,
@@ -137,49 +137,15 @@ namespace Game
                 ship_state = preview_segments.back().end;
             }
 
-            const orbitsim::State reference_state = ephemeris.body_state_at_by_id(reference_body_id, preview_time_s);
-            const glm::dvec3 rel_position_m = ship_state.position_m - reference_state.position_m;
-            const glm::dvec3 rel_velocity_mps = ship_state.velocity_mps - reference_state.velocity_mps;
-            if (!finite_vec3(rel_position_m) || !finite_vec3(rel_velocity_mps))
+            if (!finite_vec3(ship_state.position_m) || !finite_vec3(ship_state.velocity_mps))
             {
                 return false;
             }
 
-            out_preview.rel_position_m = rel_position_m;
-            out_preview.rel_velocity_mps = rel_velocity_mps;
+            out_preview.inertial_position_m = ship_state.position_m;
+            out_preview.inertial_velocity_mps = ship_state.velocity_mps;
             out_preview.valid = true;
             return true;
-        }
-
-        orbitsim::TrajectorySegment to_body_centered_segment(const orbitsim::TrajectorySegment &segment,
-                                                             const orbitsim::State &reference_start,
-                                                             const orbitsim::State &reference_end)
-        {
-            orbitsim::TrajectorySegment out = segment;
-            out.start.position_m = segment.start.position_m - reference_start.position_m;
-            out.start.velocity_mps = segment.start.velocity_mps - reference_start.velocity_mps;
-            out.end.position_m = segment.end.position_m - reference_end.position_m;
-            out.end.velocity_mps = segment.end.velocity_mps - reference_end.velocity_mps;
-            return out;
-        }
-
-        std::vector<orbitsim::TrajectorySegment> trajectory_segments_to_body_centered_inertial(
-                const std::vector<orbitsim::TrajectorySegment> &segments_inertial,
-                const orbitsim::CelestialEphemeris &ephemeris,
-                const orbitsim::BodyId reference_body_id)
-        {
-            std::vector<orbitsim::TrajectorySegment> out;
-            out.reserve(segments_inertial.size());
-
-            for (const orbitsim::TrajectorySegment &segment : segments_inertial)
-            {
-                const double t1_s = segment.t0_s + segment.dt_s;
-                const orbitsim::State reference_start = ephemeris.body_state_at_by_id(reference_body_id, segment.t0_s);
-                const orbitsim::State reference_end = ephemeris.body_state_at_by_id(reference_body_id, t1_s);
-                out.push_back(to_body_centered_segment(segment, reference_start, reference_end));
-            }
-
-            return out;
         }
 
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_samples(
@@ -384,10 +350,35 @@ namespace Game
 
         CelestialPredictionSamplingSpec build_celestial_prediction_sampling_spec(
                 const OrbitPredictionService::Request &request,
-                const orbitsim::MassiveBody &reference_body,
                 const orbitsim::MassiveBody &subject_body)
         {
             CelestialPredictionSamplingSpec out{};
+            if (request.massive_bodies.size() < 2)
+            {
+                return out;
+            }
+
+            std::vector<orbitsim::MassiveBody> candidate_bodies;
+            candidate_bodies.reserve(request.massive_bodies.size() - 1);
+            for (const orbitsim::MassiveBody &body : request.massive_bodies)
+            {
+                if (body.id != subject_body.id)
+                {
+                    candidate_bodies.push_back(body);
+                }
+            }
+            if (candidate_bodies.empty())
+            {
+                return out;
+            }
+
+            const std::size_t primary_index = orbitsim::auto_select_primary_index(
+                    candidate_bodies,
+                    subject_body.state.position_m,
+                    [&candidate_bodies](const std::size_t i) -> orbitsim::Vec3 { return candidate_bodies[i].state.position_m; },
+                    request.sim_config.softening_length_m);
+            const orbitsim::MassiveBody &reference_body = candidate_bodies[primary_index];
+
             out.rel_pos_m = glm::dvec3(subject_body.state.position_m - reference_body.state.position_m);
             out.rel_vel_mps = glm::dvec3(subject_body.state.velocity_mps - reference_body.state.velocity_mps);
             if (!finite_vec3(out.rel_pos_m) || !finite_vec3(out.rel_vel_mps))
@@ -395,7 +386,7 @@ namespace Game
                 return out;
             }
 
-            const double mu_ref_m3_s2 = request.sim_config.gravitational_constant * request.reference_body_mass_kg;
+            const double mu_ref_m3_s2 = request.sim_config.gravitational_constant * reference_body.mass_kg;
             if (!(mu_ref_m3_s2 > 0.0) || !std::isfinite(mu_ref_m3_s2))
             {
                 return out;
@@ -432,6 +423,7 @@ namespace Game
 
     OrbitPredictionService::OrbitPredictionService()
     {
+        // Spin up the dedicated prediction worker immediately so gameplay can stay enqueue-only.
         _worker = std::thread(&OrbitPredictionService::worker_loop, this);
     }
 
@@ -439,6 +431,7 @@ namespace Game
     {
         {
             std::lock_guard<std::mutex> lock(_mutex);
+            // Stop accepting/publishing work before waking the worker for shutdown.
             _running = false;
             _pending_jobs.clear();
             _completed.clear();
@@ -460,6 +453,7 @@ namespace Game
             const uint64_t request_epoch = _request_epoch;
             _latest_requested_generation_by_track[track_id] = generation_id;
 
+            // Keep only the newest queued request per track to avoid backlogging stale previews.
             auto existing = std::find_if(_pending_jobs.begin(),
                                          _pending_jobs.end(),
                                          [track_id](const PendingJob &job) { return job.track_id == track_id; });
@@ -500,6 +494,7 @@ namespace Game
     {
         {
             std::lock_guard<std::mutex> lock(_mutex);
+            // Bump the epoch so any in-flight jobs become stale even if they finish later.
             ++_request_epoch;
             _pending_jobs.clear();
             _completed.clear();
@@ -538,6 +533,7 @@ namespace Game
         }
 
         std::lock_guard<std::mutex> lock(_ephemeris_mutex);
+        // Re-check after the build in case another worker filled the cache first.
         for (CachedEphemerisEntry &entry : _ephemeris_cache)
         {
             if (!compatible_cached_ephemeris(entry, request))
@@ -561,6 +557,7 @@ namespace Game
 
         if (_ephemeris_cache.size() > kMaxCachedEphemerides)
         {
+            // Bound memory usage with a simple LRU eviction policy.
             auto lru_it = std::min_element(_ephemeris_cache.begin(),
                                            _ephemeris_cache.end(),
                                            [](const CachedEphemerisEntry &a, const CachedEphemerisEntry &b) {
@@ -578,32 +575,30 @@ namespace Game
     OrbitPredictionService::EphemerisSamplingSpec OrbitPredictionService::build_ephemeris_sampling_spec(const Request &request)
     {
         EphemerisSamplingSpec out{};
-        if (!std::isfinite(request.sim_time_s) ||
-            request.reference_body_id == orbitsim::kInvalidBodyId ||
-            !(request.reference_body_mass_kg > 0.0) ||
-            !std::isfinite(request.reference_body_mass_kg))
+        if (!std::isfinite(request.sim_time_s) || request.massive_bodies.empty())
         {
             return out;
         }
 
-        const auto ref_it = std::find_if(request.massive_bodies.begin(),
-                                         request.massive_bodies.end(),
-                                         [&request](const orbitsim::MassiveBody &body) {
-                                             return body.id == request.reference_body_id;
-                                         });
-        if (ref_it == request.massive_bodies.end())
+        const std::size_t primary_index = orbitsim::auto_select_primary_index(
+                request.massive_bodies,
+                request.ship_bary_position_m,
+                [&request](const std::size_t i) -> orbitsim::Vec3 { return request.massive_bodies[i].state.position_m; },
+                request.sim_config.softening_length_m);
+        if (primary_index >= request.massive_bodies.size())
         {
             return out;
         }
 
-        const double mu_ref_m3_s2 = request.sim_config.gravitational_constant * request.reference_body_mass_kg;
+        const orbitsim::MassiveBody &primary_body = request.massive_bodies[primary_index];
+        const double mu_ref_m3_s2 = request.sim_config.gravitational_constant * primary_body.mass_kg;
         if (!(mu_ref_m3_s2 > 0.0) || !std::isfinite(mu_ref_m3_s2))
         {
             return out;
         }
 
-        const glm::dvec3 ship_rel_pos_m = request.ship_bary_position_m - glm::dvec3(ref_it->state.position_m);
-        const glm::dvec3 ship_rel_vel_mps = request.ship_bary_velocity_mps - glm::dvec3(ref_it->state.velocity_mps);
+        const glm::dvec3 ship_rel_pos_m = request.ship_bary_position_m - glm::dvec3(primary_body.state.position_m);
+        const glm::dvec3 ship_rel_vel_mps = request.ship_bary_velocity_mps - glm::dvec3(primary_body.state.velocity_mps);
         if (!finite_vec3(ship_rel_pos_m) || !finite_vec3(ship_rel_vel_mps))
         {
             return out;
@@ -612,6 +607,7 @@ namespace Game
         const auto [horizon_s_auto, dt_s_auto] =
                 OrbitPredictionMath::select_prediction_horizon_and_dt(mu_ref_m3_s2, ship_rel_pos_m, ship_rel_vel_mps);
 
+        // Start from orbital-state-driven defaults, then clamp into service-wide budgets.
         double horizon_s = std::clamp(horizon_s_auto, OrbitPredictionTuning::kMinHorizonS, OrbitPredictionTuning::kMaxHorizonS);
         double dt_s = std::clamp(dt_s_auto, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
         int max_steps = OrbitPredictionTuning::kMaxStepsNormal;
@@ -623,6 +619,7 @@ namespace Game
             std::isfinite(request.max_maneuver_time_s) &&
             request.max_maneuver_time_s > request.sim_time_s)
         {
+            // Keep enough look-ahead to show the last planned node and a small post-node tail.
             const double extra_s = std::max(OrbitPredictionTuning::kPostNodeCoverageMinS,
                                             std::max(0.0, request.future_window_s));
             min_horizon_s = std::max(min_horizon_s, (request.max_maneuver_time_s - request.sim_time_s) + extra_s);
@@ -631,6 +628,7 @@ namespace Game
 
         if (request.thrusting)
         {
+            // During active thrust we trade long horizons for denser near-term sampling.
             const double thrust_horizon_cap_s =
                     std::clamp(std::max(OrbitPredictionTuning::kThrustHorizonMinS,
                                         std::max(0.0, request.future_window_s) * OrbitPredictionTuning::kThrustHorizonWindowScale),
@@ -670,11 +668,13 @@ namespace Game
             const uint64_t current_request_epoch,
             const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track)
     {
+        // reset() invalidates every queued and in-flight job by moving to a new epoch.
         if (job.request_epoch != current_request_epoch)
         {
             return false;
         }
 
+        // Only publish the newest generation for each track.
         const auto latest_it = latest_requested_generation_by_track.find(job.track_id);
         return latest_it == latest_requested_generation_by_track.end() ||
                job.generation_id >= latest_it->second;
@@ -705,6 +705,7 @@ namespace Game
                 _pending_jobs.pop_front();
             }
 
+            // Run the expensive simulation outside the lock so request() stays responsive.
             Result result = compute_prediction(job.generation_id, job.request);
 
             {
@@ -750,20 +751,8 @@ namespace Game
         out.track_id = request.track_id;
         out.build_time_s = request.sim_time_s;
 
+        // Invalid inputs produce an invalid result rather than throwing on the worker thread.
         if (!std::isfinite(request.sim_time_s))
-        {
-            return out;
-        }
-
-        if (request.reference_body_id == orbitsim::kInvalidBodyId ||
-            !(request.reference_body_mass_kg > 0.0) ||
-            !std::isfinite(request.reference_body_mass_kg))
-        {
-            return out;
-        }
-
-        const double mu_ref_m3_s2 = request.sim_config.gravitational_constant * request.reference_body_mass_kg;
-        if (!(mu_ref_m3_s2 > 0.0) || !std::isfinite(mu_ref_m3_s2))
         {
             return out;
         }
@@ -786,16 +775,12 @@ namespace Game
             }
         }
 
-        const orbitsim::MassiveBody *ref_sim = sim.body_by_id(request.reference_body_id);
-        if (!ref_sim)
-        {
-            return out;
-        }
+        out.massive_bodies = sim.massive_bodies();
 
+        // Celestial route: predict the body's inertial motion.
         if (request.kind == RequestKind::Celestial)
         {
-            if (request.subject_body_id == orbitsim::kInvalidBodyId ||
-                request.subject_body_id == request.reference_body_id)
+            if (request.subject_body_id == orbitsim::kInvalidBodyId)
             {
                 return out;
             }
@@ -807,7 +792,7 @@ namespace Game
             }
 
             const CelestialPredictionSamplingSpec sampling_spec =
-                    build_celestial_prediction_sampling_spec(request, *ref_sim, *subject_sim);
+                    build_celestial_prediction_sampling_spec(request, *subject_sim);
             if (!sampling_spec.valid)
             {
                 return out;
@@ -849,56 +834,20 @@ namespace Game
                 return out;
             }
 
-            std::vector<orbitsim::TrajectorySample> traj_centered =
-                    orbitsim::trajectory_to_body_centered_inertial(traj_inertial, *shared_ephemeris, *ref_sim);
-            if (traj_centered.size() < 2)
-            {
-                return out;
-            }
-
-            out.trajectory_bci = std::move(traj_centered);
-            out.trajectory_segments_bci = trajectory_segments_from_samples(out.trajectory_bci);
-            out.altitude_km.reserve(out.trajectory_bci.size());
-            out.speed_kmps.reserve(out.trajectory_bci.size());
-            for (const orbitsim::TrajectorySample &sample : out.trajectory_bci)
-            {
-                const double r_m = OrbitPredictionMath::safe_length(sample.position_m);
-                const double alt_km = (r_m - request.reference_body_radius_m) * 1.0e-3;
-                const double spd_kmps = OrbitPredictionMath::safe_length(sample.velocity_mps) * 1.0e-3;
-                out.altitude_km.push_back(static_cast<float>(alt_km));
-                out.speed_kmps.push_back(static_cast<float>(spd_kmps));
-            }
-
-            const OrbitPredictionMath::OrbitalElementsEstimate elements =
-                    OrbitPredictionMath::compute_orbital_elements(mu_ref_m3_s2,
-                                                                  sampling_spec.rel_pos_m,
-                                                                  sampling_spec.rel_vel_mps);
-            if (elements.valid)
-            {
-                out.semi_major_axis_m = elements.semi_major_axis_m;
-                out.eccentricity = elements.eccentricity;
-                out.orbital_period_s = elements.orbital_period_s;
-                out.periapsis_alt_km = (elements.periapsis_m - request.reference_body_radius_m) * 1.0e-3;
-                out.apoapsis_alt_km = std::isfinite(elements.apoapsis_m)
-                                              ? (elements.apoapsis_m - request.reference_body_radius_m) * 1.0e-3
-                                              : std::numeric_limits<double>::infinity();
-            }
-
+            out.shared_ephemeris = shared_ephemeris;
+            out.trajectory_inertial = std::move(traj_inertial);
+            out.trajectory_segments_inertial = trajectory_segments_from_samples(out.trajectory_inertial);
             out.valid = true;
             return out;
         }
 
+        // Spacecraft route: build a transient ship state, then predict inertial baseline and planned trajectories.
         const glm::dvec3 ship_bary_pos_m = request.ship_bary_position_m;
         const glm::dvec3 ship_bary_vel_mps = request.ship_bary_velocity_mps;
-        const glm::dvec3 ship_rel_pos_m = ship_bary_pos_m - glm::dvec3(ref_sim->state.position_m);
-        const glm::dvec3 ship_rel_vel_mps = ship_bary_vel_mps - glm::dvec3(ref_sim->state.velocity_mps);
-        if (!finite_vec3(ship_rel_pos_m) || !finite_vec3(ship_rel_vel_mps))
+        if (!finite_vec3(ship_bary_pos_m) || !finite_vec3(ship_bary_vel_mps))
         {
             return out;
         }
-
-        out.ship_rel_position_m = ship_rel_pos_m;
-        out.ship_rel_velocity_mps = ship_rel_vel_mps;
 
         const EphemerisSamplingSpec sampling_spec = build_ephemeris_sampling_spec(request);
         if (!sampling_spec.valid)
@@ -960,9 +909,6 @@ namespace Game
             return out;
         }
 
-        out.trajectory_segments_bci =
-                trajectory_segments_to_body_centered_inertial(traj_segments_inertial_baseline, eph, ref_sim->id);
-
         const std::vector<orbitsim::TrajectorySample> traj_inertial_baseline =
                 orbitsim::sample_trajectory_segments_uniform_dt(traj_segments_inertial_baseline, opt);
         if (traj_inertial_baseline.size() < 2)
@@ -970,38 +916,9 @@ namespace Game
             return out;
         }
 
-        std::vector<orbitsim::TrajectorySample> traj_centered_baseline =
-                orbitsim::trajectory_to_body_centered_inertial(traj_inertial_baseline, eph, *ref_sim);
-        if (traj_centered_baseline.size() < 2)
-        {
-            return out;
-        }
-
-        out.trajectory_bci = std::move(traj_centered_baseline);
-        out.altitude_km.reserve(out.trajectory_bci.size());
-        out.speed_kmps.reserve(out.trajectory_bci.size());
-
-        for (const orbitsim::TrajectorySample &sample : out.trajectory_bci)
-        {
-            const double r_m = OrbitPredictionMath::safe_length(sample.position_m);
-            const double alt_km = (r_m - request.reference_body_radius_m) * 1.0e-3;
-            const double spd_kmps = OrbitPredictionMath::safe_length(sample.velocity_mps) * 1.0e-3;
-            out.altitude_km.push_back(static_cast<float>(alt_km));
-            out.speed_kmps.push_back(static_cast<float>(spd_kmps));
-        }
-
-        const OrbitPredictionMath::OrbitalElementsEstimate elements =
-                OrbitPredictionMath::compute_orbital_elements(mu_ref_m3_s2, ship_rel_pos_m, ship_rel_vel_mps);
-        if (elements.valid)
-        {
-            out.semi_major_axis_m = elements.semi_major_axis_m;
-            out.eccentricity = elements.eccentricity;
-            out.orbital_period_s = elements.orbital_period_s;
-            out.periapsis_alt_km = (elements.periapsis_m - request.reference_body_radius_m) * 1.0e-3;
-            out.apoapsis_alt_km = std::isfinite(elements.apoapsis_m)
-                                      ? (elements.apoapsis_m - request.reference_body_radius_m) * 1.0e-3
-                                      : std::numeric_limits<double>::infinity();
-        }
+        out.shared_ephemeris = shared_ephemeris;
+        out.trajectory_segments_inertial = traj_segments_inertial_baseline;
+        out.trajectory_inertial = traj_inertial_baseline;
 
         if (!request.maneuver_impulses.empty())
         {
@@ -1014,6 +931,7 @@ namespace Game
             plan.impulses.reserve(maneuver_impulses.size());
             out.maneuver_previews.reserve(maneuver_impulses.size());
 
+            // Build each node preview from the already-planned prefix so later nodes see earlier burns.
             for (const ManeuverImpulse &src : maneuver_impulses)
             {
                 if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rtn_mps))
@@ -1028,7 +946,6 @@ namespace Game
                 if (build_maneuver_preview(sim,
                                            eph,
                                            ship_h.id,
-                                           ref_sim->id,
                                            request.sim_time_s,
                                            src.t_s,
                                            dt_s,
@@ -1041,8 +958,15 @@ namespace Game
                 orbitsim::Vec3 solver_dv_rtn = src.dv_rtn_mps;
                 if (preview.valid)
                 {
-                    solver_dv_rtn =
-                            convert_dv_rtf_to_solver_rtn(src.dv_rtn_mps, preview.rel_position_m, preview.rel_velocity_mps);
+                    const orbitsim::MassiveBody *primary_sim = sim.body_by_id(src.primary_body_id);
+                    if (primary_sim)
+                    {
+                        const orbitsim::State primary_state = eph.body_state_at_by_id(src.primary_body_id, src.t_s);
+                        const glm::dvec3 rel_position_m = preview.inertial_position_m - primary_state.position_m;
+                        const glm::dvec3 rel_velocity_mps = preview.inertial_velocity_mps - primary_state.velocity_mps;
+                        solver_dv_rtn =
+                                convert_dv_rtf_to_solver_rtn(src.dv_rtn_mps, rel_position_m, rel_velocity_mps);
+                    }
                 }
 
                 orbitsim::ImpulseSegment impulse{};
@@ -1056,20 +980,18 @@ namespace Game
             orbitsim::sort_impulses_by_time(plan);
             sim.maneuver_plan() = std::move(plan);
 
+            // Planned output shows the same prediction window with all maneuver nodes applied.
             const std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_planned =
                     orbitsim::predict_spacecraft_trajectory_segments(sim, eph, ship_h.id, segment_opt);
             if (!traj_segments_inertial_planned.empty())
             {
-                out.trajectory_segments_bci_planned =
-                        trajectory_segments_to_body_centered_inertial(traj_segments_inertial_planned, eph, ref_sim->id);
+                out.trajectory_segments_inertial_planned = traj_segments_inertial_planned;
 
                 const std::vector<orbitsim::TrajectorySample> traj_inertial_planned =
                         orbitsim::sample_trajectory_segments_uniform_dt(traj_segments_inertial_planned, opt);
-                std::vector<orbitsim::TrajectorySample> traj_centered_planned =
-                        orbitsim::trajectory_to_body_centered_inertial(traj_inertial_planned, eph, *ref_sim);
-                if (traj_centered_planned.size() >= 2)
+                if (traj_inertial_planned.size() >= 2)
                 {
-                    out.trajectory_bci_planned = std::move(traj_centered_planned);
+                    out.trajectory_inertial_planned = traj_inertial_planned;
                 }
             }
         }
