@@ -73,8 +73,8 @@ namespace Game
 
         const auto &cfg = _scenario_config;
 
-        const CelestialBodyInfo *ref_info = _orbitsim->reference_body();
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        const CelestialBodyInfo *ref_info = _orbitsim->world_reference_body();
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
         if (!ref_info || !ref_sim)
         {
             return;
@@ -128,7 +128,7 @@ namespace Game
                 _orbitsim &&
                 _physics &&
                 _physics_context &&
-                _orbitsim->reference_sim_body();
+                _orbitsim->world_reference_sim_body();
 
         const EntityId anchor_eid = select_rebase_anchor_entity();
         const Entity *anchor_entity = _world.entities().find(anchor_eid);
@@ -147,7 +147,7 @@ namespace Game
             WorldVec3 orbiter_pos_world{0.0, 0.0, 0.0};
             if (orbiter.rails.active() && _orbitsim)
             {
-                const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+                const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
                 const orbitsim::Spacecraft *sc = ref_sim ? _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id) : nullptr;
                 if (ref_sim && sc)
                 {
@@ -198,7 +198,7 @@ namespace Game
             return;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
         if (!ref_sim)
         {
             return;
@@ -245,7 +245,7 @@ namespace Game
             return false;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
         Entity *ent = _world.entities().find(orbiter.entity);
         if (!ref_sim || !ent || !ent->has_physics() || !_physics)
         {
@@ -301,7 +301,7 @@ namespace Game
             return false;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
         const orbitsim::Spacecraft *sc = ref_sim ? _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id) : nullptr;
         Entity *ent = _world.entities().find(orbiter.entity);
         if (!ref_sim || !sc || !ent)
@@ -366,7 +366,7 @@ namespace Game
 
         const auto &cfg = _scenario_config;
         const bool use_orbitsim = _orbitsim && !_orbitsim->bodies.empty()
-                                  && _orbitsim->reference_body() != nullptr;
+                                  && _orbitsim->world_reference_body() != nullptr;
 
         if (use_orbitsim)
         {
@@ -527,7 +527,7 @@ namespace Game
             return;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
         if (!ref_sim)
         {
             return;
@@ -670,7 +670,7 @@ namespace Game
             return;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
         if (!ref_sim)
         {
             for (auto &orbiter : _orbiters)
@@ -830,7 +830,7 @@ namespace Game
             return;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->reference_sim_body();
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
         if (!ref_sim)
         {
             return;

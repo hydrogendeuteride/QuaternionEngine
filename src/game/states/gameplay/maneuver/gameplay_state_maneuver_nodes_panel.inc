@@ -8,6 +8,27 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     }
 
     const double now_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+    const auto default_node_primary_body_id = [&]() -> orbitsim::BodyId {
+        if (_prediction_frame_selection.spec.type == orbitsim::TrajectoryFrameType::BodyCenteredInertial &&
+            _prediction_frame_selection.spec.primary_body_id != orbitsim::kInvalidBodyId)
+        {
+            return _prediction_frame_selection.spec.primary_body_id;
+        }
+
+        if (const PredictionTrackState *player_track = player_prediction_track())
+        {
+            if (player_track->cache.valid && !player_track->cache.trajectory_inertial.empty())
+            {
+                return resolve_prediction_analysis_body_id(player_track->cache,
+                                                           player_track->key,
+                                                           player_track->cache.trajectory_inertial.front().t_s);
+            }
+        }
+
+        return (_orbitsim && _orbitsim->world_reference_body())
+                       ? _orbitsim->world_reference_body()->sim_id
+                       : orbitsim::kInvalidBodyId;
+    };
 
     ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - 28.0f,
                                    viewport->WorkPos.y + viewport->WorkSize.y - 28.0f),
@@ -47,9 +68,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         n.id = _maneuver_state.next_node_id++;
         n.time_s = now_s + 60.0;
         n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
-        n.primary_body_id = (_orbitsim && _orbitsim->reference_body())
-                                ? _orbitsim->reference_body()->sim_id
-                                : orbitsim::kInvalidBodyId;
+        n.primary_body_id = default_node_primary_body_id();
         n.total_dv_mps = 0.0;
         _maneuver_state.nodes.push_back(n);
         _maneuver_state.selected_node_id = n.id;
@@ -157,9 +176,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         n.id = _maneuver_state.next_node_id++;
         n.time_s = time_s;
         n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
-        n.primary_body_id = (_orbitsim && _orbitsim->reference_body())
-                                ? _orbitsim->reference_body()->sim_id
-                                : orbitsim::kInvalidBodyId;
+        n.primary_body_id = default_node_primary_body_id();
         n.total_dv_mps = 0.0;
         _maneuver_state.nodes.push_back(n);
         _maneuver_state.selected_node_id = n.id;

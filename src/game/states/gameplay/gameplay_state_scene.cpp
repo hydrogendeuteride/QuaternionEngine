@@ -173,6 +173,7 @@ namespace Game
         _prediction_tracks.clear();
         _prediction_groups.clear();
         _prediction_selection.clear();
+        _prediction_frame_selection.clear();
         _prediction_dirty = true;
         _prediction_service.reset();
 
@@ -449,7 +450,7 @@ namespace Game
         }
 
         const auto &cfg = _scenario_config;
-        const orbitsim::MassiveBody *ref_sim = _orbitsim ? _orbitsim->reference_sim_body() : nullptr;
+        const orbitsim::MassiveBody *ref_sim = _orbitsim ? _orbitsim->world_reference_sim_body() : nullptr;
         const auto celestial_world_position = [&](const std::string &name) {
             WorldVec3 planet_center_world = cfg.system_center;
             if (_orbitsim && ref_sim)
@@ -541,7 +542,7 @@ namespace Game
         sim_cfg.enable_events = false;
 
         scenario->sim = orbitsim::GameSimulation(sim_cfg);
-        scenario->reference_body_index = 0;
+        scenario->world_reference_body_index = 0;
 
         // Create all massive bodies in the simulation
         const auto &ref_def = cfg.celestials[0];
@@ -620,8 +621,8 @@ namespace Game
         }
 
         // Compute player initial orbit around reference body
-        const CelestialBodyInfo *ref_info = scenario->reference_body();
-        const orbitsim::MassiveBody *ref_sim = scenario->reference_sim_body();
+        const CelestialBodyInfo *ref_info = scenario->world_reference_body();
+        const orbitsim::MassiveBody *ref_sim = scenario->world_reference_sim_body();
         if (ref_info && ref_sim)
         {
             // Find player orbiter def to get orbit altitude

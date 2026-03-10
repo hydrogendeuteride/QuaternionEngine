@@ -79,9 +79,29 @@ void GameplayState::update_maneuver_nodes_execution(GameStateContext &ctx)
         return;
     }
 
-    const WorldVec3 ref_body_world = prediction_reference_body_world();
-    const glm::dvec3 r_rel_m = glm::dvec3(ship_pos_world - ref_body_world);
-    const glm::dvec3 v_rel_mps = ship_vel_world;
+    glm::dvec3 r_rel_m(0.0);
+    glm::dvec3 v_rel_mps = ship_vel_world;
+    if (_orbitsim && node->primary_body_id != orbitsim::kInvalidBodyId)
+    {
+        const orbitsim::MassiveBody *world_ref_sim = _orbitsim->world_reference_sim_body();
+        const orbitsim::MassiveBody *primary_body = _orbitsim->sim.body_by_id(node->primary_body_id);
+        if (world_ref_sim && primary_body)
+        {
+            const WorldVec3 primary_world =
+                    prediction_world_reference_body_world() +
+                    WorldVec3(primary_body->state.position_m - world_ref_sim->state.position_m);
+            r_rel_m = glm::dvec3(ship_pos_world - primary_world);
+            v_rel_mps = ship_vel_world - (primary_body->state.velocity_mps - world_ref_sim->state.velocity_mps);
+        }
+        else
+        {
+            r_rel_m = glm::dvec3(ship_pos_world - prediction_world_reference_body_world());
+        }
+    }
+    else
+    {
+        r_rel_m = glm::dvec3(ship_pos_world - prediction_world_reference_body_world());
+    }
 
     const orbitsim::RtnFrame f = compute_maneuver_rtf_frame(r_rel_m, v_rel_mps);
 
