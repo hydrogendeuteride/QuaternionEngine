@@ -115,6 +115,8 @@ namespace Game
         std::vector<orbitsim::TrajectorySample> trajectory_frame_planned;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame_planned;
+        orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
+        bool resolved_frame_spec_valid{false};
         std::vector<ManeuverNodePreview> maneuver_previews;
 
         // Cached world-space polyline refreshed from the selected display frame.
@@ -130,6 +132,7 @@ namespace Game
         double periapsis_alt_km{0.0};
         double apoapsis_alt_km{std::numeric_limits<double>::infinity()};
         orbitsim::BodyId metrics_body_id{orbitsim::kInvalidBodyId};
+        bool metrics_valid{false};
 
         // Reset every cached prediction artifact so the next update rebuilds from scratch.
         void clear()
@@ -148,6 +151,8 @@ namespace Game
             trajectory_frame_planned.clear();
             trajectory_segments_frame.clear();
             trajectory_segments_frame_planned.clear();
+            resolved_frame_spec = {};
+            resolved_frame_spec_valid = false;
             maneuver_previews.clear();
             points_world.clear();
             points_world_planned.clear();
@@ -159,6 +164,7 @@ namespace Game
             periapsis_alt_km = 0.0;
             apoapsis_alt_km = std::numeric_limits<double>::infinity();
             metrics_body_id = orbitsim::kInvalidBodyId;
+            metrics_valid = false;
         }
     };
 
