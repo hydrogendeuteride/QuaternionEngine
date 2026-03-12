@@ -58,6 +58,12 @@ namespace Game
             applied_result = true;
         }
 
+        while (auto completed = _prediction_derived_service.poll_completed())
+        {
+            apply_completed_prediction_derived_result(std::move(*completed));
+            applied_result = true;
+        }
+
         if (applied_result)
         {
             sync_prediction_dirty_flag();
@@ -71,10 +77,12 @@ namespace Game
         {
             track.cache.clear();
             track.request_pending = false;
+            track.derived_request_pending = false;
             track.dirty = false;
             track.invalidated_while_pending = false;
         }
         _prediction_service.reset();
+        _prediction_derived_service.reset();
         _prediction_dirty = false;
     }
 
@@ -86,11 +94,12 @@ namespace Game
         {
             track.clear_runtime();
         }
+        _prediction_derived_service.reset();
     }
 
     void GameplayState::apply_completed_prediction_result(OrbitPredictionService::Result result)
     {
-        // Fold worker output back into the owning track cache.
+        // Queue heavy frame/metrics derivation off-thread, then swap the completed cache on the main thread.
         PredictionTrackState *track = nullptr;
         for (PredictionTrackState &candidate : _prediction_tracks)
         {
@@ -106,14 +115,12 @@ namespace Game
             return;
         }
 
-        track->request_pending = false;
-        const bool keep_dirty_for_followup = track->invalidated_while_pending;
-        track->invalidated_while_pending = false;
         track->solver_ms_last = std::max(0.0, result.compute_time_ms);
 
         if (!result.valid || result.trajectory_inertial.size() < 2)
         {
-            track->cache.clear();
+            track->request_pending = false;
+            track->derived_request_pending = false;
             track->dirty = true;
             return;
         }
@@ -123,19 +130,129 @@ namespace Game
         glm::vec3 build_vel_local{0.0f};
         (void) get_prediction_subject_world_state(track->key, build_pos_world, build_vel_world, build_vel_local);
 
-        track->cache.clear();
-        track->cache.build_time_s = result.build_time_s;
-        track->cache.build_pos_world = build_pos_world;
-        track->cache.build_vel_world = build_vel_world;
-        track->cache.shared_ephemeris = std::move(result.shared_ephemeris);
-        track->cache.massive_bodies = std::move(result.massive_bodies);
-        track->cache.trajectory_inertial = std::move(result.trajectory_inertial);
-        track->cache.trajectory_inertial_planned = std::move(result.trajectory_inertial_planned);
-        track->cache.trajectory_segments_inertial = std::move(result.trajectory_segments_inertial);
-        track->cache.trajectory_segments_inertial_planned = std::move(result.trajectory_segments_inertial_planned);
-        track->cache.maneuver_previews = std::move(result.maneuver_previews);
-        track->cache.valid = true;
-        refresh_prediction_derived_cache(*track);
+        OrbitPredictionCache resolve_cache{};
+        resolve_cache.build_time_s = result.build_time_s;
+        resolve_cache.shared_ephemeris = result.shared_ephemeris;
+        resolve_cache.massive_bodies = result.massive_bodies;
+        const double reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : result.build_time_s;
+        const orbitsim::TrajectoryFrameSpec resolved_frame_spec =
+                resolve_prediction_display_frame_spec(resolve_cache, reference_time_s);
+
+        orbitsim::BodyId analysis_body_id = orbitsim::kInvalidBodyId;
+        if (_prediction_analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
+            _prediction_analysis_selection.spec.fixed_body_id != orbitsim::kInvalidBodyId)
+        {
+            analysis_body_id = _prediction_analysis_selection.spec.fixed_body_id;
+        }
+        else
+        {
+            orbitsim::State query_state{};
+            if (sample_prediction_inertial_state(result.trajectory_inertial, reference_time_s, query_state))
+            {
+                std::vector<orbitsim::MassiveBody> candidates;
+                candidates.reserve(result.massive_bodies.size());
+                for (const orbitsim::MassiveBody &body : result.massive_bodies)
+                {
+                    if (track->key.kind == PredictionSubjectKind::Celestial &&
+                        static_cast<uint32_t>(body.id) == track->key.value)
+                    {
+                        continue;
+                    }
+                    candidates.push_back(body);
+                }
+
+                if (!candidates.empty())
+                {
+                    const auto body_position_at = [&result, &candidates, reference_time_s](const std::size_t i) -> orbitsim::Vec3 {
+                        const orbitsim::MassiveBody &body = candidates[i];
+                        if (result.shared_ephemeris && !result.shared_ephemeris->empty())
+                        {
+                            return result.shared_ephemeris->body_state_at_by_id(body.id, reference_time_s).position_m;
+                        }
+                        return body.state.position_m;
+                    };
+
+                    const std::size_t primary_index = orbitsim::auto_select_primary_index(
+                            candidates,
+                            query_state.position_m,
+                            body_position_at,
+                            _orbitsim ? _orbitsim->sim.config().softening_length_m : 0.0);
+                    if (primary_index < candidates.size())
+                    {
+                        analysis_body_id = candidates[primary_index].id;
+                    }
+                }
+            }
+        }
+
+        std::vector<orbitsim::TrajectorySample> player_lookup_trajectory;
+        if (prediction_subject_is_player(track->key))
+        {
+            if (result.trajectory_inertial_planned.size() >= 2)
+            {
+                player_lookup_trajectory = result.trajectory_inertial_planned;
+            }
+            else
+            {
+                player_lookup_trajectory = result.trajectory_inertial;
+            }
+        }
+        else if (const PredictionTrackState *player_track = player_prediction_track())
+        {
+            if (player_track->cache.trajectory_inertial_planned.size() >= 2)
+            {
+                player_lookup_trajectory = player_track->cache.trajectory_inertial_planned;
+            }
+            else if (player_track->cache.trajectory_inertial.size() >= 2)
+            {
+                player_lookup_trajectory = player_track->cache.trajectory_inertial;
+            }
+        }
+
+        OrbitPredictionDerivedService::Request derived_request{};
+        derived_request.track_id = result.track_id;
+        derived_request.generation_id = result.generation_id;
+        derived_request.solver_result = std::move(result);
+        derived_request.build_pos_world = build_pos_world;
+        derived_request.build_vel_world = build_vel_world;
+        derived_request.sim_config = _orbitsim ? _orbitsim->sim.config() : orbitsim::GameSimulation::Config{};
+        derived_request.resolved_frame_spec = resolved_frame_spec;
+        derived_request.analysis_body_id = analysis_body_id;
+        derived_request.player_lookup_trajectory_inertial = std::move(player_lookup_trajectory);
+        _prediction_derived_service.request(std::move(derived_request));
+        track->derived_request_pending = true;
+    }
+
+    void GameplayState::apply_completed_prediction_derived_result(OrbitPredictionDerivedService::Result result)
+    {
+        PredictionTrackState *track = nullptr;
+        for (PredictionTrackState &candidate : _prediction_tracks)
+        {
+            if (candidate.key.track_id() == result.track_id)
+            {
+                track = &candidate;
+                break;
+            }
+        }
+
+        if (!track)
+        {
+            return;
+        }
+
+        track->derived_request_pending = false;
+        track->request_pending = false;
+        const bool keep_dirty_for_followup = track->invalidated_while_pending;
+        track->invalidated_while_pending = false;
+
+        if (!result.valid || !result.cache.valid || result.cache.trajectory_frame.size() < 2)
+        {
+            track->dirty = true;
+            return;
+        }
+
+        track->cache = std::move(result.cache);
+        track->pick_cache.clear();
         track->dirty = keep_dirty_for_followup;
     }
 
@@ -281,6 +398,7 @@ namespace Game
 
         _prediction_service.request(std::move(request));
         track.request_pending = true;
+        track.derived_request_pending = false;
         track.invalidated_while_pending = false;
         return true;
     }
@@ -311,6 +429,7 @@ namespace Game
         // Celestial tracks now flow through the same worker queue as spacecraft tracks.
         _prediction_service.request(std::move(request));
         track.request_pending = true;
+        track.derived_request_pending = false;
         track.invalidated_while_pending = false;
         return true;
     }

@@ -272,6 +272,26 @@ namespace Game::PredictionDrawDetail
         return align_delta;
     }
 
+    bool frame_transform_is_identity(const glm::dmat3 &frame_to_world)
+    {
+        constexpr double kIdentityEpsilon = 1.0e-12;
+
+        for (int col = 0; col < 3; ++col)
+        {
+            for (int row = 0; row < 3; ++row)
+            {
+                const double expected = (col == row) ? 1.0 : 0.0;
+                const double value = frame_to_world[col][row];
+                if (!std::isfinite(value) || std::abs(value - expected) > kIdentityEpsilon)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
     namespace
     {
         WorldVec3 eval_segment_world_pos(const OrbitDrawWindowContext &ctx,
@@ -303,26 +323,6 @@ namespace Game::PredictionDrawDetail
             const glm::dvec3 m1 = glm::dvec3(segment.end.velocity_mps) * segment.dt_s;
             const glm::dvec3 local = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
             return ctx.ref_body_world + WorldVec3(local) + ctx.align_delta;
-        }
-
-        bool frame_transform_is_identity(const glm::dmat3 &frame_to_world)
-        {
-            constexpr double kIdentityEpsilon = 1.0e-12;
-
-            for (int col = 0; col < 3; ++col)
-            {
-                for (int row = 0; row < 3; ++row)
-                {
-                    const double expected = (col == row) ? 1.0 : 0.0;
-                    const double value = frame_to_world[col][row];
-                    if (!std::isfinite(value) || std::abs(value - expected) > kIdentityEpsilon)
-                    {
-                        return false;
-                    }
-                }
-            }
-
-            return true;
         }
 
         orbitsim::TrajectorySegment transform_segment_to_world_basis(const orbitsim::TrajectorySegment &segment,
@@ -383,11 +383,15 @@ namespace Game::PredictionDrawDetail
                                     const bool dashed,
                                     const OrbitPlotDepth depth)
         {
-            double dash_phase_px = 0.0;
-            const double dash_on_px = draw_config.dashed_segment_on_px;
-            const double dash_off_px = draw_config.dashed_segment_off_px;
-            const double dash_period_px = dash_on_px + dash_off_px;
+            (void) draw_config;
+            if (!ctx.orbit_plot || traj_segments.empty() || !(t_end_s > t_start_s))
+            {
+                return;
+            }
 
+            std::vector<OrbitPlotSystem::GpuRootSegment> roots;
+            roots.reserve(traj_segments.size());
+            double prefix_length_m = 0.0;
             for (const orbitsim::TrajectorySegment &segment : traj_segments)
             {
                 if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
@@ -395,79 +399,37 @@ namespace Game::PredictionDrawDetail
                     continue;
                 }
 
-                const double seg_t0_s = segment.t0_s;
-                const double seg_t1_s = seg_t0_s + segment.dt_s;
-                const double clip_t0_s = std::max(seg_t0_s, t_start_s);
-                const double clip_t1_s = std::min(seg_t1_s, t_end_s);
-                if (!(clip_t1_s > clip_t0_s))
-                {
-                    continue;
-                }
+                OrbitPlotSystem::GpuRootSegment root{};
+                root.t0_s = segment.t0_s;
+                root.p0_bci = glm::dvec3(segment.start.position_m);
+                root.v0_bci = glm::dvec3(segment.start.velocity_mps);
+                root.p1_bci = glm::dvec3(segment.end.position_m);
+                root.v1_bci = glm::dvec3(segment.end.velocity_mps);
+                root.dt_s = segment.dt_s;
+                root.prefix_length_m = prefix_length_m;
+                roots.push_back(root);
 
-                float dash_phase_start_px = 0.0f;
-                if (dashed)
+                const double chord_m = glm::length(root.p1_bci - root.p0_bci);
+                if (std::isfinite(chord_m) && chord_m > 0.0)
                 {
-                    const WorldVec3 a_world = eval_segment_world_pos(ctx, segment, clip_t0_s);
-                    const WorldVec3 b_world = eval_segment_world_pos(ctx, segment, clip_t1_s);
-                    const double seg_m = glm::length(glm::dvec3(b_world - a_world));
-                    if (std::isfinite(seg_m) && seg_m > 1.0e-9)
-                    {
-                        const glm::dvec3 mid_world = glm::mix(glm::dvec3(a_world), glm::dvec3(b_world), 0.5);
-                        const double seg_mpp = meters_per_px_at_world(ctx, WorldVec3(mid_world));
-                        if (std::isfinite(seg_mpp) && seg_mpp > 1.0e-6)
-                        {
-                            const double seg_px = seg_m / seg_mpp;
-                            dash_phase_start_px = static_cast<float>(std::fmod(dash_phase_px, dash_period_px));
-                            if (std::isfinite(seg_px) && seg_px > 0.0)
-                            {
-                                dash_phase_px = std::fmod(dash_phase_px + seg_px, dash_period_px);
-                            }
-                        }
-                    }
+                    prefix_length_m += chord_m;
                 }
-
-                const double clip_u0 = (clip_t0_s - seg_t0_s) / segment.dt_s;
-                const double clip_u1 = (clip_t1_s - seg_t0_s) / segment.dt_s;
-                ctx.orbit_plot->add_gpu_root_segment(segment.dt_s,
-                                                     glm::dvec3(segment.start.position_m),
-                                                     glm::dvec3(segment.start.velocity_mps),
-                                                     glm::dvec3(segment.end.position_m),
-                                                     glm::dvec3(segment.end.velocity_mps),
-                                                     clip_u0,
-                                                     clip_u1,
-                                                     dashed,
-                                                     dash_phase_start_px,
-                                                     color,
-                                                     depth);
             }
-        }
 
-        void emit_cpu_fallback_chords(const OrbitDrawWindowContext &ctx,
-                                      const std::vector<orbitsim::TrajectorySegment> &traj_segments,
-                                      const double t_start_s,
-                                      const double t_end_s,
-                                      const glm::vec4 &color)
-        {
-            for (const orbitsim::TrajectorySegment &segment : traj_segments)
+            if (roots.empty())
             {
-                if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
-                {
-                    continue;
-                }
-
-                const double seg_t0_s = segment.t0_s;
-                const double seg_t1_s = seg_t0_s + segment.dt_s;
-                const double clip_t0_s = std::max(seg_t0_s, t_start_s);
-                const double clip_t1_s = std::min(seg_t1_s, t_end_s);
-                if (!(clip_t1_s > clip_t0_s))
-                {
-                    continue;
-                }
-
-                const WorldVec3 a_world = eval_segment_world_pos(ctx, segment, clip_t0_s);
-                const WorldVec3 b_world = eval_segment_world_pos(ctx, segment, clip_t1_s);
-                emit_orbit_line(ctx, color, a_world, b_world);
+                return;
             }
+
+            ctx.orbit_plot->add_gpu_root_batch(
+                    std::make_shared<const std::vector<OrbitPlotSystem::GpuRootSegment>>(std::move(roots)),
+                                               t_start_s,
+                                               t_end_s,
+                                               ctx.ref_body_world,
+                                               ctx.align_delta,
+                                               color,
+                                               dashed,
+                                               depth);
         }
 
         void emit_cpu_render_lod(const OrbitDrawWindowContext &ctx,
@@ -585,16 +547,6 @@ namespace Game::PredictionDrawDetail
             }
         }
 
-        void update_pick_perf_stats(OrbitPlotPerfStats &perf, const OrbitPlotLodBuilder::PickResult &pick_lod)
-        {
-            perf.pick_segments_before_cull += static_cast<uint32_t>(pick_lod.segments_before_cull);
-            perf.pick_segments += static_cast<uint32_t>(pick_lod.segments.size());
-            if (pick_lod.cap_hit)
-            {
-                perf.pick_cap_hit_last_frame = true;
-                ++perf.pick_cap_hits_total;
-            }
-        }
     } // namespace
 
     void draw_orbit_window(const OrbitDrawWindowContext &ctx,
@@ -619,10 +571,9 @@ namespace Game::PredictionDrawDetail
         const std::vector<orbitsim::TrajectorySegment> &segments_world_basis =
                 needs_world_basis_transform ? transformed_segments : traj_segments;
 
-        const bool gpu_subdivision_enabled = ctx.orbit_plot && ctx.orbit_plot->settings().gpu_generate_enabled;
+        const bool gpu_subdivision_enabled = false;
         if (gpu_subdivision_enabled)
         {
-            ctx.orbit_plot->set_gpu_frame_reference(ctx.ref_body_world, ctx.align_delta);
             emit_gpu_root_segments(ctx,
                                    draw_config,
                                    segments_world_basis,
@@ -648,19 +599,7 @@ namespace Game::PredictionDrawDetail
                                            OrbitPlotDepth::AlwaysOnTop);
                 }
             }
-
-            // If GPU path wasn't active in the last frame, emit a coarse CPU fallback
-            // (single clipped chord per adaptive segment) to avoid losing trajectory visuals.
-            if (ctx.orbit_plot->stats().gpu_path_active_last_frame)
-            {
-                return;
-            }
-
-            if (!dashed)
-            {
-                emit_cpu_fallback_chords(ctx, segments_world_basis, t_start_s, t_end_s, color);
-                return;
-            }
+            return;
         }
 
         emit_cpu_render_lod(ctx, draw_config, perf, segments_world_basis, t_start_s, t_end_s, color, dashed);
@@ -782,6 +721,87 @@ namespace Game::PredictionDrawDetail
         return planned_window;
     }
 
+    std::size_t build_pick_segment_cache(const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                                         const WorldVec3 &ref_body_world,
+                                         const glm::dmat3 &frame_to_world,
+                                         const WorldVec3 &align_delta,
+                                         const double t0_s,
+                                         const double t1_s,
+                                         const std::size_t max_segments,
+                                         std::vector<PickingSystem::LinePickSegmentData> &out_segments,
+                                         bool &out_cap_hit,
+                                         OrbitPlotPerfStats &perf)
+    {
+        const bool needs_world_basis_transform = !frame_transform_is_identity(frame_to_world);
+        const std::vector<orbitsim::TrajectorySegment> transformed_segments =
+                needs_world_basis_transform
+                        ? transform_segments_to_world_basis(traj_segments, frame_to_world)
+                        : std::vector<orbitsim::TrajectorySegment>{};
+        const std::vector<orbitsim::TrajectorySegment> &segments_world_basis =
+                needs_world_basis_transform ? transformed_segments : traj_segments;
+        out_segments.clear();
+        out_cap_hit = false;
+        if (segments_world_basis.empty())
+        {
+            return 0;
+        }
+
+        const std::size_t capped_max_segments = std::max<std::size_t>(1, max_segments);
+        const std::size_t stride = std::max<std::size_t>(1, segments_world_basis.size() / capped_max_segments);
+        out_segments.reserve(std::min(segments_world_basis.size(), capped_max_segments));
+        const auto pick_start_tp = std::chrono::steady_clock::now();
+        for (std::size_t i = 0; i < segments_world_basis.size() && out_segments.size() < capped_max_segments; i += stride)
+        {
+            const orbitsim::TrajectorySegment &segment = segments_world_basis[i];
+            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
+            {
+                continue;
+            }
+
+            const double seg_t0_s = segment.t0_s;
+            const double seg_t1_s = seg_t0_s + segment.dt_s;
+            const double clip_t0_s = std::max(seg_t0_s, t0_s);
+            const double clip_t1_s = std::min(seg_t1_s, t1_s);
+            if (!(clip_t1_s > clip_t0_s))
+            {
+                continue;
+            }
+
+            const WorldVec3 a_world = eval_segment_world_pos(OrbitDrawWindowContext{
+                                                                     .ref_body_world = ref_body_world,
+                                                                     .frame_to_world = glm::dmat3(1.0),
+                                                                     .align_delta = align_delta,
+                                                             },
+                                                             segment,
+                                                             clip_t0_s);
+            const WorldVec3 b_world = eval_segment_world_pos(OrbitDrawWindowContext{
+                                                                     .ref_body_world = ref_body_world,
+                                                                     .frame_to_world = glm::dmat3(1.0),
+                                                                     .align_delta = align_delta,
+                                                             },
+                                                             segment,
+                                                             clip_t1_s);
+            out_segments.push_back(PickingSystem::LinePickSegmentData{
+                    .a_world = a_world,
+                    .b_world = b_world,
+                    .a_time_s = clip_t0_s,
+                    .b_time_s = clip_t1_s,
+            });
+        }
+        perf.pick_lod_ms_last +=
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pick_start_tp).count();
+        const std::size_t emitted = out_segments.size();
+        perf.pick_segments_before_cull += static_cast<uint32_t>(emitted);
+        perf.pick_segments += static_cast<uint32_t>(emitted);
+        out_cap_hit = segments_world_basis.size() > emitted;
+        perf.pick_cap_hit_last_frame = out_cap_hit;
+        if (out_cap_hit)
+        {
+            ++perf.pick_cap_hits_total;
+        }
+        return emitted;
+    }
+
     std::size_t emit_pick_segments(PickingSystem *picking,
                                    const uint32_t pick_group,
                                    const std::vector<orbitsim::TrajectorySegment> &traj_segments,
@@ -795,39 +815,36 @@ namespace Game::PredictionDrawDetail
                                    const std::vector<double> &anchor_times,
                                    OrbitPlotPerfStats &perf)
     {
-        const bool needs_world_basis_transform = !frame_transform_is_identity(frame_to_world);
-        const std::vector<orbitsim::TrajectorySegment> transformed_segments =
-                needs_world_basis_transform
-                        ? transform_segments_to_world_basis(traj_segments, frame_to_world)
-                        : std::vector<orbitsim::TrajectorySegment>{};
-        const std::vector<orbitsim::TrajectorySegment> &segments_world_basis =
-                needs_world_basis_transform ? transformed_segments : traj_segments;
-
-        const auto pick_lod_start_tp = std::chrono::steady_clock::now();
-        const OrbitPlotLodBuilder::PickResult pick_lod =
-                OrbitPlotLodBuilder::build_pick_lod(segments_world_basis,
-                                                    ref_body_world,
-                                                    align_delta,
-                                                    pick_frustum,
-                                                    pick_settings,
-                                                    t0_s,
-                                                    t1_s,
-                                                    anchor_times);
-        perf.pick_lod_ms_last +=
-                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pick_lod_start_tp)
-                        .count();
-        update_pick_perf_stats(perf, pick_lod);
-
-        for (const OrbitPlotLodBuilder::PickSegment &segment : pick_lod.segments)
+        (void) pick_frustum;
+        (void) anchor_times;
+        if (!picking || pick_group == kInvalidPickGroup)
         {
-            picking->add_line_pick_segment(pick_group,
-                                           segment.a_world,
-                                           segment.b_world,
-                                           segment.t0_s,
-                                           segment.t1_s);
+            return 0;
         }
 
-        return pick_lod.segments.size();
+        std::vector<PickingSystem::LinePickSegmentData> segments;
+        bool cap_hit = false;
+        const std::size_t emitted = build_pick_segment_cache(traj_segments,
+                                                             ref_body_world,
+                                                             frame_to_world,
+                                                             align_delta,
+                                                             t0_s,
+                                                             t1_s,
+                                                             std::max<std::size_t>(1, pick_settings.max_segments),
+                                                             segments,
+                                                             cap_hit,
+                                                             perf);
+        (void) cap_hit;
+        for (const PickingSystem::LinePickSegmentData &segment : segments)
+        {
+            picking->add_line_pick_segment(
+                    pick_group,
+                    segment.a_world,
+                    segment.b_world,
+                    segment.a_time_s,
+                    segment.b_time_s);
+        }
+        return emitted;
     }
 
     bool frame_spec_uses_direct_world_polyline(const orbitsim::TrajectoryFrameSpec &spec)

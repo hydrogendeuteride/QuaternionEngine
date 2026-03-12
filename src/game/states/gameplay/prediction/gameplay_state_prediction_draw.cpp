@@ -9,6 +9,143 @@ namespace Game
 {
     namespace Draw = PredictionDrawDetail;
 
+    namespace
+    {
+        constexpr double kPickWindowRebuildEpsilonS = 0.25;
+        constexpr double kPickAlignRebuildDistanceM = 25.0;
+        constexpr double kPickReferenceRebuildDistanceM = 1.0;
+        constexpr double kPickMatrixRebuildEpsilon = 1.0e-6;
+
+        bool same_matrix(const glm::dmat3 &a, const glm::dmat3 &b, const double epsilon)
+        {
+            for (int col = 0; col < 3; ++col)
+            {
+                for (int row = 0; row < 3; ++row)
+                {
+                    if (!std::isfinite(a[col][row]) || !std::isfinite(b[col][row]) ||
+                        std::abs(a[col][row] - b[col][row]) > epsilon)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        void enqueue_cached_orbit_window(OrbitPlotSystem *orbit_plot,
+                                         const std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> &cached_roots,
+                                         const WorldVec3 &ref_body_world,
+                                         const glm::dmat3 &frame_to_world,
+                                         const WorldVec3 &align_delta,
+                                         const double t_start_s,
+                                         const double t_end_s,
+                                         const glm::vec4 &color,
+                                         const bool dashed,
+                                         const float line_overlay_boost)
+        {
+            if (!orbit_plot || !cached_roots || cached_roots->empty() || !(t_end_s > t_start_s) ||
+                !Draw::frame_transform_is_identity(frame_to_world))
+            {
+                return;
+            }
+
+            orbit_plot->add_gpu_root_batch(cached_roots,
+                                           t_start_s,
+                                           t_end_s,
+                                           ref_body_world,
+                                           align_delta,
+                                           color,
+                                           dashed,
+                                           OrbitPlotDepth::DepthTested);
+
+            if (line_overlay_boost <= 0.0f)
+            {
+                return;
+            }
+
+            glm::vec4 overlay_color = color;
+            overlay_color.a = std::clamp(overlay_color.a * line_overlay_boost, 0.0f, 1.0f);
+            if (overlay_color.a <= 0.0f)
+            {
+                return;
+            }
+
+            orbit_plot->add_gpu_root_batch(cached_roots,
+                                           t_start_s,
+                                           t_end_s,
+                                           ref_body_world,
+                                           align_delta,
+                                           overlay_color,
+                                           dashed,
+                                           OrbitPlotDepth::AlwaysOnTop);
+        }
+
+        bool should_rebuild_pick_cache(const PredictionLinePickCache &cache,
+                                       const uint64_t generation_id,
+                                       const WorldVec3 &ref_body_world,
+                                       const glm::dmat3 &frame_to_world,
+                                       const WorldVec3 &align_delta,
+                                       const double t0_s,
+                                       const double t1_s,
+                                       const std::size_t max_segments,
+                                       const bool planned)
+        {
+            const bool valid = planned ? cache.planned_valid : cache.base_valid;
+            const double cached_t0_s = planned ? cache.planned_t0_s : cache.base_t0_s;
+            const double cached_t1_s = planned ? cache.planned_t1_s : cache.base_t1_s;
+            const std::size_t cached_max_segments = planned ? cache.planned_max_segments : cache.base_max_segments;
+            if (!valid || cache.generation_id != generation_id || cached_max_segments != max_segments)
+            {
+                return true;
+            }
+
+            if (!same_matrix(cache.frame_to_world, frame_to_world, kPickMatrixRebuildEpsilon))
+            {
+                return true;
+            }
+
+            if (glm::length(glm::dvec3(cache.ref_body_world - ref_body_world)) > kPickReferenceRebuildDistanceM ||
+                glm::length(glm::dvec3(cache.align_delta_world - align_delta)) > kPickAlignRebuildDistanceM)
+            {
+                return true;
+            }
+
+            return !std::isfinite(cached_t0_s) || !std::isfinite(cached_t1_s) ||
+                   std::abs(cached_t0_s - t0_s) > kPickWindowRebuildEpsilonS ||
+                   std::abs(cached_t1_s - t1_s) > kPickWindowRebuildEpsilonS;
+        }
+
+        void mark_pick_cache_valid(PredictionLinePickCache &cache,
+                                   const uint64_t generation_id,
+                                   const WorldVec3 &ref_body_world,
+                                   const glm::dmat3 &frame_to_world,
+                                   const WorldVec3 &align_delta,
+                                   const double t0_s,
+                                   const double t1_s,
+                                   const std::size_t max_segments,
+                                   const bool planned)
+        {
+            cache.generation_id = generation_id;
+            cache.ref_body_world = ref_body_world;
+            cache.frame_to_world = frame_to_world;
+            cache.align_delta_world = align_delta;
+            if (planned)
+            {
+                cache.planned_valid = true;
+                cache.planned_t0_s = t0_s;
+                cache.planned_t1_s = t1_s;
+                cache.planned_max_segments = max_segments;
+            }
+            else
+            {
+                cache.base_valid = true;
+                cache.base_t0_s = t0_s;
+                cache.base_t1_s = t1_s;
+                cache.base_max_segments = max_segments;
+            }
+        }
+    } // namespace
+
     // Build per-frame orbit visuals, pick data, and debug overlays from the latest prediction cache.
     void GameplayState::emit_orbit_prediction_debug(GameStateContext &ctx)
     {
@@ -153,7 +290,6 @@ namespace Game
 
             std::vector<orbitsim::TrajectorySegment> base_segments_fallback;
             const std::vector<orbitsim::TrajectorySegment> *traj_base_segments = &track->cache.trajectory_segments_frame;
-            const OrbitRenderCurve *traj_base_render_curve = &track->cache.render_curve_frame;
             if (traj_base_segments->empty())
             {
                 base_segments_fallback = Draw::trajectory_segments_from_samples(traj_base);
@@ -166,7 +302,6 @@ namespace Game
 
             std::vector<orbitsim::TrajectorySegment> planned_segments_fallback;
             const std::vector<orbitsim::TrajectorySegment> *traj_planned_segments = &track->cache.trajectory_segments_frame_planned;
-            const OrbitRenderCurve *traj_planned_render_curve = &track->cache.render_curve_frame_planned;
             if (traj_planned_segments->empty() && !traj_planned.empty())
             {
                 planned_segments_fallback = Draw::trajectory_segments_from_samples(traj_planned);
@@ -206,6 +341,10 @@ namespace Game
             draw_ctx.render_error_px = render_error_px;
             draw_ctx.render_max_segments = static_cast<std::size_t>(std::max(1, _orbit_plot_render_max_segments_cpu));
             draw_ctx.line_overlay_boost = std::clamp(_prediction_line_overlay_boost, 0.0f, 1.0f);
+            const bool use_persistent_gpu_roots =
+                    orbit_plot && orbit_plot->settings().gpu_generate_enabled &&
+                    !direct_world_polyline &&
+                    Draw::frame_transform_is_identity(frame_to_world);
 
             glm::vec4 track_color_full = color_orbit_full;
             glm::vec4 track_color_future = color_orbit_future;
@@ -240,30 +379,29 @@ namespace Game
                                                track_color_full,
                                                false);
                 }
-                else
+                else if (use_persistent_gpu_roots && track->cache.gpu_roots_frame && !track->cache.gpu_roots_frame->empty())
                 {
-                    if (traj_base_render_curve && !traj_base_render_curve->empty())
-                    {
-                        Draw::draw_adaptive_curve_window(draw_ctx,
-                                                         _prediction_draw_config,
-                                                         _orbit_plot_perf,
-                                                         *traj_base_render_curve,
-                                                         t0,
-                                                         t_full_end,
-                                                         track_color_full,
-                                                         false);
-                    }
-                    else
-                    {
-                        Draw::draw_orbit_window(draw_ctx,
-                                                _prediction_draw_config,
-                                                _orbit_plot_perf,
-                                                *traj_base_segments,
+                    enqueue_cached_orbit_window(orbit_plot,
+                                                track->cache.gpu_roots_frame,
+                                                ref_body_world,
+                                                frame_to_world,
+                                                align_delta,
                                                 t0,
                                                 t_full_end,
                                                 track_color_full,
-                                                false);
-                    }
+                                                false,
+                                                draw_ctx.line_overlay_boost);
+                }
+                else
+                {
+                    Draw::draw_orbit_window(draw_ctx,
+                                            _prediction_draw_config,
+                                            _orbit_plot_perf,
+                                            *traj_base_segments,
+                                            t0,
+                                            t_full_end,
+                                            track_color_full,
+                                            false);
                 }
                 if (is_active && !_prediction_draw_future_segment && t_full_end > t0)
                 {
@@ -287,30 +425,29 @@ namespace Game
                                                track_color_future,
                                                false);
                 }
-                else
+                else if (use_persistent_gpu_roots && track->cache.gpu_roots_frame && !track->cache.gpu_roots_frame->empty())
                 {
-                    if (traj_base_render_curve && !traj_base_render_curve->empty())
-                    {
-                        Draw::draw_adaptive_curve_window(draw_ctx,
-                                                         _prediction_draw_config,
-                                                         _orbit_plot_perf,
-                                                         *traj_base_render_curve,
-                                                         now_s,
-                                                         t_end,
-                                                         track_color_future,
-                                                         false);
-                    }
-                    else
-                    {
-                        Draw::draw_orbit_window(draw_ctx,
-                                                _prediction_draw_config,
-                                                _orbit_plot_perf,
-                                                *traj_base_segments,
+                    enqueue_cached_orbit_window(orbit_plot,
+                                                track->cache.gpu_roots_frame,
+                                                ref_body_world,
+                                                frame_to_world,
+                                                align_delta,
                                                 now_s,
                                                 t_end,
                                                 track_color_future,
-                                                false);
-                    }
+                                                false,
+                                                draw_ctx.line_overlay_boost);
+                }
+                else
+                {
+                    Draw::draw_orbit_window(draw_ctx,
+                                            _prediction_draw_config,
+                                            _orbit_plot_perf,
+                                            *traj_base_segments,
+                                            now_s,
+                                            t_end,
+                                            track_color_future,
+                                            false);
                 }
                 if (is_active && t_end > now_s)
                 {
@@ -343,30 +480,30 @@ namespace Game
                                                track_color_plan,
                                                _prediction_draw_config.draw_planned_as_dashed);
                 }
-                else
+                else if (use_persistent_gpu_roots && track->cache.gpu_roots_frame_planned &&
+                         !track->cache.gpu_roots_frame_planned->empty())
                 {
-                    if (traj_planned_render_curve && !traj_planned_render_curve->empty())
-                    {
-                        Draw::draw_adaptive_curve_window(draw_ctx,
-                                                         _prediction_draw_config,
-                                                         _orbit_plot_perf,
-                                                         *traj_planned_render_curve,
-                                                         planned_pick_window.t0_s,
-                                                         planned_pick_window.t1_s,
-                                                         track_color_plan,
-                                                         _prediction_draw_config.draw_planned_as_dashed);
-                    }
-                    else
-                    {
-                        Draw::draw_orbit_window(draw_ctx,
-                                                _prediction_draw_config,
-                                                _orbit_plot_perf,
-                                                *traj_planned_segments,
+                    enqueue_cached_orbit_window(orbit_plot,
+                                                track->cache.gpu_roots_frame_planned,
+                                                ref_body_world,
+                                                frame_to_world,
+                                                align_delta,
                                                 planned_pick_window.t0_s,
                                                 planned_pick_window.t1_s,
                                                 track_color_plan,
-                                                _prediction_draw_config.draw_planned_as_dashed);
-                    }
+                                                _prediction_draw_config.draw_planned_as_dashed,
+                                                draw_ctx.line_overlay_boost);
+                }
+                else
+                {
+                    Draw::draw_orbit_window(draw_ctx,
+                                            _prediction_draw_config,
+                                            _orbit_plot_perf,
+                                            *traj_planned_segments,
+                                            planned_pick_window.t0_s,
+                                            planned_pick_window.t1_s,
+                                            track_color_plan,
+                                            _prediction_draw_config.draw_planned_as_dashed);
                 }
             }
 
@@ -376,22 +513,9 @@ namespace Game
                 const bool allow_planned_pick = !_maneuver_state.nodes.empty();
                 const uint32_t pick_group_base = picking->add_line_pick_group("OrbitPlot/Base");
                 const uint32_t pick_group_planned = picking->add_line_pick_group("OrbitPlot/Planned");
-                const std::vector<double> maneuver_node_times_s = Draw::collect_maneuver_node_times(_maneuver_state.nodes);
-
-                OrbitPlotLodBuilder::FrustumContext pick_frustum{};
-                if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_sceneManager)
-                {
-                    pick_frustum.valid = true;
-                    pick_frustum.viewproj = ctx.renderer->_context->getSceneData().viewproj;
-                    pick_frustum.origin_world = ctx.renderer->_sceneManager->get_world_origin();
-                }
 
                 const std::size_t pick_max_segments =
                         static_cast<std::size_t>(std::max(1, _orbit_plot_pick_max_segments));
-                const double pick_frustum_margin_ratio =
-                        (std::isfinite(_orbit_plot_pick_frustum_margin_ratio) && _orbit_plot_pick_frustum_margin_ratio >= 0.0)
-                                ? _orbit_plot_pick_frustum_margin_ratio
-                                : 0.05;
                 const std::size_t pick_planned_reserve_target = std::min(
                         _prediction_draw_config.pick_planned_reserve_segments,
                         static_cast<std::size_t>(std::max<std::size_t>(
@@ -424,29 +548,66 @@ namespace Game
                     }
                     else
                     {
-                        OrbitPlotLodBuilder::PickSettings pick_settings{};
-                        pick_settings.max_segments = remaining_pick_budget - planned_reserve;
-                        pick_settings.frustum_margin_ratio = pick_frustum_margin_ratio;
+                        const std::size_t base_pick_budget = remaining_pick_budget - planned_reserve;
+                        bool rebuilt_pick_cache = false;
+                        if (base_pick_budget > 0 &&
+                            should_rebuild_pick_cache(track->pick_cache,
+                                                      track->cache.generation_id,
+                                                      ref_body_world,
+                                                      frame_to_world,
+                                                      align_delta,
+                                                      base_pick_window.t0_s,
+                                                      base_pick_window.t1_s,
+                                                      base_pick_budget,
+                                                      false))
+                        {
+                            rebuilt_pick_cache = true;
+                            bool cap_hit = false;
+                            emitted = Draw::build_pick_segment_cache(*traj_base_segments,
+                                                                     ref_body_world,
+                                                                     frame_to_world,
+                                                                     align_delta,
+                                                                     base_pick_window.t0_s,
+                                                                     base_pick_window.t1_s,
+                                                                     base_pick_budget,
+                                                                     track->pick_cache.base_segments,
+                                                                     cap_hit,
+                                                                     _orbit_plot_perf);
+                            if (emitted > 0)
+                            {
+                                mark_pick_cache_valid(track->pick_cache,
+                                                      track->cache.generation_id,
+                                                      ref_body_world,
+                                                      frame_to_world,
+                                                      align_delta,
+                                                      base_pick_window.t0_s,
+                                                      base_pick_window.t1_s,
+                                                      base_pick_budget,
+                                                      false);
+                            }
+                            else
+                            {
+                                track->pick_cache.base_valid = false;
+                                track->pick_cache.base_segments.clear();
+                            }
+                        }
 
-                        std::vector<double> base_anchor_times{};
-                        base_anchor_times.reserve(1 + maneuver_node_times_s.size());
-                        base_anchor_times.push_back(now_s);
-                        base_anchor_times.insert(base_anchor_times.end(),
-                                                 maneuver_node_times_s.begin(),
-                                                 maneuver_node_times_s.end());
-
-                        emitted = Draw::emit_pick_segments(picking,
-                                                           pick_group_base,
-                                                           *traj_base_segments,
-                                                           ref_body_world,
-                                                           frame_to_world,
-                                                           align_delta,
-                                                           pick_frustum,
-                                                           pick_settings,
-                                                           base_pick_window.t0_s,
-                                                           base_pick_window.t1_s,
-                                                           base_anchor_times,
-                                                           _orbit_plot_perf);
+                        if (base_pick_budget > 0 &&
+                            track->pick_cache.base_valid &&
+                            !track->pick_cache.base_segments.empty())
+                        {
+                            emitted = track->pick_cache.base_segments.size();
+                            if (!rebuilt_pick_cache)
+                            {
+                                _orbit_plot_perf.pick_segments_before_cull += static_cast<uint32_t>(emitted);
+                                _orbit_plot_perf.pick_segments += static_cast<uint32_t>(emitted);
+                            }
+                            picking->add_line_pick_segments(
+                                    pick_group_base,
+                                    std::span<const PickingSystem::LinePickSegmentData>(
+                                            track->pick_cache.base_segments.data(),
+                                            track->pick_cache.base_segments.size()));
+                        }
                     }
                     remaining_pick_budget = (emitted >= remaining_pick_budget) ? 0 : (remaining_pick_budget - emitted);
                 }
@@ -469,32 +630,63 @@ namespace Game
                     }
                     else
                     {
-                        OrbitPlotLodBuilder::PickSettings pick_settings{};
-                        pick_settings.max_segments = remaining_pick_budget;
-                        pick_settings.frustum_margin_ratio = pick_frustum_margin_ratio;
-
-                        std::vector<double> planned_anchor_times{};
-                        planned_anchor_times.reserve(1 + maneuver_node_times_s.size());
-                        if (std::isfinite(planned_pick_window.anchor_time_s))
+                        bool rebuilt_pick_cache = false;
+                        if (should_rebuild_pick_cache(track->pick_cache,
+                                                      track->cache.generation_id,
+                                                      ref_body_world,
+                                                      frame_to_world,
+                                                      align_delta,
+                                                      planned_pick_window.t0_s,
+                                                      planned_pick_window.t1_s,
+                                                      remaining_pick_budget,
+                                                      true))
                         {
-                            planned_anchor_times.push_back(planned_pick_window.anchor_time_s);
+                            rebuilt_pick_cache = true;
+                            bool cap_hit = false;
+                            Draw::build_pick_segment_cache(*traj_planned_segments,
+                                                           ref_body_world,
+                                                           frame_to_world,
+                                                           align_delta,
+                                                           planned_pick_window.t0_s,
+                                                           planned_pick_window.t1_s,
+                                                           remaining_pick_budget,
+                                                           track->pick_cache.planned_segments,
+                                                           cap_hit,
+                                                           _orbit_plot_perf);
+                            if (!track->pick_cache.planned_segments.empty())
+                            {
+                                mark_pick_cache_valid(track->pick_cache,
+                                                      track->cache.generation_id,
+                                                      ref_body_world,
+                                                      frame_to_world,
+                                                      align_delta,
+                                                      planned_pick_window.t0_s,
+                                                      planned_pick_window.t1_s,
+                                                      remaining_pick_budget,
+                                                      true);
+                            }
+                            else
+                            {
+                                track->pick_cache.planned_valid = false;
+                                track->pick_cache.planned_segments.clear();
+                            }
                         }
-                        planned_anchor_times.insert(planned_anchor_times.end(),
-                                                    maneuver_node_times_s.begin(),
-                                                    maneuver_node_times_s.end());
 
-                        Draw::emit_pick_segments(picking,
-                                                 pick_group_planned,
-                                                 *traj_planned_segments,
-                                                 ref_body_world,
-                                                 frame_to_world,
-                                                 align_delta,
-                                                 pick_frustum,
-                                                 pick_settings,
-                                                 planned_pick_window.t0_s,
-                                                 planned_pick_window.t1_s,
-                                                 planned_anchor_times,
-                                                 _orbit_plot_perf);
+                        if (track->pick_cache.planned_valid && !track->pick_cache.planned_segments.empty())
+                        {
+                            if (!rebuilt_pick_cache)
+                            {
+                                _orbit_plot_perf.pick_segments_before_cull +=
+                                        static_cast<uint32_t>(track->pick_cache.planned_segments.size());
+                                _orbit_plot_perf.pick_segments +=
+                                        static_cast<uint32_t>(track->pick_cache.planned_segments.size());
+                            }
+                            picking->add_line_pick_segments(
+                                    pick_group_planned,
+                                    std::span<const PickingSystem::LinePickSegmentData>(
+                                            track->pick_cache.planned_segments.data(),
+                                            track->pick_cache.planned_segments.size()));
+                        }
                     }
                 }
             }

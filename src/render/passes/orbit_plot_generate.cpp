@@ -29,6 +29,8 @@ namespace
     constexpr float k_min_subdivision_dt_s = 1.0e-6f;
     constexpr double k_upload_frustum_margin_ratio = 0.05;
     constexpr double k_min_upload_clip_dt_s = 1.0e-6;
+    constexpr float k_dash_on_px = 14.0f;
+    constexpr float k_dash_off_px = 9.0f;
 
     struct OrbitPlotGeneratePushConstants
     {
@@ -93,6 +95,57 @@ namespace
         const glm::dvec3 m0 = root.v0_bci * root.dt_s;
         const glm::dvec3 m1 = root.v1_bci * root.dt_s;
         return (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
+    }
+
+    static double meters_per_px_at_local(const glm::vec3 &camera_local,
+                                         const float tan_half_fov,
+                                         const float viewport_height_px,
+                                         const glm::dvec3 &point_local_d)
+    {
+        if (!std::isfinite(tan_half_fov) || !(tan_half_fov > 1.0e-6f) || !(viewport_height_px > 0.0f))
+        {
+            return std::numeric_limits<double>::infinity();
+        }
+
+        glm::vec3 point_local{};
+        if (!pack_vec3_finite(point_local_d, point_local))
+        {
+            return std::numeric_limits<double>::infinity();
+        }
+
+        const double dist_m = glm::length(glm::dvec3(point_local) - glm::dvec3(camera_local));
+        if (!std::isfinite(dist_m) || !(dist_m > 1.0e-6))
+        {
+            return std::numeric_limits<double>::infinity();
+        }
+
+        return (2.0 * static_cast<double>(tan_half_fov) * dist_m) / std::max(1.0, static_cast<double>(viewport_height_px));
+    }
+
+    static float compute_dash_phase_start_px(const OrbitPlotSystem::GpuRootSegment &root,
+                                             const double u0,
+                                             const glm::dvec3 &reference_offset_local_d,
+                                             const glm::vec3 &camera_local,
+                                             const float tan_half_fov,
+                                             const float viewport_height_px)
+    {
+        const float dash_period_px = std::max(1.0f, k_dash_on_px + k_dash_off_px);
+        const glm::dvec3 seg_start_local_d = eval_root_local_position(root, 0.0, reference_offset_local_d);
+        const glm::dvec3 clip_start_local_d = eval_root_local_position(root, u0, reference_offset_local_d);
+        const double clipped_prefix_m = glm::length(clip_start_local_d - seg_start_local_d);
+        const double prefix_length_m = std::max(0.0, root.prefix_length_m) +
+                                       ((std::isfinite(clipped_prefix_m) && clipped_prefix_m > 0.0) ? clipped_prefix_m : 0.0);
+        const double meters_per_px = meters_per_px_at_local(camera_local,
+                                                            tan_half_fov,
+                                                            viewport_height_px,
+                                                            clip_start_local_d);
+        if (!std::isfinite(meters_per_px) || !(meters_per_px > 1.0e-6))
+        {
+            return 0.0f;
+        }
+
+        const double dash_phase_px = std::fmod(prefix_length_m / meters_per_px, static_cast<double>(dash_period_px));
+        return std::isfinite(dash_phase_px) ? static_cast<float>(std::max(0.0, dash_phase_px)) : 0.0f;
     }
 
     static bool frustum_contains_local_margin(const glm::mat4 &viewproj,
@@ -213,8 +266,8 @@ bool OrbitPlotGenerate::prepare_and_register(RenderGraph *graph,
         return false;
     }
 
-    const std::span<const OrbitPlotSystem::GpuRootSegment> active = plot.active_gpu_root_segments();
-    if (active.empty())
+    const std::span<const OrbitPlotSystem::GpuRootBatch> active_batches = plot.active_gpu_root_batches();
+    if (active_batches.empty())
     {
         return false;
     }
@@ -227,9 +280,6 @@ bool OrbitPlotGenerate::prepare_and_register(RenderGraph *graph,
         camera_local = world_to_local(cam.position_world, origin_world);
         tan_half_fov = std::tan(glm::radians(cam.fovDegrees) * 0.5f);
     }
-
-    const WorldVec3 reference_offset_world = plot.gpu_reference_body_world() + plot.gpu_align_delta_world();
-    const glm::dvec3 reference_offset_local_d = world_to_local_d(reference_offset_world, origin_world);
 
     const bool frustum_valid = (_context->scene != nullptr);
     const glm::mat4 frustum_viewproj = _context->getSceneData().viewproj;
@@ -249,47 +299,76 @@ bool OrbitPlotGenerate::prepare_and_register(RenderGraph *graph,
     struct CulledRoot
     {
         const OrbitPlotSystem::GpuRootSegment *root = nullptr;
+        const OrbitPlotSystem::GpuRootBatch *batch = nullptr;
         double u0 = 0.0;
         double u1 = 1.0;
+        glm::dvec3 reference_offset_local_d{0.0, 0.0, 0.0};
     };
 
     std::vector<CulledRoot> culled_roots{};
-    culled_roots.reserve(active.size());
-    for (const OrbitPlotSystem::GpuRootSegment &root : active)
+    std::size_t total_root_count = 0;
+    for (const OrbitPlotSystem::GpuRootBatch &batch : active_batches)
     {
-        if (!(root.dt_s > 0.0) || !std::isfinite(root.dt_s))
+        total_root_count += batch.count;
+    }
+    culled_roots.reserve(total_root_count);
+    for (const OrbitPlotSystem::GpuRootBatch &batch : active_batches)
+    {
+        if (batch.segments == nullptr || batch.count == 0 || !(batch.t_end_s > batch.t_start_s))
         {
             continue;
         }
 
-        const double u0 = std::clamp(root.clip_u0, 0.0, 1.0);
-        const double u1 = std::clamp(root.clip_u1, 0.0, 1.0);
-        if (!(u1 > u0))
+        const WorldVec3 reference_offset_world = batch.reference_body_world + batch.align_delta_world;
+        const glm::dvec3 reference_offset_local_d = world_to_local_d(reference_offset_world, origin_world);
+        for (std::size_t i = 0; i < batch.count; ++i)
         {
-            continue;
-        }
-
-        const double clip_dt_s = (u1 - u0) * root.dt_s;
-        if (!std::isfinite(clip_dt_s) || !(clip_dt_s > k_min_upload_clip_dt_s))
-        {
-            continue;
-        }
-
-        if (frustum_valid)
-        {
-            const glm::dvec3 a_local_d = eval_root_local_position(root, u0, reference_offset_local_d);
-            const glm::dvec3 b_local_d = eval_root_local_position(root, u1, reference_offset_local_d);
-            if (!frustum_accept_root_margin(frustum_viewproj, a_local_d, b_local_d, k_upload_frustum_margin_ratio))
+            const OrbitPlotSystem::GpuRootSegment &root = batch.segments[i];
+            if (!(root.dt_s > 0.0) || !std::isfinite(root.dt_s))
             {
                 continue;
             }
-        }
 
-        culled_roots.push_back(CulledRoot{
-                .root = &root,
-                .u0 = u0,
-                .u1 = u1,
-        });
+            const double seg_t0_s = root.t0_s;
+            const double seg_t1_s = seg_t0_s + root.dt_s;
+            const double clip_t0_s = std::max(seg_t0_s, batch.t_start_s);
+            const double clip_t1_s = std::min(seg_t1_s, batch.t_end_s);
+            if (!(clip_t1_s > clip_t0_s))
+            {
+                continue;
+            }
+
+            const double u0 = (clip_t0_s - seg_t0_s) / root.dt_s;
+            const double u1 = (clip_t1_s - seg_t0_s) / root.dt_s;
+            if (!(u1 > u0))
+            {
+                continue;
+            }
+
+            const double clip_dt_s = (u1 - u0) * root.dt_s;
+            if (!std::isfinite(clip_dt_s) || !(clip_dt_s > k_min_upload_clip_dt_s))
+            {
+                continue;
+            }
+
+            if (frustum_valid)
+            {
+                const glm::dvec3 a_local_d = eval_root_local_position(root, u0, reference_offset_local_d);
+                const glm::dvec3 b_local_d = eval_root_local_position(root, u1, reference_offset_local_d);
+                if (!frustum_accept_root_margin(frustum_viewproj, a_local_d, b_local_d, k_upload_frustum_margin_ratio))
+                {
+                    continue;
+                }
+            }
+
+            culled_roots.push_back(CulledRoot{
+                    .root = &root,
+                    .batch = &batch,
+                    .u0 = u0,
+                    .u1 = u1,
+                    .reference_offset_local_d = reference_offset_local_d,
+            });
+        }
     }
 
     if (culled_roots.empty())
@@ -314,12 +393,13 @@ bool OrbitPlotGenerate::prepare_and_register(RenderGraph *graph,
     for (std::size_t i = 0; i < input_root_count; ++i)
     {
         const CulledRoot &root_entry = culled_roots[i];
-        if (!root_entry.root)
+        if (!root_entry.root || !root_entry.batch)
         {
             continue;
         }
 
         const OrbitPlotSystem::GpuRootSegment &root = *root_entry.root;
+        const OrbitPlotSystem::GpuRootBatch &batch = *root_entry.batch;
         const float dt_s = static_cast<float>(root.dt_s);
         const float u0 = static_cast<float>(root_entry.u0);
         const float u1 = static_cast<float>(root_entry.u1);
@@ -328,6 +408,7 @@ bool OrbitPlotGenerate::prepare_and_register(RenderGraph *graph,
             continue;
         }
 
+        const glm::dvec3 &reference_offset_local_d = root_entry.reference_offset_local_d;
         const glm::dvec3 p0_local_d = reference_offset_local_d + root.p0_bci;
         const glm::dvec3 p1_local_d = reference_offset_local_d + root.p1_bci;
         if (!std::isfinite(p0_local_d.x) || !std::isfinite(p0_local_d.y) || !std::isfinite(p0_local_d.z) ||
@@ -358,18 +439,25 @@ bool OrbitPlotGenerate::prepare_and_register(RenderGraph *graph,
         gpu_line.anchor_dt = glm::vec4(anchor_local, dt_s);
         gpu_line.p0_rel_u0 = glm::vec4(p0_rel, u0);
         gpu_line.p1_rel_u1 = glm::vec4(p1_rel, u1);
-        gpu_line.v0_depth = glm::vec4(v0, root.depth == OrbitPlotDepth::DepthTested ? 0.0f : 1.0f);
-        gpu_line.v1_dashed = glm::vec4(v1, root.dashed ? 1.0f : 0.0f);
-        gpu_line.dash_phase_dashed = glm::vec4(std::max(0.0f, root.dash_phase_start_px),
+        gpu_line.v0_depth = glm::vec4(v0, batch.depth == OrbitPlotDepth::DepthTested ? 0.0f : 1.0f);
+        gpu_line.v1_dashed = glm::vec4(v1, batch.dashed ? 1.0f : 0.0f);
+        gpu_line.dash_phase_dashed = glm::vec4(batch.dashed
+                                                       ? compute_dash_phase_start_px(root,
+                                                                                     root_entry.u0,
+                                                                                     reference_offset_local_d,
+                                                                                     camera_local,
+                                                                                     tan_half_fov,
+                                                                                     static_cast<float>(std::max(1u, _context->getDrawExtent().height)))
+                                                       : 0.0f,
                                                0.0f,
                                                0.0f,
                                                0.0f);
-        gpu_line.color = root.color;
+        gpu_line.color = batch.color;
         _input_staging.push_back(gpu_line);
 
         if (_input_staging.size() <= capped_input_count)
         {
-            if (root.depth == OrbitPlotDepth::DepthTested)
+            if (batch.depth == OrbitPlotDepth::DepthTested)
             {
                 ++depth_estimate;
             }
@@ -433,8 +521,6 @@ bool OrbitPlotGenerate::prepare_and_register(RenderGraph *graph,
             0.01,
             16.0));
     const float viewport_height_px = static_cast<float>(std::max(1u, _context->getDrawExtent().height));
-    constexpr float k_dash_on_px = 14.0f;
-    constexpr float k_dash_off_px = 9.0f;
     const float dash_period_px = std::max(1.0f, k_dash_on_px + k_dash_off_px);
 
     OrbitPlotGeneratePushConstants pc{};
