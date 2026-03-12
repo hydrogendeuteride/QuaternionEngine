@@ -98,6 +98,7 @@ public:
         double t_end_s{0.0};
         WorldVec3 reference_body_world{0.0, 0.0, 0.0};
         WorldVec3 align_delta_world{0.0, 0.0, 0.0};
+        glm::dmat3 frame_to_world{1.0};
         glm::vec4 color{1.0f};
         bool dashed{false};
         OrbitPlotDepth depth{OrbitPlotDepth::DepthTested};
@@ -135,6 +136,7 @@ public:
                             double t_end_s,
                             const WorldVec3 &reference_body_world,
                             const WorldVec3 &align_delta_world,
+                            const glm::dmat3 &frame_to_world,
                             const glm::vec4 &color,
                             bool dashed,
                             OrbitPlotDepth depth = OrbitPlotDepth::DepthTested);
