@@ -3,6 +3,7 @@
 #include "game/game_world.h"
 #include "game/state/game_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_types.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_derived_service.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
 #include "game/states/gameplay/scenario/scenario_config.h"
 #include "orbit_helpers.h"
@@ -99,6 +100,7 @@ namespace Game
         void clear_prediction_runtime();
         void clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects);
         void apply_completed_prediction_result(OrbitPredictionService::Result result);
+        void apply_completed_prediction_derived_result(OrbitPredictionDerivedService::Result result);
         bool should_rebuild_prediction_track(const PredictionTrackState &track,
                                              double now_s,
                                              float fixed_dt,
@@ -268,6 +270,7 @@ namespace Game
         OrbitPlotPerfStats _orbit_plot_perf{};
         OrbitPredictionDrawConfig _prediction_draw_config{};
         OrbitPredictionService _prediction_service{};
+        OrbitPredictionDerivedService _prediction_derived_service{};
         std::vector<PredictionTrackState> _prediction_tracks{};
         std::vector<PredictionGroup> _prediction_groups{};
         PredictionSelectionState _prediction_selection{};

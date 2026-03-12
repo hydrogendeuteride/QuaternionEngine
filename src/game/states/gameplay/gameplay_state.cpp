@@ -45,6 +45,7 @@ namespace Game
         _scenario_io_status.clear();
         _scenario_io_status_ok = true;
         _prediction_service.reset();
+        _prediction_derived_service.reset();
         _prediction_tracks.clear();
         _prediction_groups.clear();
         _prediction_selection.clear();
@@ -96,6 +97,7 @@ namespace Game
         _prediction_analysis_selection.clear();
         _prediction_dirty = true;
         _prediction_service.reset();
+        _prediction_derived_service.reset();
         _orbit_plot_perf = {};
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
         {
