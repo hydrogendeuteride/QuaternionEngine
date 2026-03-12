@@ -302,7 +302,8 @@ void PickingSystem::init(EngineContext *context)
     _hover_pick = {};
     _drag_selection.clear();
     _line_pick_groups.clear();
-    _line_pick_segments.clear();
+    _owned_line_pick_segments.clear();
+    _line_pick_batches.clear();
     _mouse_pos_window = glm::vec2{-1.0f, -1.0f};
     _drag_state = {};
     _pending_pick = {};
@@ -332,7 +333,8 @@ void PickingSystem::cleanup()
     _hover_pick = {};
     _drag_selection.clear();
     _line_pick_groups.clear();
-    _line_pick_segments.clear();
+    _owned_line_pick_segments.clear();
+    _line_pick_batches.clear();
     _pending_pick = {};
     _pick_result_pending = false;
     _last_pick_object_id = 0;
@@ -1016,7 +1018,8 @@ bool PickingSystem::pick_line_at_window_pos(const glm::vec2 &window_pos, PickInf
         return false;
     }
 
-    if (!_settings.enabled || !_settings.enable_line_picking || _line_pick_segments.empty())
+    if (!_settings.enabled || !_settings.enable_line_picking ||
+        (_owned_line_pick_segments.empty() && _line_pick_batches.empty()))
     {
         return false;
     }
@@ -1042,15 +1045,14 @@ bool PickingSystem::pick_line_at_window_pos(const glm::vec2 &window_pos, PickInf
     bool any_hit = false;
     double best_px_dist = std::numeric_limits<double>::infinity();
     double best_depth = std::numeric_limits<double>::infinity();
-    uint32_t best_seg_index = 0;
+    uint32_t best_group_id = 0;
+    const LinePickSegmentData *best_seg = nullptr;
     double best_t = 0.0;
 
-    for (uint32_t i = 0; i < static_cast<uint32_t>(_line_pick_segments.size()); ++i)
-    {
-        const LinePickSegment &seg = _line_pick_segments[i];
-        if (seg.group_id >= _line_pick_groups.size())
+    const auto consider_segment = [&](const uint32_t group_id, const LinePickSegmentData &seg) {
+        if (group_id >= _line_pick_groups.size())
         {
-            continue;
+            return;
         }
 
         const glm::dvec3 a_local = world_to_local_d(seg.a_world, ray.origin_world);
@@ -1059,24 +1061,24 @@ bool PickingSystem::pick_line_at_window_pos(const glm::vec2 &window_pos, PickInf
         const RaySegmentClosest c = closest_points_ray_segment(ray.origin_local, ray.dir_local, a_local, b_local);
         if (!std::isfinite(c.dist2) || !std::isfinite(c.ray_s) || !std::isfinite(c.seg_t))
         {
-            continue;
+            return;
         }
         if (!(c.ray_s > 0.0))
         {
-            continue;
+            return;
         }
 
         const double meters_per_px = (2.0 * tan_half_fov * c.ray_s) / ray.viewport_height_px;
         if (!std::isfinite(meters_per_px) || !(meters_per_px > 0.0))
         {
-            continue;
+            return;
         }
 
         const double dist_m = std::sqrt(std::max(0.0, c.dist2));
         const double dist_px = dist_m / meters_per_px;
         if (!(dist_px <= static_cast<double>(radius_px)))
         {
-            continue;
+            return;
         }
 
         if (!any_hit || dist_px < best_px_dist || (dist_px == best_px_dist && c.ray_s < best_depth))
@@ -1084,24 +1086,42 @@ bool PickingSystem::pick_line_at_window_pos(const glm::vec2 &window_pos, PickInf
             any_hit = true;
             best_px_dist = dist_px;
             best_depth = c.ray_s;
-            best_seg_index = i;
+            best_group_id = group_id;
+            best_seg = &seg;
             best_t = std::clamp(c.seg_t, 0.0, 1.0);
+        }
+    };
+
+    for (const LinePickSegment &owned : _owned_line_pick_segments)
+    {
+        consider_segment(owned.group_id, owned.data);
+    }
+
+    for (const LinePickBatch &batch : _line_pick_batches)
+    {
+        if (batch.group_id >= _line_pick_groups.size() || batch.segments == nullptr || batch.count == 0)
+        {
+            continue;
+        }
+
+        for (size_t i = 0; i < batch.count; ++i)
+        {
+            consider_segment(batch.group_id, batch.segments[i]);
         }
     }
 
-    if (!any_hit)
+    if (!any_hit || best_seg == nullptr)
     {
         return false;
     }
 
-    const LinePickSegment &best = _line_pick_segments[best_seg_index];
-    const LinePickGroup &group = _line_pick_groups[best.group_id];
+    const LinePickGroup &group = _line_pick_groups[best_group_id];
 
-    const WorldVec3 hit_world = (1.0 - best_t) * best.a_world + best_t * best.b_world;
+    const WorldVec3 hit_world = (1.0 - best_t) * best_seg->a_world + best_t * best_seg->b_world;
     double hit_time_s = std::numeric_limits<double>::quiet_NaN();
-    if (std::isfinite(best.a_time_s) && std::isfinite(best.b_time_s))
+    if (std::isfinite(best_seg->a_time_s) && std::isfinite(best_seg->b_time_s))
     {
-        hit_time_s = best.a_time_s + (best.b_time_s - best.a_time_s) * best_t;
+        hit_time_s = best_seg->a_time_s + (best_seg->b_time_s - best_seg->a_time_s) * best_t;
     }
 
     out_pick.mesh = nullptr;
@@ -1223,7 +1243,8 @@ void PickingSystem::clear_pick(PickInfo &pick) const
 void PickingSystem::clear_line_picks()
 {
     _line_pick_groups.clear();
-    _line_pick_segments.clear();
+    _owned_line_pick_segments.clear();
+    _line_pick_batches.clear();
 }
 
 uint32_t PickingSystem::add_line_pick_group(std::string owner_name)
@@ -1248,9 +1269,23 @@ void PickingSystem::add_line_pick_segment(uint32_t group_id,
 
     LinePickSegment seg{};
     seg.group_id = group_id;
-    seg.a_world = a_world;
-    seg.b_world = b_world;
-    seg.a_time_s = a_time_s;
-    seg.b_time_s = b_time_s;
-    _line_pick_segments.push_back(std::move(seg));
+    seg.data.a_world = a_world;
+    seg.data.b_world = b_world;
+    seg.data.a_time_s = a_time_s;
+    seg.data.b_time_s = b_time_s;
+    _owned_line_pick_segments.push_back(std::move(seg));
+}
+
+void PickingSystem::add_line_pick_segments(uint32_t group_id, const std::span<const LinePickSegmentData> segments)
+{
+    if (group_id >= _line_pick_groups.size() || segments.empty())
+    {
+        return;
+    }
+
+    LinePickBatch batch{};
+    batch.group_id = group_id;
+    batch.segments = segments.data();
+    batch.count = segments.size();
+    _line_pick_batches.push_back(batch);
 }

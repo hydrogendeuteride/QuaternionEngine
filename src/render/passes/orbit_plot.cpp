@@ -164,7 +164,7 @@ void OrbitPlotPass::register_graph(RenderGraph *graph,
     }
 
     const bool has_cpu_lines = plot->has_active_lines();
-    const bool has_gpu_roots = plot->has_active_gpu_root_segments();
+    const bool has_gpu_roots = plot->has_active_gpu_root_batches();
     if (!has_cpu_lines && !has_gpu_roots)
     {
         return;

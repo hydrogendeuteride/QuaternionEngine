@@ -55,6 +55,7 @@ namespace Game::PredictionDrawDetail
     double snap_time_past_straddling_segment(const std::vector<orbitsim::TrajectorySegment> &traj_segments, double t_s);
     std::vector<double> collect_maneuver_node_times(const std::vector<ManeuverNode> &nodes);
     std::size_t lower_bound_sample_index(const std::vector<orbitsim::TrajectorySample> &traj, double t_s);
+    bool frame_transform_is_identity(const glm::dmat3 &frame_to_world);
     WorldVec3 sample_polyline_world(const WorldVec3 &frame_origin_world,
                                     const glm::dmat3 &frame_to_world,
                                     const std::vector<orbitsim::TrajectorySample> &traj,
@@ -91,6 +92,16 @@ namespace Game::PredictionDrawDetail
                                          bool draw_future_segment,
                                          bool draw_full_orbit,
                                          double orbital_period_s);
+    std::size_t build_pick_segment_cache(const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                                         const WorldVec3 &ref_body_world,
+                                         const glm::dmat3 &frame_to_world,
+                                         const WorldVec3 &align_delta,
+                                         double t0_s,
+                                         double t1_s,
+                                         std::size_t max_segments,
+                                         std::vector<PickingSystem::LinePickSegmentData> &out_segments,
+                                         bool &out_cap_hit,
+                                         OrbitPlotPerfStats &perf);
     std::size_t emit_pick_segments(PickingSystem *picking,
                                    uint32_t pick_group,
                                    const std::vector<orbitsim::TrajectorySegment> &traj_segments,

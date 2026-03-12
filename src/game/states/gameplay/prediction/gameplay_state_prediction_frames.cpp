@@ -34,15 +34,6 @@ namespace Game
             return a.mode == b.mode && a.fixed_body_id == b.fixed_body_id;
         }
 
-        bool frame_spec_supports_adaptive_render_curve(const orbitsim::TrajectoryFrameSpec &spec)
-        {
-            return spec.type == orbitsim::TrajectoryFrameType::Inertial ||
-                   spec.type == orbitsim::TrajectoryFrameType::BodyCenteredInertial ||
-                   spec.type == orbitsim::TrajectoryFrameType::BodyFixed ||
-                   spec.type == orbitsim::TrajectoryFrameType::Synodic ||
-                   spec.type == orbitsim::TrajectoryFrameType::LVLH;
-        }
-
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_samples(
                 const std::vector<orbitsim::TrajectorySample> &samples)
         {
@@ -70,6 +61,49 @@ namespace Game
                         .end = orbitsim::make_state(b.position_m, b.velocity_mps),
                         .flags = 0u,
                 });
+            }
+
+            return out;
+        }
+
+        std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> build_gpu_root_cache(
+                const std::vector<orbitsim::TrajectorySegment> &segments)
+        {
+            auto out = std::make_shared<std::vector<OrbitPlotSystem::GpuRootSegment>>();
+            out->reserve(segments.size());
+
+            double prefix_length_m = 0.0;
+            for (const orbitsim::TrajectorySegment &segment : segments)
+            {
+                if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
+                {
+                    continue;
+                }
+
+                const glm::dvec3 p0 = glm::dvec3(segment.start.position_m);
+                const glm::dvec3 p1 = glm::dvec3(segment.end.position_m);
+                const glm::dvec3 v0 = glm::dvec3(segment.start.velocity_mps);
+                const glm::dvec3 v1 = glm::dvec3(segment.end.velocity_mps);
+                if (!finite_vec3(p0) || !finite_vec3(p1) || !finite_vec3(v0) || !finite_vec3(v1))
+                {
+                    continue;
+                }
+
+                OrbitPlotSystem::GpuRootSegment root{};
+                root.t0_s = segment.t0_s;
+                root.p0_bci = p0;
+                root.v0_bci = v0;
+                root.p1_bci = p1;
+                root.v1_bci = v1;
+                root.dt_s = segment.dt_s;
+                root.prefix_length_m = prefix_length_m;
+                out->push_back(root);
+
+                const double chord_m = glm::length(p1 - p0);
+                if (std::isfinite(chord_m) && chord_m > 0.0)
+                {
+                    prefix_length_m += chord_m;
+                }
             }
 
             return out;
@@ -1010,16 +1044,11 @@ namespace Game
                         trajectory_segments_from_samples(track.cache.trajectory_frame_planned);
             }
 
-            if (frame_spec_supports_adaptive_render_curve(resolved_frame_spec))
-            {
-                track.cache.render_curve_frame =
-                        OrbitRenderCurve::build(track.cache.trajectory_segments_frame);
-                if (!track.cache.trajectory_segments_frame_planned.empty())
-                {
-                    track.cache.render_curve_frame_planned =
-                            OrbitRenderCurve::build(track.cache.trajectory_segments_frame_planned);
-                }
-            }
+            track.cache.gpu_roots_frame = build_gpu_root_cache(track.cache.trajectory_segments_frame);
+            track.cache.gpu_roots_frame_planned = build_gpu_root_cache(track.cache.trajectory_segments_frame_planned);
+
+            track.cache.render_curve_frame.clear();
+            track.cache.render_curve_frame_planned.clear();
 
             track.cache.resolved_frame_spec = resolved_frame_spec;
             track.cache.resolved_frame_spec_valid = true;
