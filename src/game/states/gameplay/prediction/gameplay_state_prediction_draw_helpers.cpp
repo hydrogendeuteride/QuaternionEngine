@@ -292,6 +292,26 @@ namespace Game::PredictionDrawDetail
         return true;
     }
 
+    std::vector<orbitsim::TrajectorySegment> transform_segments_to_world_basis(
+            const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+            const glm::dmat3 &frame_to_world)
+    {
+        std::vector<orbitsim::TrajectorySegment> transformed_segments{};
+        transformed_segments.reserve(traj_segments.size());
+
+        for (const orbitsim::TrajectorySegment &segment : traj_segments)
+        {
+            orbitsim::TrajectorySegment transformed = segment;
+            transformed.start.position_m = frame_to_world * glm::dvec3(segment.start.position_m);
+            transformed.start.velocity_mps = frame_to_world * glm::dvec3(segment.start.velocity_mps);
+            transformed.end.position_m = frame_to_world * glm::dvec3(segment.end.position_m);
+            transformed.end.velocity_mps = frame_to_world * glm::dvec3(segment.end.velocity_mps);
+            transformed_segments.push_back(transformed);
+        }
+
+        return transformed_segments;
+    }
+
     namespace
     {
         WorldVec3 eval_segment_world_pos(const OrbitDrawWindowContext &ctx,
@@ -323,32 +343,6 @@ namespace Game::PredictionDrawDetail
             const glm::dvec3 m1 = glm::dvec3(segment.end.velocity_mps) * segment.dt_s;
             const glm::dvec3 local = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
             return ctx.ref_body_world + WorldVec3(local) + ctx.align_delta;
-        }
-
-        orbitsim::TrajectorySegment transform_segment_to_world_basis(const orbitsim::TrajectorySegment &segment,
-                                                                     const glm::dmat3 &frame_to_world)
-        {
-            orbitsim::TrajectorySegment transformed = segment;
-            transformed.start.position_m = frame_to_world * glm::dvec3(segment.start.position_m);
-            transformed.start.velocity_mps = frame_to_world * glm::dvec3(segment.start.velocity_mps);
-            transformed.end.position_m = frame_to_world * glm::dvec3(segment.end.position_m);
-            transformed.end.velocity_mps = frame_to_world * glm::dvec3(segment.end.velocity_mps);
-            return transformed;
-        }
-
-        std::vector<orbitsim::TrajectorySegment> transform_segments_to_world_basis(
-                const std::vector<orbitsim::TrajectorySegment> &traj_segments,
-                const glm::dmat3 &frame_to_world)
-        {
-            std::vector<orbitsim::TrajectorySegment> transformed_segments{};
-            transformed_segments.reserve(traj_segments.size());
-
-            for (const orbitsim::TrajectorySegment &segment : traj_segments)
-            {
-                transformed_segments.push_back(transform_segment_to_world_basis(segment, frame_to_world));
-            }
-
-            return transformed_segments;
         }
 
         void emit_orbit_line(const OrbitDrawWindowContext &ctx,
@@ -427,6 +421,7 @@ namespace Game::PredictionDrawDetail
                                                t_end_s,
                                                ctx.ref_body_world,
                                                ctx.align_delta,
+                                               ctx.frame_to_world,
                                                color,
                                                dashed,
                                                depth);
@@ -638,7 +633,21 @@ namespace Game::PredictionDrawDetail
             return;
         }
 
-        draw_orbit_window(ctx, draw_config, perf, selected_segments, t_start_s, t_end_s, color, dashed);
+        const bool needs_world_basis_transform = !frame_transform_is_identity(ctx.frame_to_world);
+        const std::vector<orbitsim::TrajectorySegment> transformed_segments =
+                needs_world_basis_transform
+                        ? transform_segments_to_world_basis(selected_segments, ctx.frame_to_world)
+                        : std::vector<orbitsim::TrajectorySegment>{};
+        const std::vector<orbitsim::TrajectorySegment> &segments_for_draw =
+                needs_world_basis_transform ? transformed_segments : selected_segments;
+
+        OrbitDrawWindowContext draw_ctx = ctx;
+        if (needs_world_basis_transform)
+        {
+            draw_ctx.frame_to_world = glm::dmat3(1.0);
+        }
+
+        draw_orbit_window(draw_ctx, draw_config, perf, segments_for_draw, t_start_s, t_end_s, color, dashed);
     }
 
     PickWindow build_planned_pick_window(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
@@ -728,11 +737,13 @@ namespace Game::PredictionDrawDetail
                                          const double t0_s,
                                          const double t1_s,
                                          const std::size_t max_segments,
+                                         const bool segments_are_world_basis,
                                          std::vector<PickingSystem::LinePickSegmentData> &out_segments,
                                          bool &out_cap_hit,
                                          OrbitPlotPerfStats &perf)
     {
-        const bool needs_world_basis_transform = !frame_transform_is_identity(frame_to_world);
+        const bool needs_world_basis_transform =
+                !segments_are_world_basis && !frame_transform_is_identity(frame_to_world);
         const std::vector<orbitsim::TrajectorySegment> transformed_segments =
                 needs_world_basis_transform
                         ? transform_segments_to_world_basis(traj_segments, frame_to_world)
@@ -813,6 +824,7 @@ namespace Game::PredictionDrawDetail
                                    const double t0_s,
                                    const double t1_s,
                                    const std::vector<double> &anchor_times,
+                                   const bool segments_are_world_basis,
                                    OrbitPlotPerfStats &perf)
     {
         (void) pick_frustum;
@@ -831,6 +843,7 @@ namespace Game::PredictionDrawDetail
                                                              t0_s,
                                                              t1_s,
                                                              std::max<std::size_t>(1, pick_settings.max_segments),
+                                                             segments_are_world_basis,
                                                              segments,
                                                              cap_hit,
                                                              perf);

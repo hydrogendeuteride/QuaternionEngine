@@ -56,6 +56,9 @@ namespace Game::PredictionDrawDetail
     std::vector<double> collect_maneuver_node_times(const std::vector<ManeuverNode> &nodes);
     std::size_t lower_bound_sample_index(const std::vector<orbitsim::TrajectorySample> &traj, double t_s);
     bool frame_transform_is_identity(const glm::dmat3 &frame_to_world);
+    std::vector<orbitsim::TrajectorySegment> transform_segments_to_world_basis(
+            const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+            const glm::dmat3 &frame_to_world);
     WorldVec3 sample_polyline_world(const WorldVec3 &frame_origin_world,
                                     const glm::dmat3 &frame_to_world,
                                     const std::vector<orbitsim::TrajectorySample> &traj,
@@ -99,6 +102,7 @@ namespace Game::PredictionDrawDetail
                                          double t0_s,
                                          double t1_s,
                                          std::size_t max_segments,
+                                         bool segments_are_world_basis,
                                          std::vector<PickingSystem::LinePickSegmentData> &out_segments,
                                          bool &out_cap_hit,
                                          OrbitPlotPerfStats &perf);
@@ -113,6 +117,7 @@ namespace Game::PredictionDrawDetail
                                    double t0_s,
                                    double t1_s,
                                    const std::vector<double> &anchor_times,
+                                   bool segments_are_world_basis,
                                    OrbitPlotPerfStats &perf);
     bool frame_spec_uses_direct_world_polyline(const orbitsim::TrajectoryFrameSpec &spec);
     void draw_polyline_window(const OrbitDrawWindowContext &ctx,

@@ -43,8 +43,7 @@ namespace Game
                                          const bool dashed,
                                          const float line_overlay_boost)
         {
-            if (!orbit_plot || !cached_roots || cached_roots->empty() || !(t_end_s > t_start_s) ||
-                !Draw::frame_transform_is_identity(frame_to_world))
+            if (!orbit_plot || !cached_roots || cached_roots->empty() || !(t_end_s > t_start_s))
             {
                 return;
             }
@@ -54,6 +53,7 @@ namespace Game
                                            t_end_s,
                                            ref_body_world,
                                            align_delta,
+                                           frame_to_world,
                                            color,
                                            dashed,
                                            OrbitPlotDepth::DepthTested);
@@ -75,6 +75,7 @@ namespace Game
                                            t_end_s,
                                            ref_body_world,
                                            align_delta,
+                                           frame_to_world,
                                            overlay_color,
                                            dashed,
                                            OrbitPlotDepth::AlwaysOnTop);
@@ -341,10 +342,51 @@ namespace Game
             draw_ctx.render_error_px = render_error_px;
             draw_ctx.render_max_segments = static_cast<std::size_t>(std::max(1, _orbit_plot_render_max_segments_cpu));
             draw_ctx.line_overlay_boost = std::clamp(_prediction_line_overlay_boost, 0.0f, 1.0f);
+            const bool identity_frame_transform = Draw::frame_transform_is_identity(frame_to_world);
             const bool use_persistent_gpu_roots =
                     orbit_plot && orbit_plot->settings().gpu_generate_enabled &&
+                    !direct_world_polyline;
+            const bool use_base_adaptive_curve =
                     !direct_world_polyline &&
-                    Draw::frame_transform_is_identity(frame_to_world);
+                    !use_persistent_gpu_roots &&
+                    !track->cache.render_curve_frame.empty();
+            const bool use_planned_adaptive_curve =
+                    !direct_world_polyline &&
+                    !use_persistent_gpu_roots &&
+                    !track->cache.render_curve_frame_planned.empty();
+
+            Draw::OrbitDrawWindowContext world_basis_draw_ctx = draw_ctx;
+            if (!identity_frame_transform)
+            {
+                world_basis_draw_ctx.frame_to_world = glm::dmat3(1.0);
+            }
+
+            std::vector<orbitsim::TrajectorySegment> traj_base_segments_world_basis{};
+            std::vector<orbitsim::TrajectorySegment> traj_planned_segments_world_basis{};
+            const auto get_base_segments_world_basis = [&]() -> const std::vector<orbitsim::TrajectorySegment> & {
+                if (identity_frame_transform)
+                {
+                    return *traj_base_segments;
+                }
+                if (traj_base_segments_world_basis.empty() && !traj_base_segments->empty())
+                {
+                    traj_base_segments_world_basis =
+                            Draw::transform_segments_to_world_basis(*traj_base_segments, frame_to_world);
+                }
+                return traj_base_segments_world_basis;
+            };
+            const auto get_planned_segments_world_basis = [&]() -> const std::vector<orbitsim::TrajectorySegment> & {
+                if (identity_frame_transform)
+                {
+                    return *traj_planned_segments;
+                }
+                if (traj_planned_segments_world_basis.empty() && !traj_planned_segments->empty())
+                {
+                    traj_planned_segments_world_basis =
+                            Draw::transform_segments_to_world_basis(*traj_planned_segments, frame_to_world);
+                }
+                return traj_planned_segments_world_basis;
+            };
 
             glm::vec4 track_color_full = color_orbit_full;
             glm::vec4 track_color_future = color_orbit_future;
@@ -358,6 +400,7 @@ namespace Game
                 track_color_plan = Draw::scale_line_color(glm::vec4(seed.r, seed.g, seed.b, 0.75f), line_alpha_scale);
                 draw_ctx.line_overlay_boost = std::clamp(_prediction_line_overlay_boost * 0.35f, 0.0f, 1.0f);
             }
+            world_basis_draw_ctx.line_overlay_boost = draw_ctx.line_overlay_boost;
 
             const double future_window_s = prediction_future_window_s(track->key);
             Draw::PickWindow base_pick_window{};
@@ -392,12 +435,24 @@ namespace Game
                                                 false,
                                                 draw_ctx.line_overlay_boost);
                 }
+                else if (use_base_adaptive_curve)
+                {
+                    Draw::draw_adaptive_curve_window(draw_ctx,
+                                                     _prediction_draw_config,
+                                                     _orbit_plot_perf,
+                                                     track->cache.render_curve_frame,
+                                                     t0,
+                                                     t_full_end,
+                                                     track_color_full,
+                                                     false);
+                }
                 else
                 {
-                    Draw::draw_orbit_window(draw_ctx,
+                    Draw::draw_orbit_window(identity_frame_transform ? draw_ctx : world_basis_draw_ctx,
                                             _prediction_draw_config,
                                             _orbit_plot_perf,
-                                            *traj_base_segments,
+                                            identity_frame_transform ? *traj_base_segments
+                                                                     : get_base_segments_world_basis(),
                                             t0,
                                             t_full_end,
                                             track_color_full,
@@ -438,12 +493,24 @@ namespace Game
                                                 false,
                                                 draw_ctx.line_overlay_boost);
                 }
+                else if (use_base_adaptive_curve)
+                {
+                    Draw::draw_adaptive_curve_window(draw_ctx,
+                                                     _prediction_draw_config,
+                                                     _orbit_plot_perf,
+                                                     track->cache.render_curve_frame,
+                                                     now_s,
+                                                     t_end,
+                                                     track_color_future,
+                                                     false);
+                }
                 else
                 {
-                    Draw::draw_orbit_window(draw_ctx,
+                    Draw::draw_orbit_window(identity_frame_transform ? draw_ctx : world_basis_draw_ctx,
                                             _prediction_draw_config,
                                             _orbit_plot_perf,
-                                            *traj_base_segments,
+                                            identity_frame_transform ? *traj_base_segments
+                                                                     : get_base_segments_world_basis(),
                                             now_s,
                                             t_end,
                                             track_color_future,
@@ -494,12 +561,24 @@ namespace Game
                                                 _prediction_draw_config.draw_planned_as_dashed,
                                                 draw_ctx.line_overlay_boost);
                 }
+                else if (use_planned_adaptive_curve)
+                {
+                    Draw::draw_adaptive_curve_window(draw_ctx,
+                                                     _prediction_draw_config,
+                                                     _orbit_plot_perf,
+                                                     track->cache.render_curve_frame_planned,
+                                                     planned_pick_window.t0_s,
+                                                     planned_pick_window.t1_s,
+                                                     track_color_plan,
+                                                     _prediction_draw_config.draw_planned_as_dashed);
+                }
                 else
                 {
-                    Draw::draw_orbit_window(draw_ctx,
+                    Draw::draw_orbit_window(identity_frame_transform ? draw_ctx : world_basis_draw_ctx,
                                             _prediction_draw_config,
                                             _orbit_plot_perf,
-                                            *traj_planned_segments,
+                                            identity_frame_transform ? *traj_planned_segments
+                                                                     : get_planned_segments_world_basis(),
                                             planned_pick_window.t0_s,
                                             planned_pick_window.t1_s,
                                             track_color_plan,
@@ -563,13 +642,16 @@ namespace Game
                         {
                             rebuilt_pick_cache = true;
                             bool cap_hit = false;
-                            emitted = Draw::build_pick_segment_cache(*traj_base_segments,
+                            const std::vector<orbitsim::TrajectorySegment> &pick_base_segments =
+                                    identity_frame_transform ? *traj_base_segments : get_base_segments_world_basis();
+                            emitted = Draw::build_pick_segment_cache(pick_base_segments,
                                                                      ref_body_world,
                                                                      frame_to_world,
                                                                      align_delta,
                                                                      base_pick_window.t0_s,
                                                                      base_pick_window.t1_s,
                                                                      base_pick_budget,
+                                                                     !identity_frame_transform,
                                                                      track->pick_cache.base_segments,
                                                                      cap_hit,
                                                                      _orbit_plot_perf);
@@ -643,13 +725,16 @@ namespace Game
                         {
                             rebuilt_pick_cache = true;
                             bool cap_hit = false;
-                            Draw::build_pick_segment_cache(*traj_planned_segments,
+                            const std::vector<orbitsim::TrajectorySegment> &pick_planned_segments =
+                                    identity_frame_transform ? *traj_planned_segments : get_planned_segments_world_basis();
+                            Draw::build_pick_segment_cache(pick_planned_segments,
                                                            ref_body_world,
                                                            frame_to_world,
                                                            align_delta,
                                                            planned_pick_window.t0_s,
                                                            planned_pick_window.t1_s,
                                                            remaining_pick_budget,
+                                                           !identity_frame_transform,
                                                            track->pick_cache.planned_segments,
                                                            cap_hit,
                                                            _orbit_plot_perf);

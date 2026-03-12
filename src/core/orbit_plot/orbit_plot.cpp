@@ -191,6 +191,7 @@ void OrbitPlotSystem::add_gpu_root_batch(const std::shared_ptr<const std::vector
                                          const double t_end_s,
                                          const WorldVec3 &reference_body_world,
                                          const WorldVec3 &align_delta_world,
+                                         const glm::dmat3 &frame_to_world,
                                          const glm::vec4 &color,
                                          const bool dashed,
                                          const OrbitPlotDepth depth)
@@ -208,6 +209,7 @@ void OrbitPlotSystem::add_gpu_root_batch(const std::shared_ptr<const std::vector
     batch.t_end_s = t_end_s;
     batch.reference_body_world = reference_body_world;
     batch.align_delta_world = align_delta_world;
+    batch.frame_to_world = frame_to_world;
     batch.color = color;
     batch.dashed = dashed;
     batch.depth = depth;

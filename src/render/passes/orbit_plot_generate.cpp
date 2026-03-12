@@ -77,9 +77,16 @@ namespace
         return std::isfinite(dst.x) && std::isfinite(dst.y) && std::isfinite(dst.z);
     }
 
+    static glm::dvec3 apply_frame_to_vector(const glm::dmat3 &frame_to_world,
+                                            const glm::dvec3 &value)
+    {
+        return frame_to_world * value;
+    }
+
     static glm::dvec3 eval_root_local_position(const OrbitPlotSystem::GpuRootSegment &root,
                                                double u,
-                                               const glm::dvec3 &reference_offset_local_d)
+                                               const glm::dvec3 &reference_offset_local_d,
+                                               const glm::dmat3 &frame_to_world)
     {
         u = std::clamp(u, 0.0, 1.0);
         const double u2 = u * u;
@@ -90,10 +97,10 @@ namespace
         const double h01 = (-2.0 * u3) + (3.0 * u2);
         const double h11 = u3 - u2;
 
-        const glm::dvec3 p0 = reference_offset_local_d + root.p0_bci;
-        const glm::dvec3 p1 = reference_offset_local_d + root.p1_bci;
-        const glm::dvec3 m0 = root.v0_bci * root.dt_s;
-        const glm::dvec3 m1 = root.v1_bci * root.dt_s;
+        const glm::dvec3 p0 = reference_offset_local_d + apply_frame_to_vector(frame_to_world, root.p0_bci);
+        const glm::dvec3 p1 = reference_offset_local_d + apply_frame_to_vector(frame_to_world, root.p1_bci);
+        const glm::dvec3 m0 = apply_frame_to_vector(frame_to_world, root.v0_bci) * root.dt_s;
+        const glm::dvec3 m1 = apply_frame_to_vector(frame_to_world, root.v1_bci) * root.dt_s;
         return (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
     }
 
@@ -125,13 +132,14 @@ namespace
     static float compute_dash_phase_start_px(const OrbitPlotSystem::GpuRootSegment &root,
                                              const double u0,
                                              const glm::dvec3 &reference_offset_local_d,
+                                             const glm::dmat3 &frame_to_world,
                                              const glm::vec3 &camera_local,
                                              const float tan_half_fov,
                                              const float viewport_height_px)
     {
         const float dash_period_px = std::max(1.0f, k_dash_on_px + k_dash_off_px);
-        const glm::dvec3 seg_start_local_d = eval_root_local_position(root, 0.0, reference_offset_local_d);
-        const glm::dvec3 clip_start_local_d = eval_root_local_position(root, u0, reference_offset_local_d);
+        const glm::dvec3 seg_start_local_d = eval_root_local_position(root, 0.0, reference_offset_local_d, frame_to_world);
+        const glm::dvec3 clip_start_local_d = eval_root_local_position(root, u0, reference_offset_local_d, frame_to_world);
         const double clipped_prefix_m = glm::length(clip_start_local_d - seg_start_local_d);
         const double prefix_length_m = std::max(0.0, root.prefix_length_m) +
                                        ((std::isfinite(clipped_prefix_m) && clipped_prefix_m > 0.0) ? clipped_prefix_m : 0.0);
@@ -353,8 +361,8 @@ bool OrbitPlotGenerate::prepare_and_register(RenderGraph *graph,
 
             if (frustum_valid)
             {
-                const glm::dvec3 a_local_d = eval_root_local_position(root, u0, reference_offset_local_d);
-                const glm::dvec3 b_local_d = eval_root_local_position(root, u1, reference_offset_local_d);
+                const glm::dvec3 a_local_d = eval_root_local_position(root, u0, reference_offset_local_d, batch.frame_to_world);
+                const glm::dvec3 b_local_d = eval_root_local_position(root, u1, reference_offset_local_d, batch.frame_to_world);
                 if (!frustum_accept_root_margin(frustum_viewproj, a_local_d, b_local_d, k_upload_frustum_margin_ratio))
                 {
                     continue;
@@ -409,8 +417,8 @@ bool OrbitPlotGenerate::prepare_and_register(RenderGraph *graph,
         }
 
         const glm::dvec3 &reference_offset_local_d = root_entry.reference_offset_local_d;
-        const glm::dvec3 p0_local_d = reference_offset_local_d + root.p0_bci;
-        const glm::dvec3 p1_local_d = reference_offset_local_d + root.p1_bci;
+        const glm::dvec3 p0_local_d = reference_offset_local_d + apply_frame_to_vector(batch.frame_to_world, root.p0_bci);
+        const glm::dvec3 p1_local_d = reference_offset_local_d + apply_frame_to_vector(batch.frame_to_world, root.p1_bci);
         if (!std::isfinite(p0_local_d.x) || !std::isfinite(p0_local_d.y) || !std::isfinite(p0_local_d.z) ||
             !std::isfinite(p1_local_d.x) || !std::isfinite(p1_local_d.y) || !std::isfinite(p1_local_d.z))
         {
@@ -426,11 +434,13 @@ bool OrbitPlotGenerate::prepare_and_register(RenderGraph *graph,
         glm::vec3 p1_rel{};
         glm::vec3 v0{};
         glm::vec3 v1{};
+        const glm::dvec3 v0_local_d = apply_frame_to_vector(batch.frame_to_world, root.v0_bci);
+        const glm::dvec3 v1_local_d = apply_frame_to_vector(batch.frame_to_world, root.v1_bci);
         if (!pack_vec3_finite(anchor_local_d, anchor_local) ||
             !pack_vec3_finite(p0_rel_d, p0_rel) ||
             !pack_vec3_finite(p1_rel_d, p1_rel) ||
-            !pack_vec3_finite(root.v0_bci, v0) ||
-            !pack_vec3_finite(root.v1_bci, v1))
+            !pack_vec3_finite(v0_local_d, v0) ||
+            !pack_vec3_finite(v1_local_d, v1))
         {
             continue;
         }
@@ -445,6 +455,7 @@ bool OrbitPlotGenerate::prepare_and_register(RenderGraph *graph,
                                                        ? compute_dash_phase_start_px(root,
                                                                                      root_entry.u0,
                                                                                      reference_offset_local_d,
+                                                                                     batch.frame_to_world,
                                                                                      camera_local,
                                                                                      tan_half_fov,
                                                                                      static_cast<float>(std::max(1u, _context->getDrawExtent().height)))
