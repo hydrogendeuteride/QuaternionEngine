@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -29,7 +30,7 @@ public:
     struct Settings
     {
         bool enabled = true;
-        bool gpu_generate_enabled = false;
+        bool gpu_generate_enabled = true;
         float line_width_px = 2.0f;
         float line_aa_px = 1.0f;
         double render_error_px = 0.75;
@@ -79,16 +80,27 @@ public:
 
     struct GpuRootSegment
     {
+        double t0_s{0.0};
         glm::dvec3 p0_bci{0.0, 0.0, 0.0};
         glm::dvec3 v0_bci{0.0, 0.0, 0.0};
         glm::dvec3 p1_bci{0.0, 0.0, 0.0};
         glm::dvec3 v1_bci{0.0, 0.0, 0.0};
         double dt_s{0.0};
-        double clip_u0{0.0};
-        double clip_u1{1.0};
-        float dash_phase_start_px{0.0f};
-        bool dashed{false};
+        double prefix_length_m{0.0};
+    };
+
+    struct GpuRootBatch
+    {
+        std::shared_ptr<const std::vector<GpuRootSegment>> owner{};
+        const GpuRootSegment *segments{nullptr};
+        std::size_t count{0};
+        double t_start_s{0.0};
+        double t_end_s{0.0};
+        WorldVec3 reference_body_world{0.0, 0.0, 0.0};
+        WorldVec3 align_delta_world{0.0, 0.0, 0.0};
+        glm::dmat3 frame_to_world{1.0};
         glm::vec4 color{1.0f};
+        bool dashed{false};
         OrbitPlotDepth depth{OrbitPlotDepth::DepthTested};
     };
 
@@ -107,10 +119,8 @@ public:
 
     bool has_active_lines() const;
     std::span<const LineCommand> active_lines() const;
-    bool has_active_gpu_root_segments() const;
-    std::span<const GpuRootSegment> active_gpu_root_segments() const;
-    const WorldVec3 &gpu_reference_body_world() const { return _gpu_reference_body_world; }
-    const WorldVec3 &gpu_align_delta_world() const { return _gpu_align_delta_world; }
+    bool has_active_gpu_root_batches() const;
+    std::span<const GpuRootBatch> active_gpu_root_batches() const;
     LineVertexLists build_line_vertices(const WorldVec3 &origin_world) const;
 
     void record_upload_stats(std::size_t upload_bytes,
@@ -121,27 +131,21 @@ public:
                              uint32_t overlay_segment_count);
     void record_gpu_path_stats(bool gpu_path_active, bool gpu_generate_cap_hit, bool fallback);
 
-    void set_gpu_frame_reference(const WorldVec3 &reference_body_world,
-                                 const WorldVec3 &align_delta_world);
-    void add_gpu_root_segment(double dt_s,
-                              const glm::dvec3 &p0_bci,
-                              const glm::dvec3 &v0_bci,
-                              const glm::dvec3 &p1_bci,
-                              const glm::dvec3 &v1_bci,
-                              double clip_u0,
-                              double clip_u1,
-                              bool dashed,
-                              float dash_phase_start_px,
-                              const glm::vec4 &color,
-                              OrbitPlotDepth depth = OrbitPlotDepth::DepthTested);
+    void add_gpu_root_batch(std::shared_ptr<const std::vector<GpuRootSegment>> segments,
+                            double t_start_s,
+                            double t_end_s,
+                            const WorldVec3 &reference_body_world,
+                            const WorldVec3 &align_delta_world,
+                            const glm::dmat3 &frame_to_world,
+                            const glm::vec4 &color,
+                            bool dashed,
+                            OrbitPlotDepth depth = OrbitPlotDepth::DepthTested);
 
 private:
     Settings _settings{};
     Stats _stats{};
     std::vector<LineCommand> _pending_lines{};
     std::vector<LineCommand> _active_lines{};
-    std::vector<GpuRootSegment> _pending_gpu_root_segments{};
-    std::vector<GpuRootSegment> _active_gpu_root_segments{};
-    WorldVec3 _gpu_reference_body_world{0.0, 0.0, 0.0};
-    WorldVec3 _gpu_align_delta_world{0.0, 0.0, 0.0};
+    std::vector<GpuRootBatch> _pending_gpu_root_batches{};
+    std::vector<GpuRootBatch> _active_gpu_root_batches{};
 };

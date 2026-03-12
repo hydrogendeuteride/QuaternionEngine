@@ -11,6 +11,7 @@
 #include <glm/mat4x4.hpp>
 
 #include <limits>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -122,6 +123,14 @@ public:
 
     void clear_owner_picks(RenderObject::OwnerType owner_type, const std::string &owner_name);
 
+    struct LinePickSegmentData
+    {
+        WorldVec3 a_world{0.0, 0.0, 0.0};
+        WorldVec3 b_world{0.0, 0.0, 0.0};
+        double a_time_s = std::numeric_limits<double>::quiet_NaN();
+        double b_time_s = std::numeric_limits<double>::quiet_NaN();
+    };
+
     // --------------------------------------------------------------------
     // Custom line/polyline pick registration (CPU-only)
     // --------------------------------------------------------------------
@@ -134,6 +143,7 @@ public:
                                const WorldVec3 &b_world,
                                double a_time_s = std::numeric_limits<double>::quiet_NaN(),
                                double b_time_s = std::numeric_limits<double>::quiet_NaN());
+    void add_line_pick_segments(uint32_t group_id, std::span<const LinePickSegmentData> segments);
 
     PickInfo *mutable_last_pick() { return &_last_pick; }
     PickInfo *mutable_hover_pick() { return &_hover_pick; }
@@ -190,10 +200,14 @@ private:
     struct LinePickSegment
     {
         uint32_t group_id = 0;
-        WorldVec3 a_world{0.0, 0.0, 0.0};
-        WorldVec3 b_world{0.0, 0.0, 0.0};
-        double a_time_s = std::numeric_limits<double>::quiet_NaN();
-        double b_time_s = std::numeric_limits<double>::quiet_NaN();
+        LinePickSegmentData data{};
+    };
+
+    struct LinePickBatch
+    {
+        uint32_t group_id = 0;
+        const LinePickSegmentData *segments = nullptr;
+        size_t count = 0;
     };
 
     PickInfo _last_pick{};
@@ -201,7 +215,8 @@ private:
     std::vector<PickInfo> _drag_selection{};
 
     std::vector<LinePickGroup> _line_pick_groups{};
-    std::vector<LinePickSegment> _line_pick_segments{};
+    std::vector<LinePickSegment> _owned_line_pick_segments{};
+    std::vector<LinePickBatch> _line_pick_batches{};
 
     glm::vec2 _mouse_pos_window{-1.0f, -1.0f};
     DragState _drag_state{};

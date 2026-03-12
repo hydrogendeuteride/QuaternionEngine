@@ -55,15 +55,17 @@ namespace Game::PredictionDrawDetail
     double snap_time_past_straddling_segment(const std::vector<orbitsim::TrajectorySegment> &traj_segments, double t_s);
     std::vector<double> collect_maneuver_node_times(const std::vector<ManeuverNode> &nodes);
     std::size_t lower_bound_sample_index(const std::vector<orbitsim::TrajectorySample> &traj, double t_s);
+    bool frame_transform_is_identity(const glm::dmat3 &frame_to_world);
+    std::vector<orbitsim::TrajectorySegment> transform_segments_to_world_basis(
+            const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+            const glm::dmat3 &frame_to_world);
     WorldVec3 sample_polyline_world(const WorldVec3 &frame_origin_world,
                                     const glm::dmat3 &frame_to_world,
                                     const std::vector<orbitsim::TrajectorySample> &traj,
-                                    const std::vector<WorldVec3> &points_world,
                                     std::size_t i_lo,
                                     std::size_t i_hi,
                                     double t_s);
     WorldVec3 compute_align_delta(const std::vector<orbitsim::TrajectorySample> &traj_base,
-                                  const std::vector<WorldVec3> &points_base,
                                   std::size_t i_hi,
                                   const WorldVec3 &ship_pos_world,
                                   double now_s,
@@ -77,6 +79,14 @@ namespace Game::PredictionDrawDetail
                            double t_end_s,
                            const glm::vec4 &color,
                            bool dashed);
+    void draw_adaptive_curve_window(const OrbitDrawWindowContext &ctx,
+                                    const OrbitPredictionDrawConfig &draw_config,
+                                    OrbitPlotPerfStats &perf,
+                                    const OrbitRenderCurve &curve,
+                                    double t_start_s,
+                                    double t_end_s,
+                                    const glm::vec4 &color,
+                                    bool dashed);
     PickWindow build_planned_pick_window(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
                                          const OrbitPredictionDrawConfig &draw_config,
                                          const std::vector<ManeuverNode> &nodes,
@@ -85,22 +95,34 @@ namespace Game::PredictionDrawDetail
                                          bool draw_future_segment,
                                          bool draw_full_orbit,
                                          double orbital_period_s);
+    std::size_t build_pick_segment_cache(const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                                         const WorldVec3 &ref_body_world,
+                                         const glm::dmat3 &frame_to_world,
+                                         const WorldVec3 &align_delta,
+                                         double t0_s,
+                                         double t1_s,
+                                         std::size_t max_segments,
+                                         bool segments_are_world_basis,
+                                         std::vector<PickingSystem::LinePickSegmentData> &out_segments,
+                                         bool &out_cap_hit,
+                                         OrbitPlotPerfStats &perf);
     std::size_t emit_pick_segments(PickingSystem *picking,
                                    uint32_t pick_group,
                                    const std::vector<orbitsim::TrajectorySegment> &traj_segments,
                                    const WorldVec3 &ref_body_world,
+                                   const glm::dmat3 &frame_to_world,
                                    const WorldVec3 &align_delta,
                                    const OrbitPlotLodBuilder::FrustumContext &pick_frustum,
                                    const OrbitPlotLodBuilder::PickSettings &pick_settings,
                                    double t0_s,
                                    double t1_s,
                                    const std::vector<double> &anchor_times,
+                                   bool segments_are_world_basis,
                                    OrbitPlotPerfStats &perf);
     bool frame_spec_uses_direct_world_polyline(const orbitsim::TrajectoryFrameSpec &spec);
     void draw_polyline_window(const OrbitDrawWindowContext &ctx,
                               const OrbitPredictionDrawConfig &draw_config,
                               const std::vector<orbitsim::TrajectorySample> &traj,
-                              const std::vector<WorldVec3> &points_world,
                               double t_start_s,
                               double t_end_s,
                               const glm::vec4 &color,
@@ -109,7 +131,6 @@ namespace Game::PredictionDrawDetail
                                             PickingSystem *picking,
                                             uint32_t pick_group,
                                             const std::vector<orbitsim::TrajectorySample> &traj,
-                                            const std::vector<WorldVec3> &points_world,
                                             double t0_s,
                                             double t1_s,
                                             std::size_t max_segments,
