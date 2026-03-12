@@ -610,10 +610,12 @@ namespace Game
         // Start from orbital-state-driven defaults, then clamp into service-wide budgets.
         double horizon_s = std::clamp(horizon_s_auto, OrbitPredictionTuning::kMinHorizonS, OrbitPredictionTuning::kMaxHorizonS);
         double dt_s = std::clamp(dt_s_auto, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
-        int max_steps = OrbitPredictionTuning::kMaxStepsNormal;
+        int max_steps = OrbitPredictionTuning::kSpacecraftMaxStepsNormal;
         double dt_min_s = 0.01;
         double dt_max_s = OrbitPredictionTuning::kMaxSampleDtS;
-        double min_horizon_s = horizon_s;
+        // Keep solver coverage aligned with the UI's requested future draw window.
+        double min_horizon_s = std::max(1.0, request.future_window_s);
+        horizon_s = std::max(horizon_s, min_horizon_s);
 
         if (!request.maneuver_impulses.empty() &&
             std::isfinite(request.max_maneuver_time_s) &&
@@ -644,6 +646,13 @@ namespace Game
             dt_max_s = OrbitPredictionTuning::kThrustMaxSampleDtS;
             dt_s = std::clamp(horizon_s / target_samples, dt_min_s, dt_max_s);
             max_steps = OrbitPredictionTuning::kMaxStepsThrust;
+        }
+        else
+        {
+            const double target_samples = std::clamp(horizon_s / OrbitPredictionTuning::kTargetSamplesDivisorS,
+                                                     OrbitPredictionTuning::kTargetSamplesMin,
+                                                     OrbitPredictionTuning::kSpacecraftTargetSamplesMaxNormal);
+            dt_s = std::clamp(horizon_s / target_samples, dt_min_s, dt_max_s);
         }
 
         const double min_dt_for_step_budget = horizon_s / static_cast<double>(std::max(1, max_steps));

@@ -119,9 +119,6 @@ namespace Game
         bool resolved_frame_spec_valid{false};
         std::vector<ManeuverNodePreview> maneuver_previews;
 
-        // Cached world-space polyline refreshed from the selected display frame.
-        std::vector<WorldVec3> points_world;
-        std::vector<WorldVec3> points_world_planned;
         std::vector<float> altitude_km;
         std::vector<float> speed_kmps;
 
@@ -154,8 +151,6 @@ namespace Game
             resolved_frame_spec = {};
             resolved_frame_spec_valid = false;
             maneuver_previews.clear();
-            points_world.clear();
-            points_world_planned.clear();
             altitude_km.clear();
             speed_kmps.clear();
             semi_major_axis_m = 0.0;
@@ -227,6 +222,7 @@ namespace Game
         OrbitPredictionCache cache{};
         bool dirty{true};
         bool request_pending{false};
+        bool invalidated_while_pending{false};
         bool supports_maneuvers{false};
         bool is_celestial{false};
         double solver_ms_last{0.0};
@@ -236,6 +232,7 @@ namespace Game
             cache.clear();
             dirty = true;
             request_pending = false;
+            invalidated_while_pending = false;
             solver_ms_last = 0.0;
         }
     };

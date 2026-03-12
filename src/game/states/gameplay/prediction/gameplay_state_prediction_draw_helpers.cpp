@@ -197,25 +197,20 @@ namespace Game::PredictionDrawDetail
     WorldVec3 sample_polyline_world(const WorldVec3 &frame_origin_world,
                                     const glm::dmat3 &frame_to_world,
                                     const std::vector<orbitsim::TrajectorySample> &traj,
-                                    const std::vector<WorldVec3> &points_world,
                                     const std::size_t i_lo,
                                     const std::size_t i_hi,
                                     const double t_s)
     {
-        if (i_lo >= points_world.size())
-        {
-            return WorldVec3(0.0);
-        }
         if (i_lo >= traj.size())
         {
-            return points_world[i_lo];
+            return WorldVec3(0.0);
         }
 
         const auto transform_local = [&](const glm::dvec3 &local) -> WorldVec3 {
             return frame_origin_world + WorldVec3(frame_to_world * local);
         };
 
-        if (i_hi >= points_world.size() || i_hi >= traj.size() || i_lo == i_hi)
+        if (i_hi >= traj.size() || i_lo == i_hi)
         {
             return transform_local(glm::dvec3(traj[i_lo].position_m));
         }
@@ -251,23 +246,20 @@ namespace Game::PredictionDrawDetail
     }
 
     WorldVec3 compute_align_delta(const std::vector<orbitsim::TrajectorySample> &traj_base,
-                                  const std::vector<WorldVec3> &points_base,
                                   const std::size_t i_hi,
                                   const WorldVec3 &ship_pos_world,
                                   const double now_s,
                                   const WorldVec3 &frame_origin_world,
                                   const glm::dmat3 &frame_to_world)
     {
-        WorldVec3 predicted_now_world = (i_hi < points_base.size()) ? points_base[i_hi] : WorldVec3(0.0);
+        WorldVec3 predicted_now_world{0.0, 0.0, 0.0};
         if (i_hi > 0)
         {
-            predicted_now_world =
-                    sample_polyline_world(frame_origin_world, frame_to_world, traj_base, points_base, i_hi - 1, i_hi, now_s);
+            predicted_now_world = sample_polyline_world(frame_origin_world, frame_to_world, traj_base, i_hi - 1, i_hi, now_s);
         }
         else if (i_hi < traj_base.size())
         {
-            predicted_now_world =
-                    sample_polyline_world(frame_origin_world, frame_to_world, traj_base, points_base, i_hi, i_hi, now_s);
+            predicted_now_world = sample_polyline_world(frame_origin_world, frame_to_world, traj_base, i_hi, i_hi, now_s);
         }
 
         const WorldVec3 align_delta = ship_pos_world - predicted_now_world;
@@ -749,13 +741,12 @@ namespace Game::PredictionDrawDetail
     void draw_polyline_window(const OrbitDrawWindowContext &ctx,
                               const OrbitPredictionDrawConfig &draw_config,
                               const std::vector<orbitsim::TrajectorySample> &traj,
-                              const std::vector<WorldVec3> &points_world,
                               const double t_start_s,
                               const double t_end_s,
                               const glm::vec4 &color,
                               const bool dashed)
     {
-        if (!(t_end_s > t_start_s) || traj.size() < 2 || traj.size() != points_world.size())
+        if (!(t_end_s > t_start_s) || traj.size() < 2)
         {
             return;
         }
@@ -777,11 +768,9 @@ namespace Game::PredictionDrawDetail
             }
 
             const WorldVec3 a_world =
-                    sample_polyline_world(ctx.ref_body_world, ctx.frame_to_world, traj, points_world, i - 1, i, clip_t0_s) +
-                    ctx.align_delta;
+                    sample_polyline_world(ctx.ref_body_world, ctx.frame_to_world, traj, i - 1, i, clip_t0_s) + ctx.align_delta;
             const WorldVec3 b_world =
-                    sample_polyline_world(ctx.ref_body_world, ctx.frame_to_world, traj, points_world, i - 1, i, clip_t1_s) +
-                    ctx.align_delta;
+                    sample_polyline_world(ctx.ref_body_world, ctx.frame_to_world, traj, i - 1, i, clip_t1_s) + ctx.align_delta;
 
             if (!dashed)
             {
@@ -831,13 +820,12 @@ namespace Game::PredictionDrawDetail
                                             PickingSystem *picking,
                                             const uint32_t pick_group,
                                             const std::vector<orbitsim::TrajectorySample> &traj,
-                                            const std::vector<WorldVec3> &points_world,
                                             const double t0_s,
                                             const double t1_s,
                                             const std::size_t max_segments,
                                             OrbitPlotPerfStats &perf)
     {
-        if (!picking || pick_group == kInvalidPickGroup || traj.size() < 2 || traj.size() != points_world.size())
+        if (!picking || pick_group == kInvalidPickGroup || traj.size() < 2)
         {
             return 0;
         }
@@ -855,11 +843,9 @@ namespace Game::PredictionDrawDetail
             }
 
             const WorldVec3 a_world =
-                    sample_polyline_world(ctx.ref_body_world, ctx.frame_to_world, traj, points_world, i - 1, i, clip_t0_s) +
-                    ctx.align_delta;
+                    sample_polyline_world(ctx.ref_body_world, ctx.frame_to_world, traj, i - 1, i, clip_t0_s) + ctx.align_delta;
             const WorldVec3 b_world =
-                    sample_polyline_world(ctx.ref_body_world, ctx.frame_to_world, traj, points_world, i - 1, i, clip_t1_s) +
-                    ctx.align_delta;
+                    sample_polyline_world(ctx.ref_body_world, ctx.frame_to_world, traj, i - 1, i, clip_t1_s) + ctx.align_delta;
             picking->add_line_pick_segment(pick_group, a_world, b_world, clip_t0_s, clip_t1_s);
             ++emitted;
         }
