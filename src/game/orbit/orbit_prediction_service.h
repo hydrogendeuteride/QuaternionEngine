@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -143,16 +144,19 @@ namespace Game
         };
 
         // Execute a single queued prediction request on the worker.
-        Result compute_prediction(uint64_t generation_id, const Request &request);
+        Result compute_prediction(uint64_t generation_id, const Request &request, uint64_t request_epoch);
         // Drop stale results after reset() or when a newer request supersedes the same track.
         static bool should_publish_result(const PendingJob &job,
                                           uint64_t current_request_epoch,
                                           const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track);
+        bool should_continue_job(uint64_t track_id, uint64_t generation_id, uint64_t request_epoch) const;
         // Background loop that consumes queued jobs and publishes fresh results.
         void worker_loop();
+        SharedCelestialEphemeris get_or_build_ephemeris(const EphemerisBuildRequest &request,
+                                                        const std::function<bool()> &cancel_requested);
 
-        std::thread _worker;
-        std::mutex _mutex;
+        std::vector<std::thread> _workers;
+        mutable std::mutex _mutex;
         std::condition_variable _cv;
         bool _running{true};
 
