@@ -93,6 +93,7 @@ namespace Game
                                                 glm::vec3 &out_vel_local) const;
 
         // Orbit prediction
+        void poll_completed_prediction_results();
         void update_prediction(GameStateContext &ctx, float fixed_dt);
         void clear_prediction_runtime();
         void clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects);
@@ -121,8 +122,6 @@ namespace Game
                                              bool with_maneuvers);
         void update_celestial_prediction_track(PredictionTrackState &track,
                                                double now_s);
-        void refresh_prediction_world_points(PredictionTrackState &track,
-                                             double display_time_s);
         WorldVec3 prediction_reference_body_world() const;
         bool prediction_subject_thrust_applied_this_tick(PredictionSubjectKey key) const;
         void rebuild_prediction_subjects();

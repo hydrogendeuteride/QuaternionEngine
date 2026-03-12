@@ -21,11 +21,11 @@ namespace Game
 
     void GameplayState::sync_prediction_dirty_flag()
     {
-        // Collapse per-track dirty/pending state into one cheap UI-facing flag.
+        // Collapse only actual rebuild demand into one cheap UI-facing flag.
         _prediction_dirty = false;
         for (const PredictionTrackState &track : _prediction_tracks)
         {
-            if (track.dirty || track.request_pending)
+            if (track.dirty)
             {
                 _prediction_dirty = true;
                 return;
@@ -38,9 +38,30 @@ namespace Game
         // Force every cached track to rebuild on the next prediction update.
         for (PredictionTrackState &track : _prediction_tracks)
         {
+            if (track.request_pending)
+            {
+                track.invalidated_while_pending = true;
+                continue;
+            }
+
             track.dirty = true;
         }
         sync_prediction_dirty_flag();
+    }
+
+    void GameplayState::poll_completed_prediction_results()
+    {
+        bool applied_result = false;
+        while (auto completed = _prediction_service.poll_completed())
+        {
+            apply_completed_prediction_result(std::move(*completed));
+            applied_result = true;
+        }
+
+        if (applied_result)
+        {
+            sync_prediction_dirty_flag();
+        }
     }
 
     void GameplayState::clear_prediction_runtime()
@@ -51,6 +72,7 @@ namespace Game
             track.cache.clear();
             track.request_pending = false;
             track.dirty = false;
+            track.invalidated_while_pending = false;
         }
         _prediction_service.reset();
         _prediction_dirty = false;
@@ -85,7 +107,8 @@ namespace Game
         }
 
         track->request_pending = false;
-        const bool keep_dirty_for_followup = track->dirty;
+        const bool keep_dirty_for_followup = track->invalidated_while_pending;
+        track->invalidated_while_pending = false;
         track->solver_ms_last = std::max(0.0, result.compute_time_ms);
 
         if (!result.valid || result.trajectory_inertial.size() < 2)
@@ -227,6 +250,7 @@ namespace Game
         request.sim_time_s = now_s;
         request.sim_config = _orbitsim->sim.config();
         request.massive_bodies = _orbitsim->sim.massive_bodies();
+        request.shared_ephemeris = track.cache.shared_ephemeris;
         request.ship_bary_position_m = ship_bary_pos_m;
         request.ship_bary_velocity_mps = ship_bary_vel_mps;
         request.thrusting = thrusting;
@@ -257,6 +281,7 @@ namespace Game
 
         _prediction_service.request(std::move(request));
         track.request_pending = true;
+        track.invalidated_while_pending = false;
         return true;
     }
 
@@ -279,12 +304,14 @@ namespace Game
         request.sim_time_s = now_s;
         request.sim_config = _orbitsim->sim.config();
         request.massive_bodies = _orbitsim->sim.massive_bodies();
+        request.shared_ephemeris = track.cache.shared_ephemeris;
         request.subject_body_id = body->id;
         request.future_window_s = prediction_future_window_s(track.key);
 
         // Celestial tracks now flow through the same worker queue as spacecraft tracks.
         _prediction_service.request(std::move(request));
         track.request_pending = true;
+        track.invalidated_while_pending = false;
         return true;
     }
 
@@ -307,7 +334,6 @@ namespace Game
 
         if (track.request_pending)
         {
-            track.dirty = true;
             return;
         }
 
@@ -334,7 +360,6 @@ namespace Game
 
         if (track.request_pending)
         {
-            track.dirty = true;
             return;
         }
 
@@ -365,11 +390,6 @@ namespace Game
         rebuild_prediction_analysis_options();
 
         const double now_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
-        // Pull any finished async jobs into the visible cache set.
-        while (auto completed = _prediction_service.poll_completed())
-        {
-            apply_completed_prediction_result(std::move(*completed));
-        }
 
         const std::vector<PredictionSubjectKey> visible_subjects = collect_visible_prediction_subjects();
         if (!_orbitsim)

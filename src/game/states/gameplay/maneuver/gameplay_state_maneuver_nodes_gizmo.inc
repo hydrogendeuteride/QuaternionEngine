@@ -804,17 +804,16 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         return;
     }
 
-    WorldVec3 predicted_now_world = prediction_cache->points_world[i_hi];
+    WorldVec3 predicted_now_world =
+            prediction_sample_position_world(*prediction_cache, traj_now[i_hi], now_s);
     if (i_hi > 0)
     {
-        const double h = traj_now[i_hi].t_s - traj_now[i_hi - 1].t_s;
-        double u = (h > 0.0 && std::isfinite(h)) ? ((now_s - traj_now[i_hi - 1].t_s) / h) : 0.0;
-        if (!std::isfinite(u))
-        {
-            u = 0.0;
-        }
-        u = std::clamp(u, 0.0, 1.0);
-        predicted_now_world = glm::mix(prediction_cache->points_world[i_hi - 1], prediction_cache->points_world[i_hi], u);
+        predicted_now_world = prediction_sample_hermite_world(
+                *prediction_cache,
+                traj_now[i_hi - 1],
+                traj_now[i_hi],
+                now_s,
+                now_s);
     }
 
     WorldVec3 align_delta = ship_pos_world - predicted_now_world;

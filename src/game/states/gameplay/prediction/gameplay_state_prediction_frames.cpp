@@ -65,6 +65,51 @@ namespace Game
 
             return out;
         }
+
+        orbitsim::State body_state_for_segment_transform(const OrbitPredictionCache &cache,
+                                                         const orbitsim::MassiveBody &body,
+                                                         const double t_s)
+        {
+            if (cache.shared_ephemeris && !cache.shared_ephemeris->empty())
+            {
+                return cache.shared_ephemeris->body_state_at_by_id(body.id, t_s);
+            }
+            return body.state;
+        }
+
+        std::vector<orbitsim::TrajectorySegment> transform_segments_to_body_centered_inertial(
+                const OrbitPredictionCache &cache,
+                const std::vector<orbitsim::TrajectorySegment> &segments_inertial,
+                const orbitsim::MassiveBody &reference_body)
+        {
+            std::vector<orbitsim::TrajectorySegment> out;
+            out.reserve(segments_inertial.size());
+
+            for (const orbitsim::TrajectorySegment &segment : segments_inertial)
+            {
+                const double t0_s = segment.t0_s;
+                const double t1_s = t0_s + segment.dt_s;
+                if (!(segment.dt_s > 0.0) || !std::isfinite(t0_s) || !std::isfinite(t1_s))
+                {
+                    continue;
+                }
+
+                const orbitsim::State ref_start = body_state_for_segment_transform(cache, reference_body, t0_s);
+                const orbitsim::State ref_end = body_state_for_segment_transform(cache, reference_body, t1_s);
+
+                out.push_back(orbitsim::TrajectorySegment{
+                        .t0_s = t0_s,
+                        .dt_s = segment.dt_s,
+                        .start = orbitsim::make_state(segment.start.position_m - ref_start.position_m,
+                                                      segment.start.velocity_mps - ref_start.velocity_mps),
+                        .end = orbitsim::make_state(segment.end.position_m - ref_end.position_m,
+                                                    segment.end.velocity_mps - ref_end.velocity_mps),
+                        .flags = segment.flags,
+                });
+            }
+
+            return out;
+        }
     } // namespace
 
     const CelestialBodyInfo *GameplayState::find_celestial_body_info(const orbitsim::BodyId body_id) const
@@ -830,9 +875,6 @@ namespace Game
     void GameplayState::refresh_prediction_derived_cache(PredictionTrackState &track,
                                                          double display_time_s)
     {
-        track.cache.points_world.clear();
-        track.cache.points_world_planned.clear();
-
         if (!track.cache.valid || track.cache.trajectory_inertial.size() < 2)
         {
             return;
@@ -856,6 +898,59 @@ namespace Game
             {
                 track.cache.trajectory_frame = track.cache.trajectory_inertial;
                 track.cache.trajectory_frame_planned = track.cache.trajectory_inertial_planned;
+                track.cache.trajectory_segments_frame = track.cache.trajectory_segments_inertial;
+                track.cache.trajectory_segments_frame_planned = track.cache.trajectory_segments_inertial_planned;
+            }
+            else if (resolved_frame_spec.type == orbitsim::TrajectoryFrameType::BodyCenteredInertial)
+            {
+                if (!track.cache.shared_ephemeris || track.cache.shared_ephemeris->empty())
+                {
+                    track.cache.valid = false;
+                    track.cache.resolved_frame_spec_valid = false;
+                    track.cache.metrics_valid = false;
+                    return;
+                }
+
+                const orbitsim::MassiveBody *reference_body =
+                        find_massive_body(track.cache.massive_bodies, resolved_frame_spec.primary_body_id);
+                if (!reference_body)
+                {
+                    track.cache.valid = false;
+                    track.cache.resolved_frame_spec_valid = false;
+                    track.cache.metrics_valid = false;
+                    return;
+                }
+
+                const auto player_lookup = build_prediction_player_lookup();
+                track.cache.trajectory_frame = orbitsim::trajectory_to_frame_spec(
+                        track.cache.trajectory_inertial,
+                        *track.cache.shared_ephemeris,
+                        track.cache.massive_bodies,
+                        resolved_frame_spec,
+                        player_lookup);
+                if (!track.cache.trajectory_inertial_planned.empty())
+                {
+                    track.cache.trajectory_frame_planned = orbitsim::trajectory_to_frame_spec(
+                            track.cache.trajectory_inertial_planned,
+                            *track.cache.shared_ephemeris,
+                            track.cache.massive_bodies,
+                            resolved_frame_spec,
+                            player_lookup);
+                }
+
+                track.cache.trajectory_segments_frame =
+                        transform_segments_to_body_centered_inertial(
+                                track.cache,
+                                track.cache.trajectory_segments_inertial,
+                                *reference_body);
+                if (!track.cache.trajectory_segments_inertial_planned.empty())
+                {
+                    track.cache.trajectory_segments_frame_planned =
+                            transform_segments_to_body_centered_inertial(
+                                    track.cache,
+                                    track.cache.trajectory_segments_inertial_planned,
+                                    *reference_body);
+                }
             }
             else
             {
@@ -893,8 +988,12 @@ namespace Game
                 return;
             }
 
-            track.cache.trajectory_segments_frame = trajectory_segments_from_samples(track.cache.trajectory_frame);
-            if (!track.cache.trajectory_frame_planned.empty())
+            if (track.cache.trajectory_segments_frame.empty())
+            {
+                track.cache.trajectory_segments_frame = trajectory_segments_from_samples(track.cache.trajectory_frame);
+            }
+            if (!track.cache.trajectory_frame_planned.empty() &&
+                track.cache.trajectory_segments_frame_planned.empty())
             {
                 track.cache.trajectory_segments_frame_planned =
                         trajectory_segments_from_samples(track.cache.trajectory_frame_planned);
@@ -903,30 +1002,6 @@ namespace Game
             track.cache.resolved_frame_spec = resolved_frame_spec;
             track.cache.resolved_frame_spec_valid = true;
             track.cache.metrics_valid = false;
-        }
-
-        WorldVec3 origin_world{0.0};
-        glm::dmat3 frame_to_world(1.0);
-        const bool have_display_transform =
-                build_prediction_display_transform(track.cache, origin_world, frame_to_world, display_time_s);
-        const auto sample_to_world = [&](const orbitsim::TrajectorySample &sample) -> WorldVec3 {
-            if (!have_display_transform)
-            {
-                return _scenario_config.system_center + WorldVec3(glm::dvec3(sample.position_m));
-            }
-            return origin_world + WorldVec3(frame_to_world * glm::dvec3(sample.position_m));
-        };
-
-        track.cache.points_world.resize(track.cache.trajectory_frame.size());
-        for (std::size_t i = 0; i < track.cache.trajectory_frame.size(); ++i)
-        {
-            track.cache.points_world[i] = sample_to_world(track.cache.trajectory_frame[i]);
-        }
-
-        track.cache.points_world_planned.resize(track.cache.trajectory_frame_planned.size());
-        for (std::size_t i = 0; i < track.cache.trajectory_frame_planned.size(); ++i)
-        {
-            track.cache.points_world_planned[i] = sample_to_world(track.cache.trajectory_frame_planned[i]);
         }
 
         double analysis_time_s = display_time_s;
@@ -1031,12 +1106,6 @@ namespace Game
     WorldVec3 GameplayState::prediction_reference_body_world() const
     {
         return prediction_world_reference_body_world();
-    }
-
-    void GameplayState::refresh_prediction_world_points(PredictionTrackState &track,
-                                                        const double display_time_s)
-    {
-        refresh_prediction_derived_cache(track, display_time_s);
     }
 
 } // namespace Game

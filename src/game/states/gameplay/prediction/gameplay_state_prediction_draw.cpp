@@ -102,16 +102,13 @@ namespace Game
                 continue;
             }
 
-            refresh_prediction_world_points(*track, display_time_s);
-            if (!track->cache.valid ||
-                track->cache.points_world.size() < 2 ||
-                track->cache.trajectory_frame.size() != track->cache.points_world.size())
+            refresh_prediction_derived_cache(*track, display_time_s);
+            if (!track->cache.valid || track->cache.trajectory_frame.size() < 2)
             {
                 continue;
             }
 
             const auto &traj_base = track->cache.trajectory_frame;
-            const auto &points_base = track->cache.points_world;
             const auto &traj_planned = track->cache.trajectory_frame_planned;
             WorldVec3 ref_body_world{0.0, 0.0, 0.0};
             glm::dmat3 frame_to_world(1.0);
@@ -189,9 +186,11 @@ namespace Game
             }
 
             const WorldVec3 align_delta =
-                    Draw::compute_align_delta(traj_base, points_base, i_hi, subject_pos_world, now_s, ref_body_world, frame_to_world);
+                    Draw::compute_align_delta(traj_base, i_hi, subject_pos_world, now_s, ref_body_world, frame_to_world);
             const bool direct_world_polyline =
-                    Draw::frame_spec_uses_direct_world_polyline(_prediction_frame_selection.spec);
+                    Draw::frame_spec_uses_direct_world_polyline(
+                            track->cache.resolved_frame_spec_valid ? track->cache.resolved_frame_spec
+                                                                   : _prediction_frame_selection.spec);
 
             Draw::OrbitDrawWindowContext draw_ctx{};
             draw_ctx.orbit_plot = orbit_plot;
@@ -234,7 +233,6 @@ namespace Game
                     Draw::draw_polyline_window(draw_ctx,
                                                _prediction_draw_config,
                                                traj_base,
-                                               points_base,
                                                t0,
                                                t_full_end,
                                                track_color_full,
@@ -268,7 +266,6 @@ namespace Game
                     Draw::draw_polyline_window(draw_ctx,
                                                _prediction_draw_config,
                                                traj_base,
-                                               points_base,
                                                now_s,
                                                t_end,
                                                track_color_future,
@@ -311,7 +308,6 @@ namespace Game
                     Draw::draw_polyline_window(draw_ctx,
                                                _prediction_draw_config,
                                                traj_planned,
-                                               track->cache.points_world_planned,
                                                planned_pick_window.t0_s,
                                                planned_pick_window.t1_s,
                                                track_color_plan,
@@ -377,7 +373,6 @@ namespace Game
                                                                     picking,
                                                                     pick_group_base,
                                                                     traj_base,
-                                                                    points_base,
                                                                     base_pick_window.t0_s,
                                                                     base_pick_window.t1_s,
                                                                     remaining_pick_budget - planned_reserve,
@@ -422,7 +417,6 @@ namespace Game
                                                           picking,
                                                           pick_group_planned,
                                                           traj_planned,
-                                                          track->cache.points_world_planned,
                                                           planned_pick_window.t0_s,
                                                           planned_pick_window.t1_s,
                                                           remaining_pick_budget,
