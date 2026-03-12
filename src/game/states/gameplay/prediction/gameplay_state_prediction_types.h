@@ -1,7 +1,10 @@
 #pragma once
 
+#include "core/orbit_plot/orbit_plot.h"
+#include "core/picking/picking_system.h"
 #include "core/world.h"
 #include "game/orbit/orbit_prediction_service.h"
+#include "game/orbit/orbit_render_curve.h"
 #include "orbitsim/frame_spec.hpp"
 
 #include <glm/glm.hpp>
@@ -10,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -98,6 +102,7 @@ namespace Game
         using ManeuverNodePreview = OrbitPredictionService::ManeuverNodePreview;
 
         bool valid{false};
+        uint64_t generation_id{0};
         double build_time_s{0.0};
         WorldVec3 build_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 build_vel_world{0.0, 0.0, 0.0};
@@ -115,13 +120,14 @@ namespace Game
         std::vector<orbitsim::TrajectorySample> trajectory_frame_planned;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame_planned;
+        std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> gpu_roots_frame;
+        std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> gpu_roots_frame_planned;
+        OrbitRenderCurve render_curve_frame;
+        OrbitRenderCurve render_curve_frame_planned;
         orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
         bool resolved_frame_spec_valid{false};
         std::vector<ManeuverNodePreview> maneuver_previews;
 
-        // Cached world-space polyline refreshed from the selected display frame.
-        std::vector<WorldVec3> points_world;
-        std::vector<WorldVec3> points_world_planned;
         std::vector<float> altitude_km;
         std::vector<float> speed_kmps;
 
@@ -138,6 +144,7 @@ namespace Game
         void clear()
         {
             valid = false;
+            generation_id = 0;
             build_time_s = 0.0;
             build_pos_world = WorldVec3(0.0, 0.0, 0.0);
             build_vel_world = glm::dvec3(0.0, 0.0, 0.0);
@@ -151,11 +158,13 @@ namespace Game
             trajectory_frame_planned.clear();
             trajectory_segments_frame.clear();
             trajectory_segments_frame_planned.clear();
+            gpu_roots_frame.reset();
+            gpu_roots_frame_planned.reset();
+            render_curve_frame.clear();
+            render_curve_frame_planned.clear();
             resolved_frame_spec = {};
             resolved_frame_spec_valid = false;
             maneuver_previews.clear();
-            points_world.clear();
-            points_world_planned.clear();
             altitude_km.clear();
             speed_kmps.clear();
             semi_major_axis_m = 0.0;
@@ -165,6 +174,42 @@ namespace Game
             apoapsis_alt_km = std::numeric_limits<double>::infinity();
             metrics_body_id = orbitsim::kInvalidBodyId;
             metrics_valid = false;
+        }
+    };
+
+    struct PredictionLinePickCache
+    {
+        uint64_t generation_id{0};
+        bool base_valid{false};
+        bool planned_valid{false};
+        WorldVec3 ref_body_world{0.0, 0.0, 0.0};
+        WorldVec3 align_delta_world{0.0, 0.0, 0.0};
+        glm::dmat3 frame_to_world{1.0};
+        double base_t0_s{std::numeric_limits<double>::quiet_NaN()};
+        double base_t1_s{std::numeric_limits<double>::quiet_NaN()};
+        double planned_t0_s{std::numeric_limits<double>::quiet_NaN()};
+        double planned_t1_s{std::numeric_limits<double>::quiet_NaN()};
+        std::size_t base_max_segments{0};
+        std::size_t planned_max_segments{0};
+        std::vector<PickingSystem::LinePickSegmentData> base_segments;
+        std::vector<PickingSystem::LinePickSegmentData> planned_segments;
+
+        void clear()
+        {
+            generation_id = 0;
+            base_valid = false;
+            planned_valid = false;
+            ref_body_world = WorldVec3(0.0, 0.0, 0.0);
+            align_delta_world = WorldVec3(0.0, 0.0, 0.0);
+            frame_to_world = glm::dmat3(1.0);
+            base_t0_s = std::numeric_limits<double>::quiet_NaN();
+            base_t1_s = std::numeric_limits<double>::quiet_NaN();
+            planned_t0_s = std::numeric_limits<double>::quiet_NaN();
+            planned_t1_s = std::numeric_limits<double>::quiet_NaN();
+            base_max_segments = 0;
+            planned_max_segments = 0;
+            base_segments.clear();
+            planned_segments.clear();
         }
     };
 
@@ -225,8 +270,11 @@ namespace Game
         PredictionSubjectKey key{};
         std::string label{};
         OrbitPredictionCache cache{};
+        PredictionLinePickCache pick_cache{};
         bool dirty{true};
         bool request_pending{false};
+        bool derived_request_pending{false};
+        bool invalidated_while_pending{false};
         bool supports_maneuvers{false};
         bool is_celestial{false};
         double solver_ms_last{0.0};
@@ -234,8 +282,11 @@ namespace Game
         void clear_runtime()
         {
             cache.clear();
+            pick_cache.clear();
             dirty = true;
             request_pending = false;
+            derived_request_pending = false;
+            invalidated_while_pending = false;
             solver_ms_last = 0.0;
         }
     };

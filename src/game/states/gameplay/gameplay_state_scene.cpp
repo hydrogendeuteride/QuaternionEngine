@@ -176,6 +176,7 @@ namespace Game
         _prediction_frame_selection.clear();
         _prediction_dirty = true;
         _prediction_service.reset();
+        _prediction_derived_service.reset();
 
         _world.clear_rebase_anchor();
         _world.clear();

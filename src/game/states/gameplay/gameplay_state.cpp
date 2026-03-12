@@ -45,6 +45,7 @@ namespace Game
         _scenario_io_status.clear();
         _scenario_io_status_ok = true;
         _prediction_service.reset();
+        _prediction_derived_service.reset();
         _prediction_tracks.clear();
         _prediction_groups.clear();
         _prediction_selection.clear();
@@ -96,6 +97,7 @@ namespace Game
         _prediction_analysis_selection.clear();
         _prediction_dirty = true;
         _prediction_service.reset();
+        _prediction_derived_service.reset();
         _orbit_plot_perf = {};
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
         {
@@ -135,6 +137,7 @@ namespace Game
         }
 
         _elapsed += dt;
+        _frame_monitor.update(dt);
 
         handle_time_warp_input(ctx);
 
@@ -149,10 +152,7 @@ namespace Game
         _world.entities().update_components(comp_ctx, dt);
         _world.entities().sync_to_render(*ctx.api, alpha);
 
-        if (_prediction_dirty)
-        {
-            update_prediction(ctx, 0.0f);
-        }
+        poll_completed_prediction_results();
 
         refresh_maneuver_node_runtime_cache(ctx);
 
@@ -972,7 +972,9 @@ namespace Game
                     if (active_prediction && active_prediction->cache.valid && _orbitsim)
                     {
                         const double age_s = _orbitsim->sim.time_s() - active_prediction->cache.build_time_s;
-                        ImGui::Text("Prediction: %zu pts, age %.1f s", active_prediction->cache.points_world.size(), age_s);
+                        ImGui::Text("Prediction: %zu pts, age %.1f s",
+                                    active_prediction->cache.trajectory_frame.size(),
+                                    age_s);
                         const orbitsim::BodyId analysis_body_id = active_prediction->cache.metrics_body_id;
                         if (const CelestialBodyInfo *analysis_body = find_celestial_body_info(analysis_body_id))
                         {
@@ -1060,6 +1062,7 @@ namespace Game
 
         draw_maneuver_nodes_panel(ctx);
         draw_maneuver_imgui_gizmo(ctx);
+        _frame_monitor.draw_ui();
     }
 
     void GameplayState::reset_time_warp_state()

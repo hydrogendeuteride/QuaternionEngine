@@ -3,9 +3,11 @@
 #include "game/game_world.h"
 #include "game/state/game_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_types.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_derived_service.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
 #include "game/states/gameplay/scenario/scenario_config.h"
 #include "orbit_helpers.h"
+#include "frame_monitor.h"
 #include "time_warp_state.h"
 #include "physics/physics_context.h"
 #include "physics/physics_world.h"
@@ -93,10 +95,12 @@ namespace Game
                                                 glm::vec3 &out_vel_local) const;
 
         // Orbit prediction
+        void poll_completed_prediction_results();
         void update_prediction(GameStateContext &ctx, float fixed_dt);
         void clear_prediction_runtime();
         void clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects);
         void apply_completed_prediction_result(OrbitPredictionService::Result result);
+        void apply_completed_prediction_derived_result(OrbitPredictionDerivedService::Result result);
         bool should_rebuild_prediction_track(const PredictionTrackState &track,
                                              double now_s,
                                              float fixed_dt,
@@ -121,8 +125,6 @@ namespace Game
                                              bool with_maneuvers);
         void update_celestial_prediction_track(PredictionTrackState &track,
                                                double now_s);
-        void refresh_prediction_world_points(PredictionTrackState &track,
-                                             double display_time_s);
         WorldVec3 prediction_reference_body_world() const;
         bool prediction_subject_thrust_applied_this_tick(PredictionSubjectKey key) const;
         void rebuild_prediction_subjects();
@@ -268,6 +270,7 @@ namespace Game
         OrbitPlotPerfStats _orbit_plot_perf{};
         OrbitPredictionDrawConfig _prediction_draw_config{};
         OrbitPredictionService _prediction_service{};
+        OrbitPredictionDerivedService _prediction_derived_service{};
         std::vector<PredictionTrackState> _prediction_tracks{};
         std::vector<PredictionGroup> _prediction_groups{};
         PredictionSelectionState _prediction_selection{};
@@ -336,6 +339,7 @@ namespace Game
         double _fixed_time_s{0.0};
 
         TimeWarpState _time_warp{};
+        FrameMonitor _frame_monitor{};
         bool _rails_warp_active{false};
         double _last_sim_step_dt_s{0.0};
         bool _rails_thrust_applied_this_tick{false};

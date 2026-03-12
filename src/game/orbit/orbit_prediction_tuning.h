@@ -22,6 +22,8 @@ namespace Game::OrbitPredictionTuning
     inline constexpr double kTargetSamplesMin = 500.0;
     inline constexpr double kTargetSamplesMax = 24'000.0;
     inline constexpr int kMaxStepsNormal = 24'000;
+    inline constexpr double kSpacecraftTargetSamplesMaxNormal = 12'000.0;
+    inline constexpr int kSpacecraftMaxStepsNormal = 12'000;
 
     // Extra coverage requested after the last maneuver node so the post-node path stays visible.
     inline constexpr double kPostNodeCoverageMinS = 120.0;
