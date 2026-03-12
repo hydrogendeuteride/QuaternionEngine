@@ -305,6 +305,52 @@ namespace Game::PredictionDrawDetail
             return ctx.ref_body_world + WorldVec3(local) + ctx.align_delta;
         }
 
+        bool frame_transform_is_identity(const glm::dmat3 &frame_to_world)
+        {
+            constexpr double kIdentityEpsilon = 1.0e-12;
+
+            for (int col = 0; col < 3; ++col)
+            {
+                for (int row = 0; row < 3; ++row)
+                {
+                    const double expected = (col == row) ? 1.0 : 0.0;
+                    const double value = frame_to_world[col][row];
+                    if (!std::isfinite(value) || std::abs(value - expected) > kIdentityEpsilon)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        orbitsim::TrajectorySegment transform_segment_to_world_basis(const orbitsim::TrajectorySegment &segment,
+                                                                     const glm::dmat3 &frame_to_world)
+        {
+            orbitsim::TrajectorySegment transformed = segment;
+            transformed.start.position_m = frame_to_world * glm::dvec3(segment.start.position_m);
+            transformed.start.velocity_mps = frame_to_world * glm::dvec3(segment.start.velocity_mps);
+            transformed.end.position_m = frame_to_world * glm::dvec3(segment.end.position_m);
+            transformed.end.velocity_mps = frame_to_world * glm::dvec3(segment.end.velocity_mps);
+            return transformed;
+        }
+
+        std::vector<orbitsim::TrajectorySegment> transform_segments_to_world_basis(
+                const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                const glm::dmat3 &frame_to_world)
+        {
+            std::vector<orbitsim::TrajectorySegment> transformed_segments{};
+            transformed_segments.reserve(traj_segments.size());
+
+            for (const orbitsim::TrajectorySegment &segment : traj_segments)
+            {
+                transformed_segments.push_back(transform_segment_to_world_basis(segment, frame_to_world));
+            }
+
+            return transformed_segments;
+        }
+
         void emit_orbit_line(const OrbitDrawWindowContext &ctx,
                              const glm::vec4 &color,
                              const WorldVec3 &a_world,
@@ -565,13 +611,21 @@ namespace Game::PredictionDrawDetail
             return;
         }
 
+        const bool needs_world_basis_transform = !frame_transform_is_identity(ctx.frame_to_world);
+        const std::vector<orbitsim::TrajectorySegment> transformed_segments =
+                needs_world_basis_transform
+                        ? transform_segments_to_world_basis(traj_segments, ctx.frame_to_world)
+                        : std::vector<orbitsim::TrajectorySegment>{};
+        const std::vector<orbitsim::TrajectorySegment> &segments_world_basis =
+                needs_world_basis_transform ? transformed_segments : traj_segments;
+
         const bool gpu_subdivision_enabled = ctx.orbit_plot && ctx.orbit_plot->settings().gpu_generate_enabled;
         if (gpu_subdivision_enabled)
         {
             ctx.orbit_plot->set_gpu_frame_reference(ctx.ref_body_world, ctx.align_delta);
             emit_gpu_root_segments(ctx,
                                    draw_config,
-                                   traj_segments,
+                                   segments_world_basis,
                                    t_start_s,
                                    t_end_s,
                                    color,
@@ -586,7 +640,7 @@ namespace Game::PredictionDrawDetail
                 {
                     emit_gpu_root_segments(ctx,
                                            draw_config,
-                                           traj_segments,
+                                           segments_world_basis,
                                            t_start_s,
                                            t_end_s,
                                            overlay_color,
@@ -604,12 +658,48 @@ namespace Game::PredictionDrawDetail
 
             if (!dashed)
             {
-                emit_cpu_fallback_chords(ctx, traj_segments, t_start_s, t_end_s, color);
+                emit_cpu_fallback_chords(ctx, segments_world_basis, t_start_s, t_end_s, color);
                 return;
             }
         }
 
-        emit_cpu_render_lod(ctx, draw_config, perf, traj_segments, t_start_s, t_end_s, color, dashed);
+        emit_cpu_render_lod(ctx, draw_config, perf, segments_world_basis, t_start_s, t_end_s, color, dashed);
+    }
+
+    void draw_adaptive_curve_window(const OrbitDrawWindowContext &ctx,
+                                    const OrbitPredictionDrawConfig &draw_config,
+                                    OrbitPlotPerfStats &perf,
+                                    const OrbitRenderCurve &curve,
+                                    const double t_start_s,
+                                    const double t_end_s,
+                                    const glm::vec4 &color,
+                                    const bool dashed)
+    {
+        if (curve.empty() || !(t_end_s > t_start_s))
+        {
+            return;
+        }
+
+        OrbitRenderCurve::SelectionContext selection_ctx{};
+        selection_ctx.reference_body_world = ctx.ref_body_world;
+        selection_ctx.align_delta_world = ctx.align_delta;
+        selection_ctx.frame_to_world = ctx.frame_to_world;
+        selection_ctx.camera_world = ctx.camera_world;
+        selection_ctx.tan_half_fov = ctx.tan_half_fov;
+        selection_ctx.viewport_height_px = ctx.viewport_height_px;
+        selection_ctx.error_px = ctx.render_error_px;
+
+        const auto select_start_tp = std::chrono::steady_clock::now();
+        std::vector<orbitsim::TrajectorySegment> selected_segments{};
+        OrbitRenderCurve::select_segments(curve, selection_ctx, t_start_s, t_end_s, selected_segments);
+        perf.render_lod_ms_last +=
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - select_start_tp).count();
+        if (selected_segments.empty())
+        {
+            return;
+        }
+
+        draw_orbit_window(ctx, draw_config, perf, selected_segments, t_start_s, t_end_s, color, dashed);
     }
 
     PickWindow build_planned_pick_window(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
@@ -696,6 +786,7 @@ namespace Game::PredictionDrawDetail
                                    const uint32_t pick_group,
                                    const std::vector<orbitsim::TrajectorySegment> &traj_segments,
                                    const WorldVec3 &ref_body_world,
+                                   const glm::dmat3 &frame_to_world,
                                    const WorldVec3 &align_delta,
                                    const OrbitPlotLodBuilder::FrustumContext &pick_frustum,
                                    const OrbitPlotLodBuilder::PickSettings &pick_settings,
@@ -704,9 +795,17 @@ namespace Game::PredictionDrawDetail
                                    const std::vector<double> &anchor_times,
                                    OrbitPlotPerfStats &perf)
     {
+        const bool needs_world_basis_transform = !frame_transform_is_identity(frame_to_world);
+        const std::vector<orbitsim::TrajectorySegment> transformed_segments =
+                needs_world_basis_transform
+                        ? transform_segments_to_world_basis(traj_segments, frame_to_world)
+                        : std::vector<orbitsim::TrajectorySegment>{};
+        const std::vector<orbitsim::TrajectorySegment> &segments_world_basis =
+                needs_world_basis_transform ? transformed_segments : traj_segments;
+
         const auto pick_lod_start_tp = std::chrono::steady_clock::now();
         const OrbitPlotLodBuilder::PickResult pick_lod =
-                OrbitPlotLodBuilder::build_pick_lod(traj_segments,
+                OrbitPlotLodBuilder::build_pick_lod(segments_world_basis,
                                                     ref_body_world,
                                                     align_delta,
                                                     pick_frustum,
@@ -733,9 +832,8 @@ namespace Game::PredictionDrawDetail
 
     bool frame_spec_uses_direct_world_polyline(const orbitsim::TrajectoryFrameSpec &spec)
     {
-        return spec.type == orbitsim::TrajectoryFrameType::BodyFixed ||
-               spec.type == orbitsim::TrajectoryFrameType::Synodic ||
-               spec.type == orbitsim::TrajectoryFrameType::LVLH;
+        (void) spec;
+        return false;
     }
 
     void draw_polyline_window(const OrbitDrawWindowContext &ctx,
