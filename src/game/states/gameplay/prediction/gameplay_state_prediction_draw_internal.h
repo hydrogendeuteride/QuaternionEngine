@@ -75,6 +75,14 @@ namespace Game::PredictionDrawDetail
                            double t_end_s,
                            const glm::vec4 &color,
                            bool dashed);
+    void draw_adaptive_curve_window(const OrbitDrawWindowContext &ctx,
+                                    const OrbitPredictionDrawConfig &draw_config,
+                                    OrbitPlotPerfStats &perf,
+                                    const OrbitRenderCurve &curve,
+                                    double t_start_s,
+                                    double t_end_s,
+                                    const glm::vec4 &color,
+                                    bool dashed);
     PickWindow build_planned_pick_window(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
                                          const OrbitPredictionDrawConfig &draw_config,
                                          const std::vector<ManeuverNode> &nodes,
@@ -87,6 +95,7 @@ namespace Game::PredictionDrawDetail
                                    uint32_t pick_group,
                                    const std::vector<orbitsim::TrajectorySegment> &traj_segments,
                                    const WorldVec3 &ref_body_world,
+                                   const glm::dmat3 &frame_to_world,
                                    const WorldVec3 &align_delta,
                                    const OrbitPlotLodBuilder::FrustumContext &pick_frustum,
                                    const OrbitPlotLodBuilder::PickSettings &pick_settings,

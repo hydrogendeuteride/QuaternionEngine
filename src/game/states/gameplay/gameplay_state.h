@@ -6,6 +6,7 @@
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
 #include "game/states/gameplay/scenario/scenario_config.h"
 #include "orbit_helpers.h"
+#include "frame_monitor.h"
 #include "time_warp_state.h"
 #include "physics/physics_context.h"
 #include "physics/physics_world.h"
@@ -335,6 +336,7 @@ namespace Game
         double _fixed_time_s{0.0};
 
         TimeWarpState _time_warp{};
+        FrameMonitor _frame_monitor{};
         bool _rails_warp_active{false};
         double _last_sim_step_dt_s{0.0};
         bool _rails_thrust_applied_this_tick{false};

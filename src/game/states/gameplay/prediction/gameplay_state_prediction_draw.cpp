@@ -153,6 +153,7 @@ namespace Game
 
             std::vector<orbitsim::TrajectorySegment> base_segments_fallback;
             const std::vector<orbitsim::TrajectorySegment> *traj_base_segments = &track->cache.trajectory_segments_frame;
+            const OrbitRenderCurve *traj_base_render_curve = &track->cache.render_curve_frame;
             if (traj_base_segments->empty())
             {
                 base_segments_fallback = Draw::trajectory_segments_from_samples(traj_base);
@@ -165,6 +166,7 @@ namespace Game
 
             std::vector<orbitsim::TrajectorySegment> planned_segments_fallback;
             const std::vector<orbitsim::TrajectorySegment> *traj_planned_segments = &track->cache.trajectory_segments_frame_planned;
+            const OrbitRenderCurve *traj_planned_render_curve = &track->cache.render_curve_frame_planned;
             if (traj_planned_segments->empty() && !traj_planned.empty())
             {
                 planned_segments_fallback = Draw::trajectory_segments_from_samples(traj_planned);
@@ -240,14 +242,28 @@ namespace Game
                 }
                 else
                 {
-                    Draw::draw_orbit_window(draw_ctx,
-                                            _prediction_draw_config,
-                                            _orbit_plot_perf,
-                                            *traj_base_segments,
-                                            t0,
-                                            t_full_end,
-                                            track_color_full,
-                                            false);
+                    if (traj_base_render_curve && !traj_base_render_curve->empty())
+                    {
+                        Draw::draw_adaptive_curve_window(draw_ctx,
+                                                         _prediction_draw_config,
+                                                         _orbit_plot_perf,
+                                                         *traj_base_render_curve,
+                                                         t0,
+                                                         t_full_end,
+                                                         track_color_full,
+                                                         false);
+                    }
+                    else
+                    {
+                        Draw::draw_orbit_window(draw_ctx,
+                                                _prediction_draw_config,
+                                                _orbit_plot_perf,
+                                                *traj_base_segments,
+                                                t0,
+                                                t_full_end,
+                                                track_color_full,
+                                                false);
+                    }
                 }
                 if (is_active && !_prediction_draw_future_segment && t_full_end > t0)
                 {
@@ -273,14 +289,28 @@ namespace Game
                 }
                 else
                 {
-                    Draw::draw_orbit_window(draw_ctx,
-                                            _prediction_draw_config,
-                                            _orbit_plot_perf,
-                                            *traj_base_segments,
-                                            now_s,
-                                            t_end,
-                                            track_color_future,
-                                            false);
+                    if (traj_base_render_curve && !traj_base_render_curve->empty())
+                    {
+                        Draw::draw_adaptive_curve_window(draw_ctx,
+                                                         _prediction_draw_config,
+                                                         _orbit_plot_perf,
+                                                         *traj_base_render_curve,
+                                                         now_s,
+                                                         t_end,
+                                                         track_color_future,
+                                                         false);
+                    }
+                    else
+                    {
+                        Draw::draw_orbit_window(draw_ctx,
+                                                _prediction_draw_config,
+                                                _orbit_plot_perf,
+                                                *traj_base_segments,
+                                                now_s,
+                                                t_end,
+                                                track_color_future,
+                                                false);
+                    }
                 }
                 if (is_active && t_end > now_s)
                 {
@@ -315,14 +345,28 @@ namespace Game
                 }
                 else
                 {
-                    Draw::draw_orbit_window(draw_ctx,
-                                            _prediction_draw_config,
-                                            _orbit_plot_perf,
-                                            *traj_planned_segments,
-                                            planned_pick_window.t0_s,
-                                            planned_pick_window.t1_s,
-                                            track_color_plan,
-                                            _prediction_draw_config.draw_planned_as_dashed);
+                    if (traj_planned_render_curve && !traj_planned_render_curve->empty())
+                    {
+                        Draw::draw_adaptive_curve_window(draw_ctx,
+                                                         _prediction_draw_config,
+                                                         _orbit_plot_perf,
+                                                         *traj_planned_render_curve,
+                                                         planned_pick_window.t0_s,
+                                                         planned_pick_window.t1_s,
+                                                         track_color_plan,
+                                                         _prediction_draw_config.draw_planned_as_dashed);
+                    }
+                    else
+                    {
+                        Draw::draw_orbit_window(draw_ctx,
+                                                _prediction_draw_config,
+                                                _orbit_plot_perf,
+                                                *traj_planned_segments,
+                                                planned_pick_window.t0_s,
+                                                planned_pick_window.t1_s,
+                                                track_color_plan,
+                                                _prediction_draw_config.draw_planned_as_dashed);
+                    }
                 }
             }
 
@@ -395,6 +439,7 @@ namespace Game
                                                            pick_group_base,
                                                            *traj_base_segments,
                                                            ref_body_world,
+                                                           frame_to_world,
                                                            align_delta,
                                                            pick_frustum,
                                                            pick_settings,
@@ -442,6 +487,7 @@ namespace Game
                                                  pick_group_planned,
                                                  *traj_planned_segments,
                                                  ref_body_world,
+                                                 frame_to_world,
                                                  align_delta,
                                                  pick_frustum,
                                                  pick_settings,

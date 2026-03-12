@@ -34,6 +34,15 @@ namespace Game
             return a.mode == b.mode && a.fixed_body_id == b.fixed_body_id;
         }
 
+        bool frame_spec_supports_adaptive_render_curve(const orbitsim::TrajectoryFrameSpec &spec)
+        {
+            return spec.type == orbitsim::TrajectoryFrameType::Inertial ||
+                   spec.type == orbitsim::TrajectoryFrameType::BodyCenteredInertial ||
+                   spec.type == orbitsim::TrajectoryFrameType::BodyFixed ||
+                   spec.type == orbitsim::TrajectoryFrameType::Synodic ||
+                   spec.type == orbitsim::TrajectoryFrameType::LVLH;
+        }
+
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_samples(
                 const std::vector<orbitsim::TrajectorySample> &samples)
         {
@@ -893,6 +902,8 @@ namespace Game
             track.cache.trajectory_frame_planned.clear();
             track.cache.trajectory_segments_frame.clear();
             track.cache.trajectory_segments_frame_planned.clear();
+            track.cache.render_curve_frame.clear();
+            track.cache.render_curve_frame_planned.clear();
 
             if (resolved_frame_spec.type == orbitsim::TrajectoryFrameType::Inertial)
             {
@@ -997,6 +1008,17 @@ namespace Game
             {
                 track.cache.trajectory_segments_frame_planned =
                         trajectory_segments_from_samples(track.cache.trajectory_frame_planned);
+            }
+
+            if (frame_spec_supports_adaptive_render_curve(resolved_frame_spec))
+            {
+                track.cache.render_curve_frame =
+                        OrbitRenderCurve::build(track.cache.trajectory_segments_frame);
+                if (!track.cache.trajectory_segments_frame_planned.empty())
+                {
+                    track.cache.render_curve_frame_planned =
+                            OrbitRenderCurve::build(track.cache.trajectory_segments_frame_planned);
+                }
             }
 
             track.cache.resolved_frame_spec = resolved_frame_spec;

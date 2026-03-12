@@ -15,6 +15,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   # game/orbit
   game/orbit/orbit_prediction_math.h
   game/orbit/orbit_prediction_math.cpp
+  game/orbit/orbit_render_curve.h
+  game/orbit/orbit_render_curve.cpp
   game/orbit/orbit_plot_lod_builder.h
   game/orbit/orbit_plot_lod_builder.cpp
   game/orbit/orbit_prediction_tuning.h
@@ -44,6 +46,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/gameplay_state.cpp
   game/states/gameplay/gameplay_state_scene.cpp
   game/states/gameplay/gameplay_state_sim.cpp
+  game/states/gameplay/frame_monitor.h
+  game/states/gameplay/frame_monitor.cpp
   game/states/gameplay/orbit_helpers.h
   game/states/gameplay/time_warp_state.h
   game/states/gameplay/prediction/gameplay_state_prediction_types.h

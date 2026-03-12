@@ -135,6 +135,7 @@ namespace Game
         }
 
         _elapsed += dt;
+        _frame_monitor.update(dt);
 
         handle_time_warp_input(ctx);
 
@@ -1059,6 +1060,7 @@ namespace Game
 
         draw_maneuver_nodes_panel(ctx);
         draw_maneuver_imgui_gizmo(ctx);
+        _frame_monitor.draw_ui();
     }
 
     void GameplayState::reset_time_warp_state()
