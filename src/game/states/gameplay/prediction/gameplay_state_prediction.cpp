@@ -350,6 +350,78 @@ namespace Game
         return track->label;
     }
 
+    glm::vec3 GameplayState::prediction_subject_orbit_rgb(const PredictionSubjectKey key) const
+    {
+        static constexpr std::array<glm::vec3, 4> kOrbiterPalette{{
+                {1.00f, 0.25f, 0.25f},
+                {0.25f, 0.52f, 1.00f},
+                {0.62f, 0.65f, 0.70f},
+                {0.28f, 0.88f, 0.38f},
+        }};
+        static constexpr glm::vec3 kAnchorOrbiterColor{0.70f, 0.35f, 1.00f};
+        static constexpr glm::vec3 kDefaultCelestialColor{0.80f, 0.82f, 0.86f};
+
+        if (!key.valid())
+        {
+            return kDefaultCelestialColor;
+        }
+
+        if (key.kind == PredictionSubjectKind::Celestial)
+        {
+            const CelestialBodyInfo *body_info = find_celestial_body_info(static_cast<orbitsim::BodyId>(key.value));
+            if (!body_info)
+            {
+                return kDefaultCelestialColor;
+            }
+
+            for (const ScenarioConfig::CelestialDef &body_def : _scenario_config.celestials)
+            {
+                if (body_def.name == body_info->name)
+                {
+                    return body_def.has_prediction_orbit_color
+                               ? body_def.prediction_orbit_color
+                               : kDefaultCelestialColor;
+                }
+            }
+
+            return kDefaultCelestialColor;
+        }
+
+        if (prediction_subject_is_player(key))
+        {
+            return kAnchorOrbiterColor;
+        }
+
+        const OrbiterInfo *orbiter = find_orbiter(EntityId{key.value});
+        if (orbiter)
+        {
+            for (const ScenarioConfig::OrbiterDef &orbiter_def : _scenario_config.orbiters)
+            {
+                if (orbiter_def.name == orbiter->name && orbiter_def.has_prediction_orbit_color)
+                {
+                    return orbiter_def.prediction_orbit_color;
+                }
+            }
+        }
+
+        std::size_t orbiter_palette_index = 0;
+        for (const OrbiterInfo &orbiter : _orbiters)
+        {
+            if (!orbiter.entity.is_valid() || orbiter.is_player)
+            {
+                continue;
+            }
+
+            if (orbiter.entity.value == key.value)
+            {
+                return kOrbiterPalette[orbiter_palette_index % kOrbiterPalette.size()];
+            }
+            ++orbiter_palette_index;
+        }
+
+        return kOrbiterPalette[0];
+    }
+
     bool GameplayState::prediction_subject_thrust_applied_this_tick(PredictionSubjectKey key) const
     {
         // Thrust-triggered refresh only matters for the actively piloted subject.
