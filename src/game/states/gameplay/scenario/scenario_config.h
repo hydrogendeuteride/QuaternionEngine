@@ -33,6 +33,8 @@ namespace Game
             std::string emission_dir;
             glm::vec3 emission_factor{0.0f};
             float render_scale{1.0f}; // legacy fallback scale for non-planet-system celestial rendering
+            glm::vec3 prediction_orbit_color{0.75f, 0.75f, 0.75f};
+            bool has_prediction_orbit_color{false};
         };
 
         struct OrbiterDef
@@ -42,6 +44,8 @@ namespace Game
             glm::dvec3 offset_from_player{0.0}; // relative spawn offset for non-player orbiters
             glm::dvec3 relative_velocity{0.0};  // initial velocity relative to player
             std::string prediction_group;       // optional authored orbit overlay group
+            glm::vec3 prediction_orbit_color{1.0f, 0.25f, 0.25f};
+            bool has_prediction_orbit_color{false};
             GameAPI::PrimitiveType primitive{GameAPI::PrimitiveType::Capsule};
             glm::vec3 render_scale{1.0f};
             Physics::BodySettings body_settings{};

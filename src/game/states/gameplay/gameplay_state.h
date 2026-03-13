@@ -142,6 +142,7 @@ namespace Game
         bool prediction_subject_is_player(PredictionSubjectKey key) const;
         bool prediction_subject_supports_maneuvers(PredictionSubjectKey key) const;
         std::string prediction_subject_label(PredictionSubjectKey key) const;
+        glm::vec3 prediction_subject_orbit_rgb(PredictionSubjectKey key) const;
         const CelestialBodyInfo *find_celestial_body_info(orbitsim::BodyId body_id) const;
         const orbitsim::MassiveBody *find_massive_body(const std::vector<orbitsim::MassiveBody> &bodies,
                                                        orbitsim::BodyId body_id) const;

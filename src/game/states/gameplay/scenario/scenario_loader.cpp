@@ -394,6 +394,12 @@ namespace Game
             c.emission_dir = json_required<std::string>(j, "emission_dir", path);
             c.emission_factor = parse_vec3(*json_required_object(j, "emission_factor", path), child_path(path, "emission_factor"));
             c.render_scale = json_required_finite<float>(j, "render_scale", path);
+            if (const auto it = j.find("prediction_orbit_color"); it != j.end() && !it->is_null())
+            {
+                c.prediction_orbit_color = parse_vec3(*json_required_object(j, "prediction_orbit_color", path),
+                                                      child_path(path, "prediction_orbit_color"));
+                c.has_prediction_orbit_color = true;
+            }
 
             if (c.name.empty())
             {
@@ -441,6 +447,13 @@ namespace Game
             j["emission_dir"] = c.emission_dir;
             j["emission_factor"] = {{"x", c.emission_factor.x}, {"y", c.emission_factor.y}, {"z", c.emission_factor.z}};
             j["render_scale"] = c.render_scale;
+            if (c.has_prediction_orbit_color)
+            {
+                j["prediction_orbit_color"] = {
+                        {"x", c.prediction_orbit_color.x},
+                        {"y", c.prediction_orbit_color.y},
+                        {"z", c.prediction_orbit_color.z}};
+            }
             return j;
         }
 
@@ -465,6 +478,12 @@ namespace Game
             if (const auto it = j.find("prediction_group"); it != j.end() && !it->is_null())
             {
                 o.prediction_group = json_required<std::string>(j, "prediction_group", path);
+            }
+            if (const auto it = j.find("prediction_orbit_color"); it != j.end() && !it->is_null())
+            {
+                o.prediction_orbit_color = parse_vec3(*json_required_object(j, "prediction_orbit_color", path),
+                                                      child_path(path, "prediction_orbit_color"));
+                o.has_prediction_orbit_color = true;
             }
             o.primitive = parse_primitive_type(
                     json_required<std::string>(j, "primitive", path),
@@ -504,6 +523,13 @@ namespace Game
             if (!o.prediction_group.empty())
             {
                 j["prediction_group"] = o.prediction_group;
+            }
+            if (o.has_prediction_orbit_color)
+            {
+                j["prediction_orbit_color"] = {
+                        {"x", o.prediction_orbit_color.x},
+                        {"y", o.prediction_orbit_color.y},
+                        {"z", o.prediction_orbit_color.z}};
             }
             j["primitive"] = primitive_type_string(o.primitive);
             j["render_scale"] = {{"x", o.render_scale.x}, {"y", o.render_scale.y}, {"z", o.render_scale.z}};

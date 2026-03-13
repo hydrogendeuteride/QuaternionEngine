@@ -57,6 +57,8 @@ namespace Game
             earth.height_max_m = 8000.0;
             earth.emission_dir = "planets/earth/emission/L0";
             earth.emission_factor = glm::vec3(2.0f, 2.0f, 2.0f);
+            earth.prediction_orbit_color = glm::vec3(0.60f, 0.68f, 0.82f);
+            earth.has_prediction_orbit_color = true;
             cfg.celestials.push_back(std::move(earth));
         }
 
@@ -68,6 +70,8 @@ namespace Game
             moon.radius_m = 1'737'400.0;
             moon.soi_radius_m = 6.61e7;
             moon.orbit_distance_m = 384'400'000.0;
+            moon.prediction_orbit_color = glm::vec3(0.84f, 0.84f, 0.87f);
+            moon.has_prediction_orbit_color = true;
             cfg.celestials.push_back(std::move(moon));
         }
 
@@ -77,6 +81,8 @@ namespace Game
             ship.name = "ship";
             ship.orbit_altitude_m = 400'000.0;
             ship.prediction_group = "flight";
+            ship.prediction_orbit_color = glm::vec3(0.70f, 0.35f, 1.00f);
+            ship.has_prediction_orbit_color = true;
             ship.is_player = true;
             ship.is_rebase_anchor = true;
             ship.primitive = GameAPI::PrimitiveType::Capsule;
@@ -105,6 +111,8 @@ namespace Game
             ScenarioConfig::OrbiterDef probe{};
             probe.name = "probe";
             probe.prediction_group = "flight";
+            probe.prediction_orbit_color = glm::vec3(0.25f, 0.52f, 1.00f);
+            probe.has_prediction_orbit_color = true;
             probe.is_player = false;
             probe.offset_from_player = glm::dvec3(100'000.0, 45'000.0, 0.0);
             probe.relative_velocity = glm::dvec3(0.0, 700.0, -56.5);
@@ -131,6 +139,8 @@ namespace Game
             collision_test.name = "collision_test";
             collision_test.is_player = false;
             collision_test.prediction_group = "flight";
+            collision_test.prediction_orbit_color = glm::vec3(1.00f, 0.25f, 0.25f);
+            collision_test.has_prediction_orbit_color = true;
             collision_test.offset_from_player = glm::dvec3(0.0, -0.5, 150.0);
             collision_test.relative_velocity = glm::dvec3(0.0, 0.0, -25.0);
             collision_test.primitive = GameAPI::PrimitiveType::Cube;
