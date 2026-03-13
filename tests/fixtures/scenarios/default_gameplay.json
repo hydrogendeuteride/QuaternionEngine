@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "speed_scale": 1.0,
+  "mu_base": 3.986004418e14,
+  "system_center": {
+    "x": 0.0,
+    "y": 0.0,
+    "z": 0.0
+  },
+  "celestials": [
+    {
+      "name": "earth",
+      "mass_kg": 5.972e24,
+      "radius_m": 6371000.0,
+      "atmosphere_top_m": 100000.0,
+      "terrain_max_m": 8848.0,
+      "soi_radius_m": 924000000.0,
+      "orbit_distance_m": 0.0,
+      "has_terrain": true,
+      "albedo_dir": "planets/earth/albedo/L0",
+      "height_dir": "planets/earth/height/L0",
+      "height_max_m": 8000.0,
+      "emission_dir": "planets/earth/emission/L0",
+      "emission_factor": {
+        "x": 2.0,
+        "y": 2.0,
+        "z": 2.0
+      },
+      "render_scale": 1.0
+    },
+    {
+      "name": "moon",
+      "mass_kg": 7.342e22,
+      "radius_m": 1737400.0,
+      "atmosphere_top_m": 0.0,
+      "terrain_max_m": 0.0,
+      "soi_radius_m": 66100000.0,
+      "orbit_distance_m": 384400000.0,
+      "has_terrain": false,
+      "albedo_dir": "",
+      "height_dir": "",
+      "height_max_m": 0.0,
+      "emission_dir": "",
+      "emission_factor": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "render_scale": 150000.0
+    }
+  ],
+  "orbiters": [
+    {
+      "name": "ship",
+      "orbit_altitude_m": 400000.0,
+      "offset_from_player": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "relative_velocity": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "prediction_group": "flight",
+      "primitive": "capsule",
+      "render_scale": {
+        "x": 4.0,
+        "y": 4.0,
+        "z": 4.0
+      },
+      "body_settings": {
+        "shape": {
+          "type": "capsule",
+          "radius": 2.0,
+          "half_height": 2.0
+        },
+        "user_data": 0,
+        "position": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "rotation": {
+          "w": 1.0,
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "motion_type": "dynamic",
+        "mass": 100.0,
+        "friction": 0.2,
+        "restitution": 0.05,
+        "linear_damping": 0.0,
+        "angular_damping": 0.0,
+        "layer": 4,
+        "is_sensor": false,
+        "start_active": true,
+        "allow_sleeping": true,
+        "gravity_scale": 0.0
+      },
+      "is_player": true,
+      "is_rebase_anchor": true
+    },
+    {
+      "name": "probe",
+      "orbit_altitude_m": 0.0,
+      "offset_from_player": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -60.0
+      },
+      "relative_velocity": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "formation_hold_enabled": true,
+      "formation_leader": "ship",
+      "formation_slot_lvlh_m": {
+        "x": 0.0,
+        "y": -60.0,
+        "z": 0.0
+      },
+      "prediction_group": "flight",
+      "primitive": "sphere",
+      "render_scale": {
+        "x": 2.0,
+        "y": 2.0,
+        "z": 2.0
+      },
+      "body_settings": {
+        "shape": {
+          "type": "sphere",
+          "radius": 1.0
+        },
+        "user_data": 0,
+        "position": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "rotation": {
+          "w": 1.0,
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "motion_type": "dynamic",
+        "mass": 100.0,
+        "friction": 0.2,
+        "restitution": 0.1,
+        "linear_damping": 0.0,
+        "angular_damping": 0.0,
+        "layer": 2,
+        "is_sensor": false,
+        "start_active": true,
+        "allow_sleeping": true,
+        "gravity_scale": 0.0
+      },
+      "is_player": false,
+      "is_rebase_anchor": false
+    },
+    {
+      "name": "collision_test",
+      "orbit_altitude_m": 0.0,
+      "offset_from_player": {
+        "x": 0.0,
+        "y": -0.5,
+        "z": 150.0
+      },
+      "relative_velocity": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -25.0
+      },
+      "prediction_group": "flight",
+      "primitive": "cube",
+      "render_scale": {
+        "x": 3.0,
+        "y": 3.0,
+        "z": 3.0
+      },
+      "body_settings": {
+        "shape": {
+          "type": "box",
+          "half_extents": {
+            "x": 1.5,
+            "y": 1.5,
+            "z": 1.5
+          }
+        },
+        "user_data": 0,
+        "position": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "rotation": {
+          "w": 1.0,
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "motion_type": "dynamic",
+        "mass": 500.0,
+        "friction": 0.2,
+        "restitution": 0.1,
+        "linear_damping": 0.0,
+        "angular_damping": 0.0,
+        "layer": 2,
+        "is_sensor": false,
+        "start_active": true,
+        "allow_sleeping": true,
+        "gravity_scale": 0.0
+      },
+      "is_player": false,
+      "is_rebase_anchor": false
+    }
+  ]
+}
