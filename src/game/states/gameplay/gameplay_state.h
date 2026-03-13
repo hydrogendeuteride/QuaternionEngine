@@ -195,11 +195,17 @@ namespace Game
         void sync_celestial_render_entities(GameStateContext &ctx);
 
         // Orbiter helpers
+        OrbiterInfo *find_player_orbiter();
         const OrbiterInfo *find_player_orbiter() const;
+        OrbiterInfo *find_orbiter(EntityId entity);
         const OrbiterInfo *find_orbiter(EntityId entity) const;
         EntityId player_entity() const;
         EntityId select_rebase_anchor_entity() const;
         void update_rebase_anchor();
+        bool set_active_player_orbiter(GameStateContext &ctx, EntityId entity);
+        bool cycle_player_orbiter(GameStateContext &ctx, int direction);
+        void sync_player_camera_target(GameStateContext &ctx) const;
+        void sync_player_collision_callbacks();
 
         // Game world (entities + resource lifetime)
         GameWorld _world;
