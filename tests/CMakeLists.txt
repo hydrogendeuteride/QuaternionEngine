@@ -9,6 +9,7 @@ endif()
 add_executable(scenario_loader_tests
   scenario_loader_tests.cpp
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/scenario/scenario_loader.cpp"
+  "${PROJECT_SOURCE_DIR}/src/core/assets/locator.cpp"
   "${PROJECT_SOURCE_DIR}/src/core/util/logger.cpp"
 )
 
@@ -18,10 +19,6 @@ target_include_directories(scenario_loader_tests PRIVATE
   "${PROJECT_SOURCE_DIR}/src"
   "${PROJECT_SOURCE_DIR}/third_party/vma"
   "${PROJECT_SOURCE_DIR}/third_party/taskflow/3rd-party"
-)
-
-target_compile_definitions(scenario_loader_tests PRIVATE
-  SCENARIO_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets/scenarios"
 )
 
 target_link_libraries(scenario_loader_tests PRIVATE

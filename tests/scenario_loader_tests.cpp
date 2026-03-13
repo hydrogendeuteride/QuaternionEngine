@@ -1,4 +1,5 @@
 #include "game/states/gameplay/scenario/scenario_loader.h"
+#include "core/assets/locator.h"
 
 #include <nlohmann/json.hpp>
 #include <gtest/gtest.h>
@@ -111,6 +112,16 @@ namespace
         out.close();
         return path.string();
     }
+
+    std::filesystem::path resolve_bundled_scenario_path(const std::string &filename)
+    {
+        const AssetPaths paths = AssetPaths::detect();
+        const std::filesystem::path scenario_path = paths.assets / "scenarios" / filename;
+        EXPECT_FALSE(paths.assets.empty()) << "Failed to detect repository assets/ directory from cwd '"
+                                           << std::filesystem::current_path().string() << "'";
+        EXPECT_TRUE(std::filesystem::exists(scenario_path)) << "Bundled scenario file missing: " << scenario_path.string();
+        return scenario_path;
+    }
 } // namespace
 
 TEST(ScenarioLoader, LoadsValidScenarioDocument)
@@ -124,7 +135,7 @@ TEST(ScenarioLoader, LoadsValidScenarioDocument)
 
 TEST(ScenarioLoader, LoadsBundledDefaultGameplayScenario)
 {
-    const std::filesystem::path scenario_path = std::filesystem::path(SCENARIO_ASSETS_DIR) / "default_gameplay.json";
+    const std::filesystem::path scenario_path = resolve_bundled_scenario_path("default_gameplay.json");
     auto cfg = Game::load_scenario_config(scenario_path.string());
     ASSERT_TRUE(cfg.has_value());
 
