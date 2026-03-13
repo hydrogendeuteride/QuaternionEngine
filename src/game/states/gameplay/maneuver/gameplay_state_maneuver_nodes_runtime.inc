@@ -167,6 +167,52 @@ void GameplayState::update_maneuver_nodes_execution(GameStateContext &ctx)
         return;
     }
 
+    // Propagate the same delta-v to formation followers referencing the burned orbiter as leader.
+    {
+        const OrbiterInfo *player_orbiter = find_player_orbiter();
+        if (player_orbiter)
+        {
+            for (auto &follower : _orbiters)
+            {
+                if (!follower.formation_hold_enabled || &follower == player_orbiter)
+                {
+                    continue;
+                }
+                if (follower.formation_leader_name != player_orbiter->name)
+                {
+                    continue;
+                }
+
+                if (rails && _orbitsim && follower.rails.active())
+                {
+                    if (orbitsim::Spacecraft *fsc = _orbitsim->sim.spacecraft_by_id(follower.rails.sc_id))
+                    {
+                        fsc->state.velocity_mps += orbitsim::Vec3{dv_world.x, dv_world.y, dv_world.z};
+                    }
+                }
+#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
+                else if (_physics && _physics_context && follower.entity.is_valid())
+                {
+                    const Entity *fe = _world.entities().find(follower.entity);
+                    if (fe && fe->has_physics())
+                    {
+                        const Physics::BodyId fbid{fe->physics_body_value()};
+                        if (_physics->is_body_valid(fbid))
+                        {
+                            const glm::vec3 fv_local = _physics->get_linear_velocity(fbid);
+                            const glm::dvec3 fv_origin = _physics_context->velocity_origin_world();
+                            glm::dvec3 fv_world = fv_origin + glm::dvec3(fv_local);
+                            fv_world += dv_world;
+                            _physics->set_linear_velocity(fbid, glm::vec3(fv_world - fv_origin));
+                            _physics->activate(fbid);
+                        }
+                    }
+                }
+#endif
+            }
+        }
+    }
+
     // Consume the node after execution (impulse mode).
     const int executed_id = node->id;
     _maneuver_state.nodes.erase(

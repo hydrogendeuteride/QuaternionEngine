@@ -110,12 +110,15 @@ namespace Game
         {
             ScenarioConfig::OrbiterDef probe{};
             probe.name = "probe";
+            probe.formation_hold_enabled = true;
+            probe.formation_leader = "ship";
+            probe.formation_slot_lvlh_m = glm::dvec3(0.0, -60.0, 0.0);
             probe.prediction_group = "flight";
             probe.prediction_orbit_color = glm::vec3(0.25f, 0.52f, 1.00f);
             probe.has_prediction_orbit_color = true;
             probe.is_player = false;
-            probe.offset_from_player = glm::dvec3(100'000.0, 45'000.0, 0.0);
-            probe.relative_velocity = glm::dvec3(0.0, 700.0, -56.5);
+            probe.offset_from_player = glm::dvec3(0.0, 0.0, -60.0);
+            probe.relative_velocity = glm::dvec3(0.0);
             probe.primitive = GameAPI::PrimitiveType::Sphere;
             probe.render_scale = glm::vec3(2.0f);
 
@@ -342,6 +345,9 @@ namespace Game
             info.mass_kg = std::max(0.0, static_cast<double>(orbiter_def.body_settings.mass));
             info.physics_settings = orbiter_def.body_settings;
             info.use_physics_interpolation = true;
+            info.formation_hold_enabled = orbiter_def.formation_hold_enabled;
+            info.formation_leader_name = orbiter_def.formation_leader;
+            info.formation_slot_lvlh_m = orbiter_def.formation_slot_lvlh_m;
             _orbiters.push_back(std::move(info));
         }
 
@@ -642,6 +648,42 @@ namespace Game
         for (const auto &orbiter : _orbiters)
         {
             if (orbiter.entity == entity)
+            {
+                return &orbiter;
+            }
+        }
+
+        return nullptr;
+    }
+
+    OrbiterInfo *GameplayState::find_orbiter(const std::string_view name)
+    {
+        if (name.empty())
+        {
+            return nullptr;
+        }
+
+        for (auto &orbiter : _orbiters)
+        {
+            if (orbiter.name == name)
+            {
+                return &orbiter;
+            }
+        }
+
+        return nullptr;
+    }
+
+    const OrbiterInfo *GameplayState::find_orbiter(const std::string_view name) const
+    {
+        if (name.empty())
+        {
+            return nullptr;
+        }
+
+        for (const auto &orbiter : _orbiters)
+        {
+            if (orbiter.name == name)
             {
                 return &orbiter;
             }

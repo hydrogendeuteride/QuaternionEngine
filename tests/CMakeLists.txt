@@ -20,8 +20,16 @@ target_include_directories(scenario_loader_tests PRIVATE
   "${PROJECT_SOURCE_DIR}/third_party/taskflow/3rd-party"
 )
 
+set(SCENARIO_TEST_ASSETS_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/scenarios")
+file(MAKE_DIRECTORY "${SCENARIO_TEST_ASSETS_DIR}")
+configure_file(
+  "${PROJECT_SOURCE_DIR}/tests/fixtures/scenarios/default_gameplay.json"
+  "${SCENARIO_TEST_ASSETS_DIR}/default_gameplay.json"
+  COPYONLY
+)
+
 target_compile_definitions(scenario_loader_tests PRIVATE
-  SCENARIO_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets/scenarios"
+  SCENARIO_TEST_ASSETS_DIR="${SCENARIO_TEST_ASSETS_DIR}"
 )
 
 target_link_libraries(scenario_loader_tests PRIVATE
