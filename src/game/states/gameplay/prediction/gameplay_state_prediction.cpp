@@ -164,7 +164,8 @@ namespace Game
 
             track.key = key;
             track.label = orbiter.name;
-            track.supports_maneuvers = orbiter.is_player;
+            track.supports_maneuvers = orbiter.is_player ||
+                                      (orbiter.formation_hold_enabled && !orbiter.formation_leader_name.empty());
             track.is_celestial = false;
             _prediction_tracks.push_back(std::move(track));
         }
@@ -326,8 +327,20 @@ namespace Game
 
     bool GameplayState::prediction_subject_supports_maneuvers(PredictionSubjectKey key) const
     {
-        // Maneuver planning currently applies only to the player prediction.
-        return prediction_subject_is_player(key);
+        // Maneuver planning applies to the player and formation followers that mirror the leader's plan.
+        if (prediction_subject_is_player(key))
+        {
+            return true;
+        }
+        if (key.kind == PredictionSubjectKind::Orbiter)
+        {
+            const OrbiterInfo *orbiter = find_orbiter(EntityId(key.value));
+            if (orbiter && orbiter->formation_hold_enabled && !orbiter->formation_leader_name.empty())
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     std::string GameplayState::prediction_subject_label(PredictionSubjectKey key) const

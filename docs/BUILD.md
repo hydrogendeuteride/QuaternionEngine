@@ -16,6 +16,18 @@
 - Build (multi-config, e.g., MSVC)
   - `cmake --build build --config Release`
 
+- Windows clang-cl
+  - Verified with Visual Studio 2022 Developer Command Prompt environment + LLVM `clang-cl`.
+  - If Visual Studio does not have the `ClangCL` MSBuild toolset installed, use `vcvars64.bat` and the `NMake Makefiles` generator instead of `-T ClangCL`.
+  - Configure:
+    - `cmd /c '"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" && cmake -S . -B build-clang-cl-nmake -G "NMake Makefiles" -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl'`
+  - Build:
+    - `cmd /c '"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" && cmake --build build-clang-cl-nmake --target vulkan_engine'`
+  - Output:
+    - `bin/vulkan_engine.exe`
+  - Note:
+    - Building this way may emit additional third-party warnings under Clang that do not appear under MSVC.
+
 - Run
   - Single-config (Linux/macOS): `./build/bin/vulkan_engine`
   - Multi-config (Windows/MSVC): `build/bin/Release/vulkan_engine.exe` (or `Debug`)

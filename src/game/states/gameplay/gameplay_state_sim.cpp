@@ -3,6 +3,8 @@
 #include "core/game_api.h"
 #include "core/input/input_system.h"
 #include "game/component/ship_controller.h"
+#include "orbitsim/coordinate_frames.hpp"
+#include "orbitsim/frame_utils.hpp"
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
 #include "physics/jolt/jolt_physics_world.h"
@@ -350,6 +352,202 @@ namespace Game
         (void) _orbitsim->sim.remove_spacecraft(orbiter.rails.sc_id);
         orbiter.rails.clear();
         return true;
+    }
+
+    bool GameplayState::get_orbiter_inertial_state(const OrbiterInfo &orbiter, orbitsim::State &out_state) const
+    {
+        out_state = {};
+        if (!_orbitsim)
+        {
+            return false;
+        }
+
+        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
+        if (!ref_sim)
+        {
+            return false;
+        }
+
+        WorldVec3 pos_world{0.0};
+        glm::dvec3 vel_world{0.0};
+        glm::vec3 vel_local{0.0f};
+        if (!get_orbiter_world_state(orbiter, pos_world, vel_world, vel_local))
+        {
+            return false;
+        }
+
+        out_state = orbitsim::make_state(
+                ref_sim->state.position_m + glm::dvec3(pos_world - _scenario_config.system_center),
+                ref_sim->state.velocity_mps + vel_world);
+        return true;
+    }
+
+    const orbitsim::MassiveBody *GameplayState::select_primary_body_for_state(const orbitsim::State &state) const
+    {
+        if (!_orbitsim || _orbitsim->sim.massive_bodies().empty())
+        {
+            return nullptr;
+        }
+
+        const auto body_position_at = [this](const std::size_t i) -> orbitsim::Vec3 {
+            return _orbitsim->sim.massive_bodies()[i].state.position_m;
+        };
+
+        const std::size_t primary_index = orbitsim::auto_select_primary_index(
+                _orbitsim->sim.massive_bodies(),
+                state.position_m,
+                body_position_at,
+                _orbitsim->sim.config().softening_length_m);
+        if (primary_index >= _orbitsim->sim.massive_bodies().size())
+        {
+            return nullptr;
+        }
+
+        return &_orbitsim->sim.massive_bodies()[primary_index];
+    }
+
+    bool GameplayState::build_orbiter_lvlh_frame(const OrbiterInfo &leader,
+                                                 orbitsim::RotatingFrame &out_frame,
+                                                 orbitsim::State *out_leader_state,
+                                                 orbitsim::State *out_primary_state) const
+    {
+        out_frame = {};
+
+        orbitsim::State leader_state{};
+        if (!get_orbiter_inertial_state(leader, leader_state))
+        {
+            return false;
+        }
+
+        const orbitsim::MassiveBody *primary = select_primary_body_for_state(leader_state);
+        if (!primary)
+        {
+            return false;
+        }
+
+        const std::optional<orbitsim::RotatingFrame> lvlh =
+                orbitsim::make_lvlh_frame(primary->state, leader_state);
+        if (!lvlh.has_value() || !lvlh->valid())
+        {
+            return false;
+        }
+
+        out_frame = *lvlh;
+        if (out_leader_state)
+        {
+            *out_leader_state = leader_state;
+        }
+        if (out_primary_state)
+        {
+            *out_primary_state = primary->state;
+        }
+        return true;
+    }
+
+    void GameplayState::update_formation_hold(const double dt_s)
+    {
+        if (!(dt_s > 0.0) || !std::isfinite(dt_s) || !_orbitsim)
+        {
+            return;
+        }
+
+        for (auto &orbiter : _orbiters)
+        {
+            if (!orbiter.formation_hold_enabled || orbiter.formation_leader_name.empty() || orbiter.is_player)
+            {
+                continue;
+            }
+
+            const OrbiterInfo *leader = find_orbiter(std::string_view(orbiter.formation_leader_name));
+            if (!leader || leader == &orbiter)
+            {
+                continue;
+            }
+
+            orbitsim::RotatingFrame leader_lvlh{};
+            if (!build_orbiter_lvlh_frame(*leader, leader_lvlh))
+            {
+                continue;
+            }
+
+            orbitsim::State follower_state_inertial{};
+            if (!get_orbiter_inertial_state(orbiter, follower_state_inertial))
+            {
+                continue;
+            }
+
+            const orbitsim::State follower_state_lvlh =
+                    orbitsim::inertial_state_to_frame(follower_state_inertial, leader_lvlh);
+
+            // Position error and velocity in LVLH frame.
+            const glm::dvec3 pos_error =
+                    glm::dvec3(follower_state_lvlh.position_m) - orbiter.formation_slot_lvlh_m;
+            const glm::dvec3 vel = glm::dvec3(follower_state_lvlh.velocity_mps);
+
+            // Exact integration of a critically-damped spring (unconditionally stable for any dt).
+            //   e'' = -omega^2 * e - 2*omega * e'
+            //   e(t)  = (e0 + (v0 + omega*e0)*t) * exp(-omega*t)
+            //   e'(t) = (v0*(1 - omega*t) - omega^2*e0*t) * exp(-omega*t)
+            const double omega = kFormationHoldOmega;
+            const double odt = omega * dt_s;
+            const double exp_decay = std::exp(-odt);
+            const glm::dvec3 vel_after =
+                    (vel * (1.0 - odt) - (omega * omega * pos_error * dt_s)) * exp_decay;
+            glm::dvec3 dv_lvlh = vel_after - vel;
+
+            if (!finite_vec3(dv_lvlh))
+            {
+                continue;
+            }
+
+            const double dv_len = glm::length(dv_lvlh);
+            if (std::isfinite(dv_len) && dv_len > kFormationHoldMaxDvPerStepMps && dv_len > 0.0)
+            {
+                dv_lvlh *= (kFormationHoldMaxDvPerStepMps / dv_len);
+            }
+
+            const glm::dvec3 dv_world =
+                    orbitsim::frame_vector_to_inertial(leader_lvlh, dv_lvlh);
+            if (!finite_vec3(dv_world))
+            {
+                continue;
+            }
+
+            if (orbiter.rails.active())
+            {
+                orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id);
+                if (!sc)
+                {
+                    continue;
+                }
+
+                sc->state.velocity_mps += dv_world;
+                continue;
+            }
+
+            if (!_physics || !_physics_context || !orbiter.entity.is_valid())
+            {
+                continue;
+            }
+
+            Entity *entity = _world.entities().find(orbiter.entity);
+            if (!entity || !entity->has_physics())
+            {
+                continue;
+            }
+
+            const Physics::BodyId body_id{entity->physics_body_value()};
+            if (!_physics->is_body_valid(body_id))
+            {
+                continue;
+            }
+
+            // For physics mode, convert dv into an equivalent force for this tick.
+            const double mass_kg = std::max(1.0, orbiter.mass_kg);
+            const glm::vec3 force = glm::vec3(dv_world * mass_kg / dt_s);
+            _physics->add_force(body_id, force);
+            _physics->activate(body_id);
+        }
     }
 
     // Advances one fixed-step physics tick, including orbit sim gravity and moving-origin bookkeeping.
@@ -907,12 +1105,36 @@ namespace Game
                     const glm::dvec3 dir_world = glm::dvec3(player_orbiter->rails.rotation * input.local_thrust_dir);
                     const double mass_kg = std::max(1.0, sc->mass_kg());
                     const double dv = (static_cast<double>(thrust_force_N) / mass_kg) * dt_s;
-                    sc->state.velocity_mps += dir_world * dv;
+                    const glm::dvec3 dv_world = dir_world * dv;
+                    sc->state.velocity_mps += dv_world;
                     _rails_thrust_applied_this_tick = true;
                     mark_prediction_dirty();
+
+                    // Propagate the same velocity change to formation followers.
+                    for (auto &follower : _orbiters)
+                    {
+                        if (!follower.formation_hold_enabled || follower.is_player)
+                        {
+                            continue;
+                        }
+                        if (follower.formation_leader_name != player_orbiter->name)
+                        {
+                            continue;
+                        }
+                        if (!follower.rails.active())
+                        {
+                            continue;
+                        }
+                        if (orbitsim::Spacecraft *fsc = _orbitsim->sim.spacecraft_by_id(follower.rails.sc_id))
+                        {
+                            fsc->state.velocity_mps += dv_world;
+                        }
+                    }
                 }
             }
         }
+
+        update_formation_hold(dt_s);
 
         _orbitsim->sim.step(dt_s);
         sync_celestial_render_entities(ctx);

@@ -102,6 +102,9 @@ namespace Game
         double mass_kg{0.0};
         Physics::BodySettings physics_settings{};
         bool use_physics_interpolation{true};
+        bool formation_hold_enabled{false};
+        std::string formation_leader_name;
+        glm::dvec3 formation_slot_lvlh_m{0.0};
 
         struct RailsState
         {
