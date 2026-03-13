@@ -9,7 +9,6 @@ endif()
 add_executable(scenario_loader_tests
   scenario_loader_tests.cpp
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/scenario/scenario_loader.cpp"
-  "${PROJECT_SOURCE_DIR}/src/core/assets/locator.cpp"
   "${PROJECT_SOURCE_DIR}/src/core/util/logger.cpp"
 )
 
@@ -21,6 +20,18 @@ target_include_directories(scenario_loader_tests PRIVATE
   "${PROJECT_SOURCE_DIR}/third_party/taskflow/3rd-party"
 )
 
+set(SCENARIO_TEST_ASSETS_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/scenarios")
+file(MAKE_DIRECTORY "${SCENARIO_TEST_ASSETS_DIR}")
+configure_file(
+  "${PROJECT_SOURCE_DIR}/assets/scenarios/default_gameplay.json"
+  "${SCENARIO_TEST_ASSETS_DIR}/default_gameplay.json"
+  COPYONLY
+)
+
+target_compile_definitions(scenario_loader_tests PRIVATE
+  SCENARIO_TEST_ASSETS_DIR="${SCENARIO_TEST_ASSETS_DIR}"
+)
+
 target_link_libraries(scenario_loader_tests PRIVATE
   gtest
   fmt::fmt
@@ -29,9 +40,6 @@ target_link_libraries(scenario_loader_tests PRIVATE
 )
 
 add_test(NAME scenario_loader_tests COMMAND scenario_loader_tests)
-set_tests_properties(scenario_loader_tests PROPERTIES
-  ENVIRONMENT "VKG_ASSET_ROOT=${PROJECT_SOURCE_DIR}"
-)
 
 add_executable(orbit_helpers_tests
   orbit_helpers_tests.cpp
