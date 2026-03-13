@@ -3,20 +3,10 @@
 #include "game/component/ship_controller.h"
 
 #include <algorithm>
-#include <unordered_map>
 #include <utility>
 
 namespace Game
 {
-    namespace
-    {
-        template<typename T>
-        bool contains_key(const std::vector<T> &items, const T &needle)
-        {
-            return std::find(items.begin(), items.end(), needle) != items.end();
-        }
-    } // namespace
-
     bool GameplayState::get_player_world_state(WorldVec3 &out_pos_world,
                                                glm::dvec3 &out_vel_world,
                                                glm::vec3 &out_vel_local) const
@@ -142,7 +132,6 @@ namespace Game
     {
         // Rebuild the subject list while preserving any reusable runtime cache/state.
         const PredictionSubjectKey old_active = _prediction_selection.active_subject;
-        const std::vector<PredictionSubjectKey> old_overlays = _prediction_selection.overlay_subjects;
         std::vector<PredictionTrackState> old_tracks = std::move(_prediction_tracks);
 
         _prediction_tracks.clear();
@@ -209,62 +198,18 @@ namespace Game
             }
         }
 
-        std::unordered_map<std::string, std::vector<PredictionSubjectKey>> group_members;
-        for (const auto &orbiter_def : _scenario_config.orbiters)
-        {
-            if (orbiter_def.prediction_group.empty())
-            {
-                continue;
-            }
-
-            auto runtime = std::find_if(_orbiters.begin(),
-                                        _orbiters.end(),
-                                        [&](const OrbiterInfo &orbiter) { return orbiter.name == orbiter_def.name; });
-            if (runtime == _orbiters.end() || !runtime->entity.is_valid())
-            {
-                continue;
-            }
-
-            group_members[orbiter_def.prediction_group].push_back(
-                    PredictionSubjectKey{PredictionSubjectKind::Orbiter, runtime->entity.value});
-        }
-
-        for (auto &[name, members] : group_members)
-        {
-            if (members.size() < 2)
-            {
-                continue;
-            }
-
-            PredictionGroup group{};
-            group.name = name;
-            group.members = members;
-            group.primary_subject = members.front();
-
-            for (const PredictionSubjectKey member : members)
-            {
-                if (prediction_subject_is_player(member))
-                {
-                    group.primary_subject = member;
-                    break;
-                }
-            }
-
-            _prediction_groups.push_back(std::move(group));
-        }
-
         const auto track_exists = [&](PredictionSubjectKey key) {
             return find_prediction_track(key) != nullptr;
         };
 
-        // Restore the last selection when possible, otherwise fall back to a sane default.
-        if (track_exists(old_active))
-        {
-            _prediction_selection.active_subject = old_active;
-        }
-        else if (const PredictionTrackState *player_track = player_prediction_track())
+        // Keep the player as the focused subject so maneuver/picking flows still target one stable track.
+        if (const PredictionTrackState *player_track = player_prediction_track())
         {
             _prediction_selection.active_subject = player_track->key;
+        }
+        else if (track_exists(old_active))
+        {
+            _prediction_selection.active_subject = old_active;
         }
         else if (!_prediction_tracks.empty())
         {
@@ -276,86 +221,21 @@ namespace Game
         }
 
         _prediction_selection.overlay_subjects.clear();
-        for (PredictionSubjectKey key : old_overlays)
-        {
-            if (key != _prediction_selection.active_subject && track_exists(key))
-            {
-                _prediction_selection.overlay_subjects.push_back(key);
-            }
-        }
-
-        const bool had_explicit_selection =
-                old_active.valid() ||
-                !old_overlays.empty() ||
-                _prediction_selection.selected_group_index >= 0;
-        if (!had_explicit_selection)
-        {
-            // Prefer an authored group that contains the player so formation overlays appear together.
-            bool seeded_from_group = false;
-            for (size_t group_index = 0; group_index < _prediction_groups.size(); ++group_index)
-            {
-                const PredictionGroup &group = _prediction_groups[group_index];
-                if (!contains_key(group.members, _prediction_selection.active_subject))
-                {
-                    continue;
-                }
-
-                _prediction_selection.selected_group_index = static_cast<int>(group_index);
-                for (PredictionSubjectKey member : group.members)
-                {
-                    if (member != _prediction_selection.active_subject)
-                    {
-                        _prediction_selection.overlay_subjects.push_back(member);
-                    }
-                }
-                seeded_from_group = !_prediction_selection.overlay_subjects.empty();
-                break;
-            }
-
-            if (!seeded_from_group)
-            {
-                bool orbiter_overlay_added = false;
-                for (const PredictionTrackState &track : _prediction_tracks)
-                {
-                    if (track.key == _prediction_selection.active_subject)
-                    {
-                        continue;
-                    }
-
-                    if (!orbiter_overlay_added && track.key.kind == PredictionSubjectKind::Orbiter)
-                    {
-                        _prediction_selection.overlay_subjects.push_back(track.key);
-                        orbiter_overlay_added = true;
-                    }
-                }
-            }
-
-            for (const PredictionTrackState &track : _prediction_tracks)
-            {
-                if (track.key.kind == PredictionSubjectKind::Celestial)
-                {
-                    _prediction_selection.overlay_subjects.push_back(track.key);
-                    break;
-                }
-            }
-        }
+        _prediction_selection.selected_group_index = -1;
 
         sync_prediction_dirty_flag();
     }
 
     std::vector<GameplayState::PredictionSubjectKey> GameplayState::collect_visible_prediction_subjects() const
     {
-        // Return the deduplicated subject set that the UI wants drawn this frame.
+        // Render and refresh every live prediction subject.
         std::vector<PredictionSubjectKey> out;
-        if (_prediction_selection.active_subject.valid())
+        out.reserve(_prediction_tracks.size());
+        for (const PredictionTrackState &track : _prediction_tracks)
         {
-            out.push_back(_prediction_selection.active_subject);
-        }
-        for (PredictionSubjectKey key : _prediction_selection.overlay_subjects)
-        {
-            if (key.valid() && !contains_key(out, key))
+            if (track.key.valid())
             {
-                out.push_back(key);
+                out.push_back(track.key);
             }
         }
         return out;

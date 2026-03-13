@@ -257,7 +257,15 @@ namespace Game
             }
 
             ImGui::Text("Sim: %dh %dm %.1fs", sim_hours, sim_minutes, sim_seconds);
-            ImGui::Text("Warp: x%.0f (%s)  [.,] change  [/]/[Backspace] x1", _time_warp.factor(), warp_mode);
+            const char *controlled_vessel = "None";
+            if (const OrbiterInfo *player_orbiter = find_player_orbiter())
+            {
+                controlled_vessel = player_orbiter->name.c_str();
+            }
+
+            ImGui::Text("Warp: x%.0f (%s)  [,][.] change  [/]/[Backspace] x1", _time_warp.factor(), warp_mode);
+            ImGui::Text("Vessel: %s", controlled_vessel);
+            ImGui::TextUnformatted("Switch vessel: '[' previous, ']' next");
             ImGui::Text("Real: %.1f s", _elapsed);
             ImGui::Text("[ESC] Pause");
 
@@ -484,31 +492,9 @@ namespace Game
                 std::string active_prediction_label = active_prediction
                                                             ? prediction_subject_label(active_prediction->key)
                                                             : std::string("None");
-
-                if (ImGui::BeginCombo("Active prediction", active_prediction_label.c_str()))
-                {
-                    for (const PredictionTrackState &track : _prediction_tracks)
-                    {
-                        const bool selected = active_prediction && track.key == active_prediction->key;
-                        const std::string label = prediction_subject_label(track.key);
-                        if (ImGui::Selectable(label.c_str(), selected))
-                        {
-                            _prediction_selection.active_subject = track.key;
-                            _prediction_selection.overlay_subjects.erase(
-                                    std::remove(_prediction_selection.overlay_subjects.begin(),
-                                                _prediction_selection.overlay_subjects.end(),
-                                                track.key),
-                                    _prediction_selection.overlay_subjects.end());
-                            _prediction_selection.selected_group_index = -1;
-                            _prediction_dirty = true;
-                        }
-                        if (selected)
-                        {
-                            ImGui::SetItemDefaultFocus();
-                        }
-                    }
-                    ImGui::EndCombo();
-                }
+                ImGui::Text("Focused subject: %s", active_prediction_label.c_str());
+                ImGui::Text("Visible subjects: %zu", _prediction_tracks.size());
+                ImGui::TextUnformatted("All live orbiters and non-reference celestials are always shown.");
 
                 const char *frame_label = (_prediction_frame_selection.selected_index >= 0 &&
                                            _prediction_frame_selection.selected_index <
@@ -565,166 +551,6 @@ namespace Game
                     }
                     ImGui::EndCombo();
                 }
-
-                if (!_prediction_groups.empty())
-                {
-                    std::string active_group_label = "Custom";
-                    if (_prediction_selection.selected_group_index >= 0 &&
-                        _prediction_selection.selected_group_index < static_cast<int>(_prediction_groups.size()))
-                    {
-                        active_group_label = _prediction_groups[static_cast<size_t>(_prediction_selection.selected_group_index)].name;
-                    }
-
-                    if (ImGui::BeginCombo("Prediction group", active_group_label.c_str()))
-                    {
-                        const bool custom_selected = _prediction_selection.selected_group_index < 0;
-                        if (ImGui::Selectable("Custom", custom_selected))
-                        {
-                            _prediction_selection.selected_group_index = -1;
-                        }
-                        if (custom_selected)
-                        {
-                            ImGui::SetItemDefaultFocus();
-                        }
-
-                        for (size_t group_index = 0; group_index < _prediction_groups.size(); ++group_index)
-                        {
-                            const PredictionGroup &group = _prediction_groups[group_index];
-                            const bool selected =
-                                    _prediction_selection.selected_group_index == static_cast<int>(group_index);
-                            if (ImGui::Selectable(group.name.c_str(), selected))
-                            {
-                                _prediction_selection.selected_group_index = static_cast<int>(group_index);
-                                _prediction_selection.active_subject = group.primary_subject;
-                                _prediction_selection.overlay_subjects.clear();
-                                for (PredictionSubjectKey member : group.members)
-                                {
-                                    if (member != group.primary_subject)
-                                    {
-                                        _prediction_selection.overlay_subjects.push_back(member);
-                                    }
-                                }
-                                _prediction_dirty = true;
-                            }
-                        }
-                        ImGui::EndCombo();
-                    }
-                }
-
-                if (ImGui::TreeNode("Overlay subjects"))
-                {
-                    for (const PredictionTrackState &track : _prediction_tracks)
-                    {
-                        if (track.key == _prediction_selection.active_subject)
-                        {
-                            continue;
-                        }
-
-                        bool enabled =
-                                std::find(_prediction_selection.overlay_subjects.begin(),
-                                          _prediction_selection.overlay_subjects.end(),
-                                          track.key) != _prediction_selection.overlay_subjects.end();
-                        const std::string label = prediction_subject_label(track.key);
-                        if (ImGui::Checkbox(label.c_str(), &enabled))
-                        {
-                            _prediction_selection.selected_group_index = -1;
-                            if (enabled)
-                            {
-                                if (std::find(_prediction_selection.overlay_subjects.begin(),
-                                              _prediction_selection.overlay_subjects.end(),
-                                              track.key) == _prediction_selection.overlay_subjects.end())
-                                {
-                                    _prediction_selection.overlay_subjects.push_back(track.key);
-                                }
-                            }
-                            else
-                            {
-                                _prediction_selection.overlay_subjects.erase(
-                                        std::remove(_prediction_selection.overlay_subjects.begin(),
-                                                    _prediction_selection.overlay_subjects.end(),
-                                                    track.key),
-                                        _prediction_selection.overlay_subjects.end());
-                            }
-                            _prediction_dirty = true;
-                        }
-                    }
-                    ImGui::TreePop();
-                }
-
-                if (ImGui::Button("Show group + celestial"))
-                {
-                    if (const PredictionTrackState *player_track = player_prediction_track())
-                    {
-                        _prediction_selection.active_subject = player_track->key;
-                    }
-
-                    _prediction_selection.overlay_subjects.clear();
-                    _prediction_selection.selected_group_index = -1;
-
-                    for (size_t group_index = 0; group_index < _prediction_groups.size(); ++group_index)
-                    {
-                        const PredictionGroup &group = _prediction_groups[group_index];
-                        const bool group_contains_active =
-                                std::find(group.members.begin(),
-                                          group.members.end(),
-                                          _prediction_selection.active_subject) != group.members.end();
-                        if (!group_contains_active)
-                        {
-                            continue;
-                        }
-
-                        _prediction_selection.selected_group_index = static_cast<int>(group_index);
-                        for (PredictionSubjectKey member : group.members)
-                        {
-                            if (member != _prediction_selection.active_subject)
-                            {
-                                _prediction_selection.overlay_subjects.push_back(member);
-                            }
-                        }
-                        break;
-                    }
-
-                    if (_prediction_selection.overlay_subjects.empty())
-                    {
-                        for (const PredictionTrackState &track : _prediction_tracks)
-                        {
-                            if (track.key == _prediction_selection.active_subject)
-                            {
-                                continue;
-                            }
-
-                            if (track.key.kind == PredictionSubjectKind::Orbiter)
-                            {
-                                _prediction_selection.overlay_subjects.push_back(track.key);
-                            }
-                        }
-                    }
-
-                    for (const PredictionTrackState &track : _prediction_tracks)
-                    {
-                        if (track.key.kind == PredictionSubjectKind::Celestial)
-                        {
-                            _prediction_selection.overlay_subjects.push_back(track.key);
-                            break;
-                        }
-                    }
-                    _prediction_dirty = true;
-                }
-                ImGui::SameLine();
-                ImGui::TextUnformatted("Shows the active flight group plus the first celestial overlay.");
-
-                std::string visible_prediction_summary = active_prediction
-                                                             ? prediction_subject_label(active_prediction->key)
-                                                             : std::string("None");
-                for (PredictionSubjectKey key : _prediction_selection.overlay_subjects)
-                {
-                    const std::string label = prediction_subject_label(key);
-                    if (!label.empty())
-                    {
-                        visible_prediction_summary += visible_prediction_summary.empty() ? label : ", " + label;
-                    }
-                }
-                ImGui::TextWrapped("Visible prediction subjects: %s", visible_prediction_summary.c_str());
 
                 ImGui::Checkbox("Prediction full orbit", &_prediction_draw_full_orbit);
                 ImGui::Checkbox("Prediction future segment", &_prediction_draw_future_segment);
@@ -939,14 +765,14 @@ namespace Game
                         {
                             const Physics::MotionType motion = _physics->get_motion_type(body_id);
                             bool kinematic = motion == Physics::MotionType::Kinematic;
-                            if (ImGui::Checkbox("Primary player kinematic", &kinematic))
+                            if (ImGui::Checkbox("Controlled vessel kinematic", &kinematic))
                             {
                                 const Physics::MotionType target =
                                         kinematic ? Physics::MotionType::Kinematic : Physics::MotionType::Dynamic;
                                 (void) _physics->set_motion_type(body_id, target);
                             }
                             ImGui::SameLine();
-                            ImGui::TextUnformatted("Anchor source: orbiter config (is_rebase_anchor).");
+                            ImGui::TextUnformatted("Controlled vessel is also the rebase anchor.");
                         }
                     }
                 }
@@ -1092,6 +918,15 @@ namespace Game
         if (ui_capture_keyboard)
         {
             return;
+        }
+
+        if (ctx.input->key_pressed(Key::RightBracket))
+        {
+            (void) cycle_player_orbiter(ctx, +1);
+        }
+        if (ctx.input->key_pressed(Key::LeftBracket))
+        {
+            (void) cycle_player_orbiter(ctx, -1);
         }
 
         int level = _time_warp.warp_level;

@@ -57,6 +57,8 @@ enum class Key : uint16_t
     Backspace = 42,
     Tab = 43,
     Space = 44,
+    LeftBracket = 47,
+    RightBracket = 48,
 
     Comma = 54,
     Period = 55,
