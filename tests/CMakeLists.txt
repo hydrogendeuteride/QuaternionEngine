@@ -29,6 +29,9 @@ target_link_libraries(scenario_loader_tests PRIVATE
 )
 
 add_test(NAME scenario_loader_tests COMMAND scenario_loader_tests)
+set_tests_properties(scenario_loader_tests PROPERTIES
+  ENVIRONMENT "VKG_ASSET_ROOT=${PROJECT_SOURCE_DIR}"
+)
 
 add_executable(orbit_helpers_tests
   orbit_helpers_tests.cpp
