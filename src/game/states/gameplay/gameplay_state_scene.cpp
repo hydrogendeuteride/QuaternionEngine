@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <utility>
 
 namespace Game
 {
@@ -56,6 +57,8 @@ namespace Game
             earth.height_max_m = 8000.0;
             earth.emission_dir = "planets/earth/emission/L0";
             earth.emission_factor = glm::vec3(2.0f, 2.0f, 2.0f);
+            earth.prediction_orbit_color = glm::vec3(0.60f, 0.68f, 0.82f);
+            earth.has_prediction_orbit_color = true;
             cfg.celestials.push_back(std::move(earth));
         }
 
@@ -67,6 +70,8 @@ namespace Game
             moon.radius_m = 1'737'400.0;
             moon.soi_radius_m = 6.61e7;
             moon.orbit_distance_m = 384'400'000.0;
+            moon.prediction_orbit_color = glm::vec3(0.84f, 0.84f, 0.87f);
+            moon.has_prediction_orbit_color = true;
             cfg.celestials.push_back(std::move(moon));
         }
 
@@ -76,6 +81,8 @@ namespace Game
             ship.name = "ship";
             ship.orbit_altitude_m = 400'000.0;
             ship.prediction_group = "flight";
+            ship.prediction_orbit_color = glm::vec3(0.70f, 0.35f, 1.00f);
+            ship.has_prediction_orbit_color = true;
             ship.is_player = true;
             ship.is_rebase_anchor = true;
             ship.primitive = GameAPI::PrimitiveType::Capsule;
@@ -104,6 +111,8 @@ namespace Game
             ScenarioConfig::OrbiterDef probe{};
             probe.name = "probe";
             probe.prediction_group = "flight";
+            probe.prediction_orbit_color = glm::vec3(0.25f, 0.52f, 1.00f);
+            probe.has_prediction_orbit_color = true;
             probe.is_player = false;
             probe.offset_from_player = glm::dvec3(100'000.0, 45'000.0, 0.0);
             probe.relative_velocity = glm::dvec3(0.0, 700.0, -56.5);
@@ -130,6 +139,8 @@ namespace Game
             collision_test.name = "collision_test";
             collision_test.is_player = false;
             collision_test.prediction_group = "flight";
+            collision_test.prediction_orbit_color = glm::vec3(1.00f, 0.25f, 0.25f);
+            collision_test.has_prediction_orbit_color = true;
             collision_test.offset_from_player = glm::dvec3(0.0, -0.5, 150.0);
             collision_test.relative_velocity = glm::dvec3(0.0, 0.0, -25.0);
             collision_test.primitive = GameAPI::PrimitiveType::Cube;
@@ -348,91 +359,19 @@ namespace Game
 
         const EntityId primary_player_eid = player_entity();
 
-#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-        if (_physics)
-        {
-            for (const auto &orbiter : _orbiters)
-            {
-                if (!orbiter.is_player || !orbiter.entity.is_valid())
-                {
-                    continue;
-                }
-
-                Entity *player = _world.entities().find(orbiter.entity);
-                if (player && player->has_physics())
-                {
-                    const Physics::BodyId player_body{player->physics_body_value()};
-                    if (_physics->is_body_valid(player_body))
-                    {
-                        Physics::PhysicsWorld::BodyCallbacks callbacks{};
-                        callbacks.on_collision = [this](const Physics::CollisionEvent &e) {
-                            if (e.type != Physics::ContactEventType::Begin)
-                            {
-                                return;
-                            }
-
-                            mark_prediction_dirty();
-
-                            if (!_contact_log_enabled)
-                            {
-                                return;
-                            }
-
-                            ContactLogEntry entry{};
-                            entry.time_s = static_cast<float>(_fixed_time_s);
-                            entry.type = e.type;
-                            entry.self_body = e.self.value;
-                            entry.other_body = e.other.value;
-                            entry.self_user_data = e.self_user_data;
-                            entry.other_user_data = e.other_user_data;
-                            entry.point = e.point;
-                            entry.normal = e.normal;
-                            entry.penetration_depth = e.penetration_depth;
-
-                            _contact_log.push_back(entry);
-                            while (_contact_log.size() > _contact_log_capacity)
-                            {
-                                _contact_log.pop_front();
-                            }
-
-                            if (_contact_log_print_console)
-                            {
-                                Logger::debug("[Collision][{}] self={} other={} depth={:.3f} p=({:.2f},{:.2f},{:.2f})",
-                                              contact_event_type_name(entry.type),
-                                              entry.self_body,
-                                              entry.other_body,
-                                              entry.penetration_depth,
-                                              entry.point.x, entry.point.y, entry.point.z);
-                            }
-                        };
-                        _physics->set_body_callbacks(player_body, callbacks);
-                    }
-                }
-            }
-        }
-#endif
-
-        std::string cam_target_name = "ship";
-        if (const OrbiterInfo *player_orbiter = find_player_orbiter())
-        {
-            cam_target_name = player_orbiter->name;
-        }
-        else if (!_orbiters.empty() && !_orbiters.front().name.empty())
-        {
-            cam_target_name = _orbiters.front().name;
-        }
+        sync_player_collision_callbacks();
 
         if (primary_player_eid.is_valid() || !_orbiters.empty())
         {
             GameAPI::OrbitCameraSettings orbit{};
             orbit.target.type = GameAPI::CameraTargetType::MeshInstance;
-            orbit.target.name = cam_target_name;
             orbit.distance = 40.0;
             orbit.yaw = 0.6f;
             orbit.pitch = -0.35f;
             orbit.lookSensitivity = 0.0020f;
             ctx.api->set_camera_mode(GameAPI::CameraMode::Orbit);
             ctx.api->set_orbit_camera_settings(orbit);
+            sync_player_camera_target(ctx);
         }
 
         ctx.api->set_debug_draw_enabled(_debug_draw_enabled);
@@ -651,6 +590,18 @@ namespace Game
 
     // ---- Orbiter helpers ----
 
+    OrbiterInfo *GameplayState::find_player_orbiter()
+    {
+        for (auto &o : _orbiters)
+        {
+            if (o.is_player)
+            {
+                return &o;
+            }
+        }
+        return nullptr;
+    }
+
     const OrbiterInfo *GameplayState::find_player_orbiter() const
     {
         for (const auto &o : _orbiters)
@@ -660,6 +611,24 @@ namespace Game
                 return &o;
             }
         }
+        return nullptr;
+    }
+
+    OrbiterInfo *GameplayState::find_orbiter(const EntityId entity)
+    {
+        if (!entity.is_valid())
+        {
+            return nullptr;
+        }
+
+        for (auto &orbiter : _orbiters)
+        {
+            if (orbiter.entity == entity)
+            {
+                return &orbiter;
+            }
+        }
+
         return nullptr;
     }
 
@@ -731,5 +700,274 @@ namespace Game
         {
             _world.set_rebase_anchor(next_anchor);
         }
+    }
+
+    void GameplayState::sync_player_camera_target(GameStateContext &ctx) const
+    {
+        if (!ctx.api)
+        {
+            return;
+        }
+
+        const OrbiterInfo *player_orbiter = find_player_orbiter();
+        if (!player_orbiter || player_orbiter->name.empty())
+        {
+            return;
+        }
+
+        GameAPI::CameraTarget target{};
+        target.type = GameAPI::CameraTargetType::MeshInstance;
+        target.name = player_orbiter->name;
+
+        GameAPI::OrbitCameraSettings orbit = ctx.api->get_orbit_camera_settings();
+        orbit.target = target;
+        ctx.api->set_orbit_camera_settings(orbit);
+
+        GameAPI::FollowCameraSettings follow = ctx.api->get_follow_camera_settings();
+        follow.target = target;
+        ctx.api->set_follow_camera_settings(follow);
+
+        GameAPI::ChaseCameraSettings chase = ctx.api->get_chase_camera_settings();
+        chase.target = target;
+        ctx.api->set_chase_camera_settings(chase);
+    }
+
+    void GameplayState::sync_player_collision_callbacks()
+    {
+#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
+        if (!_physics)
+        {
+            return;
+        }
+
+        for (const OrbiterInfo &orbiter : _orbiters)
+        {
+            if (!orbiter.entity.is_valid())
+            {
+                continue;
+            }
+
+            const Entity *entity = _world.entities().find(orbiter.entity);
+            if (!entity || !entity->has_physics())
+            {
+                continue;
+            }
+
+            const Physics::BodyId body_id{entity->physics_body_value()};
+            if (!_physics->is_body_valid(body_id))
+            {
+                continue;
+            }
+
+            _physics->clear_body_callbacks(body_id);
+        }
+
+        const OrbiterInfo *player_orbiter = find_player_orbiter();
+        if (!player_orbiter || !player_orbiter->entity.is_valid())
+        {
+            return;
+        }
+
+        const Entity *player = _world.entities().find(player_orbiter->entity);
+        if (!player || !player->has_physics())
+        {
+            return;
+        }
+
+        const Physics::BodyId player_body{player->physics_body_value()};
+        if (!_physics->is_body_valid(player_body))
+        {
+            return;
+        }
+
+        Physics::PhysicsWorld::BodyCallbacks callbacks{};
+        callbacks.on_collision = [this](const Physics::CollisionEvent &e) {
+            if (e.type != Physics::ContactEventType::Begin)
+            {
+                return;
+            }
+
+            mark_prediction_dirty();
+
+            if (!_contact_log_enabled)
+            {
+                return;
+            }
+
+            ContactLogEntry entry{};
+            entry.time_s = static_cast<float>(_fixed_time_s);
+            entry.type = e.type;
+            entry.self_body = e.self.value;
+            entry.other_body = e.other.value;
+            entry.self_user_data = e.self_user_data;
+            entry.other_user_data = e.other_user_data;
+            entry.point = e.point;
+            entry.normal = e.normal;
+            entry.penetration_depth = e.penetration_depth;
+
+            _contact_log.push_back(entry);
+            while (_contact_log.size() > _contact_log_capacity)
+            {
+                _contact_log.pop_front();
+            }
+
+            if (_contact_log_print_console)
+            {
+                Logger::debug("[Collision][{}] self={} other={} depth={:.3f} p=({:.2f},{:.2f},{:.2f})",
+                              contact_event_type_name(entry.type),
+                              entry.self_body,
+                              entry.other_body,
+                              entry.penetration_depth,
+                              entry.point.x, entry.point.y, entry.point.z);
+            }
+        };
+        _physics->set_body_callbacks(player_body, callbacks);
+#endif
+    }
+
+    bool GameplayState::set_active_player_orbiter(GameStateContext &ctx, const EntityId entity)
+    {
+        OrbiterInfo *target = find_orbiter(entity);
+        OrbiterInfo *current = find_player_orbiter();
+        if (!target || !target->entity.is_valid() || target == current)
+        {
+            return false;
+        }
+
+        struct ControllerSnapshot
+        {
+            float thrust_force{500.0f};
+            float torque_strength{50.0f};
+            float sas_damping{5.0f};
+            bool sas_enabled{false};
+            bool sas_toggle_prev_down{false};
+        } snapshot{};
+
+        if (current)
+        {
+            if (Entity *current_entity = _world.entities().find(current->entity))
+            {
+                if (ShipController *controller = current_entity->get_component<ShipController>())
+                {
+                    snapshot.thrust_force = controller->thrust_force();
+                    snapshot.torque_strength = controller->torque_strength();
+                    snapshot.sas_damping = controller->sas_damping();
+                    snapshot.sas_enabled = controller->sas_enabled();
+                    snapshot.sas_toggle_prev_down = ctx.input && ctx.input->key_down(Key::T);
+                    (void) current_entity->remove_component<ShipController>();
+                }
+            }
+        }
+
+        if (!_rails_warp_active && target->rails.active())
+        {
+            (void) demote_orbiter_from_rails(*target);
+        }
+
+        for (auto &orbiter : _orbiters)
+        {
+            const bool is_active = orbiter.entity == target->entity;
+            orbiter.is_player = is_active;
+            orbiter.is_rebase_anchor = is_active;
+        }
+
+        for (auto &orbiter_def : _scenario_config.orbiters)
+        {
+            const bool is_active = orbiter_def.name == target->name;
+            orbiter_def.is_player = is_active;
+            orbiter_def.is_rebase_anchor = is_active;
+        }
+
+        if (Entity *target_entity = _world.entities().find(target->entity))
+        {
+            ShipController *controller = target_entity->get_component<ShipController>();
+            if (!controller)
+            {
+                controller = target_entity->add_component<ShipController>();
+            }
+            if (controller)
+            {
+                controller->set_thrust_force(snapshot.thrust_force);
+                controller->set_torque_strength(snapshot.torque_strength);
+                controller->set_sas_damping(snapshot.sas_damping);
+                controller->set_sas_enabled(target->rails.active() ? target->rails.sas_enabled : snapshot.sas_enabled);
+                controller->set_sas_toggle_prev_down(snapshot.sas_toggle_prev_down);
+            }
+        }
+
+        update_rebase_anchor();
+        sync_player_camera_target(ctx);
+        sync_player_collision_callbacks();
+
+        _prediction_selection.active_subject = PredictionSubjectKey{PredictionSubjectKind::Orbiter, target->entity.value};
+        _prediction_selection.overlay_subjects.clear();
+        _prediction_selection.selected_group_index = -1;
+        _execute_node_armed = false;
+        _execute_node_id = -1;
+        _maneuver_state.nodes.clear();
+        _maneuver_state.selected_node_id = -1;
+        _maneuver_state.next_node_id = 0;
+        _maneuver_gizmo_interaction = {};
+        mark_prediction_dirty();
+        return true;
+    }
+
+    bool GameplayState::cycle_player_orbiter(GameStateContext &ctx, const int direction)
+    {
+        if (_orbiters.size() < 2 || direction == 0)
+        {
+            return false;
+        }
+
+        std::size_t current_index = 0;
+        bool found_current = false;
+        for (std::size_t i = 0; i < _orbiters.size(); ++i)
+        {
+            if (_orbiters[i].is_player)
+            {
+                current_index = i;
+                found_current = true;
+                break;
+            }
+        }
+
+        if (!found_current)
+        {
+            for (std::size_t i = 0; i < _orbiters.size(); ++i)
+            {
+                if (_orbiters[i].entity.is_valid())
+                {
+                    current_index = i;
+                    found_current = true;
+                    break;
+                }
+            }
+        }
+
+        if (!found_current)
+        {
+            return false;
+        }
+
+        const std::size_t count = _orbiters.size();
+        std::size_t next_index = current_index;
+        const int step = direction > 0 ? 1 : -1;
+        for (std::size_t attempt = 0; attempt < count; ++attempt)
+        {
+            const int signed_next =
+                    (static_cast<int>(next_index) + step + static_cast<int>(count)) % static_cast<int>(count);
+            next_index = static_cast<std::size_t>(signed_next);
+            if (_orbiters[next_index].entity.is_valid())
+            {
+                break;
+            }
+        }
+
+        if (next_index == current_index || !_orbiters[next_index].entity.is_valid())
+        {
+            return false;
+        }
+
+        return set_active_player_orbiter(ctx, _orbiters[next_index].entity);
     }
 } // namespace Game

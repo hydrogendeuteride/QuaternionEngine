@@ -182,10 +182,6 @@ namespace Game
         const float ttl_s = std::clamp(ctx.delta_time(), 0.0f, 0.1f) + 0.002f;
 
         const float line_alpha_scale = std::clamp(_prediction_line_alpha_scale, 0.1f, 8.0f);
-        const glm::vec4 color_orbit_full =
-                Draw::scale_line_color(_prediction_draw_config.palette.orbit_full, line_alpha_scale);
-        const glm::vec4 color_orbit_future =
-                Draw::scale_line_color(_prediction_draw_config.palette.orbit_future, line_alpha_scale);
         const glm::vec4 color_orbit_plan =
                 Draw::scale_line_color(_prediction_draw_config.palette.orbit_planned, line_alpha_scale);
 
@@ -232,7 +228,6 @@ namespace Game
             return;
         }
 
-        std::size_t overlay_draw_index = 0;
         for (PredictionTrackState *track : visible_tracks)
         {
             if (!track)
@@ -388,16 +383,12 @@ namespace Game
                 return traj_planned_segments_world_basis;
             };
 
-            glm::vec4 track_color_full = color_orbit_full;
-            glm::vec4 track_color_future = color_orbit_future;
+            const glm::vec3 track_rgb = prediction_subject_orbit_rgb(track->key);
+            glm::vec4 track_color_full = Draw::scale_line_color(glm::vec4(track_rgb, 0.22f), line_alpha_scale);
+            glm::vec4 track_color_future = Draw::scale_line_color(glm::vec4(track_rgb, 0.80f), line_alpha_scale);
             glm::vec4 track_color_plan = color_orbit_plan;
             if (!is_active)
             {
-                const glm::vec4 seed = prediction_overlay_seed_color(overlay_draw_index);
-                ++overlay_draw_index;
-                track_color_full = Draw::scale_line_color(glm::vec4(seed.r, seed.g, seed.b, 0.18f), line_alpha_scale);
-                track_color_future = Draw::scale_line_color(glm::vec4(seed.r, seed.g, seed.b, 0.58f), line_alpha_scale);
-                track_color_plan = Draw::scale_line_color(glm::vec4(seed.r, seed.g, seed.b, 0.75f), line_alpha_scale);
                 draw_ctx.line_overlay_boost = std::clamp(_prediction_line_overlay_boost * 0.35f, 0.0f, 1.0f);
             }
             world_basis_draw_ctx.line_overlay_boost = draw_ctx.line_overlay_boost;
