@@ -124,7 +124,8 @@ TEST(ScenarioLoader, LoadsValidScenarioDocument)
 
 TEST(ScenarioLoader, LoadsBundledDefaultGameplayScenario)
 {
-    const std::filesystem::path scenario_path = std::filesystem::path(SCENARIO_ASSETS_DIR) / "default_gameplay.json";
+    const std::filesystem::path scenario_path = std::filesystem::path(SCENARIO_TEST_ASSETS_DIR) / "default_gameplay.json";
+    ASSERT_TRUE(std::filesystem::exists(scenario_path)) << "Bundled scenario fixture missing: " << scenario_path.string();
     auto cfg = Game::load_scenario_config(scenario_path.string());
     ASSERT_TRUE(cfg.has_value());
 

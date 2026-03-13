@@ -220,6 +220,7 @@ namespace Game
         {
             _fixed_time_s += static_cast<double>(fixed_dt);
             _world.entities().fixed_update_components(comp_ctx, fixed_dt);
+            update_formation_hold(static_cast<double>(fixed_dt));
             step_physics(ctx, fixed_dt);
         }
 

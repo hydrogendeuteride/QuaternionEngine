@@ -475,6 +475,20 @@ namespace Game
             o.relative_velocity = parse_dvec3(
                     *json_required_object(j, "relative_velocity", path),
                     child_path(path, "relative_velocity"));
+            if (const auto it = j.find("formation_hold_enabled"); it != j.end() && !it->is_null())
+            {
+                o.formation_hold_enabled = json_required<bool>(j, "formation_hold_enabled", path);
+            }
+            if (const auto it = j.find("formation_leader"); it != j.end() && !it->is_null())
+            {
+                o.formation_leader = json_required<std::string>(j, "formation_leader", path);
+            }
+            if (const auto it = j.find("formation_slot_lvlh_m"); it != j.end() && !it->is_null())
+            {
+                o.formation_slot_lvlh_m = parse_dvec3(
+                        *json_required_object(j, "formation_slot_lvlh_m", path),
+                        child_path(path, "formation_slot_lvlh_m"));
+            }
             if (const auto it = j.find("prediction_group"); it != j.end() && !it->is_null())
             {
                 o.prediction_group = json_required<std::string>(j, "prediction_group", path);
@@ -509,6 +523,10 @@ namespace Game
             {
                 fail(child_path(path, "render_scale") + " components must be > 0");
             }
+            if (o.formation_hold_enabled && o.formation_leader.empty())
+            {
+                fail(child_path(path, "formation_leader") + " must not be empty when formation_hold_enabled=true");
+            }
 
             return o;
         }
@@ -520,6 +538,22 @@ namespace Game
             j["orbit_altitude_m"] = o.orbit_altitude_m;
             j["offset_from_player"] = {{"x", o.offset_from_player.x}, {"y", o.offset_from_player.y}, {"z", o.offset_from_player.z}};
             j["relative_velocity"] = {{"x", o.relative_velocity.x}, {"y", o.relative_velocity.y}, {"z", o.relative_velocity.z}};
+            j["formation_hold_enabled"] = o.formation_hold_enabled;
+            if (!o.formation_leader.empty())
+            {
+                j["formation_leader"] = o.formation_leader;
+            }
+            const double formation_slot_len2 =
+                    (o.formation_slot_lvlh_m.x * o.formation_slot_lvlh_m.x) +
+                    (o.formation_slot_lvlh_m.y * o.formation_slot_lvlh_m.y) +
+                    (o.formation_slot_lvlh_m.z * o.formation_slot_lvlh_m.z);
+            if (o.formation_hold_enabled || formation_slot_len2 > 0.0)
+            {
+                j["formation_slot_lvlh_m"] = {
+                        {"x", o.formation_slot_lvlh_m.x},
+                        {"y", o.formation_slot_lvlh_m.y},
+                        {"z", o.formation_slot_lvlh_m.z}};
+            }
             if (!o.prediction_group.empty())
             {
                 j["prediction_group"] = o.prediction_group;
