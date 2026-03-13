@@ -11,6 +11,7 @@
 #include "time_warp_state.h"
 #include "physics/physics_context.h"
 #include "physics/physics_world.h"
+#include "orbitsim/coordinate_frames.hpp"
 #include "orbitsim/spacecraft_lookup.hpp"
 
 #include <cstddef>
@@ -19,6 +20,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -38,6 +40,9 @@ namespace Game
     public:
         static constexpr double kDefaultRuntimeOrbiterRailsDistanceM = 10'000.0;
         static constexpr double kRuntimeOrbiterRailsReturnDistanceRatio = 0.85;
+        // Critically-damped spring controller (exact integration, stable at any dt).
+        static constexpr double kFormationHoldOmega = 0.5;          // natural frequency [rad/s]
+        static constexpr double kFormationHoldMaxDvPerStepMps = 20.0; // safety clamp on dv per tick
 
         // Compatibility aliases for gameplay internals referenced by tests/tools.
         using OrbitPredictionCache = Game::OrbitPredictionCache;
@@ -200,6 +205,8 @@ namespace Game
         const OrbiterInfo *find_player_orbiter() const;
         OrbiterInfo *find_orbiter(EntityId entity);
         const OrbiterInfo *find_orbiter(EntityId entity) const;
+        OrbiterInfo *find_orbiter(std::string_view name);
+        const OrbiterInfo *find_orbiter(std::string_view name) const;
         EntityId player_entity() const;
         EntityId select_rebase_anchor_entity() const;
         void update_rebase_anchor();
@@ -207,6 +214,13 @@ namespace Game
         bool cycle_player_orbiter(GameStateContext &ctx, int direction);
         void sync_player_camera_target(GameStateContext &ctx) const;
         void sync_player_collision_callbacks();
+        bool get_orbiter_inertial_state(const OrbiterInfo &orbiter, orbitsim::State &out_state) const;
+        const orbitsim::MassiveBody *select_primary_body_for_state(const orbitsim::State &state) const;
+        bool build_orbiter_lvlh_frame(const OrbiterInfo &leader,
+                                      orbitsim::RotatingFrame &out_frame,
+                                      orbitsim::State *out_leader_state = nullptr,
+                                      orbitsim::State *out_primary_state = nullptr) const;
+        void update_formation_hold(double dt_s);
 
         // Game world (entities + resource lifetime)
         GameWorld _world;

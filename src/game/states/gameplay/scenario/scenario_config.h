@@ -43,6 +43,9 @@ namespace Game
             double orbit_altitude_m{0.0};      // altitude above reference body surface
             glm::dvec3 offset_from_player{0.0}; // relative spawn offset for non-player orbiters
             glm::dvec3 relative_velocity{0.0};  // initial velocity relative to player
+            bool formation_hold_enabled{false};
+            std::string formation_leader;
+            glm::dvec3 formation_slot_lvlh_m{0.0}; // slot in leader-centered LVLH frame
             std::string prediction_group;       // optional authored orbit overlay group
             glm::vec3 prediction_orbit_color{1.0f, 0.25f, 0.25f};
             bool has_prediction_orbit_color{false};
