@@ -327,5 +327,13 @@ namespace Game
         bool pick_cap_hit_last_frame{false};
         uint64_t render_cap_hits_total{0};
         uint64_t pick_cap_hits_total{0};
+
+        // Debug: planned pick window values from last frame.
+        bool planned_window_valid{false};
+        double planned_window_t0p{0.0};
+        double planned_window_now_s{0.0};
+        double planned_window_anchor_s{0.0};
+        double planned_window_t_start{0.0};
+        double planned_window_t_end{0.0};
     };
 } // namespace Game

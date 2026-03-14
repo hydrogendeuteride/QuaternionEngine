@@ -394,6 +394,7 @@ namespace Game
             world_basis_draw_ctx.line_overlay_boost = draw_ctx.line_overlay_boost;
 
             const double future_window_s = prediction_future_window_s(track->key);
+            const double planned_future_window_s = prediction_future_window_planned_s();
             Draw::PickWindow base_pick_window{};
             if (_prediction_draw_full_orbit)
             {
@@ -521,11 +522,23 @@ namespace Game
                                                               _prediction_draw_config,
                                                               _maneuver_state.nodes,
                                                               now_s,
-                                                              future_window_s,
+                                                              planned_future_window_s,
                                                               _prediction_draw_future_segment,
                                                               _prediction_draw_full_orbit,
                                                               track->cache.orbital_period_s)
                             : Draw::PickWindow{};
+            if (active_player_track)
+            {
+                _orbit_plot_perf.planned_window_valid = planned_pick_window.valid;
+                _orbit_plot_perf.planned_window_now_s = now_s;
+                _orbit_plot_perf.planned_window_anchor_s = planned_pick_window.anchor_time_s;
+                _orbit_plot_perf.planned_window_t_start = planned_pick_window.t0_s;
+                _orbit_plot_perf.planned_window_t_end = planned_pick_window.t1_s;
+                if (!traj_planned_segments->empty())
+                {
+                    _orbit_plot_perf.planned_window_t0p = traj_planned_segments->front().t0_s;
+                }
+            }
             if (planned_pick_window.valid)
             {
                 if (direct_world_polyline)
