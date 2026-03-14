@@ -629,17 +629,6 @@ namespace Game
         double min_horizon_s = std::max(1.0, request.future_window_s);
         horizon_s = std::max(horizon_s, min_horizon_s);
 
-        if (!request.maneuver_impulses.empty() &&
-            std::isfinite(request.max_maneuver_time_s) &&
-            request.max_maneuver_time_s > request.sim_time_s)
-        {
-            // Keep enough look-ahead to show the last planned node and a small post-node tail.
-            const double extra_s = std::max(OrbitPredictionTuning::kPostNodeCoverageMinS,
-                                            std::max(0.0, request.future_window_s));
-            min_horizon_s = std::max(min_horizon_s, (request.max_maneuver_time_s - request.sim_time_s) + extra_s);
-            horizon_s = std::max(horizon_s, min_horizon_s);
-        }
-
         if (request.thrusting)
         {
             // During active thrust we trade long horizons for denser near-term sampling.

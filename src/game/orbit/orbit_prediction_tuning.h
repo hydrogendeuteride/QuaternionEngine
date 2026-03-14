@@ -28,6 +28,10 @@ namespace Game::OrbitPredictionTuning
     // Extra coverage requested after the last maneuver node so the post-node path stays visible.
     inline constexpr double kPostNodeCoverageMinS = 120.0;
 
+    // While a maneuver plan is present, refresh the async prediction often enough that the planned
+    // path stays anchored to the ship's live state rather than the snapshot from when the plan was authored.
+    inline constexpr double kManeuverRefreshS = 0.1;
+
     // While thrusting, shorten the horizon so updates can happen more often.
     inline constexpr double kThrustHorizonMinS = 120.0;
     inline constexpr double kThrustHorizonWindowScale = 1.25;

@@ -575,6 +575,13 @@ namespace Game
                             static_cast<double>(std::max(0.0f, future_window_celestial_s));
                 }
 
+                float future_window_planned_s = static_cast<float>(_prediction_future_window_planned_s);
+                if (ImGui::DragFloat("Planned future window (s)", &future_window_planned_s, 10.0f, 0.0f, 15552000.0f, "%.0f"))
+                {
+                    _prediction_future_window_planned_s =
+                            static_cast<double>(std::max(0.0f, future_window_planned_s));
+                }
+
                 float refresh_s = static_cast<float>(_prediction_periodic_refresh_s);
                 if (ImGui::DragFloat("Prediction refresh (s)", &refresh_s, 1.0f, 0.0f, 36000.0f, "%.1f"))
                 {
@@ -722,6 +729,22 @@ namespace Game
                     ImGui::Text("Orbit upload peak: %.2f MiB, upload ms peak: %.3f",
                                 peak_mib,
                                 plot_stats.upload_ms_peak);
+                }
+
+                if (_orbit_plot_perf.planned_window_valid || !_maneuver_state.nodes.empty())
+                {
+                    ImGui::Separator();
+                    ImGui::Text("Planned window: %s", _orbit_plot_perf.planned_window_valid ? "VALID" : "INVALID");
+                    ImGui::Text("  t0p (traj start): %.3f", _orbit_plot_perf.planned_window_t0p);
+                    ImGui::Text("  now_s:            %.3f", _orbit_plot_perf.planned_window_now_s);
+                    ImGui::Text("  anchor (node):    %.3f", _orbit_plot_perf.planned_window_anchor_s);
+                    ImGui::Text("  t_plan_start:     %.3f", _orbit_plot_perf.planned_window_t_start);
+                    ImGui::Text("  t_plan_end:       %.3f", _orbit_plot_perf.planned_window_t_end);
+                    if (_orbit_plot_perf.planned_window_valid)
+                    {
+                        ImGui::Text("  offset from t0p:  %.3f s", _orbit_plot_perf.planned_window_t_start - _orbit_plot_perf.planned_window_t0p);
+                        ImGui::Text("  offset from now:  %.3f s", _orbit_plot_perf.planned_window_t_start - _orbit_plot_perf.planned_window_now_s);
+                    }
                 }
 
                 WorldVec3 subject_pos_world{0.0, 0.0, 0.0};
