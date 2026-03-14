@@ -185,17 +185,114 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         mark_prediction_dirty();
     };
 
+    // Resample a pick position from the current prediction trajectory so the overlay
+    // stays consistent when the reference frame or plan changes after the pick was recorded.
+    auto resample_pick_world_pos = [&](const PickingSystem::PickInfo &pick) -> WorldVec3 {
+        if (!std::isfinite(pick.time_s))
+        {
+            return pick.worldPos;
+        }
+
+        const OrbitPredictionCache *cache = player_prediction_cache();
+        if (!cache || !cache->valid)
+        {
+            return pick.worldPos;
+        }
+
+        const bool is_planned = (pick.ownerName == "OrbitPlot/Planned");
+        const auto &traj = is_planned
+                               ? (cache->trajectory_frame_planned.size() >= 2
+                                      ? cache->trajectory_frame_planned
+                                      : cache->trajectory_frame)
+                               : cache->trajectory_frame;
+        if (traj.size() < 2)
+        {
+            return pick.worldPos;
+        }
+
+        const double traj_t0 = traj.front().t_s;
+        const double traj_t1 = traj.back().t_s;
+        if (pick.time_s < traj_t0 || pick.time_s > traj_t1)
+        {
+            return pick.worldPos;
+        }
+
+        auto it_hi = std::lower_bound(traj.cbegin(), traj.cend(), pick.time_s,
+                                       [](const orbitsim::TrajectorySample &s, double t) { return s.t_s < t; });
+        const size_t i_hi = static_cast<size_t>(std::distance(traj.cbegin(), it_hi));
+        if (i_hi >= traj.size())
+        {
+            return pick.worldPos;
+        }
+
+        const double display_time_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+        WorldVec3 pos = (i_hi > 0)
+                            ? prediction_sample_hermite_world(*cache, traj[i_hi - 1], traj[i_hi],
+                                                              pick.time_s, display_time_s)
+                            : prediction_sample_position_world(*cache, traj.front(), display_time_s);
+
+        // Apply the same ship-to-prediction alignment delta used by the gizmo runtime cache.
+        const auto &traj_base = cache->trajectory_frame;
+        if (traj_base.size() >= 2)
+        {
+            const float alpha_f = std::clamp(ctx.interpolation_alpha(), 0.0f, 1.0f);
+            const double interp_dt_s =
+                    (_last_sim_step_dt_s > 0.0) ? _last_sim_step_dt_s : static_cast<double>(ctx.fixed_delta_time());
+            double align_now_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+            if (std::isfinite(interp_dt_s) && interp_dt_s > 0.0)
+            {
+                align_now_s -= (1.0 - static_cast<double>(alpha_f)) * interp_dt_s;
+            }
+            align_now_s = std::clamp(align_now_s, traj_base.front().t_s, traj_base.back().t_s);
+
+            auto it_align = std::lower_bound(traj_base.cbegin(), traj_base.cend(), align_now_s,
+                                              [](const orbitsim::TrajectorySample &s, double t) { return s.t_s < t; });
+            const size_t align_hi = static_cast<size_t>(std::distance(traj_base.cbegin(), it_align));
+            if (align_hi < traj_base.size())
+            {
+                WorldVec3 predicted_now = (align_hi > 0)
+                                              ? prediction_sample_hermite_world(*cache, traj_base[align_hi - 1],
+                                                                                traj_base[align_hi], align_now_s, align_now_s)
+                                              : prediction_sample_position_world(*cache, traj_base.front(), align_now_s);
+
+                WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
+                glm::dvec3 ship_vel_world(0.0);
+                glm::vec3 ship_vel_local_f(0.0f);
+                if (get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
+                {
+                    const EntityId player_eid = player_entity();
+                    if (const Entity *player = _world.entities().find(player_eid))
+                    {
+                        ship_pos_world = player->get_render_position_world(alpha_f);
+                    }
+
+                    WorldVec3 align_delta = ship_pos_world - predicted_now;
+                    const double align_len = safe_length(glm::dvec3(align_delta));
+                    if (!std::isfinite(align_len) || align_len > 10'000.0)
+                    {
+                        align_delta = WorldVec3(0.0, 0.0, 0.0);
+                    }
+                    pos += align_delta;
+                }
+            }
+        }
+
+        return pos;
+    };
+
     auto draw_orbit_pick_overlay = [&](const PickingSystem::PickInfo &pick,
                                        const float inner_radius_px,
                                        const float outer_radius_px,
                                        const ImU32 ring_color,
                                        const ImU32 outer_color) {
-        // Reuse the gizmo projection path so the pick highlight lands on the same pixel as the in-world markers.
+        // Resample position from current trajectory so overlay stays correct across frame/plan changes.
+        const WorldVec3 overlay_world = resample_pick_world_pos(pick);
+
         ManeuverGizmoViewContext overlay_view{};
         glm::vec2 overlay_screen{0.0f, 0.0f};
         double overlay_depth_m = 0.0;
         if (!build_maneuver_gizmo_view_context(ctx, overlay_view) ||
-            !project_maneuver_gizmo_point(overlay_view, pick.worldPos, overlay_screen, overlay_depth_m))
+            !project_maneuver_gizmo_point(overlay_view, overlay_world, overlay_screen, overlay_depth_m))
         {
             return;
         }

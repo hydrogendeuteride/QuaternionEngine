@@ -253,6 +253,11 @@ namespace Game
         return std::max(0.0, _prediction_future_window_orbiter_s);
     }
 
+    double GameplayState::prediction_future_window_planned_s() const
+    {
+        return std::max(0.0, _prediction_future_window_planned_s);
+    }
+
     GameplayState::PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key)
     {
         // Resolve mutable track state by stable subject key.

@@ -256,6 +256,38 @@ namespace Game
         track->dirty = keep_dirty_for_followup;
     }
 
+    double GameplayState::prediction_required_window_s(const PredictionSubjectKey key,
+                                                       const double now_s,
+                                                       const bool with_maneuvers) const
+    {
+        double required_ahead_s =
+                std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(key) : 0.0);
+
+        if (!with_maneuvers)
+        {
+            return required_ahead_s;
+        }
+
+        double max_node_time_s = now_s;
+        for (const ManeuverNode &node : _maneuver_state.nodes)
+        {
+            if (std::isfinite(node.time_s))
+            {
+                max_node_time_s = std::max(max_node_time_s, node.time_s);
+            }
+        }
+
+        if (max_node_time_s > now_s)
+        {
+            const double planned_window_s = prediction_future_window_planned_s();
+            const double post_node_window_s =
+                    std::max(OrbitPredictionTuning::kPostNodeCoverageMinS, planned_window_s);
+            required_ahead_s = std::max(required_ahead_s, (max_node_time_s - now_s) + post_node_window_s);
+        }
+
+        return required_ahead_s;
+    }
+
     bool GameplayState::should_rebuild_prediction_track(const PredictionTrackState &track,
                                                         const double now_s,
                                                         const float fixed_dt,
@@ -269,6 +301,12 @@ namespace Game
         {
             const double dt_since_build_s = now_s - track.cache.build_time_s;
             rebuild = dt_since_build_s >= _prediction_thrust_refresh_s;
+        }
+
+        if (!rebuild && with_maneuvers)
+        {
+            const double dt_since_build_s = now_s - track.cache.build_time_s;
+            rebuild = dt_since_build_s >= OrbitPredictionTuning::kManeuverRefreshS;
         }
 
         if (!rebuild && _prediction_periodic_refresh_s > 0.0)
@@ -306,26 +344,7 @@ namespace Game
             }
         }
 
-        double required_ahead_s = std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(track.key) : 0.0);
-        if (with_maneuvers)
-        {
-            double max_node_time_s = now_s;
-            for (const ManeuverNode &node : _maneuver_state.nodes)
-            {
-                if (std::isfinite(node.time_s))
-                {
-                    max_node_time_s = std::max(max_node_time_s, node.time_s);
-                }
-            }
-
-            if (max_node_time_s > now_s)
-            {
-                const double future_window_s = prediction_future_window_s(track.key);
-                const double post_node_window_s =
-                        std::max(OrbitPredictionTuning::kPostNodeCoverageMinS, future_window_s);
-                required_ahead_s = std::max(required_ahead_s, (max_node_time_s - now_s) + post_node_window_s);
-            }
-        }
+        const double required_ahead_s = prediction_required_window_s(track.key, now_s, with_maneuvers);
 
         // Add a small epsilon so tiny fixed-step jitter does not trigger rebuild churn.
         const double coverage_epsilon_s =
@@ -371,8 +390,7 @@ namespace Game
         request.ship_bary_position_m = ship_bary_pos_m;
         request.ship_bary_velocity_mps = ship_bary_vel_mps;
         request.thrusting = thrusting;
-        request.future_window_s = prediction_future_window_s(track.key);
-        request.max_maneuver_time_s = now_s;
+        request.future_window_s = prediction_required_window_s(track.key, now_s, with_maneuvers);
 
         // Copy currently authored maneuver nodes so the worker can include planned burns.
         if (with_maneuvers)
@@ -384,8 +402,6 @@ namespace Game
                 {
                     continue;
                 }
-
-                request.max_maneuver_time_s = std::max(request.max_maneuver_time_s, node.time_s);
 
                 OrbitPredictionService::ManeuverImpulse impulse{};
                 impulse.node_id = node.id;

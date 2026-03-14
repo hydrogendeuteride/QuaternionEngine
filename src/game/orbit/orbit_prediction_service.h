@@ -66,7 +66,6 @@ namespace Game
 
             bool thrusting{false};
             double future_window_s{600.0};
-            double max_maneuver_time_s{0.0};
             std::vector<ManeuverImpulse> maneuver_impulses;
         };
 
