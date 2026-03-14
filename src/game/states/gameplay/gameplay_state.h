@@ -136,6 +136,10 @@ namespace Game
         void sync_prediction_dirty_flag();
         std::vector<PredictionSubjectKey> collect_visible_prediction_subjects() const;
         double prediction_future_window_s(PredictionSubjectKey key) const;
+        double prediction_future_window_planned_s() const;
+        double prediction_required_window_s(PredictionSubjectKey key,
+                                            double now_s,
+                                            bool with_maneuvers) const;
         PredictionTrackState *find_prediction_track(PredictionSubjectKey key);
         const PredictionTrackState *find_prediction_track(PredictionSubjectKey key) const;
         PredictionTrackState *active_prediction_track();
@@ -283,6 +287,7 @@ namespace Game
         double _prediction_thrust_refresh_s{0.1};    // rebuild at most this often while thrusting
         double _prediction_future_window_orbiter_s{600.0};
         double _prediction_future_window_celestial_s{21600.0};
+        double _prediction_future_window_planned_s{600.0};
         double _orbit_plot_render_error_px{0.75};
         int _orbit_plot_render_max_segments_cpu{4'000};
         int _orbit_plot_pick_max_segments{8'000};

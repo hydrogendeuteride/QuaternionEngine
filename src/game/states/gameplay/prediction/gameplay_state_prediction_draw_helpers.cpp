@@ -690,6 +690,9 @@ namespace Game::PredictionDrawDetail
             }
         }
 
+        const bool has_future_node = std::isfinite(first_future_node_time_s);
+        const bool has_relevant_node = std::isfinite(first_relevant_node_time_s);
+
         double anchor_time_s = first_future_node_time_s;
         if (!std::isfinite(anchor_time_s))
         {
@@ -700,8 +703,18 @@ namespace Game::PredictionDrawDetail
             return planned_window;
         }
 
-        double t_plan_start = std::clamp(anchor_time_s + draw_config.node_time_tolerance_s, t0p, t1p);
-        t_plan_start = std::clamp(snap_time_past_straddling_segment(traj_planned_segments, t_plan_start), t0p, t1p);
+        double t_plan_start = t0p;
+        if (has_future_node)
+        {
+            t_plan_start = std::clamp(anchor_time_s + draw_config.node_time_tolerance_s, t0p, t1p);
+            t_plan_start = std::clamp(snap_time_past_straddling_segment(traj_planned_segments, t_plan_start), t0p, t1p);
+        }
+        else if (has_relevant_node)
+        {
+            // Once every authored node is in the past, keep the planned plot anchored to the ship's
+            // current predicted state instead of the original node placement time.
+            t_plan_start = std::clamp(now_s, t0p, t1p);
+        }
 
         double t_plan_end = t_plan_start;
         if (draw_future_segment && future_window_s > 0.0)
@@ -713,7 +726,8 @@ namespace Game::PredictionDrawDetail
             double t_full_end = t1p;
             if (orbital_period_s > 0.0 && std::isfinite(orbital_period_s))
             {
-                t_full_end = std::min(t0p + (orbital_period_s * OrbitPredictionTuning::kFullOrbitDrawPeriodScale), t1p);
+                // Measure the full-orbit extent from the node (plan start), not from the trajectory data start.
+                t_full_end = std::min(t_plan_start + (orbital_period_s * OrbitPredictionTuning::kFullOrbitDrawPeriodScale), t1p);
             }
             t_plan_end = t_full_end;
         }
