@@ -30,7 +30,7 @@ public:
     struct Settings
     {
         bool enabled = true;
-        bool gpu_generate_enabled = true;
+        bool gpu_generate_enabled = false;
         float line_width_px = 2.0f;
         float line_aa_px = 1.0f;
         double render_error_px = 0.75;

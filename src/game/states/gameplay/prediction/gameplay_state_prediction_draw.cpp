@@ -383,6 +383,57 @@ namespace Game
                 return traj_planned_segments_world_basis;
             };
 
+            const auto draw_cpu_base_window = [&](const double window_t0_s,
+                                                  const double window_t1_s,
+                                                  const glm::vec4 &color) {
+                if (!(window_t1_s > window_t0_s))
+                {
+                    return;
+                }
+
+                const auto draw_cpu_base_window_once = [&](const double split_t0_s,
+                                                           const double split_t1_s) {
+                    if (!(split_t1_s > split_t0_s))
+                    {
+                        return;
+                    }
+
+                    if (use_base_adaptive_curve)
+                    {
+                        Draw::draw_adaptive_curve_window(draw_ctx,
+                                                         _prediction_draw_config,
+                                                         _orbit_plot_perf,
+                                                         track->cache.render_curve_frame,
+                                                         split_t0_s,
+                                                         split_t1_s,
+                                                         color,
+                                                         false);
+                        return;
+                    }
+
+                    Draw::draw_orbit_window(identity_frame_transform ? draw_ctx : world_basis_draw_ctx,
+                                            _prediction_draw_config,
+                                            _orbit_plot_perf,
+                                            identity_frame_transform ? *traj_base_segments
+                                                                     : get_base_segments_world_basis(),
+                                            split_t0_s,
+                                            split_t1_s,
+                                            color,
+                                            false);
+                };
+
+                // Keep the current displayed ship position on an exact segment boundary so
+                // CPU LOD changes do not make the orbit line appear to drift around the craft.
+                if (now_s > window_t0_s && now_s < window_t1_s)
+                {
+                    draw_cpu_base_window_once(window_t0_s, now_s);
+                    draw_cpu_base_window_once(now_s, window_t1_s);
+                    return;
+                }
+
+                draw_cpu_base_window_once(window_t0_s, window_t1_s);
+            };
+
             const glm::vec3 track_rgb = prediction_subject_orbit_rgb(track->key);
             glm::vec4 track_color_full = Draw::scale_line_color(glm::vec4(track_rgb, 0.22f), line_alpha_scale);
             glm::vec4 track_color_future = Draw::scale_line_color(glm::vec4(track_rgb, 0.80f), line_alpha_scale);
@@ -427,28 +478,9 @@ namespace Game
                                                 false,
                                                 draw_ctx.line_overlay_boost);
                 }
-                else if (use_base_adaptive_curve)
-                {
-                    Draw::draw_adaptive_curve_window(draw_ctx,
-                                                     _prediction_draw_config,
-                                                     _orbit_plot_perf,
-                                                     track->cache.render_curve_frame,
-                                                     t0,
-                                                     t_full_end,
-                                                     track_color_full,
-                                                     false);
-                }
                 else
                 {
-                    Draw::draw_orbit_window(identity_frame_transform ? draw_ctx : world_basis_draw_ctx,
-                                            _prediction_draw_config,
-                                            _orbit_plot_perf,
-                                            identity_frame_transform ? *traj_base_segments
-                                                                     : get_base_segments_world_basis(),
-                                            t0,
-                                            t_full_end,
-                                            track_color_full,
-                                            false);
+                    draw_cpu_base_window(t0, t_full_end, track_color_full);
                 }
                 if (is_active && !_prediction_draw_future_segment && t_full_end > t0)
                 {
