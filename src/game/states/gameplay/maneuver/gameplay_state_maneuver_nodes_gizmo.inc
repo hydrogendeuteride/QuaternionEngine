@@ -873,17 +873,6 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         return finite3(glm::dvec3(out_world));
     };
 
-    const auto sample_displayed_node_state = [&](const double sample_time_s, TrajectorySampledState &out_state) -> bool {
-        out_state = {};
-        if (traj_node_world.size() < 2 || !std::isfinite(sample_time_s))
-        {
-            return false;
-        }
-
-        out_state = sample_trajectory_state(traj_node_world, WorldVec3(0.0), sample_time_s);
-        return out_state.valid;
-    };
-
     const auto resolve_node_primary_body_id =
             [&](const ManeuverNode &node, const double sample_time_s, const glm::dvec3 &inertial_position_m)
             -> orbitsim::BodyId {
@@ -936,23 +925,12 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
 
         glm::dvec3 r_rel_m{0.0, 0.0, 0.0};
         glm::dvec3 v_rel_mps{0.0, 0.0, 0.0};
-        glm::dvec3 display_r_rel_m{0.0, 0.0, 0.0};
-        glm::dvec3 display_v_rel_mps{0.0, 0.0, 0.0};
         WorldVec3 node_position_world{0.0, 0.0, 0.0};
         bool have_runtime_state = false;
-        bool have_display_state = false;
         double t_basis = node.time_s;
         if (t_basis > traj_node_t0)
         {
             t_basis = std::max(traj_node_t0, t_basis - 1e-3);
-        }
-
-        TrajectorySampledState display_state{};
-        if (sample_displayed_node_state(t_basis, display_state))
-        {
-            display_r_rel_m = display_state.r_rel_m;
-            display_v_rel_mps = display_state.v_rel_mps;
-            have_display_state = true;
         }
 
         if (preview && preview->valid)
@@ -1016,22 +994,19 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         }
 
         const orbitsim::RtnFrame solver_frame = compute_maneuver_rtf_frame(r_rel_m, v_rel_mps);
-        const orbitsim::RtnFrame display_frame =
-                have_display_state
-                    ? compute_maneuver_rtf_frame(display_r_rel_m, display_v_rel_mps)
-                    : solver_frame;
-
-        node.basis_r_world = normalized_or(display_frame_to_world * glm::dvec3(display_frame.R.x,
-                                                                                display_frame.R.y,
-                                                                                display_frame.R.z),
+        // Keep gizmo axes aligned with the node's authored pre-burn RTN frame rather than
+        // a display-trajectory interpolation that can smear across the burn discontinuity.
+        node.basis_r_world = normalized_or(display_frame_to_world * glm::dvec3(solver_frame.R.x,
+                                                                                solver_frame.R.y,
+                                                                                solver_frame.R.z),
                                            glm::dvec3(1.0, 0.0, 0.0));
-        node.basis_t_world = normalized_or(display_frame_to_world * glm::dvec3(display_frame.T.x,
-                                                                                display_frame.T.y,
-                                                                                display_frame.T.z),
+        node.basis_t_world = normalized_or(display_frame_to_world * glm::dvec3(solver_frame.T.x,
+                                                                                solver_frame.T.y,
+                                                                                solver_frame.T.z),
                                            glm::dvec3(0.0, 1.0, 0.0));
-        node.basis_n_world = normalized_or(display_frame_to_world * glm::dvec3(display_frame.N.x,
-                                                                                display_frame.N.y,
-                                                                                display_frame.N.z),
+        node.basis_n_world = normalized_or(display_frame_to_world * glm::dvec3(solver_frame.N.x,
+                                                                                solver_frame.N.y,
+                                                                                solver_frame.N.z),
                                            glm::dvec3(0.0, 0.0, 1.0));
 
         // Burn direction is used purely for debug visualization; zero-DV nodes fall back to the prograde axis.
