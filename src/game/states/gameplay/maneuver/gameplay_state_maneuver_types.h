@@ -109,7 +109,7 @@ namespace Game
         float icon_size_px{30.0f};
         float overlay_scale{1.0f};
         bool show_axis_labels{true};
-        float drag_sensitivity_mps_per_m{0.0025f};
+        float drag_sensitivity_mps_per_m{0.00025f};
     };
 
     struct ManeuverGizmoInteraction
