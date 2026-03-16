@@ -1004,7 +1004,7 @@ namespace Game
                     return out;
                 }
 
-                if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rtn_mps))
+                if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rpn_mps))
                 {
                     continue;
                 }
@@ -1034,7 +1034,7 @@ namespace Game
                     out.maneuver_previews.push_back(preview);
                 }
 
-                orbitsim::Vec3 solver_dv_rtn = src.dv_rtn_mps;
+                orbitsim::Vec3 solver_dv_rtn = src.dv_rpn_mps;
                 if (preview.valid)
                 {
                     const orbitsim::MassiveBody *primary_sim = sim.body_by_id(src.primary_body_id);
@@ -1043,7 +1043,7 @@ namespace Game
                         const orbitsim::State primary_state = eph.body_state_at_by_id(src.primary_body_id, src.t_s);
                         const glm::dvec3 rel_position_m = preview.inertial_position_m - primary_state.position_m;
                         const glm::dvec3 rel_velocity_mps = preview.inertial_velocity_mps - primary_state.velocity_mps;
-                        solver_dv_rtn = convert_dv_maneuver_to_solver_rtn(src.dv_rtn_mps, rel_position_m, rel_velocity_mps);
+                        solver_dv_rtn = convert_dv_maneuver_to_solver_rtn(src.dv_rpn_mps, rel_position_m, rel_velocity_mps);
                     }
                 }
 

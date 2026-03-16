@@ -316,8 +316,8 @@ bool GameplayState::begin_maneuver_axis_drag(GameStateContext &ctx,
     _maneuver_gizmo_interaction.state = ManeuverGizmoInteraction::State::DragAxis;
     _maneuver_gizmo_interaction.node_id = node_id;
     _maneuver_gizmo_interaction.axis = axis;
-    _maneuver_gizmo_interaction.start_dv_rtn_mps = node->dv_rtn_mps;
-    const glm::dvec3 dv_world_start = compose_basis_vector(node->dv_rtn_mps,
+    _maneuver_gizmo_interaction.start_dv_rpn_mps = node->dv_rpn_mps;
+    const glm::dvec3 dv_world_start = compose_basis_vector(node->dv_rpn_mps,
                                                            node->maneuver_basis_r_world,
                                                            node->maneuver_basis_t_world,
                                                            node->maneuver_basis_n_world);
@@ -393,10 +393,10 @@ void GameplayState::apply_maneuver_axis_drag(GameStateContext &ctx,
                                                    node.maneuver_basis_t_world,
                                                    node.maneuver_basis_n_world);
 
-    if (finite3(dv_new) && safe_length(dv_new - node.dv_rtn_mps) > 1.0e-7)
+    if (finite3(dv_new) && safe_length(dv_new - node.dv_rpn_mps) > 1.0e-7)
     {
-        node.dv_rtn_mps = dv_new;
-        node.total_dv_mps = safe_length(node.dv_rtn_mps);
+        node.dv_rpn_mps = dv_new;
+        node.total_dv_mps = safe_length(node.dv_rpn_mps);
         _maneuver_gizmo_interaction.applied_delta = true;
         mark_prediction_dirty();
     }
@@ -629,7 +629,7 @@ void GameplayState::draw_maneuver_gizmo_hover_tooltip(const std::vector<Maneuver
         ImGui::Text("Node %d", node->id);
         ImGui::Text("Axis: %s", hover_h.label);
         ImGui::Text("DV RPN: (%.2f, %.2f, %.2f) m/s",
-                    node->dv_rtn_mps.x, node->dv_rtn_mps.y, node->dv_rtn_mps.z);
+                    node->dv_rpn_mps.x, node->dv_rpn_mps.y, node->dv_rpn_mps.z);
         ImGui::TextUnformatted("Drag LMB (Shift x0.1 / Ctrl x10)");
         ImGui::EndTooltip();
     }
@@ -758,7 +758,7 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
     // Rebuild all derived node state so UI/editor code can work from the latest prediction and render interpolation.
     for (ManeuverNode &node: _maneuver_state.nodes)
     {
-        node.total_dv_mps = safe_length(node.dv_rtn_mps);
+        node.total_dv_mps = safe_length(node.dv_rpn_mps);
         node.gizmo_valid = false;
     }
 
@@ -1123,7 +1123,7 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         }
 
         // Burn direction is used purely for debug visualization; zero-DV nodes fall back to the prograde axis.
-        const glm::dvec3 dv_world = compose_basis_vector(node.dv_rtn_mps,
+        const glm::dvec3 dv_world = compose_basis_vector(node.dv_rpn_mps,
                                                          node.maneuver_basis_r_world,
                                                          node.maneuver_basis_t_world,
                                                          node.maneuver_basis_n_world);

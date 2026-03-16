@@ -17,7 +17,7 @@ namespace Game
     {
         int id{-1}; // unique ID (stable)
         double time_s{0.0}; // sim time (absolute)
-        glm::dvec3 dv_rtn_mps{0.0, 0.0, 0.0}; // UI-authored maneuver-frame DV (Radial, Prograde, Normal) [m/s]
+        glm::dvec3 dv_rpn_mps{0.0, 0.0, 0.0}; // UI-authored maneuver-frame DV (Radial, Prograde, Normal) [m/s]
         orbitsim::BodyId primary_body_id{orbitsim::kInvalidBodyId}; // maneuver-frame primary body
         bool primary_body_auto{true}; // when true, resolve the primary body from current analysis context at node time
 
@@ -87,7 +87,7 @@ namespace Game
                 orbitsim::ImpulseSegment imp{};
                 imp.t_s = node.time_s;
                 imp.primary_body_id = node.primary_body_id;
-                imp.dv_rtn_mps = orbitsim::Vec3{node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z};
+                imp.dv_rtn_mps = orbitsim::Vec3{node.dv_rpn_mps.x, node.dv_rpn_mps.y, node.dv_rpn_mps.z};
                 imp.spacecraft_id = sc_id;
                 plan.impulses.push_back(imp);
             }
@@ -127,11 +127,11 @@ namespace Game
             DragAxis
         };
 
-        // Captures drag state in RTN component space plus the world-space axis parameter used by the solver.
+        // Captures drag state in maneuver-frame (RPN) component space plus the world-space axis parameter used by the solver.
         State state{State::Idle};
         int node_id{-1};
         ManeuverHandleAxis axis{ManeuverHandleAxis::None};
-        glm::dvec3 start_dv_rtn_mps{0.0, 0.0, 0.0};
+        glm::dvec3 start_dv_rpn_mps{0.0, 0.0, 0.0};
         glm::dvec3 start_dv_display_mps{0.0, 0.0, 0.0};
         double start_axis_t_m{0.0};
         bool applied_delta{false};

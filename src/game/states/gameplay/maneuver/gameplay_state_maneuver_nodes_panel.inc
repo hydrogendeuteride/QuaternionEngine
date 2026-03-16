@@ -68,7 +68,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         ManeuverNode n{};
         n.id = _maneuver_state.next_node_id++;
         n.time_s = now_s + 60.0;
-        n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
+        n.dv_rpn_mps = glm::dvec3(0.0, 0.0, 0.0);
         n.primary_body_id = default_node_primary_body_id();
         n.primary_body_auto = true;
         n.total_dv_mps = 0.0;
@@ -177,7 +177,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         ManeuverNode n{};
         n.id = _maneuver_state.next_node_id++;
         n.time_s = time_s;
-        n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
+        n.dv_rpn_mps = glm::dvec3(0.0, 0.0, 0.0);
         n.primary_body_id = default_node_primary_body_id();
         n.primary_body_auto = true;
         n.total_dv_mps = 0.0;
@@ -427,7 +427,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
             ImGui::Text("Node %d", node.id);
             ImGui::Text("T%+.1fs", node.time_s - now_s);
             ImGui::Text("DV RPN: (%.1f, %.1f, %.1f) m/s",
-                        node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z);
+                        node.dv_rpn_mps.x, node.dv_rpn_mps.y, node.dv_rpn_mps.z);
             ImGui::EndTooltip();
         }
         ImGui::PopID();
@@ -447,7 +447,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     double total_plan_dv_mps = 0.0;
     for (const ManeuverNode &node: _maneuver_state.nodes)
     {
-        total_plan_dv_mps += safe_length(node.dv_rtn_mps);
+        total_plan_dv_mps += safe_length(node.dv_rpn_mps);
     }
 
     ImGui::Text("%zu nodes  |  Total DV %.2f m/s", _maneuver_state.nodes.size(), total_plan_dv_mps);
@@ -495,7 +495,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     for (size_t i = 0; i < _maneuver_state.nodes.size(); ++i)
     {
         ManeuverNode &node = _maneuver_state.nodes[i];
-        node.total_dv_mps = safe_length(node.dv_rtn_mps);
+        node.total_dv_mps = safe_length(node.dv_rpn_mps);
 
         char label[96];
         std::snprintf(label,
@@ -511,7 +511,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         {
             _maneuver_state.selected_node_id = node.id;
         }
-        ImGui::TextDisabled("RPN  %.1f / %.1f / %.1f", node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z);
+        ImGui::TextDisabled("RPN  %.1f / %.1f / %.1f", node.dv_rpn_mps.x, node.dv_rpn_mps.y, node.dv_rpn_mps.z);
         if (i + 1 < _maneuver_state.nodes.size())
         {
             ImGui::Separator();
@@ -538,7 +538,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     }
 
     ImGui::Text("Selected Node %d", sel->id);
-    ImGui::TextDisabled("T%+.1fs  |  DV %.2f m/s", sel->time_s - now_s, safe_length(sel->dv_rtn_mps));
+    ImGui::TextDisabled("T%+.1fs  |  DV %.2f m/s", sel->time_s - now_s, safe_length(sel->dv_rpn_mps));
 
     ImGui::BeginDisabled(selected_idx <= 0);
     if (ImGui::Button("Prev"))
@@ -632,19 +632,19 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     }
 
     float dv[3]{
-        static_cast<float>(sel->dv_rtn_mps.x),
-        static_cast<float>(sel->dv_rtn_mps.y),
-        static_cast<float>(sel->dv_rtn_mps.z)
+        static_cast<float>(sel->dv_rpn_mps.x),
+        static_cast<float>(sel->dv_rpn_mps.y),
+        static_cast<float>(sel->dv_rpn_mps.z)
     };
     // DV is always edited in node-local R/P/N order so the panel and gizmo write the same underlying data.
     if (ImGui::DragFloat3("DV RPN (m/s)", dv, 0.1f, -50'000.0f, 50'000.0f, "%.2f"))
     {
-        sel->dv_rtn_mps = glm::dvec3(dv[0], dv[1], dv[2]);
-        sel->total_dv_mps = safe_length(sel->dv_rtn_mps);
+        sel->dv_rpn_mps = glm::dvec3(dv[0], dv[1], dv[2]);
+        sel->total_dv_mps = safe_length(sel->dv_rpn_mps);
         mark_prediction_dirty();
     }
 
-    sel->total_dv_mps = safe_length(sel->dv_rtn_mps);
+    sel->total_dv_mps = safe_length(sel->dv_rpn_mps);
     ImGui::Text("DV total: %.2f m/s", sel->total_dv_mps);
 
     const orbitsim::BodyId analysis_body_id = (player_track && player_track->cache.valid)
