@@ -247,8 +247,8 @@ const char *GameplayState::maneuver_axis_label(const ManeuverHandleAxis axis) co
 {
     switch (axis)
     {
-        case ManeuverHandleAxis::ProgradePos: return "+T";
-        case ManeuverHandleAxis::ProgradeNeg: return "-T";
+        case ManeuverHandleAxis::ProgradePos: return "+P";
+        case ManeuverHandleAxis::ProgradeNeg: return "-P";
         case ManeuverHandleAxis::RadialPos: return "+R";
         case ManeuverHandleAxis::RadialNeg: return "-R";
         case ManeuverHandleAxis::NormalPos: return "+N";
@@ -317,6 +317,14 @@ bool GameplayState::begin_maneuver_axis_drag(GameStateContext &ctx,
     _maneuver_gizmo_interaction.node_id = node_id;
     _maneuver_gizmo_interaction.axis = axis;
     _maneuver_gizmo_interaction.start_dv_rtn_mps = node->dv_rtn_mps;
+    const glm::dvec3 dv_world_start = compose_basis_vector(node->dv_rtn_mps,
+                                                           node->maneuver_basis_r_world,
+                                                           node->maneuver_basis_t_world,
+                                                           node->maneuver_basis_n_world);
+    _maneuver_gizmo_interaction.start_dv_display_mps = project_basis_vector(dv_world_start,
+                                                                             node->basis_r_world,
+                                                                             node->basis_t_world,
+                                                                             node->basis_n_world);
     _maneuver_gizmo_interaction.start_axis_t_m = start_t;
     _maneuver_gizmo_interaction.applied_delta = false;
     return true;
@@ -362,19 +370,28 @@ void GameplayState::apply_maneuver_axis_drag(GameStateContext &ctx,
 
     // The drag solver works in world meters along the selected axis; convert that signed motion into DV.
     const double delta_mps = delta_axis_m * scale * sign;
-    glm::dvec3 dv_new = _maneuver_gizmo_interaction.start_dv_rtn_mps;
+    glm::dvec3 dv_display_new = _maneuver_gizmo_interaction.start_dv_display_mps;
     if (component == 0)
     {
-        dv_new.x = _maneuver_gizmo_interaction.start_dv_rtn_mps.x + delta_mps;
+        dv_display_new.x = _maneuver_gizmo_interaction.start_dv_display_mps.x + delta_mps;
     }
     else if (component == 1)
     {
-        dv_new.y = _maneuver_gizmo_interaction.start_dv_rtn_mps.y + delta_mps;
+        dv_display_new.y = _maneuver_gizmo_interaction.start_dv_display_mps.y + delta_mps;
     }
     else
     {
-        dv_new.z = _maneuver_gizmo_interaction.start_dv_rtn_mps.z + delta_mps;
+        dv_display_new.z = _maneuver_gizmo_interaction.start_dv_display_mps.z + delta_mps;
     }
+
+    const glm::dvec3 dv_world_new = compose_basis_vector(dv_display_new,
+                                                         node.basis_r_world,
+                                                         node.basis_t_world,
+                                                         node.basis_n_world);
+    const glm::dvec3 dv_new = project_basis_vector(dv_world_new,
+                                                   node.maneuver_basis_r_world,
+                                                   node.maneuver_basis_t_world,
+                                                   node.maneuver_basis_n_world);
 
     if (finite3(dv_new) && safe_length(dv_new - node.dv_rtn_mps) > 1.0e-7)
     {
@@ -611,7 +628,7 @@ void GameplayState::draw_maneuver_gizmo_hover_tooltip(const std::vector<Maneuver
         ImGui::BeginTooltip();
         ImGui::Text("Node %d", node->id);
         ImGui::Text("Axis: %s", hover_h.label);
-        ImGui::Text("DV RTN: (%.2f, %.2f, %.2f) m/s",
+        ImGui::Text("DV RPN: (%.2f, %.2f, %.2f) m/s",
                     node->dv_rtn_mps.x, node->dv_rtn_mps.y, node->dv_rtn_mps.z);
         ImGui::TextUnformatted("Drag LMB (Shift x0.1 / Ctrl x10)");
         ImGui::EndTooltip();
@@ -832,13 +849,61 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
     const double traj_node_t0 = traj_node_world.front().t_s;
     const double traj_node_t1 = traj_node_world.back().t_s;
     glm::dmat3 display_frame_to_world(1.0);
+    orbitsim::RotatingFrame display_frame_now{};
+    const bool have_display_frame = build_prediction_display_frame(*prediction_cache, display_frame_now, now_s);
+    if (have_display_frame)
     {
-        WorldVec3 display_frame_origin_world{0.0, 0.0, 0.0};
-        if (!build_prediction_display_transform(*prediction_cache, display_frame_origin_world, display_frame_to_world, now_s))
-        {
-            display_frame_to_world = glm::dmat3(1.0);
-        }
+        display_frame_to_world = glm::dmat3(glm::dvec3(display_frame_now.ex_i.x,
+                                                       display_frame_now.ex_i.y,
+                                                       display_frame_now.ex_i.z),
+                                            glm::dvec3(display_frame_now.ey_i.x,
+                                                       display_frame_now.ey_i.y,
+                                                       display_frame_now.ey_i.z),
+                                            glm::dvec3(display_frame_now.ez_i.x,
+                                                       display_frame_now.ez_i.y,
+                                                       display_frame_now.ez_i.z));
     }
+
+    const auto transform_inertial_basis_to_display_world =
+            [&](const glm::dvec3 &basis_inertial, const double sample_time_s, const glm::dvec3 &fallback) -> glm::dvec3 {
+                glm::dvec3 basis_in_display = basis_inertial;
+                orbitsim::RotatingFrame sample_frame{};
+                if (have_display_frame &&
+                    std::isfinite(sample_time_s) &&
+                    build_prediction_display_frame(*prediction_cache, sample_frame, sample_time_s))
+                {
+                    const orbitsim::Vec3 frame_vec = orbitsim::inertial_vector_to_frame(
+                            sample_frame,
+                            orbitsim::Vec3{basis_inertial.x, basis_inertial.y, basis_inertial.z});
+                    basis_in_display = glm::dvec3(frame_vec.x, frame_vec.y, frame_vec.z);
+                }
+                return normalized_or(display_frame_to_world * basis_in_display, fallback);
+            };
+
+    const auto transform_inertial_state_to_display_local =
+            [&](const glm::dvec3 &position_inertial_m,
+                const glm::dvec3 &velocity_inertial_mps,
+                const double sample_time_s,
+                glm::dvec3 &out_position_display_m,
+                glm::dvec3 &out_velocity_display_mps) -> bool {
+                out_position_display_m = position_inertial_m;
+                out_velocity_display_mps = velocity_inertial_mps;
+
+                orbitsim::RotatingFrame sample_frame{};
+                if (have_display_frame &&
+                    std::isfinite(sample_time_s) &&
+                    build_prediction_display_frame(*prediction_cache, sample_frame, sample_time_s))
+                {
+                    orbitsim::State sample_in{};
+                    sample_in.position_m = orbitsim::Vec3{position_inertial_m.x, position_inertial_m.y, position_inertial_m.z};
+                    sample_in.velocity_mps = orbitsim::Vec3{velocity_inertial_mps.x, velocity_inertial_mps.y, velocity_inertial_mps.z};
+                    const orbitsim::State sample_out = orbitsim::inertial_state_to_frame(sample_in, sample_frame);
+                    out_position_display_m = glm::dvec3(sample_out.position_m);
+                    out_velocity_display_mps = glm::dvec3(sample_out.velocity_mps);
+                }
+
+                return finite3(out_position_display_m) && finite3(out_velocity_display_mps);
+            };
 
     const auto sample_displayed_node_world = [&](const double sample_time_s, WorldVec3 &out_world) -> bool {
         out_world = WorldVec3(0.0, 0.0, 0.0);
@@ -876,9 +941,11 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
     const auto resolve_node_primary_body_id =
             [&](const ManeuverNode &node, const double sample_time_s, const glm::dvec3 &inertial_position_m)
             -> orbitsim::BodyId {
-                if (node.primary_body_id != orbitsim::kInvalidBodyId)
+                const orbitsim::BodyId preferred_body_id =
+                        resolve_maneuver_node_primary_body_id(node, sample_time_s);
+                if (preferred_body_id != orbitsim::kInvalidBodyId)
                 {
-                    return node.primary_body_id;
+                    return preferred_body_id;
                 }
                 if (prediction_cache->massive_bodies.empty() || !std::isfinite(sample_time_s) || !finite3(inertial_position_m))
                 {
@@ -925,13 +992,18 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
 
         glm::dvec3 r_rel_m{0.0, 0.0, 0.0};
         glm::dvec3 v_rel_mps{0.0, 0.0, 0.0};
+        glm::dvec3 display_r_rel_m{0.0, 0.0, 0.0};
+        glm::dvec3 display_v_rel_mps{0.0, 0.0, 0.0};
         WorldVec3 node_position_world{0.0, 0.0, 0.0};
         bool have_runtime_state = false;
+        bool have_display_basis_state = false;
         double t_basis = node.time_s;
+        double basis_time_s = node.time_s;
         if (t_basis > traj_node_t0)
         {
             t_basis = std::max(traj_node_t0, t_basis - 1e-3);
         }
+        basis_time_s = t_basis;
 
         if (preview && preview->valid)
         {
@@ -953,6 +1025,12 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
                 r_rel_m = preview_position_m - glm::dvec3(primary_state.position_m);
                 v_rel_mps = glm::dvec3(preview->inertial_velocity_mps) - glm::dvec3(primary_state.velocity_mps);
                 have_runtime_state = finite3(r_rel_m) && finite3(v_rel_mps);
+                basis_time_s = node.time_s;
+                have_display_basis_state = transform_inertial_state_to_display_local(preview_position_m,
+                                                                                     glm::dvec3(preview->inertial_velocity_mps),
+                                                                                     node.time_s,
+                                                                                     display_r_rel_m,
+                                                                                     display_v_rel_mps);
             }
         }
         else
@@ -986,6 +1064,11 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
             r_rel_m = inertial_state.r_rel_m - glm::dvec3(primary_state.position_m);
             v_rel_mps = inertial_state.v_rel_mps - glm::dvec3(primary_state.velocity_mps);
             have_runtime_state = finite3(r_rel_m) && finite3(v_rel_mps);
+            have_display_basis_state = transform_inertial_state_to_display_local(inertial_state.r_rel_m,
+                                                                                 inertial_state.v_rel_mps,
+                                                                                 basis_time_s,
+                                                                                 display_r_rel_m,
+                                                                                 display_v_rel_mps);
         }
 
         if (!have_runtime_state)
@@ -993,27 +1076,57 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
             continue;
         }
 
-        const orbitsim::RtnFrame solver_frame = compute_maneuver_rtf_frame(r_rel_m, v_rel_mps);
-        // Keep gizmo axes aligned with the node's authored pre-burn RTN frame rather than
-        // a display-trajectory interpolation that can smear across the burn discontinuity.
-        node.basis_r_world = normalized_or(display_frame_to_world * glm::dvec3(solver_frame.R.x,
-                                                                                solver_frame.R.y,
-                                                                                solver_frame.R.z),
-                                           glm::dvec3(1.0, 0.0, 0.0));
-        node.basis_t_world = normalized_or(display_frame_to_world * glm::dvec3(solver_frame.T.x,
-                                                                                solver_frame.T.y,
-                                                                                solver_frame.T.z),
-                                           glm::dvec3(0.0, 1.0, 0.0));
-        node.basis_n_world = normalized_or(display_frame_to_world * glm::dvec3(solver_frame.N.x,
-                                                                                solver_frame.N.y,
-                                                                                solver_frame.N.z),
-                                           glm::dvec3(0.0, 0.0, 1.0));
+        const orbitsim::RtnFrame solver_frame = compute_maneuver_frame(r_rel_m, v_rel_mps);
+        // Cache the authored maneuver basis separately so display-space gizmo edits can round-trip back into solver inputs.
+        node.maneuver_basis_r_world = transform_inertial_basis_to_display_world(glm::dvec3(solver_frame.R.x,
+                                                                                            solver_frame.R.y,
+                                                                                            solver_frame.R.z),
+                                                                                basis_time_s,
+                                                                                glm::dvec3(1.0, 0.0, 0.0));
+        node.maneuver_basis_t_world = transform_inertial_basis_to_display_world(glm::dvec3(solver_frame.T.x,
+                                                                                            solver_frame.T.y,
+                                                                                            solver_frame.T.z),
+                                                                                basis_time_s,
+                                                                                glm::dvec3(0.0, 1.0, 0.0));
+        node.maneuver_basis_n_world = transform_inertial_basis_to_display_world(glm::dvec3(solver_frame.N.x,
+                                                                                            solver_frame.N.y,
+                                                                                            solver_frame.N.z),
+                                                                                basis_time_s,
+                                                                                glm::dvec3(0.0, 0.0, 1.0));
+
+        if (have_display_basis_state)
+        {
+            // Impulse maneuvers create a cusp, so the displayed tangent is undefined at the node itself.
+            // Use the incoming (pre-burn) state to keep the gizmo basis stable and aligned with the authored frame.
+            glm::dvec3 display_t_local = normalized_or(display_v_rel_mps, glm::dvec3(0.0, 1.0, 0.0));
+            glm::dvec3 display_n_local = normalized_or(glm::cross(display_r_rel_m, display_v_rel_mps),
+                                                       glm::dvec3(0.0, 0.0, 1.0));
+            glm::dvec3 display_r_local = normalized_or(glm::cross(display_t_local, display_n_local),
+                                                       glm::dvec3(1.0, 0.0, 0.0));
+            if (glm::dot(display_r_local, display_r_rel_m) < 0.0)
+            {
+                display_r_local = -display_r_local;
+                display_n_local = -display_n_local;
+            }
+            display_n_local = normalized_or(glm::cross(display_r_local, display_t_local), display_n_local);
+            display_r_local = normalized_or(glm::cross(display_t_local, display_n_local), display_r_local);
+
+            node.basis_r_world = normalized_or(display_frame_to_world * display_r_local, node.maneuver_basis_r_world);
+            node.basis_t_world = normalized_or(display_frame_to_world * display_t_local, node.maneuver_basis_t_world);
+            node.basis_n_world = normalized_or(display_frame_to_world * display_n_local, node.maneuver_basis_n_world);
+        }
+        else
+        {
+            node.basis_r_world = node.maneuver_basis_r_world;
+            node.basis_t_world = node.maneuver_basis_t_world;
+            node.basis_n_world = node.maneuver_basis_n_world;
+        }
 
         // Burn direction is used purely for debug visualization; zero-DV nodes fall back to the prograde axis.
-        const glm::dvec3 dv_world =
-                node.basis_r_world * node.dv_rtn_mps.x +
-                node.basis_t_world * node.dv_rtn_mps.y +
-                node.basis_n_world * node.dv_rtn_mps.z;
+        const glm::dvec3 dv_world = compose_basis_vector(node.dv_rtn_mps,
+                                                         node.maneuver_basis_r_world,
+                                                         node.maneuver_basis_t_world,
+                                                         node.maneuver_basis_n_world);
 
         node.burn_direction_world = normalized_or(dv_world, node.basis_t_world);
         node.position_world = node_position_world;
@@ -1026,6 +1139,9 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         node.gizmo_valid = finite3(glm::dvec3(node.position_world)) &&
                            finite3(node.basis_r_world) &&
                            finite3(node.basis_t_world) &&
-                           finite3(node.basis_n_world);
+                           finite3(node.basis_n_world) &&
+                           finite3(node.maneuver_basis_r_world) &&
+                           finite3(node.maneuver_basis_t_world) &&
+                           finite3(node.maneuver_basis_n_world);
     }
 }

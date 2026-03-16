@@ -17,17 +17,23 @@ namespace Game
     {
         int id{-1}; // unique ID (stable)
         double time_s{0.0}; // sim time (absolute)
-        glm::dvec3 dv_rtn_mps{0.0, 0.0, 0.0}; // UI-authored maneuver-frame DV (Radial, Tangential/Prograde, Normal) [m/s]
-        orbitsim::BodyId primary_body_id{orbitsim::kInvalidBodyId}; // RTN primary body
+        glm::dvec3 dv_rtn_mps{0.0, 0.0, 0.0}; // UI-authored maneuver-frame DV (Radial, Prograde, Normal) [m/s]
+        orbitsim::BodyId primary_body_id{orbitsim::kInvalidBodyId}; // maneuver-frame primary body
+        bool primary_body_auto{true}; // when true, resolve the primary body from current analysis context at node time
 
         // Cached/derived values (updated by gameplay state)
         // These drive the in-world gizmo, debug overlay, and node execution preview.
         double total_dv_mps{0.0};
         WorldVec3 position_world{0.0, 0.0, 0.0};
         glm::dvec3 burn_direction_world{0.0, 0.0, 0.0};
+        // Display-space gizmo basis. This follows the currently plotted orbit curve in the selected frame.
         glm::dvec3 basis_r_world{1.0, 0.0, 0.0};
         glm::dvec3 basis_t_world{0.0, 1.0, 0.0};
         glm::dvec3 basis_n_world{0.0, 0.0, 1.0};
+        // Authored maneuver-frame basis expressed in the same displayed world space.
+        glm::dvec3 maneuver_basis_r_world{1.0, 0.0, 0.0};
+        glm::dvec3 maneuver_basis_t_world{0.0, 1.0, 0.0};
+        glm::dvec3 maneuver_basis_n_world{0.0, 0.0, 1.0};
         float gizmo_scale_m{1.0f};
         bool gizmo_valid{false};
     };
@@ -126,6 +132,7 @@ namespace Game
         int node_id{-1};
         ManeuverHandleAxis axis{ManeuverHandleAxis::None};
         glm::dvec3 start_dv_rtn_mps{0.0, 0.0, 0.0};
+        glm::dvec3 start_dv_display_mps{0.0, 0.0, 0.0};
         double start_axis_t_m{0.0};
         bool applied_delta{false};
     };

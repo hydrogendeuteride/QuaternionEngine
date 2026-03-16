@@ -679,22 +679,20 @@ namespace Game
         return candidates[primary_index].id;
     }
 
-    bool GameplayState::build_prediction_display_transform(const OrbitPredictionCache &cache,
-                                                           WorldVec3 &out_origin_world,
-                                                           glm::dmat3 &out_frame_to_world,
-                                                           double display_time_s) const
+    bool GameplayState::build_prediction_display_frame(const OrbitPredictionCache &cache,
+                                                       orbitsim::RotatingFrame &out_frame,
+                                                       double display_time_s) const
     {
-        out_origin_world = _scenario_config.system_center;
-        out_frame_to_world = glm::dmat3(1.0);
+        out_frame = {};
         double reference_time_s = display_time_s;
         if (!std::isfinite(reference_time_s))
         {
             reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : cache.build_time_s;
         }
-        const WorldVec3 world_ref_world = prediction_world_reference_body_world();
         const orbitsim::TrajectoryFrameSpec frame_spec =
-                resolve_prediction_display_frame_spec(cache, reference_time_s);
-
+                cache.resolved_frame_spec_valid
+                    ? cache.resolved_frame_spec
+                    : resolve_prediction_display_frame_spec(cache, reference_time_s);
         const auto state_at = [&](const orbitsim::MassiveBody &body) -> orbitsim::State {
             if (cache.shared_ephemeris && !cache.shared_ephemeris->empty())
             {
@@ -702,27 +700,6 @@ namespace Game
             }
             return body.state;
         };
-
-        orbitsim::State world_ref_state{};
-        bool have_world_ref_state = false;
-        if (_orbitsim)
-        {
-            if (const CelestialBodyInfo *world_ref_info = _orbitsim->world_reference_body())
-            {
-                if (const orbitsim::MassiveBody *world_ref_body = find_massive_body(cache.massive_bodies, world_ref_info->sim_id))
-                {
-                    world_ref_state = state_at(*world_ref_body);
-                    have_world_ref_state = true;
-                }
-                else if (const orbitsim::MassiveBody *world_ref_sim = _orbitsim->world_reference_sim_body())
-                {
-                    world_ref_state = world_ref_sim->state;
-                    have_world_ref_state = true;
-                }
-            }
-        }
-
-        orbitsim::RotatingFrame frame{};
         switch (frame_spec.type)
         {
             case orbitsim::TrajectoryFrameType::Inertial:
@@ -736,7 +713,7 @@ namespace Game
                 {
                     return false;
                 }
-                frame = orbitsim::make_body_centered_inertial_frame(state_at(*body));
+                out_frame = orbitsim::make_body_centered_inertial_frame(state_at(*body));
                 break;
             }
 
@@ -753,7 +730,7 @@ namespace Game
                 {
                     return false;
                 }
-                frame = *body_fixed;
+                out_frame = *body_fixed;
                 break;
             }
 
@@ -774,7 +751,7 @@ namespace Game
                 {
                     return false;
                 }
-                frame = *synodic;
+                out_frame = *synodic;
                 break;
             }
 
@@ -811,9 +788,59 @@ namespace Game
                 {
                     return false;
                 }
-                frame = *lvlh;
+                out_frame = *lvlh;
                 break;
             }
+        }
+
+        return true;
+    }
+
+    bool GameplayState::build_prediction_display_transform(const OrbitPredictionCache &cache,
+                                                           WorldVec3 &out_origin_world,
+                                                           glm::dmat3 &out_frame_to_world,
+                                                           double display_time_s) const
+    {
+        out_origin_world = _scenario_config.system_center;
+        out_frame_to_world = glm::dmat3(1.0);
+        double reference_time_s = display_time_s;
+        if (!std::isfinite(reference_time_s))
+        {
+            reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : cache.build_time_s;
+        }
+        const WorldVec3 world_ref_world = prediction_world_reference_body_world();
+
+        const auto state_at = [&](const orbitsim::MassiveBody &body) -> orbitsim::State {
+            if (cache.shared_ephemeris && !cache.shared_ephemeris->empty())
+            {
+                return cache.shared_ephemeris->body_state_at_by_id(body.id, reference_time_s);
+            }
+            return body.state;
+        };
+
+        orbitsim::State world_ref_state{};
+        bool have_world_ref_state = false;
+        if (_orbitsim)
+        {
+            if (const CelestialBodyInfo *world_ref_info = _orbitsim->world_reference_body())
+            {
+                if (const orbitsim::MassiveBody *world_ref_body = find_massive_body(cache.massive_bodies, world_ref_info->sim_id))
+                {
+                    world_ref_state = state_at(*world_ref_body);
+                    have_world_ref_state = true;
+                }
+                else if (const orbitsim::MassiveBody *world_ref_sim = _orbitsim->world_reference_sim_body())
+                {
+                    world_ref_state = world_ref_sim->state;
+                    have_world_ref_state = true;
+                }
+            }
+        }
+
+        orbitsim::RotatingFrame frame{};
+        if (!build_prediction_display_frame(cache, frame, reference_time_s))
+        {
+            return false;
         }
 
         out_frame_to_world = glm::dmat3(glm::dvec3(frame.ex_i.x, frame.ex_i.y, frame.ex_i.z),

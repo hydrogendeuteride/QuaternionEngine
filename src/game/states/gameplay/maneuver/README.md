@@ -76,4 +76,6 @@ Relevant call sites are currently in:
 
 - The `.inc` files are not independent modules; they are included into `gameplay_state_maneuver_nodes.cpp`.
 - The panel and gizmo both edit the same underlying node data: `ManeuverNode::dv_rtn_mps` and `ManeuverNode::time_s`.
+- `dv_rtn_mps` stores maneuver-frame components in `Radial / Prograde / Normal` order.
+- The gizmo and execution path use the same prograde-aligned maneuver frame, and the prediction worker converts that frame into solver RTN before building planned trajectories.
 - The gizmo depends on prediction data and render interpolation, so marker placement is rebuilt every frame in `refresh_maneuver_node_runtime_cache()`.
