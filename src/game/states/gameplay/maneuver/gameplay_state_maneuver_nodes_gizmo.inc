@@ -880,31 +880,6 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
                 return normalized_or(display_frame_to_world * basis_in_display, fallback);
             };
 
-    const auto transform_inertial_state_to_display_local =
-            [&](const glm::dvec3 &position_inertial_m,
-                const glm::dvec3 &velocity_inertial_mps,
-                const double sample_time_s,
-                glm::dvec3 &out_position_display_m,
-                glm::dvec3 &out_velocity_display_mps) -> bool {
-                out_position_display_m = position_inertial_m;
-                out_velocity_display_mps = velocity_inertial_mps;
-
-                orbitsim::RotatingFrame sample_frame{};
-                if (have_display_frame &&
-                    std::isfinite(sample_time_s) &&
-                    build_prediction_display_frame(*prediction_cache, sample_frame, sample_time_s))
-                {
-                    orbitsim::State sample_in{};
-                    sample_in.position_m = orbitsim::Vec3{position_inertial_m.x, position_inertial_m.y, position_inertial_m.z};
-                    sample_in.velocity_mps = orbitsim::Vec3{velocity_inertial_mps.x, velocity_inertial_mps.y, velocity_inertial_mps.z};
-                    const orbitsim::State sample_out = orbitsim::inertial_state_to_frame(sample_in, sample_frame);
-                    out_position_display_m = glm::dvec3(sample_out.position_m);
-                    out_velocity_display_mps = glm::dvec3(sample_out.velocity_mps);
-                }
-
-                return finite3(out_position_display_m) && finite3(out_velocity_display_mps);
-            };
-
     const auto sample_displayed_node_world = [&](const double sample_time_s, WorldVec3 &out_world) -> bool {
         out_world = WorldVec3(0.0, 0.0, 0.0);
         if (traj_node_world.size() < 2 || !std::isfinite(sample_time_s))
@@ -937,6 +912,50 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         out_world += align_delta;
         return finite3(glm::dvec3(out_world));
     };
+
+    const auto sample_display_basis_state =
+            [&](const ManeuverNode &node,
+                glm::dvec3 &out_position_display_m,
+                glm::dvec3 &out_velocity_display_mps) -> bool {
+                out_position_display_m = glm::dvec3(0.0);
+                out_velocity_display_mps = glm::dvec3(0.0);
+                if (traj_node_world.size() < 2 || !std::isfinite(node.time_s))
+                {
+                    return false;
+                }
+
+                double sample_time_s = std::clamp(node.time_s, traj_node_t0, traj_node_t1);
+                if (traj_planned.size() >= 2)
+                {
+                    // Match the visible dashed path by sampling just after the node, not at the pre-burn cusp.
+                    const double request_time_s = std::clamp(
+                            node.time_s + _prediction_draw_config.node_time_tolerance_s,
+                            traj_node_t0,
+                            traj_node_t1);
+                    auto it_hi = std::lower_bound(traj_node_world.cbegin(),
+                                                  traj_node_world.cend(),
+                                                  request_time_s,
+                                                  [](const orbitsim::TrajectorySample &s, const double t) {
+                                                      return s.t_s < t;
+                                                  });
+                    if (it_hi == traj_node_world.cend())
+                    {
+                        return false;
+                    }
+                    sample_time_s = it_hi->t_s;
+                }
+
+                const TrajectorySampledState display_state =
+                        sample_trajectory_state(traj_node_world, WorldVec3(0.0), sample_time_s);
+                if (!display_state.valid)
+                {
+                    return false;
+                }
+
+                out_position_display_m = display_state.r_rel_m;
+                out_velocity_display_mps = display_state.v_rel_mps;
+                return true;
+            };
 
     const auto resolve_node_primary_body_id =
             [&](const ManeuverNode &node, const double sample_time_s, const glm::dvec3 &inertial_position_m)
@@ -1005,13 +1024,14 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         }
         basis_time_s = t_basis;
 
+        if (!sample_displayed_node_world(node.time_s, node_position_world))
+        {
+            continue;
+        }
+        have_display_basis_state = sample_display_basis_state(node, display_r_rel_m, display_v_rel_mps);
+
         if (preview && preview->valid)
         {
-            if (!sample_displayed_node_world(node.time_s, node_position_world))
-            {
-                continue;
-            }
-
             const glm::dvec3 preview_position_m = glm::dvec3(preview->inertial_position_m);
             const orbitsim::BodyId primary_body_id =
                     resolve_node_primary_body_id(node, node.time_s, preview_position_m);
@@ -1026,17 +1046,12 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
                 v_rel_mps = glm::dvec3(preview->inertial_velocity_mps) - glm::dvec3(primary_state.velocity_mps);
                 have_runtime_state = finite3(r_rel_m) && finite3(v_rel_mps);
                 basis_time_s = node.time_s;
-                have_display_basis_state = transform_inertial_state_to_display_local(preview_position_m,
-                                                                                     glm::dvec3(preview->inertial_velocity_mps),
-                                                                                     node.time_s,
-                                                                                     display_r_rel_m,
-                                                                                     display_v_rel_mps);
             }
         }
         else
         {
             // Fallback when previews are unavailable: sample the plotted trajectory directly.
-            if (traj_node_inertial.size() < 2 || !sample_displayed_node_world(node.time_s, node_position_world))
+            if (traj_node_inertial.size() < 2)
             {
                 continue;
             }
@@ -1064,11 +1079,6 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
             r_rel_m = inertial_state.r_rel_m - glm::dvec3(primary_state.position_m);
             v_rel_mps = inertial_state.v_rel_mps - glm::dvec3(primary_state.velocity_mps);
             have_runtime_state = finite3(r_rel_m) && finite3(v_rel_mps);
-            have_display_basis_state = transform_inertial_state_to_display_local(inertial_state.r_rel_m,
-                                                                                 inertial_state.v_rel_mps,
-                                                                                 basis_time_s,
-                                                                                 display_r_rel_m,
-                                                                                 display_v_rel_mps);
         }
 
         if (!have_runtime_state)
@@ -1096,8 +1106,8 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
 
         if (have_display_basis_state)
         {
-            // Impulse maneuvers create a cusp, so the displayed tangent is undefined at the node itself.
-            // Use the incoming (pre-burn) state to keep the gizmo basis stable and aligned with the authored frame.
+            // Keep the visible axes aligned with the displayed curve.
+            // Planned paths use the first plotted sample after the node so the gizmo follows the dashed outgoing branch.
             glm::dvec3 display_t_local = normalized_or(display_v_rel_mps, glm::dvec3(0.0, 1.0, 0.0));
             glm::dvec3 display_n_local = normalized_or(glm::cross(display_r_rel_m, display_v_rel_mps),
                                                        glm::dvec3(0.0, 0.0, 1.0));
