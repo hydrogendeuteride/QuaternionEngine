@@ -30,55 +30,6 @@ namespace Game
             return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
         }
 
-        glm::dvec3 normalized_or(const glm::dvec3 &v, const glm::dvec3 &fallback)
-        {
-            const double len = OrbitPredictionMath::safe_length(v);
-            if (!(len > 0.0) || !std::isfinite(len))
-            {
-                return fallback;
-            }
-            return v / len;
-        }
-
-        orbitsim::Vec3 convert_dv_maneuver_to_solver_rtn(const glm::dvec3 &dv_maneuver_mps,
-                                                          const glm::dvec3 &r_rel_m,
-                                                          const glm::dvec3 &v_rel_mps)
-        {
-            const orbitsim::RtnFrame solver_frame = orbitsim::compute_rtn_frame(r_rel_m, v_rel_mps);
-
-            const glm::dvec3 solver_r = glm::dvec3(solver_frame.R.x, solver_frame.R.y, solver_frame.R.z);
-            const glm::dvec3 solver_t = glm::dvec3(solver_frame.T.x, solver_frame.T.y, solver_frame.T.z);
-            const glm::dvec3 solver_n = glm::dvec3(solver_frame.N.x, solver_frame.N.y, solver_frame.N.z);
-
-            const glm::dvec3 t_hat = normalized_or(v_rel_mps, solver_t);
-            glm::dvec3 n_hat = normalized_or(glm::cross(r_rel_m, v_rel_mps), solver_n);
-            glm::dvec3 r_hat = normalized_or(glm::cross(t_hat, n_hat), solver_r);
-
-            const double plane_area = OrbitPredictionMath::safe_length(glm::cross(r_rel_m, v_rel_mps));
-            if (!finite_vec3(r_hat) || !finite_vec3(t_hat) || !finite_vec3(n_hat) || !(plane_area > 1.0e-8))
-            {
-                return orbitsim::Vec3{dv_maneuver_mps.x, dv_maneuver_mps.y, dv_maneuver_mps.z};
-            }
-
-            if (glm::dot(r_hat, r_rel_m) < 0.0)
-            {
-                r_hat = -r_hat;
-                n_hat = -n_hat;
-            }
-
-            n_hat = normalized_or(glm::cross(r_hat, t_hat), n_hat);
-            r_hat = normalized_or(glm::cross(t_hat, n_hat), r_hat);
-
-            const glm::dvec3 dv_world = r_hat * dv_maneuver_mps.x +
-                                        t_hat * dv_maneuver_mps.y +
-                                        n_hat * dv_maneuver_mps.z;
-            return orbitsim::Vec3{
-                    glm::dot(dv_world, solver_r),
-                    glm::dot(dv_world, solver_t),
-                    glm::dot(dv_world, solver_n),
-            };
-        }
-
         bool build_maneuver_preview(const orbitsim::State &ship_state,
                                     const double node_time_s,
                                     OrbitPredictionService::ManeuverNodePreview &out_preview)
@@ -1004,7 +955,7 @@ namespace Game
                     return out;
                 }
 
-                if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rpn_mps))
+                if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rtn_mps))
                 {
                     continue;
                 }
@@ -1034,23 +985,10 @@ namespace Game
                     out.maneuver_previews.push_back(preview);
                 }
 
-                orbitsim::Vec3 solver_dv_rtn = src.dv_rpn_mps;
-                if (preview.valid)
-                {
-                    const orbitsim::MassiveBody *primary_sim = sim.body_by_id(src.primary_body_id);
-                    if (primary_sim)
-                    {
-                        const orbitsim::State primary_state = eph.body_state_at_by_id(src.primary_body_id, src.t_s);
-                        const glm::dvec3 rel_position_m = preview.inertial_position_m - primary_state.position_m;
-                        const glm::dvec3 rel_velocity_mps = preview.inertial_velocity_mps - primary_state.velocity_mps;
-                        solver_dv_rtn = convert_dv_maneuver_to_solver_rtn(src.dv_rpn_mps, rel_position_m, rel_velocity_mps);
-                    }
-                }
-
                 orbitsim::ImpulseSegment impulse{};
                 impulse.t_s = src.t_s;
                 impulse.primary_body_id = src.primary_body_id;
-                impulse.dv_rtn_mps = solver_dv_rtn;
+                impulse.dv_rtn_mps = src.dv_rtn_mps;
                 impulse.spacecraft_id = ship_h.id;
                 plan.impulses.push_back(impulse);
 
@@ -1077,7 +1015,7 @@ namespace Game
                                 src.t_s,
                                 preview.inertial_position_m,
                                 preview.inertial_velocity_mps,
-                                solver_dv_rtn);
+                                src.dv_rtn_mps);
                         if (finite_vec3(dv_inertial_mps))
                         {
                             preview_spacecraft.state.velocity_mps += dv_inertial_mps;

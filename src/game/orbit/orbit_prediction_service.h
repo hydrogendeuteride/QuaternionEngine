@@ -43,9 +43,8 @@ namespace Game
             int node_id{-1};
             double t_s{0.0};
             orbitsim::BodyId primary_body_id{orbitsim::kInvalidBodyId};
-            // Gameplay UI authors node DV in a prograde-aligned maneuver frame.
-            // The worker converts this into solver RTN using the prefix-planned pre-burn state.
-            orbitsim::Vec3 dv_rpn_mps{0.0, 0.0, 0.0};
+            // Gameplay UI authors node DV directly in true RTN using the pre-burn primary-relative state.
+            orbitsim::Vec3 dv_rtn_mps{0.0, 0.0, 0.0};
         };
 
         struct Request
