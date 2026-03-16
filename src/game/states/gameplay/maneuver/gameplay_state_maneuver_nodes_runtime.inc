@@ -106,7 +106,7 @@ void GameplayState::update_maneuver_nodes_execution(GameStateContext &ctx)
 
     const orbitsim::RtnFrame f = compute_maneuver_frame(r_rel_m, v_rel_mps);
 
-    const glm::dvec3 dv_rtn = node->dv_rtn_mps;
+    const glm::dvec3 dv_rtn = node->dv_rpn_mps;
     // Nodes are authored in maneuver-frame R/P/N coordinates, so convert them at execution time into world DV.
     glm::dvec3 dv_world =
             glm::dvec3(f.R.x, f.R.y, f.R.z) * dv_rtn.x +
