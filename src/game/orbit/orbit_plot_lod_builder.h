@@ -76,7 +76,8 @@ namespace Game
                                              const CameraContext &camera,
                                              const RenderSettings &settings,
                                              double t_start_s,
-                                             double t_end_s);
+                                             double t_end_s,
+                                             const FrustumContext &frustum);
 
         static PickResult build_pick_lod(std::span<const orbitsim::TrajectorySegment> segments_bci,
                                          const WorldVec3 &reference_body_world,

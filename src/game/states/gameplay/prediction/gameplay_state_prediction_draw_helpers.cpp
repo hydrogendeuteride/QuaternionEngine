@@ -2,6 +2,7 @@
 
 #include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_prediction_tuning.h"
+#include "game/orbit/orbit_plot_util.h"
 
 #include <algorithm>
 #include <chrono>
@@ -82,21 +83,7 @@ namespace Game::PredictionDrawDetail
 
     double meters_per_px_at_world(const OrbitDrawWindowContext &ctx, const WorldVec3 &p_world)
     {
-        constexpr double kFallbackMetersPerPx = 1.0;
-
-        const double dist_m = OrbitPredictionMath::safe_length(glm::dvec3(p_world) - ctx.camera_world);
-        if (!std::isfinite(dist_m) || dist_m <= 1.0e-3 || !std::isfinite(ctx.tan_half_fov) || ctx.tan_half_fov <= 1.0e-8)
-        {
-            return kFallbackMetersPerPx;
-        }
-
-        const double mpp = (2.0 * ctx.tan_half_fov * dist_m) / std::max(1.0, ctx.viewport_height_px);
-        if (!std::isfinite(mpp) || mpp <= 1.0e-6)
-        {
-            return kFallbackMetersPerPx;
-        }
-
-        return mpp;
+        return OrbitPlotUtil::meters_per_px_at_world(ctx.camera_world, ctx.tan_half_fov, ctx.viewport_height_px, p_world);
     }
 
     std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_samples(
@@ -318,31 +305,7 @@ namespace Game::PredictionDrawDetail
                                          const orbitsim::TrajectorySegment &segment,
                                          const double t_s)
         {
-            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
-            {
-                return ctx.ref_body_world + WorldVec3(glm::dvec3(segment.start.position_m)) + ctx.align_delta;
-            }
-
-            double u = (t_s - segment.t0_s) / segment.dt_s;
-            if (!std::isfinite(u))
-            {
-                u = 0.0;
-            }
-            u = std::clamp(u, 0.0, 1.0);
-
-            const double u2 = u * u;
-            const double u3 = u2 * u;
-            const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-            const double h10 = u3 - (2.0 * u2) + u;
-            const double h01 = (-2.0 * u3) + (3.0 * u2);
-            const double h11 = u3 - u2;
-
-            const glm::dvec3 p0 = glm::dvec3(segment.start.position_m);
-            const glm::dvec3 p1 = glm::dvec3(segment.end.position_m);
-            const glm::dvec3 m0 = glm::dvec3(segment.start.velocity_mps) * segment.dt_s;
-            const glm::dvec3 m1 = glm::dvec3(segment.end.velocity_mps) * segment.dt_s;
-            const glm::dvec3 local = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-            return ctx.ref_body_world + WorldVec3(local) + ctx.align_delta;
+            return ctx.ref_body_world + OrbitPlotUtil::eval_segment_local_position(segment, t_s) + ctx.align_delta;
         }
 
         void emit_orbit_line(const OrbitDrawWindowContext &ctx,
@@ -448,7 +411,8 @@ namespace Game::PredictionDrawDetail
                                                           ctx.lod_camera,
                                                           lod_settings,
                                                           t_start_s,
-                                                          t_end_s);
+                                                          t_end_s,
+                                                          ctx.render_frustum);
             perf.render_lod_ms_last +=
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - render_lod_start_tp)
                             .count();
