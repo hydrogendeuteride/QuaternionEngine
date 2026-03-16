@@ -40,9 +40,9 @@ namespace Game
             return v / len;
         }
 
-        orbitsim::Vec3 convert_dv_rtf_to_solver_rtn(const glm::dvec3 &dv_rtf_mps,
-                                                    const glm::dvec3 &r_rel_m,
-                                                    const glm::dvec3 &v_rel_mps)
+        orbitsim::Vec3 convert_dv_maneuver_to_solver_rtn(const glm::dvec3 &dv_maneuver_mps,
+                                                          const glm::dvec3 &r_rel_m,
+                                                          const glm::dvec3 &v_rel_mps)
         {
             const orbitsim::RtnFrame solver_frame = orbitsim::compute_rtn_frame(r_rel_m, v_rel_mps);
 
@@ -57,7 +57,7 @@ namespace Game
             const double plane_area = OrbitPredictionMath::safe_length(glm::cross(r_rel_m, v_rel_mps));
             if (!finite_vec3(r_hat) || !finite_vec3(t_hat) || !finite_vec3(n_hat) || !(plane_area > 1.0e-8))
             {
-                return orbitsim::Vec3{dv_rtf_mps.x, dv_rtf_mps.y, dv_rtf_mps.z};
+                return orbitsim::Vec3{dv_maneuver_mps.x, dv_maneuver_mps.y, dv_maneuver_mps.z};
             }
 
             if (glm::dot(r_hat, r_rel_m) < 0.0)
@@ -69,7 +69,9 @@ namespace Game
             n_hat = normalized_or(glm::cross(r_hat, t_hat), n_hat);
             r_hat = normalized_or(glm::cross(t_hat, n_hat), r_hat);
 
-            const glm::dvec3 dv_world = r_hat * dv_rtf_mps.x + t_hat * dv_rtf_mps.y + n_hat * dv_rtf_mps.z;
+            const glm::dvec3 dv_world = r_hat * dv_maneuver_mps.x +
+                                        t_hat * dv_maneuver_mps.y +
+                                        n_hat * dv_maneuver_mps.z;
             return orbitsim::Vec3{
                     glm::dot(dv_world, solver_r),
                     glm::dot(dv_world, solver_t),
@@ -1041,8 +1043,7 @@ namespace Game
                         const orbitsim::State primary_state = eph.body_state_at_by_id(src.primary_body_id, src.t_s);
                         const glm::dvec3 rel_position_m = preview.inertial_position_m - primary_state.position_m;
                         const glm::dvec3 rel_velocity_mps = preview.inertial_velocity_mps - primary_state.velocity_mps;
-                        solver_dv_rtn =
-                                convert_dv_rtf_to_solver_rtn(src.dv_rtn_mps, rel_position_m, rel_velocity_mps);
+                        solver_dv_rtn = convert_dv_maneuver_to_solver_rtn(src.dv_rtn_mps, rel_position_m, rel_velocity_mps);
                     }
                 }
 

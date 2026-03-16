@@ -81,10 +81,11 @@ void GameplayState::update_maneuver_nodes_execution(GameStateContext &ctx)
 
     glm::dvec3 r_rel_m(0.0);
     glm::dvec3 v_rel_mps = ship_vel_world;
-    if (_orbitsim && node->primary_body_id != orbitsim::kInvalidBodyId)
+    const orbitsim::BodyId primary_body_id = resolve_maneuver_node_primary_body_id(*node, now_s);
+    if (_orbitsim && primary_body_id != orbitsim::kInvalidBodyId)
     {
         const orbitsim::MassiveBody *world_ref_sim = _orbitsim->world_reference_sim_body();
-        const orbitsim::MassiveBody *primary_body = _orbitsim->sim.body_by_id(node->primary_body_id);
+        const orbitsim::MassiveBody *primary_body = _orbitsim->sim.body_by_id(primary_body_id);
         if (world_ref_sim && primary_body)
         {
             const WorldVec3 primary_world =
@@ -103,10 +104,10 @@ void GameplayState::update_maneuver_nodes_execution(GameStateContext &ctx)
         r_rel_m = glm::dvec3(ship_pos_world - prediction_world_reference_body_world());
     }
 
-    const orbitsim::RtnFrame f = compute_maneuver_rtf_frame(r_rel_m, v_rel_mps);
+    const orbitsim::RtnFrame f = compute_maneuver_frame(r_rel_m, v_rel_mps);
 
     const glm::dvec3 dv_rtn = node->dv_rtn_mps;
-    // Nodes are authored in maneuver-frame RTN coordinates, so convert them at execution time into world DV.
+    // Nodes are authored in maneuver-frame R/P/N coordinates, so convert them at execution time into world DV.
     glm::dvec3 dv_world =
             glm::dvec3(f.R.x, f.R.y, f.R.z) * dv_rtn.x +
             glm::dvec3(f.T.x, f.T.y, f.T.z) * dv_rtn.y +

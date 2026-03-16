@@ -165,6 +165,9 @@ namespace Game
         orbitsim::TrajectoryFrameSpec resolve_prediction_display_frame_spec(
                 const OrbitPredictionCache &cache,
                 double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
+        bool build_prediction_display_frame(const OrbitPredictionCache &cache,
+                                            orbitsim::RotatingFrame &out_frame,
+                                            double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
         bool build_prediction_display_transform(const OrbitPredictionCache &cache,
                                                WorldVec3 &out_origin_world,
                                                glm::dmat3 &out_frame_to_world,
@@ -344,6 +347,7 @@ namespace Game
         void clear_maneuver_gizmo_instances(GameStateContext &ctx);
         void update_maneuver_nodes_time_warp(GameStateContext &ctx, float fixed_dt);
         void update_maneuver_nodes_execution(GameStateContext &ctx);
+        orbitsim::BodyId resolve_maneuver_node_primary_body_id(const ManeuverNode &node, double query_time_s) const;
 
         bool _maneuver_nodes_enabled{true};
         bool _maneuver_nodes_debug_draw{true};
