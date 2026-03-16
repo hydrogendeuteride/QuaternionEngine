@@ -68,8 +68,9 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         ManeuverNode n{};
         n.id = _maneuver_state.next_node_id++;
         n.time_s = now_s + 60.0;
-        n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
+        n.dv_rpn_mps = glm::dvec3(0.0, 0.0, 0.0);
         n.primary_body_id = default_node_primary_body_id();
+        n.primary_body_auto = true;
         n.total_dv_mps = 0.0;
         _maneuver_state.nodes.push_back(n);
         _maneuver_state.selected_node_id = n.id;
@@ -176,8 +177,9 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         ManeuverNode n{};
         n.id = _maneuver_state.next_node_id++;
         n.time_s = time_s;
-        n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
+        n.dv_rpn_mps = glm::dvec3(0.0, 0.0, 0.0);
         n.primary_body_id = default_node_primary_body_id();
+        n.primary_body_auto = true;
         n.total_dv_mps = 0.0;
         _maneuver_state.nodes.push_back(n);
         _maneuver_state.selected_node_id = n.id;
@@ -424,8 +426,8 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
             ImGui::BeginTooltip();
             ImGui::Text("Node %d", node.id);
             ImGui::Text("T%+.1fs", node.time_s - now_s);
-            ImGui::Text("DV RTN: (%.1f, %.1f, %.1f) m/s",
-                        node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z);
+            ImGui::Text("DV RPN: (%.1f, %.1f, %.1f) m/s",
+                        node.dv_rpn_mps.x, node.dv_rpn_mps.y, node.dv_rpn_mps.z);
             ImGui::EndTooltip();
         }
         ImGui::PopID();
@@ -445,7 +447,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     double total_plan_dv_mps = 0.0;
     for (const ManeuverNode &node: _maneuver_state.nodes)
     {
-        total_plan_dv_mps += safe_length(node.dv_rtn_mps);
+        total_plan_dv_mps += safe_length(node.dv_rpn_mps);
     }
 
     ImGui::Text("%zu nodes  |  Total DV %.2f m/s", _maneuver_state.nodes.size(), total_plan_dv_mps);
@@ -493,7 +495,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     for (size_t i = 0; i < _maneuver_state.nodes.size(); ++i)
     {
         ManeuverNode &node = _maneuver_state.nodes[i];
-        node.total_dv_mps = safe_length(node.dv_rtn_mps);
+        node.total_dv_mps = safe_length(node.dv_rpn_mps);
 
         char label[96];
         std::snprintf(label,
@@ -509,7 +511,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         {
             _maneuver_state.selected_node_id = node.id;
         }
-        ImGui::TextDisabled("RTN  %.1f / %.1f / %.1f", node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z);
+        ImGui::TextDisabled("RPN  %.1f / %.1f / %.1f", node.dv_rpn_mps.x, node.dv_rpn_mps.y, node.dv_rpn_mps.z);
         if (i + 1 < _maneuver_state.nodes.size())
         {
             ImGui::Separator();
@@ -536,7 +538,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     }
 
     ImGui::Text("Selected Node %d", sel->id);
-    ImGui::TextDisabled("T%+.1fs  |  DV %.2f m/s", sel->time_s - now_s, safe_length(sel->dv_rtn_mps));
+    ImGui::TextDisabled("T%+.1fs  |  DV %.2f m/s", sel->time_s - now_s, safe_length(sel->dv_rpn_mps));
 
     ImGui::BeginDisabled(selected_idx <= 0);
     if (ImGui::Button("Prev"))
@@ -630,19 +632,19 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     }
 
     float dv[3]{
-        static_cast<float>(sel->dv_rtn_mps.x),
-        static_cast<float>(sel->dv_rtn_mps.y),
-        static_cast<float>(sel->dv_rtn_mps.z)
+        static_cast<float>(sel->dv_rpn_mps.x),
+        static_cast<float>(sel->dv_rpn_mps.y),
+        static_cast<float>(sel->dv_rpn_mps.z)
     };
-    // DV is always edited in node-local RTN order so the panel and gizmo write the same underlying data.
-    if (ImGui::DragFloat3("DV RTN (m/s)", dv, 0.1f, -50'000.0f, 50'000.0f, "%.2f"))
+    // DV is always edited in node-local R/P/N order so the panel and gizmo write the same underlying data.
+    if (ImGui::DragFloat3("DV RPN (m/s)", dv, 0.1f, -50'000.0f, 50'000.0f, "%.2f"))
     {
-        sel->dv_rtn_mps = glm::dvec3(dv[0], dv[1], dv[2]);
-        sel->total_dv_mps = safe_length(sel->dv_rtn_mps);
+        sel->dv_rpn_mps = glm::dvec3(dv[0], dv[1], dv[2]);
+        sel->total_dv_mps = safe_length(sel->dv_rpn_mps);
         mark_prediction_dirty();
     }
 
-    sel->total_dv_mps = safe_length(sel->dv_rtn_mps);
+    sel->total_dv_mps = safe_length(sel->dv_rpn_mps);
     ImGui::Text("DV total: %.2f m/s", sel->total_dv_mps);
 
     const orbitsim::BodyId analysis_body_id = (player_track && player_track->cache.valid)
@@ -650,12 +652,33 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
                                                                                         player_track->key,
                                                                                         sel->time_s)
                                                   : default_node_primary_body_id();
+    const orbitsim::BodyId effective_primary_body_id =
+            resolve_maneuver_node_primary_body_id(*sel, sel->time_s);
+    if (const CelestialBodyInfo *primary_body = find_celestial_body_info(effective_primary_body_id))
+    {
+        ImGui::Text("Primary body: %s%s",
+                    primary_body->name.c_str(),
+                    sel->primary_body_auto ? " (auto)" : "");
+    }
+
+    bool auto_primary = sel->primary_body_auto;
+    if (ImGui::Checkbox("Auto Primary", &auto_primary))
+    {
+        sel->primary_body_auto = auto_primary;
+        if (sel->primary_body_auto)
+        {
+            sel->primary_body_id = effective_primary_body_id;
+        }
+        mark_prediction_dirty();
+    }
+
     if (const CelestialBodyInfo *analysis_body = find_celestial_body_info(analysis_body_id))
     {
         ImGui::Text("Analysis body: %s", analysis_body->name.c_str());
         if (ImGui::Button("Use Analysis Body"))
         {
             sel->primary_body_id = analysis_body_id;
+            sel->primary_body_auto = false;
             mark_prediction_dirty();
         }
         ImGui::SameLine();
@@ -664,6 +687,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
             for (ManeuverNode &node : _maneuver_state.nodes)
             {
                 node.primary_body_id = analysis_body_id;
+                node.primary_body_auto = false;
             }
             mark_prediction_dirty();
         }

@@ -406,8 +406,8 @@ namespace Game
                 OrbitPredictionService::ManeuverImpulse impulse{};
                 impulse.node_id = node.id;
                 impulse.t_s = node.time_s;
-                impulse.primary_body_id = node.primary_body_id;
-                impulse.dv_rtn_mps = orbitsim::Vec3{node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z};
+                impulse.primary_body_id = resolve_maneuver_node_primary_body_id(node, node.time_s);
+                impulse.dv_rpn_mps = orbitsim::Vec3{node.dv_rpn_mps.x, node.dv_rpn_mps.y, node.dv_rpn_mps.z};
                 request.maneuver_impulses.push_back(impulse);
             }
         }
