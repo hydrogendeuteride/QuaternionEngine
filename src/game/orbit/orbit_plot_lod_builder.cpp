@@ -1,4 +1,5 @@
 #include "game/orbit/orbit_plot_lod_builder.h"
+#include "game/orbit/orbit_plot_util.h"
 
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
@@ -20,6 +21,8 @@ namespace Game
             double t0_s{0.0};
             double t1_s{0.0};
             int depth{0};
+            WorldVec3 a_world{0.0, 0.0, 0.0};
+            WorldVec3 b_world{0.0, 0.0, 0.0};
         };
 
         struct CandidateSegment
@@ -30,58 +33,12 @@ namespace Game
             double t1_s{0.0};
         };
 
-        double meters_per_px_at_world(const OrbitPlotLodBuilder::CameraContext &camera, const WorldVec3 &point_world)
-        {
-            const double dist_m = glm::length(glm::dvec3(point_world) - camera.camera_world);
-            if (!std::isfinite(dist_m) || dist_m <= 1.0e-3 ||
-                !std::isfinite(camera.tan_half_fov) || camera.tan_half_fov <= 1.0e-8 ||
-                !std::isfinite(camera.viewport_height_px) || camera.viewport_height_px <= 1.0)
-            {
-                return 1.0;
-            }
-
-            const double meters_per_px = (2.0 * camera.tan_half_fov * dist_m) / camera.viewport_height_px;
-            if (!std::isfinite(meters_per_px) || meters_per_px <= 1.0e-6)
-            {
-                return 1.0;
-            }
-            return meters_per_px;
-        }
-
-        glm::dvec3 eval_segment_local_position(const orbitsim::TrajectorySegment &segment, const double t_s)
-        {
-            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
-            {
-                return glm::dvec3(segment.start.position_m);
-            }
-
-            double u = (t_s - segment.t0_s) / segment.dt_s;
-            if (!std::isfinite(u))
-            {
-                u = 0.0;
-            }
-            u = std::clamp(u, 0.0, 1.0);
-
-            const double u2 = u * u;
-            const double u3 = u2 * u;
-            const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-            const double h10 = u3 - (2.0 * u2) + u;
-            const double h01 = (-2.0 * u3) + (3.0 * u2);
-            const double h11 = u3 - u2;
-
-            const glm::dvec3 p0 = glm::dvec3(segment.start.position_m);
-            const glm::dvec3 p1 = glm::dvec3(segment.end.position_m);
-            const glm::dvec3 m0 = glm::dvec3(segment.start.velocity_mps) * segment.dt_s;
-            const glm::dvec3 m1 = glm::dvec3(segment.end.velocity_mps) * segment.dt_s;
-            return (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-        }
-
         WorldVec3 eval_segment_world_position(const orbitsim::TrajectorySegment &segment,
                                               const double t_s,
                                               const WorldVec3 &reference_body_world,
                                               const WorldVec3 &align_delta_world)
         {
-            return reference_body_world + eval_segment_local_position(segment, t_s) + align_delta_world;
+            return reference_body_world + OrbitPlotUtil::eval_segment_local_position(segment, t_s) + align_delta_world;
         }
 
         bool should_split_interval(const orbitsim::TrajectorySegment &segment,
@@ -93,7 +50,8 @@ namespace Game
                                    const WorldVec3 &reference_body_world,
                                    const WorldVec3 &align_delta_world,
                                    const WorldVec3 &a_world,
-                                   const WorldVec3 &b_world)
+                                   const WorldVec3 &b_world,
+                                   WorldVec3 &out_mid_world)
         {
             if (depth >= kMaxSubdivisionDepth || !(error_px_threshold > 0.0))
             {
@@ -122,14 +80,20 @@ namespace Game
                 return false;
             }
 
-            const double meters_per_px = meters_per_px_at_world(camera, curve_mid_world);
+            const double meters_per_px = OrbitPlotUtil::meters_per_px_at_world(
+                    camera.camera_world, camera.tan_half_fov, camera.viewport_height_px, curve_mid_world);
             if (!std::isfinite(meters_per_px) || meters_per_px <= 0.0)
             {
                 return false;
             }
 
             const double error_px = error_m / meters_per_px;
-            return std::isfinite(error_px) && error_px > error_px_threshold;
+            if (std::isfinite(error_px) && error_px > error_px_threshold)
+            {
+                out_mid_world = curve_mid_world;
+                return true;
+            }
+            return false;
         }
 
         bool frustum_contains_point_margin(const OrbitPlotLodBuilder::FrustumContext &frustum,
@@ -218,7 +182,8 @@ namespace Game
             const CameraContext &camera,
             const RenderSettings &settings,
             const double t_start_s,
-            const double t_end_s)
+            const double t_end_s,
+            const FrustumContext &frustum)
     {
         RenderResult out{};
         if (segments_bci.empty() || !(t_end_s > t_start_s) || settings.max_segments == 0)
@@ -230,17 +195,14 @@ namespace Game
                                               ? settings.error_px
                                               : 0.75;
 
-        // Collect clipped solver segments with camera distance for sorting.
-        struct IndexedSegment
-        {
-            const orbitsim::TrajectorySegment *segment{nullptr};
-            double clip_t0_s{0.0};
-            double clip_t1_s{0.0};
-            double camera_dist_sq{0.0};
-        };
-
-        std::vector<IndexedSegment> clipped{};
-        clipped.reserve(segments_bci.size());
+        // Process segments in their natural time order.  The pixel-error metric in
+        // should_split_interval already adapts to camera distance (meters_per_px grows
+        // with distance), so near segments receive more subdivision automatically without
+        // an explicit distance sort.  This eliminates two O(n log n) sorts and an
+        // intermediate allocation while producing time-ordered output directly.
+        std::vector<WorkItem> stack{};
+        stack.reserve(64);
+        out.segments.reserve(std::min(settings.max_segments, segments_bci.size() * 2));
 
         for (const orbitsim::TrajectorySegment &segment : segments_bci)
         {
@@ -258,41 +220,30 @@ namespace Game
                 continue;
             }
 
-            const double mid_t_s = 0.5 * (clip_t0_s + clip_t1_s);
-            const glm::dvec3 mid_local = eval_segment_local_position(segment, mid_t_s);
-            const glm::dvec3 mid_world = glm::dvec3(reference_body_world + align_delta_world) + mid_local;
-            const glm::dvec3 delta = mid_world - camera.camera_world;
+            const WorldVec3 initial_a =
+                    eval_segment_world_position(segment, clip_t0_s, reference_body_world, align_delta_world);
+            const WorldVec3 initial_b =
+                    eval_segment_world_position(segment, clip_t1_s, reference_body_world, align_delta_world);
 
-            clipped.push_back(IndexedSegment{
-                    .segment = &segment,
-                    .clip_t0_s = clip_t0_s,
-                    .clip_t1_s = clip_t1_s,
-                    .camera_dist_sq = glm::dot(delta, delta),
-            });
-        }
-
-        // Sort by camera distance — nearest segments get subdivision budget first.
-        std::sort(clipped.begin(), clipped.end(),
-                  [](const IndexedSegment &a, const IndexedSegment &b) {
-                      return a.camera_dist_sq < b.camera_dist_sq;
-                  });
-
-        std::vector<WorkItem> stack{};
-        stack.reserve(64);
-        out.segments.reserve(std::min(settings.max_segments, clipped.size() * 4));
-        bool budget_exhausted = false;
-
-        for (const IndexedSegment &indexed : clipped)
-        {
             stack.push_back(WorkItem{
-                    .segment = indexed.segment,
-                    .t0_s = indexed.clip_t0_s,
-                    .t1_s = indexed.clip_t1_s,
+                    .segment = &segment,
+                    .t0_s = clip_t0_s,
+                    .t1_s = clip_t1_s,
                     .depth = 0,
+                    .a_world = initial_a,
+                    .b_world = initial_b,
             });
 
             while (!stack.empty())
             {
+                // Enforce the segment budget before doing any work for the next item.
+                if (out.segments.size() >= settings.max_segments)
+                {
+                    out.cap_hit = true;
+                    stack.clear();
+                    break;
+                }
+
                 const WorkItem item = stack.back();
                 stack.pop_back();
                 if (!item.segment || !(item.t1_s > item.t0_s))
@@ -300,13 +251,14 @@ namespace Game
                     continue;
                 }
 
-                const WorldVec3 a_world =
-                        eval_segment_world_position(*item.segment, item.t0_s, reference_body_world, align_delta_world);
-                const WorldVec3 b_world =
-                        eval_segment_world_position(*item.segment, item.t1_s, reference_body_world, align_delta_world);
+                // Skip subdivision for segments entirely outside the view frustum.
+                // They are still emitted (to avoid gaps at screen edges) but at coarse resolution.
+                constexpr double kRenderFrustumMargin = 0.1;
+                const bool in_frustum = frustum_accept_segment_margin(
+                        frustum, item.a_world, item.b_world, kRenderFrustumMargin);
 
-                // Once budget is exhausted, accept chord without further splitting.
-                if (!budget_exhausted &&
+                WorldVec3 mid_world{};
+                if (in_frustum &&
                     should_split_interval(*item.segment,
                                           item.t0_s,
                                           item.t1_s,
@@ -315,8 +267,9 @@ namespace Game
                                           error_px_threshold,
                                           reference_body_world,
                                           align_delta_world,
-                                          a_world,
-                                          b_world))
+                                          item.a_world,
+                                          item.b_world,
+                                          mid_world))
                 {
                     const double mid_t_s = 0.5 * (item.t0_s + item.t1_s);
                     stack.push_back(WorkItem{
@@ -324,40 +277,33 @@ namespace Game
                             .t0_s = mid_t_s,
                             .t1_s = item.t1_s,
                             .depth = item.depth + 1,
+                            .a_world = mid_world,
+                            .b_world = item.b_world,
                     });
                     stack.push_back(WorkItem{
                             .segment = item.segment,
                             .t0_s = item.t0_s,
                             .t1_s = mid_t_s,
                             .depth = item.depth + 1,
+                            .a_world = item.a_world,
+                            .b_world = mid_world,
                     });
                     continue;
                 }
 
                 out.segments.push_back(RenderSegment{
-                        .a_world = a_world,
-                        .b_world = b_world,
+                        .a_world = item.a_world,
+                        .b_world = item.b_world,
                         .t0_s = item.t0_s,
                         .t1_s = item.t1_s,
                 });
+            }
 
-                if (out.segments.size() >= settings.max_segments)
-                {
-                    budget_exhausted = true;
-                }
+            if (out.cap_hit)
+            {
+                break;
             }
         }
-
-        if (budget_exhausted)
-        {
-            out.cap_hit = true;
-        }
-
-        // Restore time order for rendering.
-        std::sort(out.segments.begin(), out.segments.end(),
-                  [](const RenderSegment &a, const RenderSegment &b) {
-                      return a.t0_s < b.t0_s;
-                  });
 
         return out;
     }
