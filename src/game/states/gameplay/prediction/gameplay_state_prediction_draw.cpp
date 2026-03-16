@@ -350,14 +350,10 @@ namespace Game
             const bool use_persistent_gpu_roots =
                     orbit_plot && orbit_plot->settings().gpu_generate_enabled &&
                     !direct_world_polyline;
-            const bool use_base_adaptive_curve =
-                    !direct_world_polyline &&
-                    !use_persistent_gpu_roots &&
-                    !track->cache.render_curve_frame.empty();
-            const bool use_planned_adaptive_curve =
-                    !direct_world_polyline &&
-                    !use_persistent_gpu_roots &&
-                    !track->cache.render_curve_frame_planned.empty();
+            // Adaptive merged curves can visibly drift away from the live craft/plan.
+            // Keep CPU rendering on the source segments until that approximation is fixed.
+            const bool use_base_adaptive_curve = false;
+            const bool use_planned_adaptive_curve = false;
 
             Draw::OrbitDrawWindowContext world_basis_draw_ctx = draw_ctx;
             if (!identity_frame_transform)
@@ -392,6 +388,25 @@ namespace Game
                 return traj_planned_segments_world_basis;
             };
 
+            const auto draw_raw_base_window = [&](const double split_t0_s,
+                                                  const double split_t1_s,
+                                                  const glm::vec4 &color) {
+                if (!(split_t1_s > split_t0_s))
+                {
+                    return;
+                }
+
+                Draw::draw_orbit_window(identity_frame_transform ? draw_ctx : world_basis_draw_ctx,
+                                        _prediction_draw_config,
+                                        _orbit_plot_perf,
+                                        identity_frame_transform ? *traj_base_segments
+                                                                 : get_base_segments_world_basis(),
+                                        split_t0_s,
+                                        split_t1_s,
+                                        color,
+                                        false);
+            };
+
             const auto draw_cpu_base_window = [&](const double window_t0_s,
                                                   const double window_t1_s,
                                                   const glm::vec4 &color) {
@@ -407,7 +422,35 @@ namespace Game
                         return;
                     }
 
-                    if (use_base_adaptive_curve)
+                    if (!use_base_adaptive_curve)
+                    {
+                        draw_raw_base_window(split_t0_s, split_t1_s, color);
+                        return;
+                    }
+
+                    std::size_t anchor_hi = i_hi;
+                    if (anchor_hi >= traj_base.size())
+                    {
+                        anchor_hi = traj_base.size() - 1;
+                    }
+
+                    std::size_t anchor_lo = (anchor_hi > 0) ? (anchor_hi - 1) : 0;
+                    if (anchor_hi == anchor_lo && (anchor_hi + 1) < traj_base.size())
+                    {
+                        anchor_hi = anchor_lo + 1;
+                    }
+
+                    const double anchor_source_t0_s = traj_base[anchor_lo].t_s;
+                    const double anchor_source_t1_s = traj_base[anchor_hi].t_s;
+                    const double anchor_t0_s = std::max(split_t0_s, anchor_source_t0_s);
+                    const double anchor_t1_s = std::min(split_t1_s, anchor_source_t1_s);
+                    const bool anchor_window_valid =
+                            is_active &&
+                            std::isfinite(anchor_source_t0_s) &&
+                            std::isfinite(anchor_source_t1_s) &&
+                            (anchor_t1_s > anchor_t0_s);
+
+                    if (!anchor_window_valid)
                     {
                         Draw::draw_adaptive_curve_window(draw_ctx,
                                                          _prediction_draw_config,
@@ -420,15 +463,33 @@ namespace Game
                         return;
                     }
 
-                    Draw::draw_orbit_window(identity_frame_transform ? draw_ctx : world_basis_draw_ctx,
-                                            _prediction_draw_config,
-                                            _orbit_plot_perf,
-                                            identity_frame_transform ? *traj_base_segments
-                                                                     : get_base_segments_world_basis(),
-                                            split_t0_s,
-                                            split_t1_s,
-                                            color,
-                                            false);
+                    if (anchor_t0_s > split_t0_s)
+                    {
+                        Draw::draw_adaptive_curve_window(draw_ctx,
+                                                         _prediction_draw_config,
+                                                         _orbit_plot_perf,
+                                                         track->cache.render_curve_frame,
+                                                         split_t0_s,
+                                                         anchor_t0_s,
+                                                         color,
+                                                         false);
+                    }
+
+                    // Keep the active subject pinned to the exact source segment around "now"
+                    // so merged adaptive nodes cannot drift away from the rendered craft.
+                    draw_raw_base_window(anchor_t0_s, anchor_t1_s, color);
+
+                    if (split_t1_s > anchor_t1_s)
+                    {
+                        Draw::draw_adaptive_curve_window(draw_ctx,
+                                                         _prediction_draw_config,
+                                                         _orbit_plot_perf,
+                                                         track->cache.render_curve_frame,
+                                                         anchor_t1_s,
+                                                         split_t1_s,
+                                                         color,
+                                                         false);
+                    }
                 };
 
                 // Keep the current displayed ship position on an exact segment boundary so
@@ -526,28 +587,9 @@ namespace Game
                                                 false,
                                                 draw_ctx.line_overlay_boost);
                 }
-                else if (use_base_adaptive_curve)
-                {
-                    Draw::draw_adaptive_curve_window(draw_ctx,
-                                                     _prediction_draw_config,
-                                                     _orbit_plot_perf,
-                                                     track->cache.render_curve_frame,
-                                                     now_s,
-                                                     t_end,
-                                                     track_color_future,
-                                                     false);
-                }
                 else
                 {
-                    Draw::draw_orbit_window(identity_frame_transform ? draw_ctx : world_basis_draw_ctx,
-                                            _prediction_draw_config,
-                                            _orbit_plot_perf,
-                                            identity_frame_transform ? *traj_base_segments
-                                                                     : get_base_segments_world_basis(),
-                                            now_s,
-                                            t_end,
-                                            track_color_future,
-                                            false);
+                    draw_cpu_base_window(now_s, t_end, track_color_future);
                 }
                 if (is_active && t_end > now_s)
                 {
