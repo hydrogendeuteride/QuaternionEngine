@@ -564,6 +564,56 @@ namespace Game::PredictionDrawDetail
         emit_cpu_render_lod(ctx, draw_config, perf, segments_world_basis, t_start_s, t_end_s, color, dashed);
     }
 
+    void draw_adaptive_curve_window(const OrbitDrawWindowContext &ctx,
+                                    const OrbitPredictionDrawConfig &draw_config,
+                                    OrbitPlotPerfStats &perf,
+                                    const OrbitRenderCurve &curve,
+                                    const double t_start_s,
+                                    const double t_end_s,
+                                    const glm::vec4 &color,
+                                    const bool dashed)
+    {
+        if (curve.empty() || !(t_end_s > t_start_s))
+        {
+            return;
+        }
+
+        OrbitRenderCurve::SelectionContext selection_ctx{};
+        selection_ctx.reference_body_world = ctx.ref_body_world;
+        selection_ctx.align_delta_world = ctx.align_delta;
+        selection_ctx.frame_to_world = ctx.frame_to_world;
+        selection_ctx.camera_world = ctx.camera_world;
+        selection_ctx.tan_half_fov = ctx.tan_half_fov;
+        selection_ctx.viewport_height_px = ctx.viewport_height_px;
+        selection_ctx.error_px = ctx.render_error_px;
+
+        const auto select_start_tp = std::chrono::steady_clock::now();
+        std::vector<orbitsim::TrajectorySegment> selected_segments{};
+        OrbitRenderCurve::select_segments(curve, selection_ctx, t_start_s, t_end_s, selected_segments);
+        perf.render_lod_ms_last +=
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - select_start_tp).count();
+        if (selected_segments.empty())
+        {
+            return;
+        }
+
+        const bool needs_world_basis_transform = !frame_transform_is_identity(ctx.frame_to_world);
+        const std::vector<orbitsim::TrajectorySegment> transformed_segments =
+                needs_world_basis_transform
+                        ? transform_segments_to_world_basis(selected_segments, ctx.frame_to_world)
+                        : std::vector<orbitsim::TrajectorySegment>{};
+        const std::vector<orbitsim::TrajectorySegment> &segments_for_draw =
+                needs_world_basis_transform ? transformed_segments : selected_segments;
+
+        OrbitDrawWindowContext draw_ctx = ctx;
+        if (needs_world_basis_transform)
+        {
+            draw_ctx.frame_to_world = glm::dmat3(1.0);
+        }
+
+        draw_orbit_window(draw_ctx, draw_config, perf, segments_for_draw, t_start_s, t_end_s, color, dashed);
+    }
+
     PickWindow build_planned_pick_window(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
                                          const OrbitPredictionDrawConfig &draw_config,
                                          const std::vector<ManeuverNode> &nodes,
