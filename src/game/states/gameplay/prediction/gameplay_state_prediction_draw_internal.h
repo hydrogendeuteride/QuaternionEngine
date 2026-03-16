@@ -23,6 +23,7 @@ namespace Game::PredictionDrawDetail
         glm::dmat3 frame_to_world{1.0};
         WorldVec3 align_delta{0.0, 0.0, 0.0};
         OrbitPlotLodBuilder::CameraContext lod_camera{};
+        OrbitPlotLodBuilder::FrustumContext render_frustum{};
         glm::dvec3 camera_world{0.0, 0.0, 0.0};
         double tan_half_fov{0.0};
         double viewport_height_px{1.0};

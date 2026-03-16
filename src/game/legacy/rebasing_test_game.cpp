@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include "game/orbit/orbit_prediction_math.h"
 #include "orbitsim/game_sim.hpp"
 #include "orbitsim/orbit_utils.hpp"
 
@@ -33,15 +34,7 @@ namespace Game
         constexpr glm::vec4 COLOR_TRAIL{0.8f, 0.8f, 0.2f, 0.9f};
         constexpr glm::vec4 COLOR_ORBIT{0.2f, 0.9f, 0.2f, 0.6f};
 
-        double safe_length(const glm::dvec3 &v)
-        {
-            const double len2 = glm::dot(v, v);
-            if (!std::isfinite(len2) || len2 <= 0.0)
-            {
-                return 0.0;
-            }
-            return std::sqrt(len2);
-        }
+        using OrbitPredictionMath::safe_length;
 
         bool changed(const glm::dvec3 &before, const glm::dvec3 &after, glm::dvec3 &out_delta)
         {

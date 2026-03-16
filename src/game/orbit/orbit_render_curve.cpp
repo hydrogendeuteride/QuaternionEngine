@@ -1,4 +1,6 @@
 #include "game/orbit/orbit_render_curve.h"
+#include "game/orbit/orbit_prediction_math.h"
+#include "game/orbit/orbit_plot_util.h"
 
 #include <algorithm>
 #include <array>
@@ -11,44 +13,6 @@ namespace Game
         constexpr std::size_t kUniformErrorSamples = 9;
         constexpr std::size_t kMidpointErrorSamples = 8;
         constexpr std::size_t kBoundaryErrorSamples = 8;
-
-        double safe_length(const glm::dvec3 &v)
-        {
-            const double len2 = glm::dot(v, v);
-            if (!std::isfinite(len2) || len2 <= 0.0)
-            {
-                return 0.0;
-            }
-            return std::sqrt(len2);
-        }
-
-        glm::dvec3 eval_segment_position(const orbitsim::TrajectorySegment &segment, const double t_s)
-        {
-            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
-            {
-                return glm::dvec3(segment.start.position_m);
-            }
-
-            double u = (t_s - segment.t0_s) / segment.dt_s;
-            if (!std::isfinite(u))
-            {
-                u = 0.0;
-            }
-            u = std::clamp(u, 0.0, 1.0);
-
-            const double u2 = u * u;
-            const double u3 = u2 * u;
-            const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-            const double h10 = u3 - (2.0 * u2) + u;
-            const double h01 = (-2.0 * u3) + (3.0 * u2);
-            const double h11 = u3 - u2;
-
-            const glm::dvec3 p0 = glm::dvec3(segment.start.position_m);
-            const glm::dvec3 p1 = glm::dvec3(segment.end.position_m);
-            const glm::dvec3 m0 = glm::dvec3(segment.start.velocity_mps) * segment.dt_s;
-            const glm::dvec3 m1 = glm::dvec3(segment.end.velocity_mps) * segment.dt_s;
-            return (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-        }
 
         double segment_end_time(const orbitsim::TrajectorySegment &segment)
         {
@@ -65,25 +29,6 @@ namespace Game
                    std::isfinite(node_t1_s) &&
                    node_t1_s > t_start_s &&
                    node_t0_s < t_end_s;
-        }
-
-        double meters_per_px_at_world(const OrbitRenderCurve::SelectionContext &ctx,
-                                      const WorldVec3 &point_world)
-        {
-            const double dist_m = safe_length(glm::dvec3(point_world) - ctx.camera_world);
-            if (!std::isfinite(dist_m) || dist_m <= 1.0e-3 ||
-                !std::isfinite(ctx.tan_half_fov) || ctx.tan_half_fov <= 1.0e-8 ||
-                !std::isfinite(ctx.viewport_height_px) || ctx.viewport_height_px <= 1.0)
-            {
-                return 1.0;
-            }
-
-            const double meters_per_px = (2.0 * ctx.tan_half_fov * dist_m) / ctx.viewport_height_px;
-            if (!std::isfinite(meters_per_px) || meters_per_px <= 1.0e-6)
-            {
-                return 1.0;
-            }
-            return meters_per_px;
         }
 
         std::size_t find_segment_for_time(const std::span<const orbitsim::TrajectorySegment> segments,
@@ -131,7 +76,7 @@ namespace Game
                 return false;
             }
 
-            out_position_m = eval_segment_position(segments[segment_index], t_s);
+            out_position_m = OrbitPlotUtil::eval_segment_local_position(segments[segment_index], t_s);
             return std::isfinite(out_position_m.x) &&
                    std::isfinite(out_position_m.y) &&
                    std::isfinite(out_position_m.z);
@@ -185,8 +130,8 @@ namespace Game
                     return;
                 }
 
-                const glm::dvec3 merged_position_m = eval_segment_position(merged, sample_time_s);
-                const double error_m = safe_length(source_position_m - merged_position_m);
+                const glm::dvec3 merged_position_m = OrbitPlotUtil::eval_segment_local_position(merged, sample_time_s);
+                const double error_m = OrbitPredictionMath::safe_length(source_position_m - merged_position_m);
                 if (std::isfinite(error_m))
                 {
                     max_error_m = std::max(max_error_m, error_m);
@@ -311,9 +256,10 @@ namespace Game
                 const double tm_s = node.segment.t0_s + (node.segment.dt_s * 0.5);
                 const WorldVec3 midpoint_world =
                         ctx.reference_body_world +
-                        WorldVec3(ctx.frame_to_world * eval_segment_position(node.segment, tm_s)) +
+                        WorldVec3(ctx.frame_to_world * OrbitPlotUtil::eval_segment_local_position(node.segment, tm_s)) +
                         ctx.align_delta_world;
-                const double error_px = node.max_error_m / meters_per_px_at_world(ctx, midpoint_world);
+                const double error_px = node.max_error_m / OrbitPlotUtil::meters_per_px_at_world(
+                        ctx.camera_world, ctx.tan_half_fov, ctx.viewport_height_px, midpoint_world);
                 descend = std::isfinite(error_px) && error_px > ctx.error_px;
             }
 
