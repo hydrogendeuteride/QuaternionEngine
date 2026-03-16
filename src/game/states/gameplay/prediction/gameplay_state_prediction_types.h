@@ -4,6 +4,7 @@
 #include "core/picking/picking_system.h"
 #include "core/world.h"
 #include "game/orbit/orbit_prediction_service.h"
+#include "game/orbit/orbit_render_curve.h"
 #include "orbitsim/frame_spec.hpp"
 
 #include <glm/glm.hpp>
@@ -121,6 +122,8 @@ namespace Game
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame_planned;
         std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> gpu_roots_frame;
         std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> gpu_roots_frame_planned;
+        OrbitRenderCurve render_curve_frame;
+        OrbitRenderCurve render_curve_frame_planned;
         orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
         bool resolved_frame_spec_valid{false};
         std::vector<ManeuverNodePreview> maneuver_previews;
@@ -157,6 +160,8 @@ namespace Game
             trajectory_segments_frame_planned.clear();
             gpu_roots_frame.reset();
             gpu_roots_frame_planned.reset();
+            render_curve_frame.clear();
+            render_curve_frame_planned.clear();
             resolved_frame_spec = {};
             resolved_frame_spec_valid = false;
             maneuver_previews.clear();
