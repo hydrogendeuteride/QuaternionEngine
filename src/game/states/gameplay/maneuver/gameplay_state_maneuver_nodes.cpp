@@ -31,6 +31,24 @@ namespace Game
             return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
         }
 
+        glm::dvec3 compose_basis_vector(const glm::dvec3 &components,
+                                        const glm::dvec3 &basis_r,
+                                        const glm::dvec3 &basis_t,
+                                        const glm::dvec3 &basis_n)
+        {
+            return basis_r * components.x + basis_t * components.y + basis_n * components.z;
+        }
+
+        glm::dvec3 project_basis_vector(const glm::dvec3 &world_vec,
+                                        const glm::dvec3 &basis_r,
+                                        const glm::dvec3 &basis_t,
+                                        const glm::dvec3 &basis_n)
+        {
+            return glm::dvec3(glm::dot(world_vec, basis_r),
+                              glm::dot(world_vec, basis_t),
+                              glm::dot(world_vec, basis_n));
+        }
+
         glm::dvec3 normalized_or(const glm::dvec3 &v, const glm::dvec3 &fallback)
         {
             const double len = OrbitPredictionMath::safe_length(v);
@@ -41,14 +59,14 @@ namespace Game
             return v / len;
         }
 
-        // Maneuver-node frame (velocity-aligned in-plane frame):
-        // - T: instantaneous flight/prograde direction (velocity-aligned)
+        // Maneuver-node frame (prograde-aligned in-plane frame):
+        // - T: instantaneous flight/prograde direction
         // - N: orbit normal from angular momentum
-        // - R: in-plane outward axis orthogonal to T (R = T x N)
+        // - R: in-plane axis orthogonal to prograde (R = T x N)
         //
-        // This avoids "circular tangent" bias and keeps node gizmo axes orthonormal.
-        orbitsim::RtnFrame compute_maneuver_rtf_frame(const glm::dvec3 &r_rel_m,
-                                                      const glm::dvec3 &v_rel_mps)
+        // This is distinct from true RTN and matches the user's expected "prograde / radial / normal" gizmo.
+        orbitsim::RtnFrame compute_maneuver_frame(const glm::dvec3 &r_rel_m,
+                                                  const glm::dvec3 &v_rel_mps)
         {
             // Keep a conventional RTN basis as a robust fallback for degenerate states.
             const orbitsim::RtnFrame fallback =
@@ -379,6 +397,59 @@ namespace Game
         }
 
     } // namespace
+
+    orbitsim::BodyId GameplayState::resolve_maneuver_node_primary_body_id(const ManeuverNode &node,
+                                                                          const double query_time_s) const
+    {
+        if (!node.primary_body_auto && node.primary_body_id != orbitsim::kInvalidBodyId)
+        {
+            return node.primary_body_id;
+        }
+
+        const PredictionTrackState *player_track = player_prediction_track();
+        if (player_track && player_track->cache.valid)
+        {
+            const OrbitPredictionCache &cache = player_track->cache;
+            if (cache.resolved_frame_spec_valid)
+            {
+                switch (cache.resolved_frame_spec.type)
+                {
+                    case orbitsim::TrajectoryFrameType::BodyCenteredInertial:
+                    case orbitsim::TrajectoryFrameType::BodyFixed:
+                    case orbitsim::TrajectoryFrameType::LVLH:
+                        if (cache.resolved_frame_spec.primary_body_id != orbitsim::kInvalidBodyId)
+                        {
+                            return cache.resolved_frame_spec.primary_body_id;
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            if (!cache.trajectory_inertial.empty())
+            {
+                const orbitsim::BodyId analysis_body_id =
+                        resolve_prediction_analysis_body_id(cache, player_track->key, query_time_s);
+                if (analysis_body_id != orbitsim::kInvalidBodyId)
+                {
+                    return analysis_body_id;
+                }
+            }
+        }
+
+        if (node.primary_body_id != orbitsim::kInvalidBodyId)
+        {
+            return node.primary_body_id;
+        }
+
+        if (_orbitsim && _orbitsim->world_reference_body())
+        {
+            return _orbitsim->world_reference_body()->sim_id;
+        }
+
+        return orbitsim::kInvalidBodyId;
+    }
 
     #include "gameplay_state_maneuver_nodes_panel.inc"
     #include "gameplay_state_maneuver_nodes_gizmo.inc"
