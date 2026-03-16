@@ -5,6 +5,7 @@
 #include "core/device/images.h"
 #include "core/input/input_system.h"
 
+#include "game/orbit/orbit_prediction_math.h"
 #include "orbitsim/coordinate_frames.hpp"
 #include "orbitsim/trajectory_transforms.hpp"
 
@@ -23,24 +24,16 @@ namespace Game
 {
     namespace
     {
+        using OrbitPredictionMath::safe_length;
+
         bool finite3(const glm::dvec3 &v)
         {
             return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
         }
 
-        double safe_length(const glm::dvec3 &v)
-        {
-            const double len2 = glm::dot(v, v);
-            if (!std::isfinite(len2) || len2 <= 0.0)
-            {
-                return 0.0;
-            }
-            return std::sqrt(len2);
-        }
-
         glm::dvec3 normalized_or(const glm::dvec3 &v, const glm::dvec3 &fallback)
         {
-            const double len = safe_length(v);
+            const double len = OrbitPredictionMath::safe_length(v);
             if (!(len > 0.0) || !std::isfinite(len))
             {
                 return fallback;
@@ -76,7 +69,7 @@ namespace Game
             }
 
             // Degenerate when angular momentum is tiny (nearly radial flight).
-            const double plane_area = safe_length(glm::cross(r_rel_m, v_rel_mps));
+            const double plane_area = OrbitPredictionMath::safe_length(glm::cross(r_rel_m, v_rel_mps));
             if (!(plane_area > 1.0e-8))
             {
                 return fallback;

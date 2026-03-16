@@ -205,6 +205,14 @@ namespace Game
         lod_camera.tan_half_fov = tan_half_fov;
         lod_camera.viewport_height_px = std::max(1.0, static_cast<double>(viewport_h_px));
 
+        OrbitPlotLodBuilder::FrustumContext render_frustum{};
+        if (ctx.renderer && ctx.renderer->_sceneManager)
+        {
+            render_frustum.valid = true;
+            render_frustum.viewproj = ctx.renderer->_sceneManager->getSceneData().viewproj;
+            render_frustum.origin_world = WorldVec3(camera_world);
+        }
+
         const double render_error_px =
                 (std::isfinite(_orbit_plot_render_error_px) && _orbit_plot_render_error_px > 0.0)
                         ? _orbit_plot_render_error_px
@@ -331,6 +339,7 @@ namespace Game
             draw_ctx.frame_to_world = frame_to_world;
             draw_ctx.align_delta = align_delta;
             draw_ctx.lod_camera = lod_camera;
+            draw_ctx.render_frustum = render_frustum;
             draw_ctx.camera_world = camera_world;
             draw_ctx.tan_half_fov = tan_half_fov;
             draw_ctx.viewport_height_px = std::max(1.0, static_cast<double>(viewport_h_px));

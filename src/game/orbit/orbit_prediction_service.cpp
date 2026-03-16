@@ -30,19 +30,9 @@ namespace Game
             return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
         }
 
-        double safe_length(const glm::dvec3 &v)
-        {
-            const double len2 = glm::dot(v, v);
-            if (!std::isfinite(len2) || len2 <= 0.0)
-            {
-                return 0.0;
-            }
-            return std::sqrt(len2);
-        }
-
         glm::dvec3 normalized_or(const glm::dvec3 &v, const glm::dvec3 &fallback)
         {
-            const double len = safe_length(v);
+            const double len = OrbitPredictionMath::safe_length(v);
             if (!(len > 0.0) || !std::isfinite(len))
             {
                 return fallback;
@@ -64,7 +54,7 @@ namespace Game
             glm::dvec3 n_hat = normalized_or(glm::cross(r_rel_m, v_rel_mps), solver_n);
             glm::dvec3 r_hat = normalized_or(glm::cross(t_hat, n_hat), solver_r);
 
-            const double plane_area = safe_length(glm::cross(r_rel_m, v_rel_mps));
+            const double plane_area = OrbitPredictionMath::safe_length(glm::cross(r_rel_m, v_rel_mps));
             if (!finite_vec3(r_hat) || !finite_vec3(t_hat) || !finite_vec3(n_hat) || !(plane_area > 1.0e-8))
             {
                 return orbitsim::Vec3{dv_rtf_mps.x, dv_rtf_mps.y, dv_rtf_mps.z};
