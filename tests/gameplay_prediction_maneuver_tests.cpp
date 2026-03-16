@@ -1,3 +1,5 @@
+#include <sstream>
+
 #define private public
 #include "game/states/gameplay/gameplay_state.h"
 #undef private
@@ -338,7 +340,7 @@ TEST_F(GameplayPredictionManeuverTests, UpdatePredictionSuppressesDragRebuildFor
     track->request_pending = false;
     state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
     state._maneuver_gizmo_interaction.node_id = node.id;
-    state._maneuver_gizmo_interaction.axis = Game::GameplayState::ManeuverHandleAxis::ProgradePos;
+    state._maneuver_gizmo_interaction.axis = Game::GameplayState::ManeuverHandleAxis::TangentialPos;
 
     state.update_prediction(ctx, 0.016f);
     track = state.player_prediction_track();
@@ -824,11 +826,11 @@ TEST_F(GameplayPredictionManeuverTests, ManeuverAxisHelpersMapComponentsLabelsCo
                                              component,
                                              sign));
 
-    EXPECT_STREQ(state.maneuver_axis_label(Game::GameplayState::ManeuverHandleAxis::ProgradePos), "+T");
+    EXPECT_STREQ(state.maneuver_axis_label(Game::GameplayState::ManeuverHandleAxis::TangentialPos), "+T");
     EXPECT_STREQ(state.maneuver_axis_label(Game::GameplayState::ManeuverHandleAxis::NormalNeg), "-N");
-    EXPECT_EQ(state.maneuver_axis_color(Game::GameplayState::ManeuverHandleAxis::ProgradePos),
-              state.maneuver_axis_color(Game::GameplayState::ManeuverHandleAxis::ProgradeNeg));
-    EXPECT_NE(state.maneuver_axis_color(Game::GameplayState::ManeuverHandleAxis::ProgradePos),
+    EXPECT_EQ(state.maneuver_axis_color(Game::GameplayState::ManeuverHandleAxis::TangentialPos),
+              state.maneuver_axis_color(Game::GameplayState::ManeuverHandleAxis::TangentialNeg));
+    EXPECT_NE(state.maneuver_axis_color(Game::GameplayState::ManeuverHandleAxis::TangentialPos),
               state.maneuver_axis_color(Game::GameplayState::ManeuverHandleAxis::RadialPos));
 
     std::vector<Game::GameplayState::ManeuverHubMarker> hubs{
@@ -837,7 +839,7 @@ TEST_F(GameplayPredictionManeuverTests, ManeuverAxisHelpersMapComponentsLabelsCo
     };
     std::vector<Game::GameplayState::ManeuverAxisMarker> handles{
             Game::GameplayState::ManeuverAxisMarker{1,
-                                                    Game::GameplayState::ManeuverHandleAxis::ProgradePos,
+                                                    Game::GameplayState::ManeuverHandleAxis::TangentialPos,
                                                     glm::vec2(20.0f, 20.0f),
                                                     glm::vec2(22.0f, 22.0f),
                                                     0u,
