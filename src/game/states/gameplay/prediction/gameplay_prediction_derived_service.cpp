@@ -464,13 +464,6 @@ namespace Game
 
         cache.gpu_roots_frame = build_gpu_root_cache(cache.trajectory_segments_frame);
         cache.gpu_roots_frame_planned = build_gpu_root_cache(cache.trajectory_segments_frame_planned);
-
-        cache.render_curve_frame = cache.trajectory_segments_frame.empty()
-                                           ? OrbitRenderCurve{}
-                                           : OrbitRenderCurve::build(cache.trajectory_segments_frame);
-        cache.render_curve_frame_planned = cache.trajectory_segments_frame_planned.empty()
-                                                   ? OrbitRenderCurve{}
-                                                   : OrbitRenderCurve::build(cache.trajectory_segments_frame_planned);
         cache.resolved_frame_spec = resolved_frame_spec;
         cache.resolved_frame_spec_valid = true;
 
