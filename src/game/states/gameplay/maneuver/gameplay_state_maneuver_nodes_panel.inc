@@ -62,12 +62,10 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         // no-op
     }
 
-    ImGui::SameLine();
-    if (ImGui::Button("+Node"))
-    {
+    auto add_maneuver_node_at_time = [&](const double time_s) {
         ManeuverNode n{};
         n.id = _maneuver_state.next_node_id++;
-        n.time_s = now_s + 60.0;
+        n.time_s = time_s;
         n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
         n.primary_body_id = default_node_primary_body_id();
         n.primary_body_auto = true;
@@ -76,6 +74,12 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         _maneuver_state.selected_node_id = n.id;
         _maneuver_state.sort_by_time();
         mark_prediction_dirty();
+    };
+
+    ImGui::SameLine();
+    if (ImGui::Button("+Node"))
+    {
+        add_maneuver_node_at_time(now_s + 60.0);
     }
 
     ImGui::SameLine();
@@ -148,35 +152,34 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         }
     }
 
-    bool style_changed = false;
-    if (ImGui::CollapsingHeader("Gizmo Style"))
-    {
-        style_changed |= ImGui::ColorEdit4("Icon Color", &_maneuver_gizmo_style.icon_color.x,
-                                           ImGuiColorEditFlags_NoInputs);
-        style_changed |= ImGui::DragFloat("Overlay Size (px)", &_maneuver_gizmo_style.icon_size_px, 0.25f, 8.0f,
-                                          160.0f, "%.1f");
-        style_changed |= ImGui::DragFloat("Overlay Scale", &_maneuver_gizmo_style.overlay_scale, 0.01f, 0.25f,
-                                          6.0f, "%.2f");
-        style_changed |= ImGui::DragFloat("Drag Sensitivity", &_maneuver_gizmo_style.drag_sensitivity_mps_per_m,
-                                          0.0001f, 0.00001f, 1.0f, "%.5f");
-        style_changed |= ImGui::Checkbox("Show Axis Overlay", &_maneuver_gizmo_style.show_axis_labels);
-    }
-
-    if (style_changed)
-    {
-        _maneuver_gizmo_style.icon_size_px = std::clamp(_maneuver_gizmo_style.icon_size_px, 8.0f, 160.0f);
-        _maneuver_gizmo_style.overlay_scale = std::clamp(_maneuver_gizmo_style.overlay_scale, 0.25f, 6.0f);
-        _maneuver_gizmo_style.drag_sensitivity_mps_per_m =
-                std::clamp(_maneuver_gizmo_style.drag_sensitivity_mps_per_m, 0.00001f, 1.0f);
-    }
-
     if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
     {
         ImGui::TextUnformatted("Gizmo: DragAxis  (Shift x0.1 / Ctrl x10)");
     }
-    else if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::HoverAxis)
+
+    if (_maneuver_nodes_debug_draw)
     {
-        ImGui::TextUnformatted("Gizmo: HoverAxis");
+        bool style_changed = false;
+        if (ImGui::CollapsingHeader("Gizmo Style"))
+        {
+            style_changed |= ImGui::ColorEdit4("Icon Color", &_maneuver_gizmo_style.icon_color.x,
+                                               ImGuiColorEditFlags_NoInputs);
+            style_changed |= ImGui::DragFloat("Overlay Size (px)", &_maneuver_gizmo_style.icon_size_px, 0.25f, 8.0f,
+                                              160.0f, "%.1f");
+            style_changed |= ImGui::DragFloat("Overlay Scale", &_maneuver_gizmo_style.overlay_scale, 0.01f, 0.25f,
+                                              6.0f, "%.2f");
+            style_changed |= ImGui::DragFloat("Drag Sensitivity", &_maneuver_gizmo_style.drag_sensitivity_mps_per_m,
+                                              0.0001f, 0.00001f, 1.0f, "%.5f");
+            style_changed |= ImGui::Checkbox("Show Axis Overlay", &_maneuver_gizmo_style.show_axis_labels);
+        }
+
+        if (style_changed)
+        {
+            _maneuver_gizmo_style.icon_size_px = std::clamp(_maneuver_gizmo_style.icon_size_px, 8.0f, 160.0f);
+            _maneuver_gizmo_style.overlay_scale = std::clamp(_maneuver_gizmo_style.overlay_scale, 0.25f, 6.0f);
+            _maneuver_gizmo_style.drag_sensitivity_mps_per_m =
+                    std::clamp(_maneuver_gizmo_style.drag_sensitivity_mps_per_m, 0.00001f, 1.0f);
+        }
     }
 
     if (_warp_to_time_active)
@@ -223,20 +226,6 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
             }
         }
     }
-
-    auto add_maneuver_node_at_time = [&](const double time_s) {
-        ManeuverNode n{};
-        n.id = _maneuver_state.next_node_id++;
-        n.time_s = time_s;
-        n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
-        n.primary_body_id = default_node_primary_body_id();
-        n.primary_body_auto = true;
-        n.total_dv_mps = 0.0;
-        _maneuver_state.nodes.push_back(n);
-        _maneuver_state.selected_node_id = n.id;
-        _maneuver_state.sort_by_time();
-        mark_prediction_dirty();
-    };
 
     // Resample a pick position from the current prediction trajectory so the overlay
     // stays consistent when the reference frame or plan changes after the pick was recorded.
@@ -377,10 +366,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
                                      ? IM_COL32(255, 190, 80, 255)
                                      : IM_COL32(170, 120, 255, 245);
         draw_orbit_pick_overlay(*orbit_pick, 10.0f, 16.0f, ring_color, IM_COL32(255, 255, 255, 120));
-    }
 
-    if (orbit_pick)
-    {
         const double dt_s = orbit_pick->time_s - now_s;
         if (std::isfinite(dt_s))
         {
@@ -551,8 +537,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         char label[96];
         std::snprintf(label,
                       sizeof(label),
-                      "%c Node %d   T%+.0fs   DV %.1f",
-                      (node.id == _maneuver_state.selected_node_id) ? '>' : ' ',
+                      "Node %d   T%+.0fs   DV %.1f",
                       node.id,
                       node.time_s - now_s,
                       node.total_dv_mps);
@@ -606,6 +591,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     ImGui::Text("Selected Node %d", sel->id);
     ImGui::TextDisabled("T%+.1fs  |  DV %.2f m/s", sel->time_s - now_s, safe_length(sel->dv_rtn_mps));
 
+    // Navigation
     ImGui::BeginDisabled(selected_idx <= 0);
     if (ImGui::Button("Prev"))
     {
@@ -621,10 +607,9 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     }
     ImGui::EndDisabled();
 
-    ImGui::SameLine();
+    // Actions
     if (ImGui::Button("Warp to Node"))
     {
-        // The runtime update picks an appropriate rails warp factor each frame to stop on the target time.
         _warp_to_time_active = true;
         _warp_to_time_target_s = sel->time_s;
         _warp_to_time_restore_level = 0;
@@ -633,7 +618,6 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     ImGui::SameLine();
     if (ImGui::Button("Execute"))
     {
-        // Arming defers the burn until sim time reaches the node; future nodes auto-trigger warp first.
         _execute_node_armed = true;
         _execute_node_id = sel->id;
 
@@ -710,8 +694,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         mark_prediction_dirty();
     }
 
-    sel->total_dv_mps = safe_length(sel->dv_rtn_mps);
-    ImGui::Text("DV total: %.2f m/s", sel->total_dv_mps);
+    ImGui::Text("DV total: %.2f m/s", safe_length(sel->dv_rtn_mps));
 
     if (sel->gizmo_valid && _maneuver_gizmo_basis_mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal)
     {

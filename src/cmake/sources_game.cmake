@@ -46,8 +46,11 @@ list(APPEND VULKAN_ENGINE_SOURCES
   # game/states/gameplay
   game/states/gameplay/gameplay_state.h
   game/states/gameplay/gameplay_state.cpp
+  game/states/gameplay/gameplay_state_ui.cpp
   game/states/gameplay/gameplay_state_scene.cpp
   game/states/gameplay/gameplay_state_sim.cpp
+  game/states/gameplay/gameplay_settings.h
+  game/states/gameplay/gameplay_settings.cpp
   game/states/gameplay/frame_monitor.h
   game/states/gameplay/frame_monitor.cpp
   game/states/gameplay/orbit_helpers.h
