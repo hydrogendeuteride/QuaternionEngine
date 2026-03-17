@@ -5,6 +5,7 @@
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_types.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_derived_service.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
+#include "game/states/gameplay/gameplay_settings.h"
 #include "game/states/gameplay/scenario/scenario_config.h"
 #include "orbit_helpers.h"
 #include "frame_monitor.h"
@@ -80,6 +81,10 @@ namespace Game
         const char *name() const override { return "Gameplay"; }
 
     private:
+        // Settings
+        GameplaySettings extract_settings() const;
+        void apply_settings(const GameplaySettings &s);
+
         // Scene bootstrap
         void setup_scene(GameStateContext &ctx);
         void setup_environment(GameStateContext &ctx);
@@ -247,6 +252,9 @@ namespace Game
         // Scenario configuration
         ScenarioConfig _scenario_config;
         std::string _scenario_slot_rel_path{"scenarios/user_gameplay.json"};
+        std::string _settings_rel_path{"settings/gameplay.json"};
+        std::string _settings_io_status{};
+        bool _settings_io_status_ok{true};
         std::string _scenario_io_status{};
         bool _scenario_io_status_ok{true};
 
