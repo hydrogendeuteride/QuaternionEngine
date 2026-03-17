@@ -245,16 +245,7 @@ bool GameplayState::resolve_maneuver_axis(const ManeuverNode &node,
 
 const char *GameplayState::maneuver_axis_label(const ManeuverHandleAxis axis) const
 {
-    switch (axis)
-    {
-        case ManeuverHandleAxis::TangentialPos: return "+T";
-        case ManeuverHandleAxis::TangentialNeg: return "-T";
-        case ManeuverHandleAxis::RadialPos: return "+R";
-        case ManeuverHandleAxis::RadialNeg: return "-R";
-        case ManeuverHandleAxis::NormalPos: return "+N";
-        case ManeuverHandleAxis::NormalNeg: return "-N";
-        default: return "";
-    }
+    return maneuver_axis_short_label(_maneuver_gizmo_basis_mode, axis);
 }
 
 uint32_t GameplayState::maneuver_axis_color(const ManeuverHandleAxis axis) const
@@ -628,8 +619,21 @@ void GameplayState::draw_maneuver_gizmo_hover_tooltip(const std::vector<Maneuver
         ImGui::BeginTooltip();
         ImGui::Text("Node %d", node->id);
         ImGui::Text("Axis: %s", hover_h.label);
+        ImGui::Text("Basis: %s", maneuver_gizmo_basis_mode_label(_maneuver_gizmo_basis_mode));
         ImGui::Text("DV RTN: (%.2f, %.2f, %.2f) m/s",
                     node->dv_rtn_mps.x, node->dv_rtn_mps.y, node->dv_rtn_mps.z);
+        if (_maneuver_gizmo_basis_mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal)
+        {
+            const glm::dvec3 dv_world = compose_basis_vector(node->dv_rtn_mps,
+                                                             node->maneuver_basis_r_world,
+                                                             node->maneuver_basis_t_world,
+                                                             node->maneuver_basis_n_world);
+            const glm::dvec3 dv_display = project_basis_vector(dv_world,
+                                                               node->basis_r_world,
+                                                               node->basis_t_world,
+                                                               node->basis_n_world);
+            ImGui::Text("DV PON: (%.2f, %.2f, %.2f) m/s", dv_display.y, dv_display.x, dv_display.z);
+        }
         ImGui::TextUnformatted("Drag LMB (Shift x0.1 / Ctrl x10)");
         ImGui::EndTooltip();
     }
@@ -913,6 +917,78 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         return finite3(glm::dvec3(out_world));
     };
 
+    const auto estimate_displayed_tangent_world =
+            [&](const double sample_time_s,
+                const WorldVec3 &sample_position_world,
+                const glm::dvec3 &fallback) -> glm::dvec3 {
+                if (traj_node_world.size() < 2 || !std::isfinite(sample_time_s) || !finite3(glm::dvec3(sample_position_world)))
+                {
+                    return fallback;
+                }
+
+                auto it_hi = std::lower_bound(traj_node_world.cbegin(),
+                                              traj_node_world.cend(),
+                                              sample_time_s,
+                                              [](const orbitsim::TrajectorySample &s, double t) { return s.t_s < t; });
+                const size_t i_hi = static_cast<size_t>(std::distance(traj_node_world.cbegin(), it_hi));
+                if (i_hi >= traj_node_world.size())
+                {
+                    return fallback;
+                }
+
+                double local_dt_s = std::numeric_limits<double>::quiet_NaN();
+                if (i_hi > 0)
+                {
+                    local_dt_s = sample_time_s - traj_node_world[i_hi - 1].t_s;
+                }
+                if ((!std::isfinite(local_dt_s) || !(local_dt_s > 0.0)) && i_hi + 1 < traj_node_world.size())
+                {
+                    local_dt_s = traj_node_world[i_hi + 1].t_s - sample_time_s;
+                }
+                if ((!std::isfinite(local_dt_s) || !(local_dt_s > 0.0)) && i_hi > 0)
+                {
+                    local_dt_s = traj_node_world[i_hi].t_s - traj_node_world[i_hi - 1].t_s;
+                }
+                if (!std::isfinite(local_dt_s) || !(local_dt_s > 0.0))
+                {
+                    return fallback;
+                }
+
+                const double sample_dt_s = std::clamp(local_dt_s * 0.25, 1.0e-3, local_dt_s);
+
+                const double t_prev = std::clamp(sample_time_s - sample_dt_s, traj_node_t0, sample_time_s);
+                if ((sample_time_s - t_prev) > 1.0e-6)
+                {
+                    WorldVec3 prev_world{0.0, 0.0, 0.0};
+                    if (sample_displayed_node_world(t_prev, prev_world))
+                    {
+                        const glm::dvec3 tangent = glm::dvec3(sample_position_world - prev_world);
+                        const double tangent_len = safe_length(tangent);
+                        if (std::isfinite(tangent_len) && tangent_len > 1.0e-6)
+                        {
+                            return tangent / tangent_len;
+                        }
+                    }
+                }
+
+                const double t_next = std::clamp(sample_time_s + sample_dt_s, sample_time_s, traj_node_t1);
+                if ((t_next - sample_time_s) > 1.0e-6)
+                {
+                    WorldVec3 next_world{0.0, 0.0, 0.0};
+                    if (sample_displayed_node_world(t_next, next_world))
+                    {
+                        const glm::dvec3 tangent = glm::dvec3(next_world - sample_position_world);
+                        const double tangent_len = safe_length(tangent);
+                        if (std::isfinite(tangent_len) && tangent_len > 1.0e-6)
+                        {
+                            return tangent / tangent_len;
+                        }
+                    }
+                }
+
+                return fallback;
+            };
+
     const auto resolve_node_primary_body_id =
             [&](const ManeuverNode &node, const double sample_time_s, const glm::dvec3 &inertial_position_m)
             -> orbitsim::BodyId {
@@ -1056,9 +1132,43 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
                                                                                 basis_time_s,
                                                                                 glm::dvec3(0.0, 0.0, 1.0));
 
-        node.basis_r_world = node.maneuver_basis_r_world;
-        node.basis_t_world = node.maneuver_basis_t_world;
-        node.basis_n_world = node.maneuver_basis_n_world;
+        if (_maneuver_gizmo_basis_mode == ManeuverGizmoBasisMode::RTN)
+        {
+            node.basis_r_world = node.maneuver_basis_r_world;
+            node.basis_t_world = node.maneuver_basis_t_world;
+            node.basis_n_world = node.maneuver_basis_n_world;
+        }
+        else
+        {
+            const glm::dvec3 fallback_rtn_r(solver_frame.R.x, solver_frame.R.y, solver_frame.R.z);
+            const glm::dvec3 fallback_rtn_t(solver_frame.T.x, solver_frame.T.y, solver_frame.T.z);
+            glm::dvec3 prograde_inertial = normalized_or(v_rel_mps, fallback_rtn_t);
+            glm::dvec3 normal_inertial = normalized_or(glm::dvec3(solver_frame.N.x, solver_frame.N.y, solver_frame.N.z),
+                                                       glm::dvec3(0.0, 0.0, 1.0));
+            const glm::dvec3 prograde_world_fallback =
+                    transform_inertial_basis_to_display_world(prograde_inertial, basis_time_s, node.maneuver_basis_t_world);
+            const glm::dvec3 normal_world_fallback =
+                    transform_inertial_basis_to_display_world(normal_inertial, basis_time_s, node.maneuver_basis_n_world);
+            glm::dvec3 prograde_world = estimate_displayed_tangent_world(node.time_s,
+                                                                         node_position_world,
+                                                                         prograde_world_fallback);
+            glm::dvec3 normal_world = normalized_or(normal_world_fallback, node.maneuver_basis_n_world);
+            glm::dvec3 outward_world = normalized_or(glm::cross(prograde_world, normal_world), node.maneuver_basis_r_world);
+            if (glm::dot(outward_world, node.maneuver_basis_r_world) < 0.0)
+            {
+                outward_world = -outward_world;
+            }
+            normal_world = normalized_or(glm::cross(outward_world, prograde_world), node.maneuver_basis_n_world);
+            if (glm::dot(normal_world, node.maneuver_basis_n_world) < 0.0)
+            {
+                outward_world = -outward_world;
+                normal_world = -normal_world;
+            }
+
+            node.basis_r_world = outward_world;
+            node.basis_t_world = prograde_world;
+            node.basis_n_world = normal_world;
+        }
 
         // Burn direction is used purely for debug visualization; zero-DV nodes fall back to the tangential axis.
         const glm::dvec3 dv_world = compose_basis_vector(node.dv_rtn_mps,

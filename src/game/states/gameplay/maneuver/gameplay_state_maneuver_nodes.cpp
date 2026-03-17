@@ -59,6 +59,41 @@ namespace Game
             return v / len;
         }
 
+        const char *maneuver_gizmo_basis_mode_label(const ManeuverGizmoBasisMode mode)
+        {
+            switch (mode)
+            {
+                case ManeuverGizmoBasisMode::ProgradeOutwardNormal:
+                    return "Prograde / Outward / Normal";
+                case ManeuverGizmoBasisMode::RTN:
+                    return "RTN";
+                default:
+                    return "Unknown";
+            }
+        }
+
+        const char *maneuver_axis_short_label(const ManeuverGizmoBasisMode mode,
+                                              const ManeuverHandleAxis axis)
+        {
+            switch (axis)
+            {
+                case ManeuverHandleAxis::TangentialPos:
+                    return mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal ? "+P" : "+T";
+                case ManeuverHandleAxis::TangentialNeg:
+                    return mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal ? "-P" : "-T";
+                case ManeuverHandleAxis::RadialPos:
+                    return mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal ? "+O" : "+R";
+                case ManeuverHandleAxis::RadialNeg:
+                    return mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal ? "-O" : "-R";
+                case ManeuverHandleAxis::NormalPos:
+                    return "+N";
+                case ManeuverHandleAxis::NormalNeg:
+                    return "-N";
+                default:
+                    return "";
+            }
+        }
+
         // Maneuver-node frame uses true RTN so editing, execution, and prediction all share one orthogonal basis:
         // - R: radial, away from the primary
         // - T: tangential / along-track in the orbital plane
@@ -370,20 +405,32 @@ namespace Game
         if (player_track && player_track->cache.valid)
         {
             const OrbitPredictionCache &cache = player_track->cache;
-            if (cache.resolved_frame_spec_valid)
+            const auto &traj =
+                    cache.trajectory_inertial_planned.size() >= 2 ? cache.trajectory_inertial_planned
+                                                                  : cache.trajectory_inertial;
+
+            orbitsim::State sc_state{};
+            if (!traj.empty() &&
+                sample_prediction_inertial_state(traj, query_time_s, sc_state) &&
+                !cache.massive_bodies.empty())
             {
-                switch (cache.resolved_frame_spec.type)
+                const auto body_position_at = [&](const std::size_t i) -> orbitsim::Vec3 {
+                    const orbitsim::MassiveBody &body = cache.massive_bodies[i];
+                    if (cache.shared_ephemeris && !cache.shared_ephemeris->empty())
+                    {
+                        return cache.shared_ephemeris->body_state_at_by_id(body.id, query_time_s).position_m;
+                    }
+                    return body.state.position_m;
+                };
+
+                const std::size_t primary_index = orbitsim::auto_select_primary_index(
+                        cache.massive_bodies,
+                        sc_state.position_m,
+                        body_position_at,
+                        _orbitsim ? _orbitsim->sim.config().softening_length_m : 0.0);
+                if (primary_index < cache.massive_bodies.size())
                 {
-                    case orbitsim::TrajectoryFrameType::BodyCenteredInertial:
-                    case orbitsim::TrajectoryFrameType::BodyFixed:
-                    case orbitsim::TrajectoryFrameType::LVLH:
-                        if (cache.resolved_frame_spec.primary_body_id != orbitsim::kInvalidBodyId)
-                        {
-                            return cache.resolved_frame_spec.primary_body_id;
-                        }
-                        break;
-                    default:
-                        break;
+                    return cache.massive_bodies[primary_index].id;
                 }
             }
 
