@@ -55,6 +55,7 @@ namespace Game
         using ManeuverNode = Game::ManeuverNode;
         using ManeuverPlanState = Game::ManeuverPlanState;
         using ManeuverHandleAxis = Game::ManeuverHandleAxis;
+        using ManeuverGizmoBasisMode = Game::ManeuverGizmoBasisMode;
         using ManeuverGizmoStyle = Game::ManeuverGizmoStyle;
         using ManeuverGizmoInteraction = Game::ManeuverGizmoInteraction;
         using ManeuverGizmoViewContext = Game::ManeuverGizmoViewContext;
@@ -353,6 +354,7 @@ namespace Game
         bool _maneuver_nodes_debug_draw{true};
         double _maneuver_timeline_window_s{3600.0};
         ManeuverPlanState _maneuver_state{};
+        ManeuverGizmoBasisMode _maneuver_gizmo_basis_mode{ManeuverGizmoBasisMode::ProgradeOutwardNormal};
         ManeuverGizmoStyle _maneuver_gizmo_style{};
         ManeuverGizmoInteraction _maneuver_gizmo_interaction{};
 

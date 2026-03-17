@@ -97,6 +97,57 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         _maneuver_timeline_window_s = static_cast<double>(std::max(60.0f, window_s));
     }
 
+    // Gizmo basis toggle: large colored tab-style buttons
+    {
+        constexpr ManeuverGizmoBasisMode k_basis_modes[]{
+            ManeuverGizmoBasisMode::ProgradeOutwardNormal,
+            ManeuverGizmoBasisMode::RTN
+        };
+        constexpr ImVec4 k_active_colors[]{
+            ImVec4(0.20f, 0.65f, 0.30f, 1.0f),  // PON green
+            ImVec4(0.70f, 0.50f, 0.15f, 1.0f),   // RTN amber
+        };
+        constexpr ImVec4 k_hovered_colors[]{
+            ImVec4(0.25f, 0.55f, 0.30f, 0.70f),
+            ImVec4(0.55f, 0.40f, 0.15f, 0.70f),
+        };
+
+        const float avail_w = ImGui::GetContentRegionAvail().x;
+        const float btn_w = std::max(80.0f, (avail_w - ImGui::GetStyle().ItemSpacing.x) * 0.5f);
+        const float btn_h = ImGui::GetFrameHeight() + 4.0f;
+
+        for (int bi = 0; bi < 2; ++bi)
+        {
+            const bool is_active = (_maneuver_gizmo_basis_mode == k_basis_modes[bi]);
+            const char *label = maneuver_gizmo_basis_mode_label(k_basis_modes[bi]);
+
+            if (is_active)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Button, k_active_colors[bi]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_active_colors[bi]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, k_active_colors[bi]);
+            }
+            else
+            {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.20f, 0.22f, 0.60f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_hovered_colors[bi]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, k_active_colors[bi]);
+            }
+
+            if (ImGui::Button(label, ImVec2(btn_w, btn_h)))
+            {
+                _maneuver_gizmo_basis_mode = k_basis_modes[bi];
+                _maneuver_gizmo_interaction = {};
+            }
+            ImGui::PopStyleColor(3);
+
+            if (bi == 0)
+            {
+                ImGui::SameLine();
+            }
+        }
+    }
+
     bool style_changed = false;
     if (ImGui::CollapsingHeader("Gizmo Style"))
     {
@@ -511,7 +562,22 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         {
             _maneuver_state.selected_node_id = node.id;
         }
-        ImGui::TextDisabled("RTN  %.1f / %.1f / %.1f", node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z);
+        if (_maneuver_gizmo_basis_mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal && node.gizmo_valid)
+        {
+            const glm::dvec3 dv_w = compose_basis_vector(node.dv_rtn_mps,
+                                                          node.maneuver_basis_r_world,
+                                                          node.maneuver_basis_t_world,
+                                                          node.maneuver_basis_n_world);
+            const glm::dvec3 dv_d = project_basis_vector(dv_w,
+                                                          node.basis_r_world,
+                                                          node.basis_t_world,
+                                                          node.basis_n_world);
+            ImGui::TextDisabled("PON  %.1f / %.1f / %.1f", dv_d.y, dv_d.x, dv_d.z);
+        }
+        else
+        {
+            ImGui::TextDisabled("RTN  %.1f / %.1f / %.1f", node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z);
+        }
         if (i + 1 < _maneuver_state.nodes.size())
         {
             ImGui::Separator();
@@ -646,6 +712,22 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
 
     sel->total_dv_mps = safe_length(sel->dv_rtn_mps);
     ImGui::Text("DV total: %.2f m/s", sel->total_dv_mps);
+
+    if (sel->gizmo_valid && _maneuver_gizmo_basis_mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal)
+    {
+        const glm::dvec3 dv_world = compose_basis_vector(sel->dv_rtn_mps,
+                                                         sel->maneuver_basis_r_world,
+                                                         sel->maneuver_basis_t_world,
+                                                         sel->maneuver_basis_n_world);
+        const glm::dvec3 dv_display = project_basis_vector(dv_world,
+                                                           sel->basis_r_world,
+                                                           sel->basis_t_world,
+                                                           sel->basis_n_world);
+        ImGui::Text("Gizmo PON: %.2f / %.2f / %.2f m/s",
+                    dv_display.y,
+                    dv_display.x,
+                    dv_display.z);
+    }
 
     const orbitsim::BodyId analysis_body_id = (player_track && player_track->cache.valid)
                                                   ? resolve_prediction_analysis_body_id(player_track->cache,

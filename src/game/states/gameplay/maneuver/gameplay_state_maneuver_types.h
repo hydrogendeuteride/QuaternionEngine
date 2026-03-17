@@ -26,11 +26,12 @@ namespace Game
         double total_dv_mps{0.0};
         WorldVec3 position_world{0.0, 0.0, 0.0};
         glm::dvec3 burn_direction_world{0.0, 0.0, 0.0};
-        // Displayed true-RTN basis expressed in the current world space.
+        // Visible/editable gizmo basis expressed in the current world space.
+        // Slot order stays X/Y/Z = radial-or-outward, tangential-or-prograde, normal.
         glm::dvec3 basis_r_world{1.0, 0.0, 0.0};
         glm::dvec3 basis_t_world{0.0, 1.0, 0.0};
         glm::dvec3 basis_n_world{0.0, 0.0, 1.0};
-        // Authored maneuver basis expressed in the same displayed world space.
+        // Canonical authored true-RTN basis expressed in the same world space.
         glm::dvec3 maneuver_basis_r_world{1.0, 0.0, 0.0};
         glm::dvec3 maneuver_basis_t_world{0.0, 1.0, 0.0};
         glm::dvec3 maneuver_basis_n_world{0.0, 0.0, 1.0};
@@ -109,6 +110,12 @@ namespace Game
         NormalNeg,
     };
 
+    enum class ManeuverGizmoBasisMode : uint8_t
+    {
+        ProgradeOutwardNormal = 0,
+        RTN,
+    };
+
     struct ManeuverGizmoStyle
     {
         glm::vec4 icon_color{0.30f, 0.80f, 1.00f, 0.90f};
@@ -127,7 +134,7 @@ namespace Game
             DragAxis
         };
 
-        // Captures drag state in maneuver-frame (RTN) component space plus the world-space axis parameter used by the solver.
+        // Captures drag state in both canonical RTN storage space and the current display-basis component space.
         State state{State::Idle};
         int node_id{-1};
         ManeuverHandleAxis axis{ManeuverHandleAxis::None};
