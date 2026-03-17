@@ -37,10 +37,6 @@ bool GameplayState::build_maneuver_gizmo_view_context(const GameStateContext &ct
     {
         logical_extent = VkExtent2D{1280, 720};
     }
-    if (logical_extent.width == 0 || logical_extent.height == 0)
-    {
-        return false;
-    }
 
     const VkRect2D letterbox_rect = vkutil::compute_letterbox_rect(logical_extent, swap_extent);
     if (letterbox_rect.extent.width == 0 || letterbox_rect.extent.height == 0)
@@ -165,21 +161,17 @@ bool GameplayState::project_maneuver_gizmo_point(const ManeuverGizmoViewContext 
         return false;
     }
 
-    const double logical_x = ((ndc_x + 1.0) * 0.5) * view.logical_w;
-    const double logical_y = ((1.0 - ndc_y) * 0.5) * view.logical_h;
-    if (!std::isfinite(logical_x) || !std::isfinite(logical_y))
+    const double u = (ndc_x + 1.0) * 0.5;
+    const double v = (1.0 - ndc_y) * 0.5;
+    if (!std::isfinite(u) || !std::isfinite(v))
     {
         return false;
     }
 
-    const double u = logical_x / view.logical_w;
-    const double v = logical_y / view.logical_h;
     const double swap_x =
-            static_cast<double>(view.letterbox_rect.offset.x) + u * static_cast<double>(view.letterbox_rect.extent.
-                width);
+            static_cast<double>(view.letterbox_rect.offset.x) + u * static_cast<double>(view.letterbox_rect.extent.width);
     const double swap_y =
-            static_cast<double>(view.letterbox_rect.offset.y) + v * static_cast<double>(view.letterbox_rect.extent.
-                height);
+            static_cast<double>(view.letterbox_rect.offset.y) + v * static_cast<double>(view.letterbox_rect.extent.height);
 
     const double draw_x = swap_x * view.draw_from_swap_x;
     const double draw_y = swap_y * view.draw_from_swap_y;
@@ -600,7 +592,7 @@ void GameplayState::draw_maneuver_gizmo_markers(ImDrawList *draw_list,
         draw_list->AddCircleFilled(to_imvec2(h.handle_screen), handle_r, col, 24);
         if (_maneuver_gizmo_style.show_axis_labels)
         {
-            draw_list->AddText(ImVec2(h.handle_screen.x + 6.0f, h.handle_screen.y - 7.0f), col, h.label);
+            draw_list->AddText(ImVec2(h.handle_screen.x + handle_r + 2.0f, h.handle_screen.y - handle_r), col, h.label);
         }
     }
 }
@@ -620,8 +612,8 @@ void GameplayState::draw_maneuver_gizmo_hover_tooltip(const std::vector<Maneuver
         ImGui::Text("Node %d", node->id);
         ImGui::Text("Axis: %s", hover_h.label);
         ImGui::Text("Basis: %s", maneuver_gizmo_basis_mode_label(_maneuver_gizmo_basis_mode));
-        ImGui::Text("DV RTN: (%.2f, %.2f, %.2f) m/s",
-                    node->dv_rtn_mps.x, node->dv_rtn_mps.y, node->dv_rtn_mps.z);
+        const char *dv_fmt = (node->total_dv_mps < 1.0) ? "DV RTN: (%.4f, %.4f, %.4f) m/s" : "DV RTN: (%.2f, %.2f, %.2f) m/s";
+        ImGui::Text(dv_fmt, node->dv_rtn_mps.x, node->dv_rtn_mps.y, node->dv_rtn_mps.z);
         if (_maneuver_gizmo_basis_mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal)
         {
             const glm::dvec3 dv_world = compose_basis_vector(node->dv_rtn_mps,
@@ -632,8 +624,10 @@ void GameplayState::draw_maneuver_gizmo_hover_tooltip(const std::vector<Maneuver
                                                                node->basis_r_world,
                                                                node->basis_t_world,
                                                                node->basis_n_world);
-            ImGui::Text("DV PON: (%.2f, %.2f, %.2f) m/s", dv_display.y, dv_display.x, dv_display.z);
+            const char *pon_fmt = (node->total_dv_mps < 1.0) ? "DV PON: (%.4f, %.4f, %.4f) m/s" : "DV PON: (%.2f, %.2f, %.2f) m/s";
+            ImGui::Text(pon_fmt, dv_display.y, dv_display.x, dv_display.z);
         }
+        ImGui::Text("Total: %.3f m/s", node->total_dv_mps);
         ImGui::TextUnformatted("Drag LMB (Shift x0.1 / Ctrl x10)");
         ImGui::EndTooltip();
     }
@@ -791,9 +785,8 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
 
     const auto &traj_base = prediction_cache->trajectory_frame;
     const auto &traj_planned = prediction_cache->trajectory_frame_planned;
-    const auto &traj_now = traj_base;
-    const double t0 = traj_now.front().t_s;
-    const double t1 = traj_now.back().t_s;
+    const double t0 = traj_base.front().t_s;
+    const double t1 = traj_base.back().t_s;
     if (!std::isfinite(now_s) || !(t1 > t0))
     {
         return;
@@ -815,24 +808,24 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         ship_pos_world = player->get_render_position_world(alpha_f);
     }
 
-    auto it_hi = std::lower_bound(traj_now.cbegin(),
-                                  traj_now.cend(),
+    auto it_hi = std::lower_bound(traj_base.cbegin(),
+                                  traj_base.cend(),
                                   now_s,
                                   [](const orbitsim::TrajectorySample &s, double t) { return s.t_s < t; });
-    const size_t i_hi = static_cast<size_t>(std::distance(traj_now.cbegin(), it_hi));
-    if (i_hi >= traj_now.size())
+    const size_t i_hi = static_cast<size_t>(std::distance(traj_base.cbegin(), it_hi));
+    if (i_hi >= traj_base.size())
     {
         return;
     }
 
     WorldVec3 predicted_now_world =
-            prediction_sample_position_world(*prediction_cache, traj_now[i_hi], now_s);
+            prediction_sample_position_world(*prediction_cache, traj_base[i_hi], now_s);
     if (i_hi > 0)
     {
         predicted_now_world = prediction_sample_hermite_world(
                 *prediction_cache,
-                traj_now[i_hi - 1],
-                traj_now[i_hi],
+                traj_base[i_hi - 1],
+                traj_base[i_hi],
                 now_s,
                 now_s);
     }
@@ -1045,13 +1038,11 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
         glm::dvec3 v_rel_mps{0.0, 0.0, 0.0};
         WorldVec3 node_position_world{0.0, 0.0, 0.0};
         bool have_runtime_state = false;
-        double t_basis = node.time_s;
         double basis_time_s = node.time_s;
-        if (t_basis > traj_node_t0)
+        if (basis_time_s > traj_node_t0)
         {
-            t_basis = std::max(traj_node_t0, t_basis - 1e-3);
+            basis_time_s = std::max(traj_node_t0, basis_time_s - 1e-3);
         }
-        basis_time_s = t_basis;
 
         if (!sample_displayed_node_world(node.time_s, node_position_world))
         {
@@ -1085,14 +1076,14 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
             }
 
             const TrajectorySampledState inertial_state =
-                    sample_trajectory_state(traj_node_inertial, WorldVec3(0.0), t_basis);
+                    sample_trajectory_state(traj_node_inertial, WorldVec3(0.0), basis_time_s);
             if (!inertial_state.valid)
             {
                 continue;
             }
 
             const orbitsim::BodyId primary_body_id =
-                    resolve_node_primary_body_id(node, t_basis, inertial_state.r_rel_m);
+                    resolve_node_primary_body_id(node, basis_time_s, inertial_state.r_rel_m);
             const orbitsim::MassiveBody *primary_body = find_massive_body(prediction_cache->massive_bodies, primary_body_id);
             if (!primary_body)
             {
@@ -1101,7 +1092,7 @@ void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
 
             const orbitsim::State primary_state =
                     (prediction_cache->shared_ephemeris && !prediction_cache->shared_ephemeris->empty())
-                        ? prediction_cache->shared_ephemeris->body_state_at_by_id(primary_body_id, t_basis)
+                        ? prediction_cache->shared_ephemeris->body_state_at_by_id(primary_body_id, basis_time_s)
                         : primary_body->state;
 
             r_rel_m = inertial_state.r_rel_m - glm::dvec3(primary_state.position_m);
