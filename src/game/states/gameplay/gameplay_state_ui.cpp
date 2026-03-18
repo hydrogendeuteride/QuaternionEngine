@@ -554,13 +554,6 @@ namespace Game
                                 static_cast<double>(std::max(0.0f, future_window_celestial_s));
                     }
 
-                    float future_window_planned_s = static_cast<float>(_prediction_future_window_planned_s);
-                    if (ImGui::DragFloat("Planned future window (s)", &future_window_planned_s, 10.0f, 0.0f, 15552000.0f, "%.0f"))
-                    {
-                        _prediction_future_window_planned_s =
-                                static_cast<double>(std::max(0.0f, future_window_planned_s));
-                    }
-
                     float refresh_s = static_cast<float>(_prediction_periodic_refresh_s);
                     if (ImGui::DragFloat("Prediction refresh (s)", &refresh_s, 1.0f, 0.0f, 36000.0f, "%.1f"))
                     {

@@ -95,6 +95,117 @@ namespace Game
             return std::isfinite(value);
         }
 
+        struct SpacecraftSamplingBudget
+        {
+            double target_samples_max{OrbitPredictionTuning::kSpacecraftTargetSamplesSoftNormal};
+            int soft_max_steps{OrbitPredictionTuning::kSpacecraftMaxStepsSoftNormal};
+            int hard_max_steps{OrbitPredictionTuning::kSpacecraftMaxStepsHardNormal};
+        };
+
+        template<typename BodyPositionAt>
+        std::size_t select_primary_index_with_hysteresis(const std::vector<orbitsim::MassiveBody> &bodies,
+                                                         const orbitsim::Vec3 &query_pos_m,
+                                                         BodyPositionAt body_position_at,
+                                                         const double softening_length_m,
+                                                         const orbitsim::BodyId preferred_body_id)
+        {
+            if (bodies.empty())
+            {
+                return 0;
+            }
+
+            const double eps2 = softening_length_m * softening_length_m;
+            std::size_t best_index = 0;
+            double best_metric = -1.0;
+            std::optional<std::size_t> preferred_index;
+            double preferred_metric = -1.0;
+
+            for (std::size_t i = 0; i < bodies.size(); ++i)
+            {
+                const double mass_kg = std::isfinite(bodies[i].mass_kg) ? bodies[i].mass_kg : 0.0;
+                if (!(mass_kg >= 0.0))
+                {
+                    continue;
+                }
+
+                const orbitsim::Vec3 dr = body_position_at(i) - query_pos_m;
+                const double r2 = glm::dot(dr, dr) + eps2;
+                if (!(r2 > 0.0) || !std::isfinite(r2))
+                {
+                    continue;
+                }
+
+                const double metric = mass_kg / r2;
+                if (metric > best_metric)
+                {
+                    best_metric = metric;
+                    best_index = i;
+                }
+
+                if (bodies[i].id == preferred_body_id)
+                {
+                    preferred_index = i;
+                    preferred_metric = metric;
+                }
+            }
+
+            if (preferred_index.has_value() &&
+                preferred_metric > 0.0 &&
+                best_metric > 0.0 &&
+                preferred_metric >= (best_metric * OrbitPredictionTuning::kPrimaryBodyHysteresisKeepRatio))
+            {
+                return *preferred_index;
+            }
+
+            return best_index;
+        }
+
+        void apply_lagrange_integrator_profile(orbitsim::GameSimulation::Config &sim_config)
+        {
+            orbitsim::DOPRI5Options &integrator = sim_config.spacecraft_integrator;
+            if (!(integrator.max_step_s > 0.0) || integrator.max_step_s > OrbitPredictionTuning::kLagrangeIntegratorMaxStepS)
+            {
+                integrator.max_step_s = OrbitPredictionTuning::kLagrangeIntegratorMaxStepS;
+            }
+            integrator.abs_tol = std::min(integrator.abs_tol, OrbitPredictionTuning::kLagrangeIntegratorAbsTol);
+            integrator.rel_tol = std::min(integrator.rel_tol, OrbitPredictionTuning::kLagrangeIntegratorRelTol);
+        }
+
+        std::size_t count_future_maneuver_impulses(const OrbitPredictionService::Request &request)
+        {
+            return static_cast<std::size_t>(std::count_if(
+                    request.maneuver_impulses.begin(),
+                    request.maneuver_impulses.end(),
+                    [&request](const OrbitPredictionService::ManeuverImpulse &impulse) {
+                        return std::isfinite(impulse.t_s) && impulse.t_s >= request.sim_time_s;
+                    }));
+        }
+
+        SpacecraftSamplingBudget build_spacecraft_sampling_budget(const OrbitPredictionService::Request &request)
+        {
+            SpacecraftSamplingBudget out{};
+            const double future_maneuvers = static_cast<double>(count_future_maneuver_impulses(request));
+
+            const double target_bonus = std::min(
+                    future_maneuvers * OrbitPredictionTuning::kSpacecraftTargetSamplesBonusPerManeuver,
+                    OrbitPredictionTuning::kSpacecraftTargetSamplesHardNormal -
+                            OrbitPredictionTuning::kSpacecraftTargetSamplesSoftNormal);
+            out.target_samples_max =
+                    std::clamp(OrbitPredictionTuning::kSpacecraftTargetSamplesSoftNormal + target_bonus,
+                               OrbitPredictionTuning::kSpacecraftTargetSamplesSoftNormal,
+                               OrbitPredictionTuning::kSpacecraftTargetSamplesHardNormal);
+
+            const double step_bonus = std::min(
+                    future_maneuvers * static_cast<double>(OrbitPredictionTuning::kSpacecraftMaxStepsBonusPerManeuver),
+                    static_cast<double>(OrbitPredictionTuning::kSpacecraftMaxStepsHardNormal -
+                                        OrbitPredictionTuning::kSpacecraftMaxStepsSoftNormal));
+            out.soft_max_steps =
+                    std::clamp(OrbitPredictionTuning::kSpacecraftMaxStepsSoftNormal + static_cast<int>(std::lround(step_bonus)),
+                               OrbitPredictionTuning::kSpacecraftMaxStepsSoftNormal,
+                               OrbitPredictionTuning::kSpacecraftMaxStepsHardNormal);
+            return out;
+        }
+
         bool same_config_for_ephemeris(const orbitsim::GameSimulation::Config &a,
                                        const orbitsim::GameSimulation::Config &b)
         {
@@ -271,7 +382,22 @@ namespace Game
             out.massive_bodies = request.massive_bodies;
             out.duration_s = sampling_spec.horizon_s;
             out.celestial_dt_s = sampling_spec.sample_dt_s;
-            out.max_samples = sampling_spec.max_samples;
+            if (request.celestial_ephemeris_dt_s > 0.0)
+            {
+                out.celestial_dt_s = std::min(out.celestial_dt_s, request.celestial_ephemeris_dt_s);
+            }
+            if (request.lagrange_sensitive)
+            {
+                out.celestial_dt_s = std::min(out.celestial_dt_s, OrbitPredictionTuning::kLagrangeEphemerisMaxDtS);
+            }
+            out.celestial_dt_s = std::max(1.0e-3, out.celestial_dt_s);
+            const std::size_t desired_segments =
+                    static_cast<std::size_t>(std::ceil(out.duration_s / out.celestial_dt_s));
+            out.max_samples = std::max<std::size_t>(sampling_spec.max_samples, desired_segments);
+            if (request.lagrange_sensitive)
+            {
+                out.max_samples = std::min(out.max_samples, OrbitPredictionTuning::kLagrangeEphemerisMaxSamples);
+            }
             return out;
         }
 
@@ -535,11 +661,12 @@ namespace Game
             return out;
         }
 
-        const std::size_t primary_index = orbitsim::auto_select_primary_index(
+        const std::size_t primary_index = select_primary_index_with_hysteresis(
                 request.massive_bodies,
                 request.ship_bary_position_m,
                 [&request](const std::size_t i) -> orbitsim::Vec3 { return request.massive_bodies[i].state.position_m; },
-                request.sim_config.softening_length_m);
+                request.sim_config.softening_length_m,
+                request.preferred_primary_body_id);
         if (primary_index >= request.massive_bodies.size())
         {
             return out;
@@ -565,7 +692,8 @@ namespace Game
         // Start from orbital-state-driven defaults, then clamp into service-wide budgets.
         double horizon_s = std::clamp(horizon_s_auto, OrbitPredictionTuning::kMinHorizonS, OrbitPredictionTuning::kMaxHorizonS);
         double dt_s = std::clamp(dt_s_auto, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
-        int max_steps = OrbitPredictionTuning::kSpacecraftMaxStepsNormal;
+        const SpacecraftSamplingBudget sampling_budget = build_spacecraft_sampling_budget(request);
+        int max_steps = sampling_budget.soft_max_steps;
         double dt_min_s = 0.01;
         double dt_max_s = OrbitPredictionTuning::kMaxSampleDtS;
         // Keep solver coverage aligned with the UI's requested future draw window.
@@ -595,8 +723,15 @@ namespace Game
         {
             const double target_samples = std::clamp(horizon_s / OrbitPredictionTuning::kTargetSamplesDivisorS,
                                                      OrbitPredictionTuning::kTargetSamplesMin,
-                                                     OrbitPredictionTuning::kSpacecraftTargetSamplesMaxNormal);
+                                                     sampling_budget.target_samples_max);
             dt_s = std::clamp(horizon_s / target_samples, dt_min_s, dt_max_s);
+
+            const int required_steps = std::clamp(static_cast<int>(std::ceil(horizon_s / dt_s)),
+                                                  2,
+                                                  sampling_budget.hard_max_steps);
+            max_steps = std::clamp(std::max(sampling_budget.soft_max_steps, required_steps),
+                                   2,
+                                   sampling_budget.hard_max_steps);
         }
 
         const double min_dt_for_step_budget = horizon_s / static_cast<double>(std::max(1, max_steps));
@@ -737,7 +872,13 @@ namespace Game
             return out;
         }
 
-        orbitsim::GameSimulation sim(request.sim_config);
+        orbitsim::GameSimulation::Config sim_config = request.sim_config;
+        if (request.lagrange_sensitive)
+        {
+            apply_lagrange_integrator_profile(sim_config);
+        }
+
+        orbitsim::GameSimulation sim(sim_config);
         if (!sim.set_time_s(request.sim_time_s))
         {
             return out;

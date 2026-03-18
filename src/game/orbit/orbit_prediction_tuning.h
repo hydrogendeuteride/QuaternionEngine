@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 namespace Game::OrbitPredictionTuning
 {
     // Scale applied to the estimated orbital period when selecting the default prediction horizon.
@@ -22,8 +24,25 @@ namespace Game::OrbitPredictionTuning
     inline constexpr double kTargetSamplesMin = 500.0;
     inline constexpr double kTargetSamplesMax = 24'000.0;
     inline constexpr int kMaxStepsNormal = 24'000;
-    inline constexpr double kSpacecraftTargetSamplesMaxNormal = 12'000.0;
-    inline constexpr int kSpacecraftMaxStepsNormal = 12'000;
+
+    // Normal spacecraft predictions start with a softer budget, but can grow up to the global
+    // hard caps when long horizons or authored maneuver plans demand it.
+    inline constexpr double kSpacecraftTargetSamplesSoftNormal = 12'000.0;
+    inline constexpr double kSpacecraftTargetSamplesHardNormal = kTargetSamplesMax;
+    inline constexpr double kSpacecraftTargetSamplesBonusPerManeuver = 1'000.0;
+    inline constexpr int kSpacecraftMaxStepsSoftNormal = 12'000;
+    inline constexpr int kSpacecraftMaxStepsHardNormal = kMaxStepsNormal;
+    inline constexpr int kSpacecraftMaxStepsBonusPerManeuver = 1'000;
+
+    // Synodic/Lagrange analysis is sensitive to phase drift. Keep spacecraft steps and body ephemerides tighter.
+    inline constexpr double kLagrangeIntegratorMaxStepS = 60.0;
+    inline constexpr double kLagrangeIntegratorAbsTol = 1.0e-4;
+    inline constexpr double kLagrangeIntegratorRelTol = 1.0e-10;
+    inline constexpr double kLagrangeEphemerisMaxDtS = 30.0;
+    inline constexpr std::size_t kLagrangeEphemerisMaxSamples = 96'000;
+
+    // Keep the currently selected primary body while its gravity metric remains close to the best candidate.
+    inline constexpr double kPrimaryBodyHysteresisKeepRatio = 0.90;
 
     // Extra coverage requested after the last maneuver node so the post-node path stays visible.
     inline constexpr double kPostNodeCoverageMinS = 120.0;

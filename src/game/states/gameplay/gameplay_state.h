@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -142,7 +143,8 @@ namespace Game
         void sync_prediction_dirty_flag();
         std::vector<PredictionSubjectKey> collect_visible_prediction_subjects() const;
         double prediction_future_window_s(PredictionSubjectKey key) const;
-        double prediction_future_window_planned_s() const;
+        double maneuver_plan_preview_window_s() const;
+        double maneuver_post_node_coverage_s() const;
         double prediction_required_window_s(PredictionSubjectKey key,
                                             double now_s,
                                             bool with_maneuvers) const;
@@ -186,9 +188,16 @@ namespace Game
                                                   const orbitsim::TrajectorySample &b,
                                                   double t_s,
                                                   double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
+        bool prediction_frame_is_lagrange_sensitive(const orbitsim::TrajectoryFrameSpec &spec) const;
+        orbitsim::BodyId select_prediction_primary_body_id(const std::vector<orbitsim::MassiveBody> &bodies,
+                                                           const OrbitPredictionCache *cache,
+                                                           const orbitsim::Vec3 &query_pos_m,
+                                                           double query_time_s,
+                                                           orbitsim::BodyId preferred_body_id = orbitsim::kInvalidBodyId) const;
         orbitsim::BodyId resolve_prediction_analysis_body_id(const OrbitPredictionCache &cache,
                                                              PredictionSubjectKey key,
-                                                             double query_time_s) const;
+                                                             double query_time_s,
+                                                             orbitsim::BodyId preferred_body_id = orbitsim::kInvalidBodyId) const;
         WorldVec3 prediction_world_reference_body_world() const;
         WorldVec3 prediction_frame_origin_world(const OrbitPredictionCache &cache,
                                                 double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
@@ -199,6 +208,7 @@ namespace Game
         void emit_orbit_prediction_debug(GameStateContext &ctx);
         void emit_maneuver_node_debug_overlay(GameStateContext &ctx);
         void mark_prediction_dirty();
+        void mark_maneuver_plan_dirty();
 
         // Time warp
         void reset_time_warp_state();
@@ -299,7 +309,7 @@ namespace Game
         double _prediction_thrust_refresh_s{0.1};    // rebuild at most this often while thrusting
         double _prediction_future_window_orbiter_s{600.0};
         double _prediction_future_window_celestial_s{21600.0};
-        double _prediction_future_window_planned_s{600.0};
+        double _prediction_future_window_planned_s{600.0}; // persisted planner preview span
         double _orbit_plot_render_error_px{0.75};
         int _orbit_plot_render_max_segments_cpu{4'000};
         int _orbit_plot_pick_max_segments{8'000};
@@ -365,6 +375,7 @@ namespace Game
         ManeuverGizmoBasisMode _maneuver_gizmo_basis_mode{ManeuverGizmoBasisMode::ProgradeOutwardNormal};
         ManeuverGizmoStyle _maneuver_gizmo_style{};
         ManeuverGizmoInteraction _maneuver_gizmo_interaction{};
+        bool _maneuver_plan_live_preview_active{false};
 
         // Maneuver-node warp/execute helpers
         bool _warp_to_time_active{false};

@@ -53,7 +53,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
             clear_maneuver_gizmo_instances(ctx);
             _maneuver_gizmo_interaction = {};
         }
-        mark_prediction_dirty();
+        mark_maneuver_plan_dirty();
     }
 
     ImGui::SameLine();
@@ -73,7 +73,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         _maneuver_state.nodes.push_back(n);
         _maneuver_state.selected_node_id = n.id;
         _maneuver_state.sort_by_time();
-        mark_prediction_dirty();
+        mark_maneuver_plan_dirty();
     };
 
     ImGui::SameLine();
@@ -91,14 +91,22 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         _execute_node_id = -1;
         _maneuver_gizmo_interaction = {};
         clear_maneuver_gizmo_instances(ctx);
-        mark_prediction_dirty();
+        mark_maneuver_plan_dirty();
     }
 
     ImGui::SameLine();
     float window_s = static_cast<float>(_maneuver_timeline_window_s);
-    if (ImGui::DragFloat("Window (s)", &window_s, 10.0f, 60.0f, 36'000.0f, "%.0f"))
+    if (ImGui::DragFloat("Timeline Window (s)", &window_s, 10.0f, 60.0f, 36'000.0f, "%.0f"))
     {
         _maneuver_timeline_window_s = static_cast<double>(std::max(60.0f, window_s));
+    }
+
+    ImGui::SeparatorText("Planner Preview");
+    float preview_window_s = static_cast<float>(_prediction_future_window_planned_s);
+    if (ImGui::DragFloat("Plan Preview (s)", &preview_window_s, 10.0f, 0.0f, 15'552'000.0f, "%.0f"))
+    {
+        _prediction_future_window_planned_s = static_cast<double>(std::max(0.0f, preview_window_s));
+        mark_maneuver_plan_dirty();
     }
 
     // Gizmo basis toggle: large colored tab-style buttons
@@ -455,7 +463,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
             const double t_new = t_start_s + u_clamped * span_s;
             node.time_s = std::max(now_s, t_new);
             needs_sort = true;
-            mark_prediction_dirty();
+            mark_maneuver_plan_dirty();
         }
 
         if (ImGui::IsItemHovered())
@@ -663,7 +671,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
             _maneuver_gizmo_interaction = {};
         }
 
-        mark_prediction_dirty();
+        mark_maneuver_plan_dirty();
         ImGui::EndChild();
         if (needs_sort)
         {
@@ -678,7 +686,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     {
         sel->time_s = now_s + static_cast<double>(std::max(0.0f, t_from_now));
         needs_sort = true;
-        mark_prediction_dirty();
+        mark_maneuver_plan_dirty();
     }
 
     float dv[3]{
@@ -691,7 +699,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     {
         sel->dv_rtn_mps = glm::dvec3(dv[0], dv[1], dv[2]);
         sel->total_dv_mps = safe_length(sel->dv_rtn_mps);
-        mark_prediction_dirty();
+        mark_maneuver_plan_dirty();
     }
 
     ImGui::Text("DV total: %.2f m/s", safe_length(sel->dv_rtn_mps));
@@ -734,7 +742,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         {
             sel->primary_body_id = effective_primary_body_id;
         }
-        mark_prediction_dirty();
+        mark_maneuver_plan_dirty();
     }
 
     if (const CelestialBodyInfo *analysis_body = find_celestial_body_info(analysis_body_id))
@@ -744,7 +752,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
         {
             sel->primary_body_id = analysis_body_id;
             sel->primary_body_auto = false;
-            mark_prediction_dirty();
+            mark_maneuver_plan_dirty();
         }
         ImGui::SameLine();
         if (ImGui::Button("Apply Analysis Body To All"))
@@ -754,7 +762,7 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
                 node.primary_body_id = analysis_body_id;
                 node.primary_body_auto = false;
             }
-            mark_prediction_dirty();
+            mark_maneuver_plan_dirty();
         }
     }
 

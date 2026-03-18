@@ -515,7 +515,7 @@ namespace Game
             world_basis_draw_ctx.line_overlay_boost = draw_ctx.line_overlay_boost;
 
             const double future_window_s = prediction_future_window_s(track->key);
-            const double planned_future_window_s = prediction_future_window_planned_s();
+            const double planned_future_window_s = maneuver_plan_preview_window_s();
             Draw::PickWindow base_pick_window{};
             if (_prediction_draw_full_orbit)
             {
