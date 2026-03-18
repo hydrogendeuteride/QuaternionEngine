@@ -307,13 +307,9 @@ namespace Game
         float _prediction_line_overlay_boost{0.0f}; // extra always-on-top alpha fraction
         double _prediction_periodic_refresh_s{0.0}; // 0 = never (cache is extended when horizon runs out)
         double _prediction_thrust_refresh_s{0.1};    // rebuild at most this often while thrusting
-        double _prediction_future_window_orbiter_s{600.0};
-        double _prediction_future_window_celestial_s{21600.0};
-        double _prediction_future_window_planned_s{600.0}; // persisted planner preview span
-        double _orbit_plot_render_error_px{0.75};
-        int _orbit_plot_render_max_segments_cpu{4'000};
-        int _orbit_plot_pick_max_segments{8'000};
-        double _orbit_plot_pick_frustum_margin_ratio{0.05};
+        PredictionSamplingPolicy _prediction_sampling_policy{};
+        ManeuverPlanWindowSettings _maneuver_plan_windows{};
+        OrbitPlotBudgetSettings _orbit_plot_budget{};
 
         OrbitPlotPerfStats _orbit_plot_perf{};
         OrbitPredictionDrawConfig _prediction_draw_config{};

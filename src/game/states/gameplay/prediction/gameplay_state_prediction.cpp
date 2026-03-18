@@ -248,20 +248,21 @@ namespace Game
         // Celestials and spacecraft use different minimum look-ahead windows.
         if (key.kind == PredictionSubjectKind::Celestial)
         {
-            return std::max(0.0, _prediction_future_window_celestial_s);
+            return std::max(0.0, _prediction_sampling_policy.celestial_min_window_s);
         }
 
-        return std::max(0.0, _prediction_future_window_orbiter_s);
+        return std::max(0.0, _prediction_sampling_policy.orbiter_min_window_s);
     }
 
     double GameplayState::maneuver_plan_preview_window_s() const
     {
-        return std::max(0.0, _prediction_future_window_planned_s);
+        return std::max(0.0, _maneuver_plan_windows.preview_window_s);
     }
 
     double GameplayState::maneuver_post_node_coverage_s() const
     {
-        return std::max(OrbitPredictionTuning::kPostNodeCoverageMinS, maneuver_plan_preview_window_s());
+        return std::max(OrbitPredictionTuning::kPostNodeCoverageMinS,
+                        std::max(0.0, _maneuver_plan_windows.solve_margin_s));
     }
 
     GameplayState::PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key)

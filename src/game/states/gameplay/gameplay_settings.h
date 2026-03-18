@@ -5,6 +5,26 @@
 
 namespace Game
 {
+    struct PredictionSamplingPolicy
+    {
+        double orbiter_min_window_s{600.0};
+        double celestial_min_window_s{21600.0};
+    };
+
+    struct ManeuverPlanWindowSettings
+    {
+        double preview_window_s{600.0};
+        double solve_margin_s{600.0};
+    };
+
+    struct OrbitPlotBudgetSettings
+    {
+        double render_error_px{0.75};
+        int render_max_segments_cpu{4'000};
+        int pick_max_segments{8'000};
+        double pick_frustum_margin_ratio{0.05};
+    };
+
     struct GameplaySettings
     {
         static constexpr int kSchemaVersion = 1;
@@ -20,15 +40,12 @@ namespace Game
         double prediction_periodic_refresh_s{0.0};
         double prediction_thrust_refresh_s{0.1};
 
-        // Prediction windows
-        double prediction_future_window_orbiter_s{600.0};
-        double prediction_future_window_celestial_s{21600.0};
-        double prediction_future_window_planned_s{600.0};
+        // Prediction sampling / plan windows
+        PredictionSamplingPolicy prediction_sampling_policy{};
+        ManeuverPlanWindowSettings maneuver_plan_windows{};
 
         // Orbit plot rendering
-        double orbit_plot_render_error_px{0.75};
-        int orbit_plot_render_max_segments_cpu{4'000};
-        int orbit_plot_pick_max_segments{8'000};
+        OrbitPlotBudgetSettings orbit_plot_budget{};
 
         // Debug toggles
         bool debug_draw_enabled{true};
