@@ -14,13 +14,31 @@ namespace Game
         constexpr double kPickWindowRebuildEpsilonS = 0.25;
         constexpr double kPickAlignRebuildDistanceM = 25.0;
         constexpr double kPickReferenceRebuildDistanceM = 1.0;
+        constexpr double kPickFrustumOriginRebuildDistanceM = 1.0;
         constexpr double kPickMatrixRebuildEpsilon = 1.0e-6;
+        constexpr float kPickViewprojRebuildEpsilon = 1.0e-5f;
 
         bool same_matrix(const glm::dmat3 &a, const glm::dmat3 &b, const double epsilon)
         {
             for (int col = 0; col < 3; ++col)
             {
                 for (int row = 0; row < 3; ++row)
+                {
+                    if (!std::isfinite(a[col][row]) || !std::isfinite(b[col][row]) ||
+                        std::abs(a[col][row] - b[col][row]) > epsilon)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        bool same_matrix(const glm::mat4 &a, const glm::mat4 &b, const float epsilon)
+        {
+            for (int col = 0; col < 4; ++col)
+            {
+                for (int row = 0; row < 4; ++row)
                 {
                     if (!std::isfinite(a[col][row]) || !std::isfinite(b[col][row]) ||
                         std::abs(a[col][row] - b[col][row]) > epsilon)
@@ -86,6 +104,8 @@ namespace Game
                                        const WorldVec3 &ref_body_world,
                                        const glm::dmat3 &frame_to_world,
                                        const WorldVec3 &align_delta,
+                                       const OrbitPlotLodBuilder::FrustumContext &pick_frustum,
+                                       const double pick_frustum_margin_ratio,
                                        const double t0_s,
                                        const double t1_s,
                                        const std::size_t max_segments,
@@ -101,6 +121,15 @@ namespace Game
             }
 
             if (!same_matrix(cache.frame_to_world, frame_to_world, kPickMatrixRebuildEpsilon))
+            {
+                return true;
+            }
+
+            if (cache.pick_frustum_valid != pick_frustum.valid ||
+                !same_matrix(cache.pick_frustum_viewproj, pick_frustum.viewproj, kPickViewprojRebuildEpsilon) ||
+                glm::length(glm::dvec3(cache.pick_frustum_origin_world - pick_frustum.origin_world)) >
+                        kPickFrustumOriginRebuildDistanceM ||
+                std::abs(cache.pick_frustum_margin_ratio - pick_frustum_margin_ratio) > kPickMatrixRebuildEpsilon)
             {
                 return true;
             }
@@ -121,6 +150,8 @@ namespace Game
                                    const WorldVec3 &ref_body_world,
                                    const glm::dmat3 &frame_to_world,
                                    const WorldVec3 &align_delta,
+                                   const OrbitPlotLodBuilder::FrustumContext &pick_frustum,
+                                   const double pick_frustum_margin_ratio,
                                    const double t0_s,
                                    const double t1_s,
                                    const std::size_t max_segments,
@@ -130,6 +161,10 @@ namespace Game
             cache.ref_body_world = ref_body_world;
             cache.frame_to_world = frame_to_world;
             cache.align_delta_world = align_delta;
+            cache.pick_frustum_valid = pick_frustum.valid;
+            cache.pick_frustum_viewproj = pick_frustum.viewproj;
+            cache.pick_frustum_origin_world = pick_frustum.origin_world;
+            cache.pick_frustum_margin_ratio = pick_frustum_margin_ratio;
             if (planned)
             {
                 cache.planned_valid = true;
@@ -214,8 +249,8 @@ namespace Game
         }
 
         const double render_error_px =
-                (std::isfinite(_orbit_plot_render_error_px) && _orbit_plot_render_error_px > 0.0)
-                        ? _orbit_plot_render_error_px
+                (std::isfinite(_orbit_plot_budget.render_error_px) && _orbit_plot_budget.render_error_px > 0.0)
+                        ? _orbit_plot_budget.render_error_px
                         : 0.75;
         if (orbit_plot)
         {
@@ -344,7 +379,8 @@ namespace Game
             draw_ctx.tan_half_fov = tan_half_fov;
             draw_ctx.viewport_height_px = std::max(1.0, static_cast<double>(viewport_h_px));
             draw_ctx.render_error_px = render_error_px;
-            draw_ctx.render_max_segments = static_cast<std::size_t>(std::max(1, _orbit_plot_render_max_segments_cpu));
+            draw_ctx.render_max_segments =
+                    static_cast<std::size_t>(std::max(1, _orbit_plot_budget.render_max_segments_cpu));
             draw_ctx.line_overlay_boost = std::clamp(_prediction_line_overlay_boost, 0.0f, 1.0f);
             const bool identity_frame_transform = Draw::frame_transform_is_identity(frame_to_world);
             const bool use_persistent_gpu_roots =
@@ -681,7 +717,19 @@ namespace Game
                 const uint32_t pick_group_planned = picking->add_line_pick_group("OrbitPlot/Planned");
 
                 const std::size_t pick_max_segments =
-                        static_cast<std::size_t>(std::max(1, _orbit_plot_pick_max_segments));
+                        static_cast<std::size_t>(std::max(1, _orbit_plot_budget.pick_max_segments));
+                const double pick_frustum_margin_ratio = std::max(0.0, _orbit_plot_budget.pick_frustum_margin_ratio);
+                OrbitPlotLodBuilder::PickSettings pick_settings{};
+                pick_settings.frustum_margin_ratio = pick_frustum_margin_ratio;
+                std::vector<double> pick_anchor_times = Draw::collect_maneuver_node_times(_maneuver_state.nodes);
+                pick_anchor_times.insert(pick_anchor_times.begin(), now_s);
+                if (planned_pick_window.valid && std::isfinite(planned_pick_window.anchor_time_s))
+                {
+                    pick_anchor_times.push_back(planned_pick_window.anchor_time_s);
+                }
+                std::sort(pick_anchor_times.begin(), pick_anchor_times.end());
+                pick_anchor_times.erase(std::unique(pick_anchor_times.begin(), pick_anchor_times.end()),
+                                        pick_anchor_times.end());
                 const std::size_t pick_planned_reserve_target = std::min(
                         _prediction_draw_config.pick_planned_reserve_segments,
                         static_cast<std::size_t>(std::max<std::size_t>(
@@ -715,6 +763,7 @@ namespace Game
                     else
                     {
                         const std::size_t base_pick_budget = remaining_pick_budget - planned_reserve;
+                        pick_settings.max_segments = std::max<std::size_t>(1, base_pick_budget);
                         bool rebuilt_pick_cache = false;
                         if (base_pick_budget > 0 &&
                             should_rebuild_pick_cache(track->pick_cache,
@@ -722,6 +771,8 @@ namespace Game
                                                       ref_body_world,
                                                       frame_to_world,
                                                       align_delta,
+                                                      render_frustum,
+                                                      pick_frustum_margin_ratio,
                                                       base_pick_window.t0_s,
                                                       base_pick_window.t1_s,
                                                       base_pick_budget,
@@ -735,9 +786,11 @@ namespace Game
                                                                      ref_body_world,
                                                                      frame_to_world,
                                                                      align_delta,
+                                                                     render_frustum,
+                                                                     pick_settings,
                                                                      base_pick_window.t0_s,
                                                                      base_pick_window.t1_s,
-                                                                     base_pick_budget,
+                                                                     std::span<const double>(pick_anchor_times),
                                                                      !identity_frame_transform,
                                                                      track->pick_cache.base_segments,
                                                                      cap_hit,
@@ -749,6 +802,8 @@ namespace Game
                                                       ref_body_world,
                                                       frame_to_world,
                                                       align_delta,
+                                                      render_frustum,
+                                                      pick_frustum_margin_ratio,
                                                       base_pick_window.t0_s,
                                                       base_pick_window.t1_s,
                                                       base_pick_budget,
@@ -799,12 +854,15 @@ namespace Game
                     }
                     else
                     {
+                        pick_settings.max_segments = std::max<std::size_t>(1, remaining_pick_budget);
                         bool rebuilt_pick_cache = false;
                         if (should_rebuild_pick_cache(track->pick_cache,
                                                       track->cache.generation_id,
                                                       ref_body_world,
                                                       frame_to_world,
                                                       align_delta,
+                                                      render_frustum,
+                                                      pick_frustum_margin_ratio,
                                                       planned_pick_window.t0_s,
                                                       planned_pick_window.t1_s,
                                                       remaining_pick_budget,
@@ -818,9 +876,11 @@ namespace Game
                                                            ref_body_world,
                                                            frame_to_world,
                                                            align_delta,
+                                                           render_frustum,
+                                                           pick_settings,
                                                            planned_pick_window.t0_s,
                                                            planned_pick_window.t1_s,
-                                                           remaining_pick_budget,
+                                                           std::span<const double>(pick_anchor_times),
                                                            !identity_frame_transform,
                                                            track->pick_cache.planned_segments,
                                                            cap_hit,
@@ -832,6 +892,8 @@ namespace Game
                                                       ref_body_world,
                                                       frame_to_world,
                                                       align_delta,
+                                                      render_frustum,
+                                                      pick_frustum_margin_ratio,
                                                       planned_pick_window.t0_s,
                                                       planned_pick_window.t1_s,
                                                       remaining_pick_budget,

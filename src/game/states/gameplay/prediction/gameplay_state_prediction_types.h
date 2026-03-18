@@ -185,6 +185,10 @@ namespace Game
         WorldVec3 ref_body_world{0.0, 0.0, 0.0};
         WorldVec3 align_delta_world{0.0, 0.0, 0.0};
         glm::dmat3 frame_to_world{1.0};
+        bool pick_frustum_valid{false};
+        glm::mat4 pick_frustum_viewproj{1.0f};
+        WorldVec3 pick_frustum_origin_world{0.0, 0.0, 0.0};
+        double pick_frustum_margin_ratio{0.05};
         double base_t0_s{std::numeric_limits<double>::quiet_NaN()};
         double base_t1_s{std::numeric_limits<double>::quiet_NaN()};
         double planned_t0_s{std::numeric_limits<double>::quiet_NaN()};
@@ -202,6 +206,10 @@ namespace Game
             ref_body_world = WorldVec3(0.0, 0.0, 0.0);
             align_delta_world = WorldVec3(0.0, 0.0, 0.0);
             frame_to_world = glm::dmat3(1.0);
+            pick_frustum_valid = false;
+            pick_frustum_viewproj = glm::mat4(1.0f);
+            pick_frustum_origin_world = WorldVec3(0.0, 0.0, 0.0);
+            pick_frustum_margin_ratio = 0.05;
             base_t0_s = std::numeric_limits<double>::quiet_NaN();
             base_t1_s = std::numeric_limits<double>::quiet_NaN();
             planned_t0_s = std::numeric_limits<double>::quiet_NaN();

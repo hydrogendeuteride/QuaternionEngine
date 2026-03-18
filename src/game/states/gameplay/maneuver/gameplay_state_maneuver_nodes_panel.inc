@@ -102,10 +102,17 @@ void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
     }
 
     ImGui::SeparatorText("Planner Preview");
-    float preview_window_s = static_cast<float>(_prediction_future_window_planned_s);
+    float preview_window_s = static_cast<float>(_maneuver_plan_windows.preview_window_s);
     if (ImGui::DragFloat("Plan Preview (s)", &preview_window_s, 10.0f, 0.0f, 15'552'000.0f, "%.0f"))
     {
-        _prediction_future_window_planned_s = static_cast<double>(std::max(0.0f, preview_window_s));
+        _maneuver_plan_windows.preview_window_s = static_cast<double>(std::max(0.0f, preview_window_s));
+        mark_maneuver_plan_dirty();
+    }
+
+    float solve_margin_s = static_cast<float>(_maneuver_plan_windows.solve_margin_s);
+    if (ImGui::DragFloat("Plan Solve Margin (s)", &solve_margin_s, 10.0f, 0.0f, 15'552'000.0f, "%.0f"))
+    {
+        _maneuver_plan_windows.solve_margin_s = static_cast<double>(std::max(0.0f, solve_margin_s));
         mark_maneuver_plan_dirty();
     }
 

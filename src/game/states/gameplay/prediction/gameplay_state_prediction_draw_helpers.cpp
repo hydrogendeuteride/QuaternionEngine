@@ -712,9 +712,11 @@ namespace Game::PredictionDrawDetail
                                          const WorldVec3 &ref_body_world,
                                          const glm::dmat3 &frame_to_world,
                                          const WorldVec3 &align_delta,
+                                         const OrbitPlotLodBuilder::FrustumContext &pick_frustum,
+                                         const OrbitPlotLodBuilder::PickSettings &pick_settings,
                                          const double t0_s,
                                          const double t1_s,
-                                         const std::size_t max_segments,
+                                         const std::span<const double> anchor_times_s,
                                          const bool segments_are_world_basis,
                                          std::vector<PickingSystem::LinePickSegmentData> &out_segments,
                                          bool &out_cap_hit,
@@ -735,54 +737,33 @@ namespace Game::PredictionDrawDetail
             return 0;
         }
 
-        const std::size_t capped_max_segments = std::max<std::size_t>(1, max_segments);
-        const std::size_t stride = std::max<std::size_t>(1, segments_world_basis.size() / capped_max_segments);
-        out_segments.reserve(std::min(segments_world_basis.size(), capped_max_segments));
         const auto pick_start_tp = std::chrono::steady_clock::now();
-        for (std::size_t i = 0; i < segments_world_basis.size() && out_segments.size() < capped_max_segments; i += stride)
-        {
-            const orbitsim::TrajectorySegment &segment = segments_world_basis[i];
-            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
-            {
-                continue;
-            }
-
-            const double seg_t0_s = segment.t0_s;
-            const double seg_t1_s = seg_t0_s + segment.dt_s;
-            const double clip_t0_s = std::max(seg_t0_s, t0_s);
-            const double clip_t1_s = std::min(seg_t1_s, t1_s);
-            if (!(clip_t1_s > clip_t0_s))
-            {
-                continue;
-            }
-
-            const WorldVec3 a_world = eval_segment_world_pos(OrbitDrawWindowContext{
-                                                                     .ref_body_world = ref_body_world,
-                                                                     .frame_to_world = glm::dmat3(1.0),
-                                                                     .align_delta = align_delta,
-                                                             },
-                                                             segment,
-                                                             clip_t0_s);
-            const WorldVec3 b_world = eval_segment_world_pos(OrbitDrawWindowContext{
-                                                                     .ref_body_world = ref_body_world,
-                                                                     .frame_to_world = glm::dmat3(1.0),
-                                                                     .align_delta = align_delta,
-                                                             },
-                                                             segment,
-                                                             clip_t1_s);
-            out_segments.push_back(PickingSystem::LinePickSegmentData{
-                    .a_world = a_world,
-                    .b_world = b_world,
-                    .a_time_s = clip_t0_s,
-                    .b_time_s = clip_t1_s,
-            });
-        }
+        const OrbitPlotLodBuilder::PickResult lod =
+                OrbitPlotLodBuilder::build_pick_lod(segments_world_basis,
+                                                    ref_body_world,
+                                                    align_delta,
+                                                    pick_frustum,
+                                                    pick_settings,
+                                                    t0_s,
+                                                    t1_s,
+                                                    anchor_times_s);
         perf.pick_lod_ms_last +=
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pick_start_tp).count();
+        perf.pick_segments_before_cull += static_cast<uint32_t>(lod.segments_before_cull);
+        perf.pick_segments += static_cast<uint32_t>(lod.segments_after_cull);
+
+        out_segments.reserve(lod.segments.size());
+        for (const OrbitPlotLodBuilder::PickSegment &segment : lod.segments)
+        {
+            out_segments.push_back(PickingSystem::LinePickSegmentData{
+                    .a_world = segment.a_world,
+                    .b_world = segment.b_world,
+                    .a_time_s = segment.t0_s,
+                    .b_time_s = segment.t1_s,
+            });
+        }
         const std::size_t emitted = out_segments.size();
-        perf.pick_segments_before_cull += static_cast<uint32_t>(emitted);
-        perf.pick_segments += static_cast<uint32_t>(emitted);
-        out_cap_hit = segments_world_basis.size() > emitted;
+        out_cap_hit = lod.cap_hit;
         perf.pick_cap_hit_last_frame = out_cap_hit;
         if (out_cap_hit)
         {
@@ -805,8 +786,6 @@ namespace Game::PredictionDrawDetail
                                    const bool segments_are_world_basis,
                                    OrbitPlotPerfStats &perf)
     {
-        (void) pick_frustum;
-        (void) anchor_times;
         if (!picking || pick_group == kInvalidPickGroup)
         {
             return 0;
@@ -818,9 +797,11 @@ namespace Game::PredictionDrawDetail
                                                              ref_body_world,
                                                              frame_to_world,
                                                              align_delta,
+                                                             pick_frustum,
+                                                             pick_settings,
                                                              t0_s,
                                                              t1_s,
-                                                             std::max<std::size_t>(1, pick_settings.max_segments),
+                                                             anchor_times,
                                                              segments_are_world_basis,
                                                              segments,
                                                              cap_hit,
