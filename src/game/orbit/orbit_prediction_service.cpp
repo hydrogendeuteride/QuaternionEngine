@@ -13,6 +13,7 @@
 #include "orbitsim/trajectory_transforms.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 
@@ -90,6 +91,605 @@ namespace Game
             return out;
         }
 
+        struct PlannedSegmentBoundaryState
+        {
+            double t_s{0.0};
+            orbitsim::State state_before{};
+            orbitsim::State state_after{};
+        };
+
+        double segment_end_time(const orbitsim::TrajectorySegment &segment)
+        {
+            return segment.t0_s + segment.dt_s;
+        }
+
+        bool eval_segment_state(const orbitsim::TrajectorySegment &segment,
+                                const double t_s,
+                                orbitsim::State &out_state)
+        {
+            out_state = segment.start;
+            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s) || !std::isfinite(t_s))
+            {
+                return finite_vec3(out_state.position_m) && finite_vec3(out_state.velocity_mps);
+            }
+
+            double u = (t_s - segment.t0_s) / segment.dt_s;
+            if (!std::isfinite(u))
+            {
+                u = 0.0;
+            }
+            u = std::clamp(u, 0.0, 1.0);
+
+            const double u2 = u * u;
+            const double u3 = u2 * u;
+            const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
+            const double h10 = u3 - (2.0 * u2) + u;
+            const double h01 = (-2.0 * u3) + (3.0 * u2);
+            const double h11 = u3 - u2;
+            const double dh00 = (6.0 * u2) - (6.0 * u);
+            const double dh10 = (3.0 * u2) - (4.0 * u) + 1.0;
+            const double dh01 = (-6.0 * u2) + (6.0 * u);
+            const double dh11 = (3.0 * u2) - (2.0 * u);
+
+            const glm::dvec3 p0 = glm::dvec3(segment.start.position_m);
+            const glm::dvec3 p1 = glm::dvec3(segment.end.position_m);
+            const glm::dvec3 m0 = glm::dvec3(segment.start.velocity_mps) * segment.dt_s;
+            const glm::dvec3 m1 = glm::dvec3(segment.end.velocity_mps) * segment.dt_s;
+            const glm::dvec3 pos = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
+            const glm::dvec3 vel = ((dh00 * p0) + (dh10 * m0) + (dh01 * p1) + (dh11 * m1)) / segment.dt_s;
+            if (!finite_vec3(pos) || !finite_vec3(vel))
+            {
+                return false;
+            }
+
+            out_state = orbitsim::make_state(pos, vel);
+            return true;
+        }
+
+        bool sample_trajectory_segment_state(const std::vector<orbitsim::TrajectorySegment> &segments,
+                                             const double t_s,
+                                             orbitsim::State &out_state)
+        {
+            out_state = {};
+            if (segments.empty() || !std::isfinite(t_s))
+            {
+                return false;
+            }
+
+            const auto it = std::lower_bound(segments.begin(),
+                                             segments.end(),
+                                             t_s,
+                                             [](const orbitsim::TrajectorySegment &segment, const double query_t_s) {
+                                                 return segment_end_time(segment) < query_t_s;
+                                             });
+            if (it == segments.end())
+            {
+                return eval_segment_state(segments.back(), segment_end_time(segments.back()), out_state);
+            }
+
+            return eval_segment_state(*it, t_s, out_state);
+        }
+
+        bool finite_state(const orbitsim::State &state)
+        {
+            return finite_vec3(state.position_m) && finite_vec3(state.velocity_mps);
+        }
+
+        void append_or_merge_planned_boundary_state(std::vector<PlannedSegmentBoundaryState> &states,
+                                                    const double t_s,
+                                                    const orbitsim::State &state_before,
+                                                    const orbitsim::State &state_after)
+        {
+            if (!std::isfinite(t_s) || !finite_state(state_before) || !finite_state(state_after))
+            {
+                return;
+            }
+
+            constexpr double kBoundaryMergeToleranceS = 1.0e-9;
+            if (!states.empty() && std::abs(states.back().t_s - t_s) <= kBoundaryMergeToleranceS)
+            {
+                states.back().state_after = state_after;
+                return;
+            }
+
+            states.push_back(PlannedSegmentBoundaryState{
+                    .t_s = t_s,
+                    .state_before = state_before,
+                    .state_after = state_after,
+            });
+        }
+
+        std::vector<orbitsim::TrajectorySegment> split_trajectory_segments_at_known_boundaries(
+                const std::vector<orbitsim::TrajectorySegment> &segments,
+                const std::vector<PlannedSegmentBoundaryState> &boundaries)
+        {
+            if (segments.empty() || boundaries.empty())
+            {
+                return segments;
+            }
+
+            constexpr double kBoundaryEpsilonS = 1.0e-9;
+            std::vector<orbitsim::TrajectorySegment> out;
+            out.reserve(segments.size() + boundaries.size());
+
+            std::size_t boundary_index = 0;
+            for (const orbitsim::TrajectorySegment &segment : segments)
+            {
+                const double seg_t0_s = segment.t0_s;
+                const double seg_t1_s = segment_end_time(segment);
+                if (!(segment.dt_s > 0.0) || !std::isfinite(seg_t0_s) || !std::isfinite(seg_t1_s) || !(seg_t1_s > seg_t0_s))
+                {
+                    out.push_back(segment);
+                    continue;
+                }
+
+                double cursor_t_s = seg_t0_s;
+                orbitsim::State cursor_state = segment.start;
+
+                while (boundary_index < boundaries.size() &&
+                       boundaries[boundary_index].t_s <= (seg_t0_s + kBoundaryEpsilonS))
+                {
+                    if (std::abs(boundaries[boundary_index].t_s - seg_t0_s) <= kBoundaryEpsilonS)
+                    {
+                        cursor_state = boundaries[boundary_index].state_after;
+                    }
+                    ++boundary_index;
+                }
+
+                std::size_t local_boundary_index = boundary_index;
+                while (local_boundary_index < boundaries.size())
+                {
+                    const PlannedSegmentBoundaryState &boundary = boundaries[local_boundary_index];
+                    if (!(boundary.t_s < (seg_t1_s - kBoundaryEpsilonS)))
+                    {
+                        break;
+                    }
+                    if (!(boundary.t_s > (cursor_t_s + kBoundaryEpsilonS)))
+                    {
+                        cursor_state = boundary.state_after;
+                        ++local_boundary_index;
+                        continue;
+                    }
+
+                    const double part_dt_s = boundary.t_s - cursor_t_s;
+                    if (part_dt_s > kBoundaryEpsilonS)
+                    {
+                        out.push_back(orbitsim::TrajectorySegment{
+                                .t0_s = cursor_t_s,
+                                .dt_s = part_dt_s,
+                                .start = cursor_state,
+                                .end = boundary.state_before,
+                                .flags = segment.flags,
+                        });
+                    }
+
+                    cursor_t_s = boundary.t_s;
+                    cursor_state = boundary.state_after;
+                    ++local_boundary_index;
+                }
+
+                const double tail_dt_s = seg_t1_s - cursor_t_s;
+                if (tail_dt_s > kBoundaryEpsilonS)
+                {
+                    out.push_back(orbitsim::TrajectorySegment{
+                            .t0_s = cursor_t_s,
+                            .dt_s = tail_dt_s,
+                            .start = cursor_state,
+                            .end = segment.end,
+                            .flags = segment.flags,
+                    });
+                }
+
+                boundary_index = local_boundary_index;
+            }
+
+            return out;
+        }
+
+        struct MultiBandSampleWindow
+        {
+            double t0_s{0.0};
+            double t1_s{0.0};
+            double density{1.0};
+            std::size_t interval_count{0};
+            double sample_dt_s{0.0};
+        };
+
+        void distribute_sample_budget(std::vector<MultiBandSampleWindow> &windows,
+                                      const std::size_t total_sample_budget,
+                                      const double start_time_s,
+                                      const double end_time_s,
+                                      const double horizon_s)
+        {
+            if (windows.empty())
+            {
+                return;
+            }
+
+            std::size_t total_intervals_budget =
+                    (total_sample_budget > 1) ? (total_sample_budget - 1) : 1;
+            while (windows.size() > 1 && windows.size() > total_intervals_budget)
+            {
+                windows[windows.size() - 2].t1_s = windows.back().t1_s;
+                windows.pop_back();
+            }
+
+            const std::size_t window_count = windows.size();
+            std::vector<double> weights(window_count, 0.0);
+            double total_weight = 0.0;
+            for (std::size_t i = 0; i < window_count; ++i)
+            {
+                const double duration_s = windows[i].t1_s - windows[i].t0_s;
+                weights[i] = std::max(0.0, duration_s) * windows[i].density;
+                total_weight += weights[i];
+            }
+
+            if (!(total_weight > 0.0) || !std::isfinite(total_weight))
+            {
+                windows.assign(1, MultiBandSampleWindow{
+                                      .t0_s = start_time_s,
+                                      .t1_s = end_time_s,
+                                      .interval_count = total_intervals_budget,
+                                      .sample_dt_s = horizon_s / static_cast<double>(total_intervals_budget),
+                              });
+                return;
+            }
+
+            std::vector<std::size_t> intervals(window_count, 1);
+            std::vector<double> fractional(window_count, 0.0);
+            std::size_t remaining_intervals =
+                    (total_intervals_budget > window_count) ? (total_intervals_budget - window_count) : 0;
+            if (total_intervals_budget <= window_count)
+            {
+                remaining_intervals = 0;
+                intervals.assign(window_count, 1);
+            }
+            else
+            {
+                std::size_t assigned_extra = 0;
+                for (std::size_t i = 0; i < window_count; ++i)
+                {
+                    const double ideal_extra =
+                            (static_cast<double>(remaining_intervals) * weights[i]) / total_weight;
+                    const std::size_t extra = static_cast<std::size_t>(std::floor(ideal_extra));
+                    intervals[i] += extra;
+                    assigned_extra += extra;
+                    fractional[i] = ideal_extra - static_cast<double>(extra);
+                }
+
+                std::size_t extras_left = remaining_intervals - assigned_extra;
+                while (extras_left > 0)
+                {
+                    std::size_t best_idx = 0;
+                    for (std::size_t i = 1; i < window_count; ++i)
+                    {
+                        if (fractional[i] > fractional[best_idx])
+                        {
+                            best_idx = i;
+                        }
+                    }
+                    ++intervals[best_idx];
+                    fractional[best_idx] = 0.0;
+                    --extras_left;
+                }
+            }
+
+            for (std::size_t i = 0; i < window_count; ++i)
+            {
+                windows[i].interval_count = intervals[i];
+                const double duration_s = windows[i].t1_s - windows[i].t0_s;
+                windows[i].sample_dt_s =
+                        (intervals[i] > 0) ? (duration_s / static_cast<double>(intervals[i])) : duration_s;
+            }
+        }
+
+        std::vector<MultiBandSampleWindow> build_multi_band_sample_windows(const double start_time_s,
+                                                                           const double horizon_s,
+                                                                           const std::size_t total_sample_budget)
+        {
+            std::vector<MultiBandSampleWindow> windows{};
+            if (!(horizon_s > 0.0) || !std::isfinite(start_time_s))
+            {
+                return windows;
+            }
+
+            struct BandTemplate
+            {
+                double duration_cap_s;
+                double density;
+            };
+
+            constexpr std::array<BandTemplate, 3> kBandTemplates{{
+                    {OrbitPredictionTuning::kMultiBandNearDurationS, OrbitPredictionTuning::kMultiBandNearDensity},
+                    {OrbitPredictionTuning::kMultiBandMidDurationS, OrbitPredictionTuning::kMultiBandMidDensity},
+                    {std::numeric_limits<double>::infinity(), OrbitPredictionTuning::kMultiBandFarDensity},
+            }};
+
+            double cursor_s = start_time_s;
+            const double end_time_s = start_time_s + horizon_s;
+            for (const BandTemplate &band : kBandTemplates)
+            {
+                const double band_end_s = std::min(end_time_s, start_time_s + band.duration_cap_s);
+                if (!(band_end_s > cursor_s))
+                {
+                    continue;
+                }
+
+                windows.push_back(MultiBandSampleWindow{
+                        .t0_s = cursor_s,
+                        .t1_s = band_end_s,
+                        .density = band.density,
+                        .interval_count = 0,
+                        .sample_dt_s = 0.0,
+                });
+                cursor_s = band_end_s;
+                if (!(end_time_s > cursor_s))
+                {
+                    break;
+                }
+            }
+
+            if (windows.empty())
+            {
+                return windows;
+            }
+
+            distribute_sample_budget(windows, total_sample_budget, start_time_s, end_time_s, horizon_s);
+            return windows;
+        }
+
+        std::vector<MultiBandSampleWindow> build_multi_band_sample_windows(const double start_time_s,
+                                                                           const double horizon_s,
+                                                                           const std::size_t total_sample_budget,
+                                                                           const std::vector<double> &node_times_s)
+        {
+            if (node_times_s.empty())
+            {
+                return build_multi_band_sample_windows(start_time_s, horizon_s, total_sample_budget);
+            }
+
+            std::vector<MultiBandSampleWindow> windows{};
+            if (!(horizon_s > 0.0) || !std::isfinite(start_time_s))
+            {
+                return windows;
+            }
+
+            // Phase A: build base time-bands with density tags (no budget yet).
+            struct BandTemplate
+            {
+                double duration_cap_s;
+                double density;
+            };
+
+            constexpr std::array<BandTemplate, 3> kBandTemplates{{
+                    {OrbitPredictionTuning::kMultiBandNearDurationS, OrbitPredictionTuning::kMultiBandNearDensity},
+                    {OrbitPredictionTuning::kMultiBandMidDurationS, OrbitPredictionTuning::kMultiBandMidDensity},
+                    {std::numeric_limits<double>::infinity(), OrbitPredictionTuning::kMultiBandFarDensity},
+            }};
+
+            const double end_time_s = start_time_s + horizon_s;
+            double cursor_s = start_time_s;
+            for (const BandTemplate &band : kBandTemplates)
+            {
+                const double band_end_s = std::min(end_time_s, start_time_s + band.duration_cap_s);
+                if (!(band_end_s > cursor_s))
+                {
+                    continue;
+                }
+
+                windows.push_back(MultiBandSampleWindow{
+                        .t0_s = cursor_s,
+                        .t1_s = band_end_s,
+                        .density = band.density,
+                });
+                cursor_s = band_end_s;
+                if (!(end_time_s > cursor_s))
+                {
+                    break;
+                }
+            }
+
+            if (windows.empty())
+            {
+                return windows;
+            }
+
+            // Phase B: insert high-density windows around each maneuver node.
+            constexpr double half_w = OrbitPredictionTuning::kMultiBandNodeWindowHalfWidthS;
+            constexpr double node_density = OrbitPredictionTuning::kMultiBandNodeDensity;
+
+            for (const double t_node : node_times_s)
+            {
+                const double nt0 = std::max(start_time_s, t_node - half_w);
+                const double nt1 = std::min(end_time_s, t_node + half_w);
+                if (!(nt1 > nt0))
+                {
+                    continue;
+                }
+
+                std::vector<MultiBandSampleWindow> split{};
+                split.reserve(windows.size() + 2);
+                bool node_inserted = false;
+
+                for (const MultiBandSampleWindow &w : windows)
+                {
+                    // No overlap: keep as-is.
+                    if (w.t1_s <= nt0 || w.t0_s >= nt1)
+                    {
+                        split.push_back(w);
+                        continue;
+                    }
+
+                    // Left remnant before node window.
+                    if (w.t0_s < nt0)
+                    {
+                        split.push_back(MultiBandSampleWindow{
+                                .t0_s = w.t0_s,
+                                .t1_s = nt0,
+                                .density = w.density,
+                        });
+                    }
+
+                    // Insert or extend the node window (merge overlapping node windows).
+                    if (!node_inserted)
+                    {
+                        split.push_back(MultiBandSampleWindow{
+                                .t0_s = nt0,
+                                .t1_s = nt1,
+                                .density = node_density,
+                        });
+                        node_inserted = true;
+                    }
+                    else
+                    {
+                        // Previous node window already covers [nt0, ...); extend if needed.
+                        MultiBandSampleWindow &prev = split.back();
+                        if (prev.density >= node_density)
+                        {
+                            prev.t1_s = std::max(prev.t1_s, nt1);
+                        }
+                    }
+
+                    // Right remnant after node window.
+                    if (w.t1_s > nt1)
+                    {
+                        split.push_back(MultiBandSampleWindow{
+                                .t0_s = nt1,
+                                .t1_s = w.t1_s,
+                                .density = w.density,
+                        });
+                    }
+                }
+
+                windows = std::move(split);
+            }
+
+            // Phase C: prune degenerate windows.
+            windows.erase(std::remove_if(windows.begin(),
+                                         windows.end(),
+                                         [](const MultiBandSampleWindow &w) { return !(w.t1_s > w.t0_s); }),
+                          windows.end());
+
+            if (windows.empty())
+            {
+                return windows;
+            }
+
+            // Phase D: distribute sample budget across all windows.
+            distribute_sample_budget(windows, total_sample_budget, start_time_s, end_time_s, horizon_s);
+            return windows;
+        }
+
+        std::vector<orbitsim::TrajectorySample> sample_trajectory_segments_multi_band(
+                const std::vector<orbitsim::TrajectorySegment> &segments,
+                const std::vector<MultiBandSampleWindow> &windows)
+        {
+            std::vector<orbitsim::TrajectorySample> samples{};
+            if (segments.empty() || windows.empty())
+            {
+                return samples;
+            }
+
+            std::size_t reserve_count = 1;
+            for (const MultiBandSampleWindow &window : windows)
+            {
+                reserve_count += window.interval_count;
+            }
+            samples.reserve(reserve_count);
+
+            for (std::size_t band_idx = 0; band_idx < windows.size(); ++band_idx)
+            {
+                const MultiBandSampleWindow &window = windows[band_idx];
+                if (!(window.t1_s > window.t0_s) || window.interval_count == 0)
+                {
+                    continue;
+                }
+
+                for (std::size_t i = 0; i <= window.interval_count; ++i)
+                {
+                    if (band_idx > 0 && i == 0)
+                    {
+                        continue;
+                    }
+
+                    const double u =
+                            static_cast<double>(i) / static_cast<double>(std::max<std::size_t>(1, window.interval_count));
+                    const double t_s = std::clamp(window.t0_s + ((window.t1_s - window.t0_s) * u),
+                                                  window.t0_s,
+                                                  window.t1_s);
+
+                    orbitsim::State state{};
+                    if (!sample_trajectory_segment_state(segments, t_s, state))
+                    {
+                        continue;
+                    }
+
+                    samples.push_back(orbitsim::TrajectorySample{
+                            .t_s = t_s,
+                            .position_m = state.position_m,
+                            .velocity_mps = state.velocity_mps,
+                    });
+                }
+            }
+
+            return samples;
+        }
+
+        std::vector<orbitsim::TrajectorySample> sample_body_ephemeris_multi_band(
+                const orbitsim::CelestialEphemeris &ephemeris,
+                const orbitsim::BodyId body_id,
+                const std::vector<MultiBandSampleWindow> &windows)
+        {
+            std::vector<orbitsim::TrajectorySample> samples{};
+            if (body_id == orbitsim::kInvalidBodyId || windows.empty())
+            {
+                return samples;
+            }
+
+            std::size_t reserve_count = 1;
+            for (const MultiBandSampleWindow &window : windows)
+            {
+                reserve_count += window.interval_count;
+            }
+            samples.reserve(reserve_count);
+
+            for (std::size_t band_idx = 0; band_idx < windows.size(); ++band_idx)
+            {
+                const MultiBandSampleWindow &window = windows[band_idx];
+                if (!(window.t1_s > window.t0_s) || window.interval_count == 0)
+                {
+                    continue;
+                }
+
+                for (std::size_t i = 0; i <= window.interval_count; ++i)
+                {
+                    if (band_idx > 0 && i == 0)
+                    {
+                        continue;
+                    }
+
+                    const double u =
+                            static_cast<double>(i) / static_cast<double>(std::max<std::size_t>(1, window.interval_count));
+                    const double t_s = std::clamp(window.t0_s + ((window.t1_s - window.t0_s) * u),
+                                                  window.t0_s,
+                                                  window.t1_s);
+                    const orbitsim::State state = ephemeris.body_state_at_by_id(body_id, t_s);
+                    if (!finite_vec3(state.position_m) || !finite_vec3(state.velocity_mps))
+                    {
+                        continue;
+                    }
+
+                    samples.push_back(orbitsim::TrajectorySample{
+                            .t_s = t_s,
+                            .position_m = state.position_m,
+                            .velocity_mps = state.velocity_mps,
+                    });
+                }
+            }
+
+            return samples;
+        }
+
         bool finite_scalar(const double value)
         {
             return std::isfinite(value);
@@ -101,6 +701,47 @@ namespace Game
             int soft_max_steps{OrbitPredictionTuning::kSpacecraftMaxStepsSoftNormal};
             int hard_max_steps{OrbitPredictionTuning::kSpacecraftMaxStepsHardNormal};
         };
+
+        bool request_uses_long_range_prediction_policy(const OrbitPredictionService::Request &request)
+        {
+            return std::isfinite(request.future_window_s) &&
+                   request.future_window_s > OrbitPredictionTuning::kLongRangeHorizonThresholdS;
+        }
+
+        double resolve_prediction_horizon_cap_s(const OrbitPredictionService::Request &request)
+        {
+            return request_uses_long_range_prediction_policy(request)
+                           ? OrbitPredictionTuning::kLongRangeHorizonCapS
+                           : OrbitPredictionTuning::kMaxHorizonS;
+        }
+
+        double resolve_prediction_sample_dt_cap_s(const OrbitPredictionService::Request &request)
+        {
+            if (request.lagrange_sensitive)
+            {
+                return OrbitPredictionTuning::kMaxSampleDtS;
+            }
+
+            return request_uses_long_range_prediction_policy(request)
+                           ? OrbitPredictionTuning::kLongRangeMaxSampleDtS
+                           : OrbitPredictionTuning::kMaxSampleDtS;
+        }
+
+        std::size_t resolve_spacecraft_segment_budget(const OrbitPredictionService::Request &request,
+                                                      const double horizon_s,
+                                                      const std::size_t sample_budget)
+        {
+            std::size_t budget = std::max<std::size_t>(1, sample_budget);
+            if (!request_uses_long_range_prediction_policy(request) || !(horizon_s > 0.0))
+            {
+                return budget;
+            }
+
+            const std::size_t desired_long_range_budget =
+                    static_cast<std::size_t>(std::ceil(horizon_s / OrbitPredictionTuning::kLongRangeSegmentTargetDtS));
+            budget = std::max(budget, desired_long_range_budget);
+            return std::clamp<std::size_t>(budget, 1, OrbitPredictionTuning::kLongRangeMaxSegmentsHard);
+        }
 
         template<typename BodyPositionAt>
         std::size_t select_primary_index_with_hysteresis(const std::vector<orbitsim::MassiveBody> &bodies,
@@ -179,6 +820,89 @@ namespace Game
                     [&request](const OrbitPredictionService::ManeuverImpulse &impulse) {
                         return std::isfinite(impulse.t_s) && impulse.t_s >= request.sim_time_s;
                     }));
+        }
+
+        bool request_needs_control_sensitive_prediction(const OrbitPredictionService::Request &request)
+        {
+            return request.thrusting || count_future_maneuver_impulses(request) > 0;
+        }
+
+        double resolve_prediction_integrator_max_step_s(const OrbitPredictionService::Request &request)
+        {
+            if (request_needs_control_sensitive_prediction(request))
+            {
+                return OrbitPredictionTuning::kPredictionIntegratorMaxStepControlledS;
+            }
+
+            return request_uses_long_range_prediction_policy(request)
+                           ? OrbitPredictionTuning::kPredictionIntegratorMaxStepLongRangeS
+                           : OrbitPredictionTuning::kPredictionIntegratorMaxStepS;
+        }
+
+        void apply_prediction_integrator_profile(orbitsim::GameSimulation::Config &sim_config,
+                                                 const OrbitPredictionService::Request &request)
+        {
+            orbitsim::DOPRI5Options &integrator = sim_config.spacecraft_integrator;
+            const double max_step_s = resolve_prediction_integrator_max_step_s(request);
+            if (!(integrator.max_step_s > 0.0) || integrator.max_step_s > max_step_s)
+            {
+                integrator.max_step_s = max_step_s;
+            }
+
+            integrator.max_substeps =
+                    std::max(integrator.max_substeps, OrbitPredictionTuning::kPredictionIntegratorMaxSubstepsSoft);
+            integrator.max_substeps_hard =
+                    std::max({integrator.max_substeps_hard,
+                              integrator.max_substeps,
+                              OrbitPredictionTuning::kPredictionIntegratorMaxSubstepsHard});
+            integrator.max_interval_splits =
+                    std::max(integrator.max_interval_splits, OrbitPredictionTuning::kPredictionIntegratorMaxIntervalSplits);
+        }
+
+        std::size_t resolve_prediction_ephemeris_max_segments(const OrbitPredictionService::Request &request)
+        {
+            if (request.lagrange_sensitive)
+            {
+                return OrbitPredictionTuning::kLagrangeEphemerisMaxSamples;
+            }
+
+            return OrbitPredictionTuning::kPredictionEphemerisMaxSegmentsHard;
+        }
+
+        double resolve_prediction_ephemeris_dt_cap_s(const OrbitPredictionService::Request &request)
+        {
+            double dt_cap_s = request_uses_long_range_prediction_policy(request)
+                                      ? OrbitPredictionTuning::kPredictionEphemerisMaxDtLongRangeS
+                                      : OrbitPredictionTuning::kPredictionEphemerisMaxDtS;
+            if (request_needs_control_sensitive_prediction(request))
+            {
+                dt_cap_s = std::min(dt_cap_s, OrbitPredictionTuning::kPredictionEphemerisMaxDtControlledS);
+            }
+            if (request.lagrange_sensitive)
+            {
+                dt_cap_s = std::min(dt_cap_s, OrbitPredictionTuning::kLagrangeEphemerisMaxDtS);
+            }
+            return dt_cap_s;
+        }
+
+        double resolve_prediction_ephemeris_dt_s(const OrbitPredictionService::Request &request,
+                                                 const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec)
+        {
+            double dt_s = sampling_spec.sample_dt_s;
+            dt_s = std::min(dt_s, resolve_prediction_ephemeris_dt_cap_s(request));
+            if (request.celestial_ephemeris_dt_s > 0.0)
+            {
+                dt_s = std::min(dt_s, request.celestial_ephemeris_dt_s);
+            }
+
+            const std::size_t max_segments = std::max<std::size_t>(1, resolve_prediction_ephemeris_max_segments(request));
+            const double min_dt_for_budget_s = sampling_spec.horizon_s / static_cast<double>(max_segments);
+            if (std::isfinite(min_dt_for_budget_s) && min_dt_for_budget_s > 0.0)
+            {
+                dt_s = std::max(dt_s, min_dt_for_budget_s);
+            }
+
+            return std::max(1.0e-3, dt_s);
         }
 
         SpacecraftSamplingBudget build_spacecraft_sampling_budget(const OrbitPredictionService::Request &request)
@@ -381,23 +1105,11 @@ namespace Game
             out.sim_config = request.sim_config;
             out.massive_bodies = request.massive_bodies;
             out.duration_s = sampling_spec.horizon_s;
-            out.celestial_dt_s = sampling_spec.sample_dt_s;
-            if (request.celestial_ephemeris_dt_s > 0.0)
-            {
-                out.celestial_dt_s = std::min(out.celestial_dt_s, request.celestial_ephemeris_dt_s);
-            }
-            if (request.lagrange_sensitive)
-            {
-                out.celestial_dt_s = std::min(out.celestial_dt_s, OrbitPredictionTuning::kLagrangeEphemerisMaxDtS);
-            }
-            out.celestial_dt_s = std::max(1.0e-3, out.celestial_dt_s);
+            out.celestial_dt_s = resolve_prediction_ephemeris_dt_s(request, sampling_spec);
             const std::size_t desired_segments =
                     static_cast<std::size_t>(std::ceil(out.duration_s / out.celestial_dt_s));
             out.max_samples = std::max<std::size_t>(sampling_spec.max_samples, desired_segments);
-            if (request.lagrange_sensitive)
-            {
-                out.max_samples = std::min(out.max_samples, OrbitPredictionTuning::kLagrangeEphemerisMaxSamples);
-            }
+            out.max_samples = std::min(out.max_samples, resolve_prediction_ephemeris_max_segments(request));
             return out;
         }
 
@@ -458,9 +1170,11 @@ namespace Game
             const auto [horizon_s_auto, dt_s_auto] =
                     OrbitPredictionMath::select_prediction_horizon_and_dt(mu_ref_m3_s2, out.rel_pos_m, out.rel_vel_mps);
 
-            double horizon_s = std::clamp(horizon_s_auto, OrbitPredictionTuning::kMinHorizonS, OrbitPredictionTuning::kMaxHorizonS);
+            const double horizon_cap_s = resolve_prediction_horizon_cap_s(request);
+            const double sample_dt_cap_s = resolve_prediction_sample_dt_cap_s(request);
+            double horizon_s = std::clamp(horizon_s_auto, OrbitPredictionTuning::kMinHorizonS, horizon_cap_s);
             horizon_s = std::max(horizon_s, std::max(1.0, request.future_window_s));
-            double dt_s = std::clamp(dt_s_auto, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
+            double dt_s = std::clamp(dt_s_auto, 0.01, sample_dt_cap_s);
             const int max_steps = OrbitPredictionTuning::kMaxStepsNormal;
             const double min_dt_for_step_budget = horizon_s / static_cast<double>(std::max(1, max_steps));
             if (std::isfinite(min_dt_for_step_budget) && min_dt_for_step_budget > 0.0)
@@ -468,8 +1182,8 @@ namespace Game
                 dt_s = std::max(dt_s, min_dt_for_step_budget);
             }
 
-            dt_s = std::clamp(dt_s, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
-            horizon_s = std::clamp(horizon_s, dt_s, OrbitPredictionTuning::kMaxHorizonS);
+            dt_s = std::clamp(dt_s, 0.01, sample_dt_cap_s);
+            horizon_s = std::clamp(horizon_s, dt_s, horizon_cap_s);
             const int sample_count = std::clamp(static_cast<int>(std::ceil(horizon_s / dt_s)) + 1, 2, max_steps);
             if (!(horizon_s > 0.0) || !(dt_s > 0.0) || sample_count < 2)
             {
@@ -690,12 +1404,13 @@ namespace Game
                 OrbitPredictionMath::select_prediction_horizon_and_dt(mu_ref_m3_s2, ship_rel_pos_m, ship_rel_vel_mps);
 
         // Start from orbital-state-driven defaults, then clamp into service-wide budgets.
-        double horizon_s = std::clamp(horizon_s_auto, OrbitPredictionTuning::kMinHorizonS, OrbitPredictionTuning::kMaxHorizonS);
-        double dt_s = std::clamp(dt_s_auto, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
+        const double horizon_cap_s = resolve_prediction_horizon_cap_s(request);
+        double horizon_s = std::clamp(horizon_s_auto, OrbitPredictionTuning::kMinHorizonS, horizon_cap_s);
+        double dt_s = std::clamp(dt_s_auto, 0.01, resolve_prediction_sample_dt_cap_s(request));
         const SpacecraftSamplingBudget sampling_budget = build_spacecraft_sampling_budget(request);
         int max_steps = sampling_budget.soft_max_steps;
         double dt_min_s = 0.01;
-        double dt_max_s = OrbitPredictionTuning::kMaxSampleDtS;
+        double dt_max_s = resolve_prediction_sample_dt_cap_s(request);
         // Keep solver coverage aligned with the UI's requested future draw window.
         double min_horizon_s = std::max(1.0, request.future_window_s);
         horizon_s = std::max(horizon_s, min_horizon_s);
@@ -741,7 +1456,7 @@ namespace Game
         }
 
         dt_s = std::clamp(dt_s, dt_min_s, dt_max_s);
-        horizon_s = std::clamp(horizon_s, dt_s, OrbitPredictionTuning::kMaxHorizonS);
+        horizon_s = std::clamp(horizon_s, dt_s, horizon_cap_s);
         const int steps = std::clamp(static_cast<int>(std::ceil(horizon_s / dt_s)), 2, max_steps);
 
         out.valid = (steps >= 2) && (horizon_s > 0.0) && (dt_s > 0.0);
@@ -873,6 +1588,7 @@ namespace Game
         }
 
         orbitsim::GameSimulation::Config sim_config = request.sim_config;
+        apply_prediction_integrator_profile(sim_config, request);
         if (request.lagrange_sensitive)
         {
             apply_lagrange_integrator_profile(sim_config);
@@ -953,19 +1669,12 @@ namespace Game
                 return out;
             }
 
-            orbitsim::TrajectoryOptions opt{};
-            opt.duration_s = sampling_spec.horizon_s;
-            opt.sample_dt_s = sampling_spec.sample_dt_s;
-            opt.spacecraft_sample_dt_s = sampling_spec.sample_dt_s;
-            opt.spacecraft_lookup_dt_s = sampling_spec.sample_dt_s;
-            opt.celestial_dt_s = sampling_spec.sample_dt_s;
-            opt.max_samples = sampling_spec.max_samples;
-            opt.include_start = true;
-            opt.include_end = true;
-            opt.stop_on_impact = false;
-
+            const std::vector<MultiBandSampleWindow> sample_windows =
+                    build_multi_band_sample_windows(request.sim_time_s,
+                                                    sampling_spec.horizon_s,
+                                                    sampling_spec.max_samples);
             std::vector<orbitsim::TrajectorySample> traj_inertial =
-                    orbitsim::predict_body_trajectory(sim, *shared_ephemeris, subject_sim->id, opt);
+                    sample_body_ephemeris_multi_band(*shared_ephemeris, subject_sim->id, sample_windows);
             if (traj_inertial.size() < 2)
             {
                 return out;
@@ -993,8 +1702,6 @@ namespace Game
         }
 
         const double horizon_s = sampling_spec.horizon_s;
-        const double dt_s = sampling_spec.sample_dt_s;
-
         orbitsim::Spacecraft ship_sc{};
         ship_sc.state = orbitsim::make_state(ship_bary_pos_m, ship_bary_vel_mps);
         ship_sc.dry_mass_kg = 1.0;
@@ -1007,23 +1714,18 @@ namespace Game
 
         sim.maneuver_plan() = orbitsim::ManeuverPlan{};
 
-        orbitsim::TrajectoryOptions opt{};
-        opt.duration_s = horizon_s;
-        opt.sample_dt_s = dt_s;
-        opt.spacecraft_sample_dt_s = dt_s;
-        opt.spacecraft_lookup_dt_s = dt_s;
-        opt.celestial_dt_s = dt_s;
-        opt.max_samples = sampling_spec.max_samples;
-        opt.include_start = true;
-        opt.include_end = true;
-        opt.stop_on_impact = false;
-
         orbitsim::TrajectorySegmentOptions segment_opt{};
         segment_opt.duration_s = horizon_s;
-        segment_opt.max_segments = std::max<std::size_t>(1, (opt.max_samples > 0) ? (opt.max_samples - 1) : 0);
+        segment_opt.max_segments =
+                resolve_spacecraft_segment_budget(request,
+                                                 horizon_s,
+                                                 (sampling_spec.max_samples > 0) ? (sampling_spec.max_samples - 1) : 0);
         segment_opt.include_start = true;
         segment_opt.include_end = true;
         segment_opt.stop_on_impact = false;
+        // Keep trajectory segment dt driven by duration/max_segments. In orbitsim, lookup_dt_s also
+        // overrides the emitted segment step, which silently truncates coverage to
+        // max_segments * lookup_dt_s for long-range predictions.
 
         SharedCelestialEphemeris shared_ephemeris = request.shared_ephemeris;
         if (!shared_ephemeris ||
@@ -1057,8 +1759,13 @@ namespace Game
             return out;
         }
 
+        const double baseline_end_s = segment_end_time(traj_segments_inertial_baseline.back());
+        const std::vector<MultiBandSampleWindow> baseline_sample_windows =
+                build_multi_band_sample_windows(request.sim_time_s,
+                                                std::max(0.0, baseline_end_s - request.sim_time_s),
+                                                sampling_spec.max_samples);
         const std::vector<orbitsim::TrajectorySample> traj_inertial_baseline =
-                orbitsim::sample_trajectory_segments_uniform_dt(traj_segments_inertial_baseline, opt);
+                sample_trajectory_segments_multi_band(traj_segments_inertial_baseline, baseline_sample_windows);
         if (traj_inertial_baseline.size() < 2)
         {
             return out;
@@ -1083,6 +1790,8 @@ namespace Game
             orbitsim::ManeuverPlan plan{};
             plan.impulses.reserve(maneuver_impulses.size());
             out.maneuver_previews.reserve(maneuver_impulses.size());
+            std::vector<PlannedSegmentBoundaryState> planned_boundary_states;
+            planned_boundary_states.reserve(maneuver_impulses.size());
             orbitsim::Spacecraft preview_spacecraft = ship_sc;
             preview_spacecraft.id = ship_h.id;
             double preview_time_s = request.sim_time_s;
@@ -1121,6 +1830,7 @@ namespace Game
                 preview.node_id = src.node_id;
                 preview.t_s = src.t_s;
 
+                const orbitsim::State pre_burn_state = preview_spacecraft.state;
                 if (build_maneuver_preview(preview_spacecraft.state, src.t_s, preview))
                 {
                     out.maneuver_previews.push_back(preview);
@@ -1163,14 +1873,22 @@ namespace Game
                         }
                     }
                 }
+
+                append_or_merge_planned_boundary_state(
+                        planned_boundary_states,
+                        src.t_s,
+                        pre_burn_state,
+                        preview_spacecraft.state);
             }
 
             orbitsim::sort_impulses_by_time(plan);
             sim.maneuver_plan() = std::move(plan);
 
             // Planned output shows the same prediction window with all maneuver nodes applied.
-            const std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_planned =
+            std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_planned =
                     orbitsim::predict_spacecraft_trajectory_segments(sim, eph, ship_h.id, segment_opt);
+            traj_segments_inertial_planned =
+                    split_trajectory_segments_at_known_boundaries(traj_segments_inertial_planned, planned_boundary_states);
             if (!traj_segments_inertial_planned.empty())
             {
                 if (cancel_requested())
@@ -1180,8 +1898,20 @@ namespace Game
 
                 out.trajectory_segments_inertial_planned = traj_segments_inertial_planned;
 
+                const double planned_end_s = segment_end_time(traj_segments_inertial_planned.back());
+                std::vector<double> node_times;
+                node_times.reserve(request.maneuver_impulses.size());
+                for (const auto &imp : request.maneuver_impulses)
+                {
+                    node_times.push_back(imp.t_s);
+                }
+                const std::vector<MultiBandSampleWindow> planned_sample_windows =
+                        build_multi_band_sample_windows(request.sim_time_s,
+                                                        std::max(0.0, planned_end_s - request.sim_time_s),
+                                                        sampling_spec.max_samples,
+                                                        node_times);
                 const std::vector<orbitsim::TrajectorySample> traj_inertial_planned =
-                        orbitsim::sample_trajectory_segments_uniform_dt(traj_segments_inertial_planned, opt);
+                        sample_trajectory_segments_multi_band(traj_segments_inertial_planned, planned_sample_windows);
                 if (traj_inertial_planned.size() >= 2)
                 {
                     out.trajectory_inertial_planned = traj_inertial_planned;

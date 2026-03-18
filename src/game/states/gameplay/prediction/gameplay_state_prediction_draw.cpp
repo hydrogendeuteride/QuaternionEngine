@@ -180,6 +180,7 @@ namespace Game
                 cache.base_max_segments = max_segments;
             }
         }
+
     } // namespace
 
     // Build per-frame orbit visuals, pick data, and debug overlays from the latest prediction cache.
@@ -552,6 +553,17 @@ namespace Game
 
             const double future_window_s = prediction_future_window_s(track->key);
             const double planned_future_window_s = maneuver_plan_preview_window_s();
+            const Draw::PickWindow planned_pick_window =
+                    (active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty() && !traj_planned_segments->empty())
+                            ? Draw::build_planned_pick_window(*traj_planned_segments,
+                                                              _prediction_draw_config,
+                                                              _maneuver_state.nodes,
+                                                              now_s,
+                                                              planned_future_window_s,
+                                                              _prediction_draw_future_segment,
+                                                              _prediction_draw_full_orbit,
+                                                              track->cache.orbital_period_s)
+                            : Draw::PickWindow{};
             Draw::PickWindow base_pick_window{};
             if (_prediction_draw_full_orbit)
             {
@@ -635,17 +647,6 @@ namespace Game
                 }
             }
 
-            const Draw::PickWindow planned_pick_window =
-                    (active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty() && !traj_planned_segments->empty())
-                            ? Draw::build_planned_pick_window(*traj_planned_segments,
-                                                              _prediction_draw_config,
-                                                              _maneuver_state.nodes,
-                                                              now_s,
-                                                              planned_future_window_s,
-                                                              _prediction_draw_future_segment,
-                                                              _prediction_draw_full_orbit,
-                                                              track->cache.orbital_period_s)
-                            : Draw::PickWindow{};
             if (active_player_track)
             {
                 _orbit_plot_perf.planned_window_valid = planned_pick_window.valid;

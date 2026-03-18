@@ -670,8 +670,17 @@ namespace Game::PredictionDrawDetail
         double t_plan_start = t0p;
         if (has_future_node)
         {
-            t_plan_start = std::clamp(anchor_time_s + draw_config.node_time_tolerance_s, t0p, t1p);
-            t_plan_start = std::clamp(snap_time_past_straddling_segment(traj_planned_segments, t_plan_start), t0p, t1p);
+            // When the solver output is split at the node time, start exactly on the node so the
+            // visible preview length matches the authored preview window. Fall back to the old
+            // "snap past the containing segment" behavior only if the node still lands inside
+            // a straddling segment.
+            t_plan_start = std::clamp(anchor_time_s, t0p, t1p);
+            const double snapped_t_plan_start =
+                    std::clamp(snap_time_past_straddling_segment(traj_planned_segments, t_plan_start), t0p, t1p);
+            if (snapped_t_plan_start > (t_plan_start + draw_config.node_time_tolerance_s))
+            {
+                t_plan_start = snapped_t_plan_start;
+            }
         }
         else if (has_relevant_node)
         {
