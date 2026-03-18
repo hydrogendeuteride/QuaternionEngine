@@ -414,30 +414,24 @@ namespace Game
                 sample_prediction_inertial_state(traj, query_time_s, sc_state) &&
                 !cache.massive_bodies.empty())
             {
-                const auto body_position_at = [&](const std::size_t i) -> orbitsim::Vec3 {
-                    const orbitsim::MassiveBody &body = cache.massive_bodies[i];
-                    if (cache.shared_ephemeris && !cache.shared_ephemeris->empty())
-                    {
-                        return cache.shared_ephemeris->body_state_at_by_id(body.id, query_time_s).position_m;
-                    }
-                    return body.state.position_m;
-                };
-
-                const std::size_t primary_index = orbitsim::auto_select_primary_index(
+                const orbitsim::BodyId preferred_body_id =
+                        node.primary_body_id != orbitsim::kInvalidBodyId ? node.primary_body_id : player_track->auto_primary_body_id;
+                const orbitsim::BodyId primary_body_id = select_prediction_primary_body_id(
                         cache.massive_bodies,
+                        &cache,
                         sc_state.position_m,
-                        body_position_at,
-                        _orbitsim ? _orbitsim->sim.config().softening_length_m : 0.0);
-                if (primary_index < cache.massive_bodies.size())
+                        query_time_s,
+                        preferred_body_id);
+                if (primary_body_id != orbitsim::kInvalidBodyId)
                 {
-                    return cache.massive_bodies[primary_index].id;
+                    return primary_body_id;
                 }
             }
 
             if (!cache.trajectory_inertial.empty())
             {
                 const orbitsim::BodyId analysis_body_id =
-                        resolve_prediction_analysis_body_id(cache, player_track->key, query_time_s);
+                        resolve_prediction_analysis_body_id(cache, player_track->key, query_time_s, node.primary_body_id);
                 if (analysis_body_id != orbitsim::kInvalidBodyId)
                 {
                     return analysis_body_id;

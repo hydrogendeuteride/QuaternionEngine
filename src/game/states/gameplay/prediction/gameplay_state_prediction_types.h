@@ -277,6 +277,7 @@ namespace Game
         bool invalidated_while_pending{false};
         bool supports_maneuvers{false};
         bool is_celestial{false};
+        orbitsim::BodyId auto_primary_body_id{orbitsim::kInvalidBodyId};
         double solver_ms_last{0.0};
 
         void clear_runtime()
@@ -287,6 +288,7 @@ namespace Game
             request_pending = false;
             derived_request_pending = false;
             invalidated_while_pending = false;
+            auto_primary_body_id = orbitsim::kInvalidBodyId;
             solver_ms_last = 0.0;
         }
     };
