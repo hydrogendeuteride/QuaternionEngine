@@ -381,7 +381,7 @@ void GameplayState::apply_maneuver_axis_drag(GameStateContext &ctx,
         node.dv_rtn_mps = dv_new;
         node.total_dv_mps = safe_length(node.dv_rtn_mps);
         _maneuver_gizmo_interaction.applied_delta = true;
-        mark_prediction_dirty();
+        mark_maneuver_plan_dirty();
     }
 }
 
@@ -728,7 +728,7 @@ void GameplayState::draw_maneuver_imgui_gizmo(GameStateContext &ctx)
 
             if (changed)
             {
-                mark_prediction_dirty();
+                mark_maneuver_plan_dirty();
             }
         }
         else

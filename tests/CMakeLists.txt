@@ -64,7 +64,11 @@ add_test(NAME orbit_helpers_tests COMMAND orbit_helpers_tests)
 
 add_executable(orbit_render_curve_tests
   orbit_render_curve_tests.cpp
-  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_render_curve.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_render.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_pick.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_plot_util.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_math.cpp"
 )
 
 set_property(TARGET orbit_render_curve_tests PROPERTY CXX_STANDARD 20)
@@ -110,8 +114,14 @@ add_executable(gameplay_time_warp_transition_tests
   gameplay_state_test_stubs.cpp
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_sim.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_math.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_render_curve.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_render.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_pick.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_plot_util.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_service.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_trajectory.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_sampling.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_policy.cpp"
 )
 
 set_property(TARGET gameplay_time_warp_transition_tests PROPERTY CXX_STANDARD 20)
@@ -140,8 +150,14 @@ add_executable(gameplay_prediction_maneuver_tests
   gameplay_prediction_maneuver_test_stubs.cpp
   "${PROJECT_SOURCE_DIR}/src/game/entity.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_math.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_render_curve.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_render.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_pick.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_plot_util.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_service.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_trajectory.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_sampling.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_policy.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_sim.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/gameplay_state_prediction.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/gameplay_state_maneuver_nodes.cpp"

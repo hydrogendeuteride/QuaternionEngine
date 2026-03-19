@@ -233,7 +233,7 @@ void GameplayState::update_maneuver_nodes_execution(GameStateContext &ctx)
 
     _execute_node_armed = false;
     _execute_node_id = -1;
-    mark_prediction_dirty();
+    mark_maneuver_plan_dirty();
 }
 
 void GameplayState::emit_maneuver_node_debug_overlay(GameStateContext &ctx)

@@ -16,14 +16,19 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/orbit/orbit_prediction_math.h
   game/orbit/orbit_prediction_math.cpp
   game/orbit/orbit_render_curve.h
-  game/orbit/orbit_render_curve.cpp
+  game/orbit/render_curve/orbit_render_curve_internal.h
+  game/orbit/render_curve/orbit_render_curve.cpp
+  game/orbit/render_curve/orbit_render_curve_render.cpp
+  game/orbit/render_curve/orbit_render_curve_pick.cpp
   game/orbit/orbit_plot_util.h
   game/orbit/orbit_plot_util.cpp
-  game/orbit/orbit_plot_lod_builder.h
-  game/orbit/orbit_plot_lod_builder.cpp
   game/orbit/orbit_prediction_tuning.h
   game/orbit/orbit_prediction_service.h
   game/orbit/orbit_prediction_service.cpp
+  game/orbit/prediction/orbit_prediction_service_internal.h
+  game/orbit/prediction/orbit_prediction_service_trajectory.cpp
+  game/orbit/prediction/orbit_prediction_service_sampling.cpp
+  game/orbit/prediction/orbit_prediction_service_policy.cpp
 
   # game root
   game/main_game.h

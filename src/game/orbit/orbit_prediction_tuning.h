@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 namespace Game::OrbitPredictionTuning
 {
     // Scale applied to the estimated orbital period when selecting the default prediction horizon.
@@ -15,15 +17,65 @@ namespace Game::OrbitPredictionTuning
     // Global horizon bounds (in seconds) used by both gameplay and worker prediction code.
     inline constexpr double kMinHorizonS = 60.0;
     inline constexpr double kMaxHorizonS = 15'552'000.0; // 180 days
+    inline constexpr double kLongRangeHorizonThresholdS = kMaxHorizonS;
+    inline constexpr double kLongRangeHorizonCapS = 157'680'000.0; // 5 years
 
     // Generic trajectory sampling limits.
     inline constexpr double kMaxSampleDtS = 900.0;
+    inline constexpr double kLongRangeMaxSampleDtS = 21'600.0; // 6 hours
     inline constexpr double kTargetSamplesDivisorS = 2.0; // horizon / 2
     inline constexpr double kTargetSamplesMin = 500.0;
     inline constexpr double kTargetSamplesMax = 24'000.0;
     inline constexpr int kMaxStepsNormal = 24'000;
-    inline constexpr double kSpacecraftTargetSamplesMaxNormal = 12'000.0;
-    inline constexpr int kSpacecraftMaxStepsNormal = 12'000;
+    inline constexpr double kLongRangeSegmentTargetDtS = 3'600.0; // 1 hour
+    inline constexpr std::size_t kLongRangeMaxSegmentsHard = 96'000;
+
+    // Multi-band cache sampling redistributes a fixed sample budget so near-term motion stays
+    // dense while long-range tails become progressively coarser.
+    inline constexpr double kMultiBandNearDurationS = 604'800.0;   // 7 days
+    inline constexpr double kMultiBandMidDurationS = 5'184'000.0;  // 60 days
+    inline constexpr double kMultiBandNearDensity = 4.0;
+    inline constexpr double kMultiBandMidDensity = 1.0;
+    inline constexpr double kMultiBandFarDensity = 0.25;
+
+    // Maneuver-node sampling windows: high-density region around each burn.
+    inline constexpr double kMultiBandNodeWindowHalfWidthS = 3'600.0; // 1 hour each side
+    inline constexpr double kMultiBandNodeDensity = 8.0;              // 2x Near density
+
+    // Normal spacecraft predictions start with a softer budget, but can grow up to the global
+    // hard caps when long horizons or authored maneuver plans demand it.
+    inline constexpr double kSpacecraftTargetSamplesSoftNormal = 12'000.0;
+    inline constexpr double kSpacecraftTargetSamplesHardNormal = kTargetSamplesMax;
+    inline constexpr double kSpacecraftTargetSamplesBonusPerManeuver = 1'000.0;
+    inline constexpr int kSpacecraftMaxStepsSoftNormal = 12'000;
+    inline constexpr int kSpacecraftMaxStepsHardNormal = kMaxStepsNormal;
+    inline constexpr int kSpacecraftMaxStepsBonusPerManeuver = 1'000;
+
+    // Prediction runs on a background worker, so it can afford a tighter spacecraft integrator budget
+    // than the live simulation. These caps reduce phase drift on long arcs without changing runtime stepping.
+    inline constexpr double kPredictionIntegratorMaxStepS = 60.0;
+    inline constexpr double kPredictionIntegratorMaxStepLongRangeS = 180.0;
+    inline constexpr double kPredictionIntegratorMaxStepControlledS = 15.0;
+    inline constexpr int kPredictionIntegratorMaxSubstepsSoft = 128;
+    inline constexpr int kPredictionIntegratorMaxSubstepsHard = 512;
+    inline constexpr int kPredictionIntegratorMaxIntervalSplits = 10;
+
+    // Build body ephemerides at a finer cadence than the final draw samples so spacecraft propagation
+    // sees a smoother gravity field, especially for multi-body and maneuver planning views.
+    inline constexpr double kPredictionEphemerisMaxDtS = 30.0;
+    inline constexpr double kPredictionEphemerisMaxDtLongRangeS = 120.0;
+    inline constexpr double kPredictionEphemerisMaxDtControlledS = 10.0;
+    inline constexpr std::size_t kPredictionEphemerisMaxSegmentsHard = 96'000;
+
+    // Synodic/Lagrange analysis is sensitive to phase drift. Keep spacecraft steps and body ephemerides tighter.
+    inline constexpr double kLagrangeIntegratorMaxStepS = 60.0;
+    inline constexpr double kLagrangeIntegratorAbsTol = 1.0e-4;
+    inline constexpr double kLagrangeIntegratorRelTol = 1.0e-10;
+    inline constexpr double kLagrangeEphemerisMaxDtS = 30.0;
+    inline constexpr std::size_t kLagrangeEphemerisMaxSamples = 96'000;
+
+    // Keep the currently selected primary body while its gravity metric remains close to the best candidate.
+    inline constexpr double kPrimaryBodyHysteresisKeepRatio = 0.90;
 
     // Extra coverage requested after the last maneuver node so the post-node path stays visible.
     inline constexpr double kPostNodeCoverageMinS = 120.0;
