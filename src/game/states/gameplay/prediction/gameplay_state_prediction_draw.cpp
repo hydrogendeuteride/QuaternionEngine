@@ -801,7 +801,7 @@ namespace Game
 
                     out_segments.clear();
                     out_segments.reserve(lod.segments.size());
-                    for (const OrbitRenderCurve::PickSegment &segment : lod.segments)
+                    for (const OrbitRenderCurve::LineSegment &segment : lod.segments)
                     {
                         out_segments.push_back(PickingSystem::LinePickSegmentData{
                                 .a_world = segment.a_world,
