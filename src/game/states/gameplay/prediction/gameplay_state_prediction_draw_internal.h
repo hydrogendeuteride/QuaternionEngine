@@ -3,7 +3,7 @@
 #include "core/engine.h"
 #include "game/states/gameplay/gameplay_state.h"
 
-#include "game/orbit/orbit_plot_lod_builder.h"
+#include "game/orbit/orbit_render_curve.h"
 #include "core/game_api.h"
 #include "core/orbit_plot/orbit_plot.h"
 
@@ -22,8 +22,8 @@ namespace Game::PredictionDrawDetail
         WorldVec3 ref_body_world{0.0, 0.0, 0.0};
         glm::dmat3 frame_to_world{1.0};
         WorldVec3 align_delta{0.0, 0.0, 0.0};
-        OrbitPlotLodBuilder::CameraContext lod_camera{};
-        OrbitPlotLodBuilder::FrustumContext render_frustum{};
+        OrbitRenderCurve::CameraContext lod_camera{};
+        OrbitRenderCurve::FrustumContext render_frustum{};
         glm::dvec3 camera_world{0.0, 0.0, 0.0};
         double tan_half_fov{0.0};
         double viewport_height_px{1.0};
@@ -100,26 +100,15 @@ namespace Game::PredictionDrawDetail
                                          const WorldVec3 &ref_body_world,
                                          const glm::dmat3 &frame_to_world,
                                          const WorldVec3 &align_delta,
+                                         const OrbitRenderCurve::FrustumContext &pick_frustum,
+                                         const OrbitRenderCurve::PickSettings &pick_settings,
                                          double t0_s,
                                          double t1_s,
-                                         std::size_t max_segments,
+                                         std::span<const double> anchor_times_s,
                                          bool segments_are_world_basis,
                                          std::vector<PickingSystem::LinePickSegmentData> &out_segments,
                                          bool &out_cap_hit,
                                          OrbitPlotPerfStats &perf);
-    std::size_t emit_pick_segments(PickingSystem *picking,
-                                   uint32_t pick_group,
-                                   const std::vector<orbitsim::TrajectorySegment> &traj_segments,
-                                   const WorldVec3 &ref_body_world,
-                                   const glm::dmat3 &frame_to_world,
-                                   const WorldVec3 &align_delta,
-                                   const OrbitPlotLodBuilder::FrustumContext &pick_frustum,
-                                   const OrbitPlotLodBuilder::PickSettings &pick_settings,
-                                   double t0_s,
-                                   double t1_s,
-                                   const std::vector<double> &anchor_times,
-                                   bool segments_are_world_basis,
-                                   OrbitPlotPerfStats &perf);
     bool frame_spec_uses_direct_world_polyline(const orbitsim::TrajectoryFrameSpec &spec);
     void draw_polyline_window(const OrbitDrawWindowContext &ctx,
                               const OrbitPredictionDrawConfig &draw_config,

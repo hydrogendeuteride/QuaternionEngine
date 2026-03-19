@@ -76,13 +76,51 @@ namespace Game
         s.prediction_periodic_refresh_s = json_opt<double>(root, "prediction_periodic_refresh_s", s.prediction_periodic_refresh_s);
         s.prediction_thrust_refresh_s = json_opt<double>(root, "prediction_thrust_refresh_s", s.prediction_thrust_refresh_s);
 
-        s.prediction_future_window_orbiter_s = json_opt<double>(root, "prediction_future_window_orbiter_s", s.prediction_future_window_orbiter_s);
-        s.prediction_future_window_celestial_s = json_opt<double>(root, "prediction_future_window_celestial_s", s.prediction_future_window_celestial_s);
-        s.prediction_future_window_planned_s = json_opt<double>(root, "prediction_future_window_planned_s", s.prediction_future_window_planned_s);
+        s.prediction_sampling_policy.orbiter_min_window_s = json_opt<double>(
+                root,
+                "prediction_sampling_orbiter_min_window_s",
+                json_opt<double>(
+                        root,
+                        "prediction_future_window_orbiter_s",
+                        s.prediction_sampling_policy.orbiter_min_window_s));
+        s.prediction_sampling_policy.celestial_min_window_s = json_opt<double>(
+                root,
+                "prediction_sampling_celestial_min_window_s",
+                json_opt<double>(
+                        root,
+                        "prediction_future_window_celestial_s",
+                        s.prediction_sampling_policy.celestial_min_window_s));
+        s.maneuver_plan_windows.preview_window_s = json_opt<double>(
+                root,
+                "maneuver_plan_preview_window_s",
+                json_opt<double>(
+                        root,
+                        "prediction_future_window_planned_s",
+                        s.maneuver_plan_windows.preview_window_s));
+        s.maneuver_plan_windows.solve_margin_s = json_opt<double>(
+                root,
+                "maneuver_plan_solve_margin_s",
+                json_opt<double>(
+                        root,
+                        "prediction_future_window_planned_s",
+                        s.maneuver_plan_windows.solve_margin_s));
 
-        s.orbit_plot_render_error_px = json_opt<double>(root, "orbit_plot_render_error_px", s.orbit_plot_render_error_px);
-        s.orbit_plot_render_max_segments_cpu = json_opt<int>(root, "orbit_plot_render_max_segments_cpu", s.orbit_plot_render_max_segments_cpu);
-        s.orbit_plot_pick_max_segments = json_opt<int>(root, "orbit_plot_pick_max_segments", s.orbit_plot_pick_max_segments);
+        s.orbit_plot_budget.render_error_px = json_opt<double>(
+                root,
+                "orbit_plot_budget_render_error_px",
+                json_opt<double>(root, "orbit_plot_render_error_px", s.orbit_plot_budget.render_error_px));
+        s.orbit_plot_budget.render_max_segments_cpu = json_opt<int>(
+                root,
+                "orbit_plot_budget_render_max_segments_cpu",
+                json_opt<int>(root, "orbit_plot_render_max_segments_cpu", s.orbit_plot_budget.render_max_segments_cpu));
+        s.orbit_plot_budget.pick_max_segments = json_opt<int>(
+                root,
+                "orbit_plot_budget_pick_max_segments",
+                json_opt<int>(root, "orbit_plot_pick_max_segments", s.orbit_plot_budget.pick_max_segments));
+        s.orbit_plot_budget.pick_frustum_margin_ratio = json_opt<double>(
+                root,
+                "orbit_plot_budget_pick_frustum_margin_ratio",
+                s.orbit_plot_budget.pick_frustum_margin_ratio);
 
         s.debug_draw_enabled = json_opt<bool>(root, "debug_draw_enabled", s.debug_draw_enabled);
         s.runtime_orbiter_rails_enabled = json_opt<bool>(root, "runtime_orbiter_rails_enabled", s.runtime_orbiter_rails_enabled);
@@ -130,13 +168,25 @@ namespace Game
             root["prediction_periodic_refresh_s"] = s.prediction_periodic_refresh_s;
             root["prediction_thrust_refresh_s"] = s.prediction_thrust_refresh_s;
 
-            root["prediction_future_window_orbiter_s"] = s.prediction_future_window_orbiter_s;
-            root["prediction_future_window_celestial_s"] = s.prediction_future_window_celestial_s;
-            root["prediction_future_window_planned_s"] = s.prediction_future_window_planned_s;
+            root["prediction_sampling_orbiter_min_window_s"] = s.prediction_sampling_policy.orbiter_min_window_s;
+            root["prediction_sampling_celestial_min_window_s"] = s.prediction_sampling_policy.celestial_min_window_s;
+            root["maneuver_plan_preview_window_s"] = s.maneuver_plan_windows.preview_window_s;
+            root["maneuver_plan_solve_margin_s"] = s.maneuver_plan_windows.solve_margin_s;
 
-            root["orbit_plot_render_error_px"] = s.orbit_plot_render_error_px;
-            root["orbit_plot_render_max_segments_cpu"] = s.orbit_plot_render_max_segments_cpu;
-            root["orbit_plot_pick_max_segments"] = s.orbit_plot_pick_max_segments;
+            // Legacy aliases kept for compatibility with older local settings files/builds.
+            root["prediction_future_window_orbiter_s"] = s.prediction_sampling_policy.orbiter_min_window_s;
+            root["prediction_future_window_celestial_s"] = s.prediction_sampling_policy.celestial_min_window_s;
+            root["prediction_future_window_planned_s"] = s.maneuver_plan_windows.preview_window_s;
+
+            root["orbit_plot_budget_render_error_px"] = s.orbit_plot_budget.render_error_px;
+            root["orbit_plot_budget_render_max_segments_cpu"] = s.orbit_plot_budget.render_max_segments_cpu;
+            root["orbit_plot_budget_pick_max_segments"] = s.orbit_plot_budget.pick_max_segments;
+            root["orbit_plot_budget_pick_frustum_margin_ratio"] = s.orbit_plot_budget.pick_frustum_margin_ratio;
+
+            // Legacy aliases kept for compatibility with older local settings files/builds.
+            root["orbit_plot_render_error_px"] = s.orbit_plot_budget.render_error_px;
+            root["orbit_plot_render_max_segments_cpu"] = s.orbit_plot_budget.render_max_segments_cpu;
+            root["orbit_plot_pick_max_segments"] = s.orbit_plot_budget.pick_max_segments;
 
             root["debug_draw_enabled"] = s.debug_draw_enabled;
             root["runtime_orbiter_rails_enabled"] = s.runtime_orbiter_rails_enabled;

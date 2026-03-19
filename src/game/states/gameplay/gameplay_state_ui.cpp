@@ -49,12 +49,9 @@ namespace Game
         s.prediction_line_overlay_boost = _prediction_line_overlay_boost;
         s.prediction_periodic_refresh_s = _prediction_periodic_refresh_s;
         s.prediction_thrust_refresh_s = _prediction_thrust_refresh_s;
-        s.prediction_future_window_orbiter_s = _prediction_future_window_orbiter_s;
-        s.prediction_future_window_celestial_s = _prediction_future_window_celestial_s;
-        s.prediction_future_window_planned_s = _prediction_future_window_planned_s;
-        s.orbit_plot_render_error_px = _orbit_plot_render_error_px;
-        s.orbit_plot_render_max_segments_cpu = _orbit_plot_render_max_segments_cpu;
-        s.orbit_plot_pick_max_segments = _orbit_plot_pick_max_segments;
+        s.prediction_sampling_policy = _prediction_sampling_policy;
+        s.maneuver_plan_windows = _maneuver_plan_windows;
+        s.orbit_plot_budget = _orbit_plot_budget;
         s.debug_draw_enabled = _debug_draw_enabled;
         s.runtime_orbiter_rails_enabled = _runtime_orbiter_rails_enabled;
         s.runtime_orbiter_rails_distance_m = _runtime_orbiter_rails_distance_m;
@@ -72,12 +69,9 @@ namespace Game
         _prediction_line_overlay_boost = s.prediction_line_overlay_boost;
         _prediction_periodic_refresh_s = s.prediction_periodic_refresh_s;
         _prediction_thrust_refresh_s = s.prediction_thrust_refresh_s;
-        _prediction_future_window_orbiter_s = s.prediction_future_window_orbiter_s;
-        _prediction_future_window_celestial_s = s.prediction_future_window_celestial_s;
-        _prediction_future_window_planned_s = s.prediction_future_window_planned_s;
-        _orbit_plot_render_error_px = s.orbit_plot_render_error_px;
-        _orbit_plot_render_max_segments_cpu = s.orbit_plot_render_max_segments_cpu;
-        _orbit_plot_pick_max_segments = s.orbit_plot_pick_max_segments;
+        _prediction_sampling_policy = s.prediction_sampling_policy;
+        _maneuver_plan_windows = s.maneuver_plan_windows;
+        _orbit_plot_budget = s.orbit_plot_budget;
         _debug_draw_enabled = s.debug_draw_enabled;
         _runtime_orbiter_rails_enabled = s.runtime_orbiter_rails_enabled;
         _runtime_orbiter_rails_distance_m = s.runtime_orbiter_rails_distance_m;
@@ -528,59 +522,12 @@ namespace Game
 #endif
                 }
 
-                // --- Orbit Settings (collapsed by default) ---
-                if (ImGui::CollapsingHeader("Orbit Settings"))
+                // --- Orbit View (collapsed by default) ---
+                if (ImGui::CollapsingHeader("Orbit View"))
                 {
                     ImGui::Checkbox("Prediction full orbit", &_prediction_draw_full_orbit);
                     ImGui::Checkbox("Prediction future segment", &_prediction_draw_future_segment);
                     ImGui::Checkbox("Prediction velocity ray", &_prediction_draw_velocity_ray);
-
-                    float future_window_orbiter_s = static_cast<float>(_prediction_future_window_orbiter_s);
-                    if (ImGui::DragFloat("Orbiter future window (s)", &future_window_orbiter_s, 10.0f, 0.0f, 15552000.0f, "%.0f"))
-                    {
-                        _prediction_future_window_orbiter_s =
-                                static_cast<double>(std::max(0.0f, future_window_orbiter_s));
-                    }
-
-                    float future_window_celestial_s = static_cast<float>(_prediction_future_window_celestial_s);
-                    if (ImGui::DragFloat("Celestial future window (s)",
-                                         &future_window_celestial_s,
-                                         60.0f,
-                                         0.0f,
-                                         15552000.0f,
-                                         "%.0f"))
-                    {
-                        _prediction_future_window_celestial_s =
-                                static_cast<double>(std::max(0.0f, future_window_celestial_s));
-                    }
-
-                    float future_window_planned_s = static_cast<float>(_prediction_future_window_planned_s);
-                    if (ImGui::DragFloat("Planned future window (s)", &future_window_planned_s, 10.0f, 0.0f, 15552000.0f, "%.0f"))
-                    {
-                        _prediction_future_window_planned_s =
-                                static_cast<double>(std::max(0.0f, future_window_planned_s));
-                    }
-
-                    float refresh_s = static_cast<float>(_prediction_periodic_refresh_s);
-                    if (ImGui::DragFloat("Prediction refresh (s)", &refresh_s, 1.0f, 0.0f, 36000.0f, "%.1f"))
-                    {
-                        _prediction_periodic_refresh_s = static_cast<double>(std::max(0.0f, refresh_s));
-                    }
-                    ImGui::SameLine();
-                    ImGui::TextUnformatted("(0 = never)");
-
-                    float thrust_refresh_s = static_cast<float>(_prediction_thrust_refresh_s);
-                    if (ImGui::DragFloat("Prediction thrust refresh (s)",
-                                         &thrust_refresh_s,
-                                         0.01f,
-                                         0.0f,
-                                         2.0f,
-                                         "%.2f"))
-                    {
-                        _prediction_thrust_refresh_s = static_cast<double>(std::max(0.0f, thrust_refresh_s));
-                    }
-                    ImGui::SameLine();
-                    ImGui::TextUnformatted("(0 = every fixed tick)");
 
                     float prediction_alpha_scale = _prediction_line_alpha_scale;
                     if (ImGui::DragFloat("Prediction line alpha scale",
@@ -605,27 +552,97 @@ namespace Game
                     }
                     ImGui::SameLine();
                     ImGui::TextUnformatted("(0 = depth-only)");
+                }
 
-                    float render_error_px = static_cast<float>(_orbit_plot_render_error_px);
-                    if (ImGui::DragFloat("Render error (px)", &render_error_px, 0.01f, 0.05f, 4.0f, "%.2f"))
+                // --- Orbit Debug (collapsed by default) ---
+                if (ImGui::CollapsingHeader("Orbit Debug"))
+                {
+                    ImGui::TextUnformatted("Planner preview / solve margin live in Maneuver Nodes.");
+
+                    float refresh_s = static_cast<float>(_prediction_periodic_refresh_s);
+                    if (ImGui::DragFloat("Prediction refresh (s)", &refresh_s, 1.0f, 0.0f, 36000.0f, "%.1f"))
                     {
-                        _orbit_plot_render_error_px = std::clamp(static_cast<double>(render_error_px), 0.05, 4.0);
+                        _prediction_periodic_refresh_s = static_cast<double>(std::max(0.0f, refresh_s));
+                    }
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted("(0 = never)");
+
+                    float thrust_refresh_s = static_cast<float>(_prediction_thrust_refresh_s);
+                    if (ImGui::DragFloat("Prediction thrust refresh (s)",
+                                         &thrust_refresh_s,
+                                         0.01f,
+                                         0.0f,
+                                         2.0f,
+                                         "%.2f"))
+                    {
+                        _prediction_thrust_refresh_s = static_cast<double>(std::max(0.0f, thrust_refresh_s));
+                    }
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted("(0 = every fixed tick)");
+
+                    ImGui::SeparatorText("Prediction Policy");
+
+                    float orbiter_min_window_s = static_cast<float>(_prediction_sampling_policy.orbiter_min_window_s);
+                    if (ImGui::DragFloat("Orbiter min window (s)",
+                                         &orbiter_min_window_s,
+                                         10.0f,
+                                         0.0f,
+                                         15552000.0f,
+                                         "%.0f"))
+                    {
+                        _prediction_sampling_policy.orbiter_min_window_s =
+                                static_cast<double>(std::max(0.0f, orbiter_min_window_s));
                     }
 
-                    int render_max_segments_cpu = _orbit_plot_render_max_segments_cpu;
+                    float celestial_min_window_s = static_cast<float>(_prediction_sampling_policy.celestial_min_window_s);
+                    if (ImGui::DragFloat("Celestial min window (s)",
+                                         &celestial_min_window_s,
+                                         60.0f,
+                                         0.0f,
+                                         15552000.0f,
+                                         "%.0f"))
+                    {
+                        _prediction_sampling_policy.celestial_min_window_s =
+                                static_cast<double>(std::max(0.0f, celestial_min_window_s));
+                    }
+
+                    ImGui::Text("Plan preview: %.0f s", _maneuver_plan_windows.preview_window_s);
+                    ImGui::Text("Plan solve margin: %.0f s", _maneuver_plan_windows.solve_margin_s);
+
+                    ImGui::SeparatorText("Orbit Budget");
+
+                    float render_error_px = static_cast<float>(_orbit_plot_budget.render_error_px);
+                    if (ImGui::DragFloat("Render error (px)", &render_error_px, 0.01f, 0.05f, 4.0f, "%.2f"))
+                    {
+                        _orbit_plot_budget.render_error_px = std::clamp(static_cast<double>(render_error_px), 0.05, 4.0);
+                    }
+
+                    int render_max_segments_cpu = _orbit_plot_budget.render_max_segments_cpu;
                     if (ImGui::DragInt("Render max segments (CPU)",
                                        &render_max_segments_cpu,
                                        50.0f,
                                        64,
                                        200000))
                     {
-                        _orbit_plot_render_max_segments_cpu = std::clamp(render_max_segments_cpu, 64, 200000);
+                        _orbit_plot_budget.render_max_segments_cpu = std::clamp(render_max_segments_cpu, 64, 200000);
                     }
 
-                    int pick_max_segments = _orbit_plot_pick_max_segments;
+                    int pick_max_segments = _orbit_plot_budget.pick_max_segments;
                     if (ImGui::DragInt("Pick max segments", &pick_max_segments, 50.0f, 64, 32000))
                     {
-                        _orbit_plot_pick_max_segments = std::clamp(pick_max_segments, 64, 32000);
+                        _orbit_plot_budget.pick_max_segments = std::clamp(pick_max_segments, 64, 32000);
+                    }
+
+                    float pick_margin_ratio = static_cast<float>(_orbit_plot_budget.pick_frustum_margin_ratio);
+                    if (ImGui::DragFloat("Pick frustum margin ratio",
+                                         &pick_margin_ratio,
+                                         0.01f,
+                                         0.0f,
+                                         1.0f,
+                                         "%.2f"))
+                    {
+                        _orbit_plot_budget.pick_frustum_margin_ratio =
+                                std::clamp(static_cast<double>(pick_margin_ratio), 0.0, 1.0);
                     }
 
                     if (orbit_plot)

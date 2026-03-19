@@ -38,6 +38,7 @@ namespace Game
         _maneuver_state.selected_node_id = -1;
         _maneuver_state.next_node_id = 0;
         _maneuver_gizmo_interaction = {};
+        _maneuver_plan_live_preview_active = false;
         _reset_requested = false;
         _scenario_io_status.clear();
         _scenario_io_status_ok = true;
@@ -120,6 +121,7 @@ namespace Game
         _maneuver_state.selected_node_id = -1;
         _maneuver_state.next_node_id = 0;
         _maneuver_gizmo_interaction = {};
+        _maneuver_plan_live_preview_active = false;
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (ctx.renderer && ctx.renderer->_context)

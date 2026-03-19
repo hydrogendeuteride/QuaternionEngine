@@ -185,12 +185,22 @@ namespace Game
         WorldVec3 ref_body_world{0.0, 0.0, 0.0};
         WorldVec3 align_delta_world{0.0, 0.0, 0.0};
         glm::dmat3 frame_to_world{1.0};
+        bool pick_frustum_valid{false};
+        glm::mat4 pick_frustum_viewproj{1.0f};
+        WorldVec3 pick_frustum_origin_world{0.0, 0.0, 0.0};
+        double pick_frustum_margin_ratio{0.05};
+        glm::dvec3 camera_world{0.0, 0.0, 0.0};
+        double tan_half_fov{0.0};
+        double viewport_height_px{1.0};
+        double render_error_px{0.75};
         double base_t0_s{std::numeric_limits<double>::quiet_NaN()};
         double base_t1_s{std::numeric_limits<double>::quiet_NaN()};
         double planned_t0_s{std::numeric_limits<double>::quiet_NaN()};
         double planned_t1_s{std::numeric_limits<double>::quiet_NaN()};
         std::size_t base_max_segments{0};
         std::size_t planned_max_segments{0};
+        bool base_use_adaptive_curve{false};
+        bool planned_use_adaptive_curve{false};
         std::vector<PickingSystem::LinePickSegmentData> base_segments;
         std::vector<PickingSystem::LinePickSegmentData> planned_segments;
 
@@ -202,12 +212,22 @@ namespace Game
             ref_body_world = WorldVec3(0.0, 0.0, 0.0);
             align_delta_world = WorldVec3(0.0, 0.0, 0.0);
             frame_to_world = glm::dmat3(1.0);
+            pick_frustum_valid = false;
+            pick_frustum_viewproj = glm::mat4(1.0f);
+            pick_frustum_origin_world = WorldVec3(0.0, 0.0, 0.0);
+            pick_frustum_margin_ratio = 0.05;
+            camera_world = glm::dvec3(0.0, 0.0, 0.0);
+            tan_half_fov = 0.0;
+            viewport_height_px = 1.0;
+            render_error_px = 0.75;
             base_t0_s = std::numeric_limits<double>::quiet_NaN();
             base_t1_s = std::numeric_limits<double>::quiet_NaN();
             planned_t0_s = std::numeric_limits<double>::quiet_NaN();
             planned_t1_s = std::numeric_limits<double>::quiet_NaN();
             base_max_segments = 0;
             planned_max_segments = 0;
+            base_use_adaptive_curve = false;
+            planned_use_adaptive_curve = false;
             base_segments.clear();
             planned_segments.clear();
         }
@@ -277,6 +297,7 @@ namespace Game
         bool invalidated_while_pending{false};
         bool supports_maneuvers{false};
         bool is_celestial{false};
+        orbitsim::BodyId auto_primary_body_id{orbitsim::kInvalidBodyId};
         double solver_ms_last{0.0};
 
         void clear_runtime()
@@ -287,6 +308,7 @@ namespace Game
             request_pending = false;
             derived_request_pending = false;
             invalidated_while_pending = false;
+            auto_primary_body_id = orbitsim::kInvalidBodyId;
             solver_ms_last = 0.0;
         }
     };

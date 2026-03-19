@@ -64,7 +64,10 @@ namespace Game
             orbitsim::Vec3 ship_bary_velocity_mps{0.0, 0.0, 0.0};
 
             bool thrusting{false};
+            bool lagrange_sensitive{false};
             double future_window_s{600.0};
+            double celestial_ephemeris_dt_s{0.0};
+            orbitsim::BodyId preferred_primary_body_id{orbitsim::kInvalidBodyId};
             std::vector<ManeuverImpulse> maneuver_impulses;
         };
 

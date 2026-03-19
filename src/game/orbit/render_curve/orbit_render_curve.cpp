@@ -1,24 +1,34 @@
+/// OrbitRenderCurve -- tree build, LOD selection, and segment resolve.
+///
+/// This file contains:
+///   - build()             : construct the binary LOD tree from source segments
+///   - select_segments()   : walk the tree and collect segments at appropriate fidelity
+///   - resolve_curve_segments() : select + optional BCI-to-world transform (shared by render/pick)
+///
+/// Helpers (anonymous namespace):
+///   - merge_segment_range / estimate_merge_error : tree construction
+///   - node_overlaps_window / node_requires_anchor_descend : tree traversal predicates
+///   - find_segment_for_time / sample_source_position : binary search for error estimation
+///   - frame_transform_is_identity / transform_segments_to_world_basis : coordinate transforms
+
 #include "game/orbit/orbit_render_curve.h"
+#include "game/orbit/render_curve/orbit_render_curve_internal.h"
 #include "game/orbit/orbit_prediction_math.h"
-#include "game/orbit/orbit_plot_util.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
+#include <vector>
 
 namespace Game
 {
     namespace
     {
-        constexpr std::size_t kUniformErrorSamples = 9;
-        constexpr std::size_t kMidpointErrorSamples = 8;
-        constexpr std::size_t kBoundaryErrorSamples = 8;
+        // Error estimation sampling: three complementary strategies to catch worst-case deviation.
+        constexpr std::size_t kUniformErrorSamples = 9;   // evenly spaced across the merged span
+        constexpr std::size_t kMidpointErrorSamples = 8;  // midpoints of individual source segments
+        constexpr std::size_t kBoundaryErrorSamples = 8;  // boundaries between adjacent source segments
 
-        double segment_end_time(const orbitsim::TrajectorySegment &segment)
-        {
-            return segment.t0_s + segment.dt_s;
-        }
-
+        /// Check if a node's time range [t0, t1) overlaps the query window [t_start, t_end).
         bool node_overlaps_window(const OrbitRenderCurve::Node &node,
                                   const double t_start_s,
                                   const double t_end_s)
@@ -31,6 +41,58 @@ namespace Game
                    node_t0_s < t_end_s;
         }
 
+        /// Check if t_s lies strictly inside (interval_t0, interval_t1), with epsilon guard.
+        bool interval_contains_interior_time(const double interval_t0_s,
+                                             const double interval_t1_s,
+                                             const double t_s)
+        {
+            if (!(interval_t1_s > interval_t0_s) || !std::isfinite(t_s))
+            {
+                return false;
+            }
+
+            const double epsilon_s =
+                    std::max(1.0e-9, std::abs(interval_t1_s - interval_t0_s) * 1.0e-9);
+            return t_s > (interval_t0_s + epsilon_s) && t_s < (interval_t1_s - epsilon_s);
+        }
+
+        /// Force descent into children when t_start/t_end or any anchor time falls
+        /// inside this node's span. This ensures segment boundaries align with those times.
+        bool node_requires_anchor_descend(const OrbitRenderCurve::Node &node,
+                                          const double t_start_s,
+                                          const double t_end_s,
+                                          const std::span<const double> anchor_times_s)
+        {
+            if (node.is_leaf())
+            {
+                return false;
+            }
+
+            const double node_t0_s = node.segment.t0_s;
+            const double node_t1_s = segment_end_time(node.segment);
+            if (!(node_t1_s > node_t0_s))
+            {
+                return false;
+            }
+
+            if (interval_contains_interior_time(node_t0_s, node_t1_s, t_start_s) ||
+                interval_contains_interior_time(node_t0_s, node_t1_s, t_end_s))
+            {
+                return true;
+            }
+
+            for (const double anchor_time_s : anchor_times_s)
+            {
+                if (interval_contains_interior_time(node_t0_s, node_t1_s, anchor_time_s))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// Binary search for the source segment containing time t_s within [first_index, last_index).
         std::size_t find_segment_for_time(const std::span<const orbitsim::TrajectorySegment> segments,
                                           const std::size_t first_index,
                                           const std::size_t last_index,
@@ -59,6 +121,8 @@ namespace Game
             return lo;
         }
 
+        /// Evaluate the local-frame position at time t_s from the original source segments.
+        /// Used by estimate_merge_error to compare source vs. merged positions.
         bool sample_source_position(const std::span<const orbitsim::TrajectorySegment> segments,
                                     const std::size_t first_index,
                                     const std::size_t last_index,
@@ -82,6 +146,8 @@ namespace Game
                    std::isfinite(out_position_m.z);
         }
 
+        /// Create a single merged Hermite segment spanning [first_index, last_index).
+        /// Uses the first segment's start state and the last segment's end state.
         orbitsim::TrajectorySegment merge_segment_range(const std::span<const orbitsim::TrajectorySegment> segments,
                                                         const std::size_t first_index,
                                                         const std::size_t last_index)
@@ -100,6 +166,9 @@ namespace Game
             return merged;
         }
 
+        /// Estimate the worst-case position error (meters) introduced by replacing
+        /// segments [first_index, last_index) with the merged segment.
+        /// Samples at uniform intervals, segment midpoints, and segment boundaries.
         double estimate_merge_error(const std::span<const orbitsim::TrajectorySegment> segments,
                                     const std::size_t first_index,
                                     const std::size_t last_index,
@@ -166,6 +235,48 @@ namespace Game
             }
 
             return max_error_m;
+        }
+
+        /// Fast check to skip the BCI-to-world transform when already identity.
+        bool frame_transform_is_identity(const glm::dmat3 &frame_to_world)
+        {
+            constexpr double kIdentityEpsilon = 1.0e-12;
+
+            for (int col = 0; col < 3; ++col)
+            {
+                for (int row = 0; row < 3; ++row)
+                {
+                    const double expected = (col == row) ? 1.0 : 0.0;
+                    const double value = frame_to_world[col][row];
+                    if (!std::isfinite(value) || std::abs(value - expected) > kIdentityEpsilon)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        /// Rotate all segment positions and velocities from BCI frame to world frame.
+        std::vector<orbitsim::TrajectorySegment> transform_segments_to_world_basis(
+                const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                const glm::dmat3 &frame_to_world)
+        {
+            std::vector<orbitsim::TrajectorySegment> transformed_segments{};
+            transformed_segments.reserve(traj_segments.size());
+
+            for (const orbitsim::TrajectorySegment &segment : traj_segments)
+            {
+                orbitsim::TrajectorySegment transformed = segment;
+                transformed.start.position_m = frame_to_world * glm::dvec3(segment.start.position_m);
+                transformed.start.velocity_mps = frame_to_world * glm::dvec3(segment.start.velocity_mps);
+                transformed.end.position_m = frame_to_world * glm::dvec3(segment.end.position_m);
+                transformed.end.velocity_mps = frame_to_world * glm::dvec3(segment.end.velocity_mps);
+                transformed_segments.push_back(transformed);
+            }
+
+            return transformed_segments;
         }
     } // namespace
 
@@ -246,8 +357,9 @@ namespace Game
                 continue;
             }
 
-            bool descend = false;
+            bool descend = node_requires_anchor_descend(node, t_start_s, t_end_s, ctx.anchor_times_s);
             if (!node.is_leaf() &&
+                !descend &&
                 std::isfinite(node.max_error_m) &&
                 node.max_error_m > 0.0 &&
                 std::isfinite(ctx.error_px) &&
@@ -278,5 +390,26 @@ namespace Game
 
             out_segments.push_back(node.segment);
         }
+    }
+
+    std::vector<orbitsim::TrajectorySegment> OrbitRenderCurve::resolve_curve_segments(
+            const OrbitRenderCurve &curve,
+            const SelectionContext &ctx,
+            const double t_start_s,
+            const double t_end_s)
+    {
+        std::vector<orbitsim::TrajectorySegment> selected_segments{};
+        select_segments(curve, ctx, t_start_s, t_end_s, selected_segments);
+        if (selected_segments.empty())
+        {
+            return selected_segments;
+        }
+
+        if (!frame_transform_is_identity(ctx.frame_to_world))
+        {
+            return transform_segments_to_world_basis(selected_segments, ctx.frame_to_world);
+        }
+
+        return selected_segments;
     }
 } // namespace Game
