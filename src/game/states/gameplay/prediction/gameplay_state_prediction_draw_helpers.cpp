@@ -409,7 +409,7 @@ namespace Game::PredictionDrawDetail
 
             if (!dashed)
             {
-                for (const OrbitRenderCurve::RenderSegment &segment : lod.segments)
+                for (const OrbitRenderCurve::LineSegment &segment : lod.segments)
                 {
                     emit_orbit_line(ctx, color, segment.a_world, segment.b_world);
                 }
@@ -421,7 +421,7 @@ namespace Game::PredictionDrawDetail
             const double dash_period_px = dash_on_px + dash_off_px;
 
             double dash_phase_px = 0.0;
-            for (const OrbitRenderCurve::RenderSegment &segment : lod.segments)
+            for (const OrbitRenderCurve::LineSegment &segment : lod.segments)
             {
                 const double seg_m = glm::length(glm::dvec3(segment.b_world - segment.a_world));
                 const double seg_dt_s = segment.t1_s - segment.t0_s;
@@ -760,7 +760,7 @@ namespace Game::PredictionDrawDetail
         perf.pick_segments += static_cast<uint32_t>(lod.segments_after_cull);
 
         out_segments.reserve(lod.segments.size());
-        for (const OrbitRenderCurve::PickSegment &segment : lod.segments)
+        for (const OrbitRenderCurve::LineSegment &segment : lod.segments)
         {
             out_segments.push_back(PickingSystem::LinePickSegmentData{
                     .a_world = segment.a_world,
