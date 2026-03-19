@@ -19,8 +19,6 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/orbit/orbit_render_curve.cpp
   game/orbit/orbit_plot_util.h
   game/orbit/orbit_plot_util.cpp
-  game/orbit/orbit_plot_lod_builder.h
-  game/orbit/orbit_plot_lod_builder.cpp
   game/orbit/orbit_prediction_tuning.h
   game/orbit/orbit_prediction_service.h
   game/orbit/orbit_prediction_service.cpp

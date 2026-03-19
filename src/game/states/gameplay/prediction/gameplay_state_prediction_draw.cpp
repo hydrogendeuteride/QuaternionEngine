@@ -3,6 +3,7 @@
 #include "game/orbit/orbit_prediction_tuning.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 namespace Game
@@ -15,7 +16,9 @@ namespace Game
         constexpr double kPickAlignRebuildDistanceM = 25.0;
         constexpr double kPickReferenceRebuildDistanceM = 1.0;
         constexpr double kPickFrustumOriginRebuildDistanceM = 1.0;
+        constexpr double kPickCameraRebuildDistanceM = 1.0;
         constexpr double kPickMatrixRebuildEpsilon = 1.0e-6;
+        constexpr double kPickScalarRebuildEpsilon = 1.0e-6;
         constexpr float kPickViewprojRebuildEpsilon = 1.0e-5f;
 
         bool same_matrix(const glm::dmat3 &a, const glm::dmat3 &b, const double epsilon)
@@ -104,18 +107,30 @@ namespace Game
                                        const WorldVec3 &ref_body_world,
                                        const glm::dmat3 &frame_to_world,
                                        const WorldVec3 &align_delta,
-                                       const OrbitPlotLodBuilder::FrustumContext &pick_frustum,
+                                       const glm::dvec3 &camera_world,
+                                       const double tan_half_fov,
+                                       const double viewport_height_px,
+                                       const double render_error_px,
+                                       const OrbitRenderCurve::FrustumContext &pick_frustum,
                                        const double pick_frustum_margin_ratio,
                                        const double t0_s,
                                        const double t1_s,
                                        const std::size_t max_segments,
+                                       const bool use_adaptive_curve,
                                        const bool planned)
         {
             const bool valid = planned ? cache.planned_valid : cache.base_valid;
             const double cached_t0_s = planned ? cache.planned_t0_s : cache.base_t0_s;
             const double cached_t1_s = planned ? cache.planned_t1_s : cache.base_t1_s;
             const std::size_t cached_max_segments = planned ? cache.planned_max_segments : cache.base_max_segments;
+            const bool cached_use_adaptive_curve =
+                    planned ? cache.planned_use_adaptive_curve : cache.base_use_adaptive_curve;
             if (!valid || cache.generation_id != generation_id || cached_max_segments != max_segments)
+            {
+                return true;
+            }
+
+            if (cached_use_adaptive_curve != use_adaptive_curve)
             {
                 return true;
             }
@@ -140,6 +155,15 @@ namespace Game
                 return true;
             }
 
+            if (use_adaptive_curve &&
+                (glm::length(cache.camera_world - camera_world) > kPickCameraRebuildDistanceM ||
+                 std::abs(cache.tan_half_fov - tan_half_fov) > kPickScalarRebuildEpsilon ||
+                 std::abs(cache.viewport_height_px - viewport_height_px) > kPickScalarRebuildEpsilon ||
+                 std::abs(cache.render_error_px - render_error_px) > kPickScalarRebuildEpsilon))
+            {
+                return true;
+            }
+
             return !std::isfinite(cached_t0_s) || !std::isfinite(cached_t1_s) ||
                    std::abs(cached_t0_s - t0_s) > kPickWindowRebuildEpsilonS ||
                    std::abs(cached_t1_s - t1_s) > kPickWindowRebuildEpsilonS;
@@ -150,17 +174,26 @@ namespace Game
                                    const WorldVec3 &ref_body_world,
                                    const glm::dmat3 &frame_to_world,
                                    const WorldVec3 &align_delta,
-                                   const OrbitPlotLodBuilder::FrustumContext &pick_frustum,
+                                   const glm::dvec3 &camera_world,
+                                   const double tan_half_fov,
+                                   const double viewport_height_px,
+                                   const double render_error_px,
+                                   const OrbitRenderCurve::FrustumContext &pick_frustum,
                                    const double pick_frustum_margin_ratio,
                                    const double t0_s,
                                    const double t1_s,
                                    const std::size_t max_segments,
+                                   const bool use_adaptive_curve,
                                    const bool planned)
         {
             cache.generation_id = generation_id;
             cache.ref_body_world = ref_body_world;
             cache.frame_to_world = frame_to_world;
             cache.align_delta_world = align_delta;
+            cache.camera_world = camera_world;
+            cache.tan_half_fov = tan_half_fov;
+            cache.viewport_height_px = viewport_height_px;
+            cache.render_error_px = render_error_px;
             cache.pick_frustum_valid = pick_frustum.valid;
             cache.pick_frustum_viewproj = pick_frustum.viewproj;
             cache.pick_frustum_origin_world = pick_frustum.origin_world;
@@ -171,6 +204,7 @@ namespace Game
                 cache.planned_t0_s = t0_s;
                 cache.planned_t1_s = t1_s;
                 cache.planned_max_segments = max_segments;
+                cache.planned_use_adaptive_curve = use_adaptive_curve;
             }
             else
             {
@@ -178,6 +212,7 @@ namespace Game
                 cache.base_t0_s = t0_s;
                 cache.base_t1_s = t1_s;
                 cache.base_max_segments = max_segments;
+                cache.base_use_adaptive_curve = use_adaptive_curve;
             }
         }
 
@@ -236,12 +271,12 @@ namespace Game
         }
 
         const double tan_half_fov = std::tan(glm::radians(static_cast<double>(camera_fov_deg)) * 0.5);
-        OrbitPlotLodBuilder::CameraContext lod_camera{};
+        OrbitRenderCurve::CameraContext lod_camera{};
         lod_camera.camera_world = camera_world;
         lod_camera.tan_half_fov = tan_half_fov;
         lod_camera.viewport_height_px = std::max(1.0, static_cast<double>(viewport_h_px));
 
-        OrbitPlotLodBuilder::FrustumContext render_frustum{};
+        OrbitRenderCurve::FrustumContext render_frustum{};
         if (ctx.renderer && ctx.renderer->_sceneManager)
         {
             render_frustum.valid = true;
@@ -387,10 +422,8 @@ namespace Game
             const bool use_persistent_gpu_roots =
                     orbit_plot && orbit_plot->settings().gpu_generate_enabled &&
                     !direct_world_polyline;
-            // Adaptive merged curves can visibly drift away from the live craft/plan.
-            // Keep CPU rendering on the source segments until that approximation is fixed.
-            const bool use_base_adaptive_curve = false;
-            const bool use_planned_adaptive_curve = false;
+            const bool use_base_adaptive_curve = !track->cache.render_curve_frame.empty();
+            const bool use_planned_adaptive_curve = !track->cache.render_curve_frame_planned.empty();
 
             Draw::OrbitDrawWindowContext world_basis_draw_ctx = draw_ctx;
             if (!identity_frame_transform)
@@ -720,7 +753,7 @@ namespace Game
                 const std::size_t pick_max_segments =
                         static_cast<std::size_t>(std::max(1, _orbit_plot_budget.pick_max_segments));
                 const double pick_frustum_margin_ratio = std::max(0.0, _orbit_plot_budget.pick_frustum_margin_ratio);
-                OrbitPlotLodBuilder::PickSettings pick_settings{};
+                OrbitRenderCurve::PickSettings pick_settings{};
                 pick_settings.frustum_margin_ratio = pick_frustum_margin_ratio;
                 std::vector<double> pick_anchor_times = Draw::collect_maneuver_node_times(_maneuver_state.nodes);
                 pick_anchor_times.insert(pick_anchor_times.begin(), now_s);
@@ -731,6 +764,19 @@ namespace Game
                 std::sort(pick_anchor_times.begin(), pick_anchor_times.end());
                 pick_anchor_times.erase(std::unique(pick_anchor_times.begin(), pick_anchor_times.end()),
                                         pick_anchor_times.end());
+                const std::span<const double> pick_anchor_times_span(pick_anchor_times);
+                const auto make_pick_selection_context = [&]() {
+                    OrbitRenderCurve::SelectionContext selection_ctx{};
+                    selection_ctx.reference_body_world = ref_body_world;
+                    selection_ctx.align_delta_world = align_delta;
+                    selection_ctx.frame_to_world = frame_to_world;
+                    selection_ctx.camera_world = camera_world;
+                    selection_ctx.tan_half_fov = tan_half_fov;
+                    selection_ctx.viewport_height_px = draw_ctx.viewport_height_px;
+                    selection_ctx.error_px = render_error_px;
+                    selection_ctx.anchor_times_s = pick_anchor_times_span;
+                    return selection_ctx;
+                };
                 const std::size_t pick_planned_reserve_target = std::min(
                         _prediction_draw_config.pick_planned_reserve_segments,
                         static_cast<std::size_t>(std::max<std::size_t>(
@@ -739,6 +785,40 @@ namespace Game
                                         std::llround(static_cast<double>(pick_max_segments) *
                                                      _prediction_draw_config.pick_planned_reserve_ratio)))));
                 std::size_t remaining_pick_budget = pick_max_segments;
+                const auto build_pick_curve_cache = [&](const OrbitRenderCurve &curve,
+                                                        const double t_start_s,
+                                                        const double t_end_s,
+                                                        std::vector<PickingSystem::LinePickSegmentData> &out_segments,
+                                                        bool &out_cap_hit) {
+                    const auto pick_start_tp = std::chrono::steady_clock::now();
+                    const OrbitRenderCurve::PickResult lod = OrbitRenderCurve::build_pick_lod(
+                            curve, make_pick_selection_context(), render_frustum, pick_settings, t_start_s, t_end_s);
+                    _orbit_plot_perf.pick_lod_ms_last +=
+                            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pick_start_tp)
+                                    .count();
+                    _orbit_plot_perf.pick_segments_before_cull += static_cast<uint32_t>(lod.segments_before_cull);
+                    _orbit_plot_perf.pick_segments += static_cast<uint32_t>(lod.segments_after_cull);
+
+                    out_segments.clear();
+                    out_segments.reserve(lod.segments.size());
+                    for (const OrbitRenderCurve::PickSegment &segment : lod.segments)
+                    {
+                        out_segments.push_back(PickingSystem::LinePickSegmentData{
+                                .a_world = segment.a_world,
+                                .b_world = segment.b_world,
+                                .a_time_s = segment.t0_s,
+                                .b_time_s = segment.t1_s,
+                        });
+                    }
+
+                    out_cap_hit = lod.cap_hit;
+                    _orbit_plot_perf.pick_cap_hit_last_frame = out_cap_hit;
+                    if (out_cap_hit)
+                    {
+                        ++_orbit_plot_perf.pick_cap_hits_total;
+                    }
+                    return out_segments.size();
+                };
 
                 if (allow_base_pick &&
                     base_pick_window.valid &&
@@ -772,30 +852,47 @@ namespace Game
                                                       ref_body_world,
                                                       frame_to_world,
                                                       align_delta,
+                                                      camera_world,
+                                                      tan_half_fov,
+                                                      draw_ctx.viewport_height_px,
+                                                      render_error_px,
                                                       render_frustum,
                                                       pick_frustum_margin_ratio,
                                                       base_pick_window.t0_s,
                                                       base_pick_window.t1_s,
                                                       base_pick_budget,
+                                                      use_base_adaptive_curve,
                                                       false))
                         {
                             rebuilt_pick_cache = true;
                             bool cap_hit = false;
-                            const std::vector<orbitsim::TrajectorySegment> &pick_base_segments =
-                                    identity_frame_transform ? *traj_base_segments : get_base_segments_world_basis();
-                            emitted = Draw::build_pick_segment_cache(pick_base_segments,
-                                                                     ref_body_world,
-                                                                     frame_to_world,
-                                                                     align_delta,
-                                                                     render_frustum,
-                                                                     pick_settings,
-                                                                     base_pick_window.t0_s,
-                                                                     base_pick_window.t1_s,
-                                                                     std::span<const double>(pick_anchor_times),
-                                                                     !identity_frame_transform,
-                                                                     track->pick_cache.base_segments,
-                                                                     cap_hit,
-                                                                     _orbit_plot_perf);
+                            emitted = 0;
+                            if (use_base_adaptive_curve)
+                            {
+                                emitted = build_pick_curve_cache(track->cache.render_curve_frame,
+                                                                 base_pick_window.t0_s,
+                                                                 base_pick_window.t1_s,
+                                                                 track->pick_cache.base_segments,
+                                                                 cap_hit);
+                            }
+                            else
+                            {
+                                const std::vector<orbitsim::TrajectorySegment> &pick_base_segments =
+                                        identity_frame_transform ? *traj_base_segments : get_base_segments_world_basis();
+                                emitted = Draw::build_pick_segment_cache(pick_base_segments,
+                                                                         ref_body_world,
+                                                                         frame_to_world,
+                                                                         align_delta,
+                                                                         render_frustum,
+                                                                         pick_settings,
+                                                                         base_pick_window.t0_s,
+                                                                         base_pick_window.t1_s,
+                                                                         pick_anchor_times_span,
+                                                                         !identity_frame_transform,
+                                                                         track->pick_cache.base_segments,
+                                                                         cap_hit,
+                                                                         _orbit_plot_perf);
+                            }
                             if (emitted > 0)
                             {
                                 mark_pick_cache_valid(track->pick_cache,
@@ -803,11 +900,16 @@ namespace Game
                                                       ref_body_world,
                                                       frame_to_world,
                                                       align_delta,
+                                                      camera_world,
+                                                      tan_half_fov,
+                                                      draw_ctx.viewport_height_px,
+                                                      render_error_px,
                                                       render_frustum,
                                                       pick_frustum_margin_ratio,
                                                       base_pick_window.t0_s,
                                                       base_pick_window.t1_s,
                                                       base_pick_budget,
+                                                      use_base_adaptive_curve,
                                                       false);
                             }
                             else
@@ -862,30 +964,46 @@ namespace Game
                                                       ref_body_world,
                                                       frame_to_world,
                                                       align_delta,
+                                                      camera_world,
+                                                      tan_half_fov,
+                                                      draw_ctx.viewport_height_px,
+                                                      render_error_px,
                                                       render_frustum,
                                                       pick_frustum_margin_ratio,
                                                       planned_pick_window.t0_s,
                                                       planned_pick_window.t1_s,
                                                       remaining_pick_budget,
+                                                      use_planned_adaptive_curve,
                                                       true))
                         {
                             rebuilt_pick_cache = true;
                             bool cap_hit = false;
-                            const std::vector<orbitsim::TrajectorySegment> &pick_planned_segments =
-                                    identity_frame_transform ? *traj_planned_segments : get_planned_segments_world_basis();
-                            Draw::build_pick_segment_cache(pick_planned_segments,
-                                                           ref_body_world,
-                                                           frame_to_world,
-                                                           align_delta,
-                                                           render_frustum,
-                                                           pick_settings,
-                                                           planned_pick_window.t0_s,
-                                                           planned_pick_window.t1_s,
-                                                           std::span<const double>(pick_anchor_times),
-                                                           !identity_frame_transform,
-                                                           track->pick_cache.planned_segments,
-                                                           cap_hit,
-                                                           _orbit_plot_perf);
+                            if (use_planned_adaptive_curve)
+                            {
+                                build_pick_curve_cache(track->cache.render_curve_frame_planned,
+                                                       planned_pick_window.t0_s,
+                                                       planned_pick_window.t1_s,
+                                                       track->pick_cache.planned_segments,
+                                                       cap_hit);
+                            }
+                            else
+                            {
+                                const std::vector<orbitsim::TrajectorySegment> &pick_planned_segments =
+                                        identity_frame_transform ? *traj_planned_segments : get_planned_segments_world_basis();
+                                Draw::build_pick_segment_cache(pick_planned_segments,
+                                                               ref_body_world,
+                                                               frame_to_world,
+                                                               align_delta,
+                                                               render_frustum,
+                                                               pick_settings,
+                                                               planned_pick_window.t0_s,
+                                                               planned_pick_window.t1_s,
+                                                               pick_anchor_times_span,
+                                                               !identity_frame_transform,
+                                                               track->pick_cache.planned_segments,
+                                                               cap_hit,
+                                                               _orbit_plot_perf);
+                            }
                             if (!track->pick_cache.planned_segments.empty())
                             {
                                 mark_pick_cache_valid(track->pick_cache,
@@ -893,11 +1011,16 @@ namespace Game
                                                       ref_body_world,
                                                       frame_to_world,
                                                       align_delta,
+                                                      camera_world,
+                                                      tan_half_fov,
+                                                      draw_ctx.viewport_height_px,
+                                                      render_error_px,
                                                       render_frustum,
                                                       pick_frustum_margin_ratio,
                                                       planned_pick_window.t0_s,
                                                       planned_pick_window.t1_s,
                                                       remaining_pick_budget,
+                                                      use_planned_adaptive_curve,
                                                       true);
                             }
                             else

@@ -20,8 +20,8 @@ namespace Game
     struct OrbitPlotBudgetSettings
     {
         double render_error_px{0.75};
-        int render_max_segments_cpu{4'000};
-        int pick_max_segments{8'000};
+        int render_max_segments_cpu{40'000};
+        int pick_max_segments{32'000};
         double pick_frustum_margin_ratio{0.05};
     };
 
