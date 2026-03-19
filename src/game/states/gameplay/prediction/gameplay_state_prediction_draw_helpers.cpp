@@ -390,32 +390,13 @@ namespace Game::PredictionDrawDetail
                                                depth);
         }
 
-        void emit_cpu_render_lod(const OrbitDrawWindowContext &ctx,
-                                 const OrbitPredictionDrawConfig &draw_config,
-                                 OrbitPlotPerfStats &perf,
-                                 const std::vector<orbitsim::TrajectorySegment> &traj_segments,
-                                 const double t_start_s,
-                                 const double t_end_s,
-                                 const glm::vec4 &color,
-                                 const bool dashed)
+        void emit_render_lod_segments(const OrbitDrawWindowContext &ctx,
+                                      const OrbitPredictionDrawConfig &draw_config,
+                                      OrbitPlotPerfStats &perf,
+                                      const OrbitRenderCurve::RenderResult &lod,
+                                      const glm::vec4 &color,
+                                      const bool dashed)
         {
-            OrbitPlotLodBuilder::RenderSettings lod_settings{};
-            lod_settings.error_px = ctx.render_error_px;
-            lod_settings.max_segments = ctx.render_max_segments;
-
-            const auto render_lod_start_tp = std::chrono::steady_clock::now();
-            const OrbitPlotLodBuilder::RenderResult lod =
-                    OrbitPlotLodBuilder::build_render_lod(traj_segments,
-                                                          ctx.ref_body_world,
-                                                          ctx.align_delta,
-                                                          ctx.lod_camera,
-                                                          lod_settings,
-                                                          t_start_s,
-                                                          t_end_s,
-                                                          ctx.render_frustum);
-            perf.render_lod_ms_last +=
-                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - render_lod_start_tp)
-                            .count();
             if (lod.cap_hit)
             {
                 perf.render_cap_hit_last_frame = true;
@@ -428,7 +409,7 @@ namespace Game::PredictionDrawDetail
 
             if (!dashed)
             {
-                for (const OrbitPlotLodBuilder::RenderSegment &segment : lod.segments)
+                for (const OrbitRenderCurve::RenderSegment &segment : lod.segments)
                 {
                     emit_orbit_line(ctx, color, segment.a_world, segment.b_world);
                 }
@@ -440,7 +421,7 @@ namespace Game::PredictionDrawDetail
             const double dash_period_px = dash_on_px + dash_off_px;
 
             double dash_phase_px = 0.0;
-            for (const OrbitPlotLodBuilder::RenderSegment &segment : lod.segments)
+            for (const OrbitRenderCurve::RenderSegment &segment : lod.segments)
             {
                 const double seg_m = glm::length(glm::dvec3(segment.b_world - segment.a_world));
                 const double seg_dt_s = segment.t1_s - segment.t0_s;
@@ -504,6 +485,35 @@ namespace Game::PredictionDrawDetail
                     dash_phase_px = std::fmod(dash_phase_px + remaining_px, dash_period_px);
                 }
             }
+        }
+
+        void emit_cpu_render_lod(const OrbitDrawWindowContext &ctx,
+                                 const OrbitPredictionDrawConfig &draw_config,
+                                 OrbitPlotPerfStats &perf,
+                                 const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                                 const double t_start_s,
+                                 const double t_end_s,
+                                 const glm::vec4 &color,
+                                 const bool dashed)
+        {
+            OrbitRenderCurve::RenderSettings lod_settings{};
+            lod_settings.error_px = ctx.render_error_px;
+            lod_settings.max_segments = ctx.render_max_segments;
+
+            const auto render_lod_start_tp = std::chrono::steady_clock::now();
+            const OrbitRenderCurve::RenderResult lod =
+                    OrbitRenderCurve::build_render_lod(traj_segments,
+                                                       ctx.ref_body_world,
+                                                       ctx.align_delta,
+                                                       ctx.lod_camera,
+                                                       lod_settings,
+                                                       t_start_s,
+                                                       t_end_s,
+                                                       ctx.render_frustum);
+            perf.render_lod_ms_last +=
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - render_lod_start_tp)
+                            .count();
+            emit_render_lod_segments(ctx, draw_config, perf, lod, color, dashed);
         }
 
     } // namespace
@@ -587,31 +597,19 @@ namespace Game::PredictionDrawDetail
         selection_ctx.viewport_height_px = ctx.viewport_height_px;
         selection_ctx.error_px = ctx.render_error_px;
 
-        const auto select_start_tp = std::chrono::steady_clock::now();
-        std::vector<orbitsim::TrajectorySegment> selected_segments{};
-        OrbitRenderCurve::select_segments(curve, selection_ctx, t_start_s, t_end_s, selected_segments);
+        const auto render_lod_start_tp = std::chrono::steady_clock::now();
+        const OrbitRenderCurve::RenderResult lod =
+                OrbitRenderCurve::build_render_lod(
+                        curve, selection_ctx, ctx.render_frustum, ctx.render_max_segments, t_start_s, t_end_s);
         perf.render_lod_ms_last +=
-                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - select_start_tp).count();
-        if (selected_segments.empty())
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - render_lod_start_tp)
+                        .count();
+        if (lod.segments.empty())
         {
             return;
         }
 
-        const bool needs_world_basis_transform = !frame_transform_is_identity(ctx.frame_to_world);
-        const std::vector<orbitsim::TrajectorySegment> transformed_segments =
-                needs_world_basis_transform
-                        ? transform_segments_to_world_basis(selected_segments, ctx.frame_to_world)
-                        : std::vector<orbitsim::TrajectorySegment>{};
-        const std::vector<orbitsim::TrajectorySegment> &segments_for_draw =
-                needs_world_basis_transform ? transformed_segments : selected_segments;
-
-        OrbitDrawWindowContext draw_ctx = ctx;
-        if (needs_world_basis_transform)
-        {
-            draw_ctx.frame_to_world = glm::dmat3(1.0);
-        }
-
-        draw_orbit_window(draw_ctx, draw_config, perf, segments_for_draw, t_start_s, t_end_s, color, dashed);
+        emit_render_lod_segments(ctx, draw_config, perf, lod, color, dashed);
     }
 
     PickWindow build_planned_pick_window(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
@@ -721,8 +719,8 @@ namespace Game::PredictionDrawDetail
                                          const WorldVec3 &ref_body_world,
                                          const glm::dmat3 &frame_to_world,
                                          const WorldVec3 &align_delta,
-                                         const OrbitPlotLodBuilder::FrustumContext &pick_frustum,
-                                         const OrbitPlotLodBuilder::PickSettings &pick_settings,
+                                         const OrbitRenderCurve::FrustumContext &pick_frustum,
+                                         const OrbitRenderCurve::PickSettings &pick_settings,
                                          const double t0_s,
                                          const double t1_s,
                                          const std::span<const double> anchor_times_s,
@@ -747,22 +745,22 @@ namespace Game::PredictionDrawDetail
         }
 
         const auto pick_start_tp = std::chrono::steady_clock::now();
-        const OrbitPlotLodBuilder::PickResult lod =
-                OrbitPlotLodBuilder::build_pick_lod(segments_world_basis,
-                                                    ref_body_world,
-                                                    align_delta,
-                                                    pick_frustum,
-                                                    pick_settings,
-                                                    t0_s,
-                                                    t1_s,
-                                                    anchor_times_s);
+        const OrbitRenderCurve::PickResult lod =
+                OrbitRenderCurve::build_pick_lod(segments_world_basis,
+                                                 ref_body_world,
+                                                 align_delta,
+                                                 pick_frustum,
+                                                 pick_settings,
+                                                 t0_s,
+                                                 t1_s,
+                                                 anchor_times_s);
         perf.pick_lod_ms_last +=
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pick_start_tp).count();
         perf.pick_segments_before_cull += static_cast<uint32_t>(lod.segments_before_cull);
         perf.pick_segments += static_cast<uint32_t>(lod.segments_after_cull);
 
         out_segments.reserve(lod.segments.size());
-        for (const OrbitPlotLodBuilder::PickSegment &segment : lod.segments)
+        for (const OrbitRenderCurve::PickSegment &segment : lod.segments)
         {
             out_segments.push_back(PickingSystem::LinePickSegmentData{
                     .a_world = segment.a_world,
@@ -777,53 +775,6 @@ namespace Game::PredictionDrawDetail
         if (out_cap_hit)
         {
             ++perf.pick_cap_hits_total;
-        }
-        return emitted;
-    }
-
-    std::size_t emit_pick_segments(PickingSystem *picking,
-                                   const uint32_t pick_group,
-                                   const std::vector<orbitsim::TrajectorySegment> &traj_segments,
-                                   const WorldVec3 &ref_body_world,
-                                   const glm::dmat3 &frame_to_world,
-                                   const WorldVec3 &align_delta,
-                                   const OrbitPlotLodBuilder::FrustumContext &pick_frustum,
-                                   const OrbitPlotLodBuilder::PickSettings &pick_settings,
-                                   const double t0_s,
-                                   const double t1_s,
-                                   const std::vector<double> &anchor_times,
-                                   const bool segments_are_world_basis,
-                                   OrbitPlotPerfStats &perf)
-    {
-        if (!picking || pick_group == kInvalidPickGroup)
-        {
-            return 0;
-        }
-
-        std::vector<PickingSystem::LinePickSegmentData> segments;
-        bool cap_hit = false;
-        const std::size_t emitted = build_pick_segment_cache(traj_segments,
-                                                             ref_body_world,
-                                                             frame_to_world,
-                                                             align_delta,
-                                                             pick_frustum,
-                                                             pick_settings,
-                                                             t0_s,
-                                                             t1_s,
-                                                             anchor_times,
-                                                             segments_are_world_basis,
-                                                             segments,
-                                                             cap_hit,
-                                                             perf);
-        (void) cap_hit;
-        for (const PickingSystem::LinePickSegmentData &segment : segments)
-        {
-            picking->add_line_pick_segment(
-                    pick_group,
-                    segment.a_world,
-                    segment.b_world,
-                    segment.a_time_s,
-                    segment.b_time_s);
         }
         return emitted;
     }
