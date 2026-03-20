@@ -69,8 +69,14 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/prediction/gameplay_state_prediction_draw_internal.h
   game/states/gameplay/prediction/gameplay_state_prediction_draw.cpp
   game/states/gameplay/prediction/gameplay_state_prediction_draw_helpers.cpp
+  game/states/gameplay/maneuver/gameplay_state_maneuver_colors.h
   game/states/gameplay/maneuver/gameplay_state_maneuver_types.h
+  game/states/gameplay/maneuver/gameplay_state_maneuver_util.h
+  game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_nodes.cpp
+  game/states/gameplay/maneuver/gameplay_state_maneuver_panel.cpp
+  game/states/gameplay/maneuver/gameplay_state_maneuver_runtime.cpp
+  game/states/gameplay/maneuver/gameplay_state_maneuver_ui.cpp
   game/states/gameplay/scenario/scenario_config.h
   game/states/gameplay/scenario/scenario_loader.h
   game/states/gameplay/scenario/scenario_loader.cpp
