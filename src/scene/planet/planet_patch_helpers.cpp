@@ -617,6 +617,39 @@ namespace planet_helpers
         return mask;
     }
 
+    bool patch_needs_balance_split(const planet::PatchKey &key,
+                                   const std::unordered_set<planet::PatchKey, planet::PatchKeyHash> &leaf_set,
+                                   uint32_t max_level_in_set)
+    {
+        double u0 = 0.0, u1 = 0.0, v0 = 0.0, v1 = 0.0;
+        planet::cubesphere_tile_uv_bounds(key.level, key.x, key.y, u0, u1, v0, v1);
+
+        const double du = std::abs(u1 - u0);
+        const double dv = std::abs(v1 - v0);
+        const double eps_u = glm::max(1e-9, du * 1e-3);
+        const double eps_v = glm::max(1e-9, dv * 1e-3);
+        constexpr std::array<double, 3> samples{0.2, 0.5, 0.8};
+
+        auto neighbor_is_more_than_one_level_finer = [&](double sample_u, double sample_v, bool horizontal) -> bool {
+            for (const double t: samples)
+            {
+                const double uf = horizontal ? glm::mix(u0, u1, t) : sample_u;
+                const double vf = horizontal ? sample_v : glm::mix(v0, v1, t);
+                const int32_t level = sample_neighbor_level_across_edge(key, uf, vf, leaf_set, max_level_in_set);
+                if (level > static_cast<int32_t>(key.level + 1u))
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        return neighbor_is_more_than_one_level_finer(u0 - eps_u, 0.0, false) ||
+               neighbor_is_more_than_one_level_finer(u1 + eps_u, 0.0, false) ||
+               neighbor_is_more_than_one_level_finer(0.0, v0 - eps_v, true) ||
+               neighbor_is_more_than_one_level_finer(0.0, v1 + eps_v, true);
+    }
+
     void stitch_patch_edges_to_parent_grid(std::vector<Vertex> &vertices, uint32_t resolution, uint8_t edge_mask)
     {
         if (edge_mask == 0u)
