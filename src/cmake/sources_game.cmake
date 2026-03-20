@@ -61,6 +61,7 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/orbit_helpers.h
   game/states/gameplay/time_warp_state.h
   game/states/gameplay/prediction/gameplay_state_prediction_types.h
+  game/states/gameplay/prediction/gameplay_prediction_cache_internal.h
   game/states/gameplay/prediction/gameplay_prediction_derived_service.h
   game/states/gameplay/prediction/gameplay_prediction_derived_service.cpp
   game/states/gameplay/prediction/gameplay_state_prediction.cpp

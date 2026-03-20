@@ -159,9 +159,10 @@ namespace Game
         CachedEphemerisEntry entry{};
         entry.sim_time_s = request.sim_time_s;
         entry.duration_s = request.duration_s;
-        entry.celestial_dt_s = request.celestial_dt_s;
         entry.sim_config = request.sim_config;
         entry.massive_bodies = request.massive_bodies;
+        entry.adaptive_options = request.adaptive_options;
+        entry.adaptive_options.cancel_requested = {};
         entry.ephemeris = std::move(built);
         entry.last_use_serial = _next_ephemeris_use_serial++;
         _ephemeris_cache.push_back(std::move(entry));
@@ -494,9 +495,16 @@ namespace Game
                 return out;
             }
 
+            const std::vector<orbitsim::TrajectorySegment> traj_segments_inertial =
+                    trajectory_segments_from_body_ephemeris(*shared_ephemeris, subject_sim->id);
+            if (traj_segments_inertial.empty())
+            {
+                return out;
+            }
+
             out.shared_ephemeris = shared_ephemeris;
             out.trajectory_inertial = std::move(traj_inertial);
-            out.trajectory_segments_inertial = trajectory_segments_from_samples(out.trajectory_inertial);
+            out.trajectory_segments_inertial = std::move(traj_segments_inertial);
             out.valid = true;
             return out;
         }
@@ -528,18 +536,8 @@ namespace Game
 
         sim.maneuver_plan() = orbitsim::ManeuverPlan{};
 
-        orbitsim::TrajectorySegmentOptions segment_opt{};
-        segment_opt.duration_s = horizon_s;
-        segment_opt.max_segments =
-                resolve_spacecraft_segment_budget(request,
-                                                 horizon_s,
-                                                 (sampling_spec.max_samples > 0) ? (sampling_spec.max_samples - 1) : 0);
-        segment_opt.include_start = true;
-        segment_opt.include_end = true;
-        segment_opt.stop_on_impact = false;
-        // Keep trajectory segment dt driven by duration/max_segments. In orbitsim, lookup_dt_s also
-        // overrides the emitted segment step, which silently truncates coverage to
-        // max_segments * lookup_dt_s for long-range predictions.
+        const orbitsim::AdaptiveSegmentOptions segment_opt =
+                build_spacecraft_adaptive_segment_options(request, sampling_spec, cancel_requested);
 
         SharedCelestialEphemeris shared_ephemeris = request.shared_ephemeris;
         if (!ephemeris_covers_horizon(shared_ephemeris, request.sim_time_s, horizon_s))
@@ -560,7 +558,7 @@ namespace Game
         const orbitsim::CelestialEphemeris &eph = *shared_ephemeris;
 
         const std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_baseline =
-                orbitsim::predict_spacecraft_trajectory_segments(sim, eph, ship_h.id, segment_opt);
+                orbitsim::predict_spacecraft_trajectory_segments_adaptive(sim, eph, ship_h.id, segment_opt);
         if (traj_segments_inertial_baseline.empty())
         {
             return out;
@@ -698,7 +696,7 @@ namespace Game
 
             // Planned output shows the same prediction window with all maneuver nodes applied.
             std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_planned =
-                    orbitsim::predict_spacecraft_trajectory_segments(sim, eph, ship_h.id, segment_opt);
+                    orbitsim::predict_spacecraft_trajectory_segments_adaptive(sim, eph, ship_h.id, segment_opt);
             traj_segments_inertial_planned =
                     split_trajectory_segments_at_known_boundaries(traj_segments_inertial_planned, planned_boundary_states);
             if (!traj_segments_inertial_planned.empty())

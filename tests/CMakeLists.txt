@@ -191,3 +191,31 @@ target_link_libraries(gameplay_prediction_maneuver_tests PRIVATE
 )
 
 add_test(NAME gameplay_prediction_maneuver_tests COMMAND gameplay_prediction_maneuver_tests)
+
+add_executable(prediction_cache_internal_tests
+  prediction_cache_internal_tests.cpp
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_math.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_plot_util.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_render.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_pick.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_trajectory.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_sampling.cpp"
+)
+
+set_property(TARGET prediction_cache_internal_tests PROPERTY CXX_STANDARD 20)
+
+target_include_directories(prediction_cache_internal_tests PRIVATE
+  "${PROJECT_SOURCE_DIR}/src"
+  "${PROJECT_SOURCE_DIR}/third_party/vma"
+  "${PROJECT_SOURCE_DIR}/third_party/taskflow/3rd-party"
+)
+
+target_link_libraries(prediction_cache_internal_tests PRIVATE
+  gtest
+  fmt::fmt
+  glm
+  orbitsim
+)
+
+add_test(NAME prediction_cache_internal_tests COMMAND prediction_cache_internal_tests)
