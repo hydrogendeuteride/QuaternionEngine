@@ -92,6 +92,7 @@ namespace Game
         void init_orbitsim(WorldVec3 &player_pos_world, glm::dvec3 &player_vel_world);
 
         // Simulation
+        double current_sim_time_s() const;
         void step_physics(GameStateContext &ctx, float fixed_dt);
         ComponentContext build_component_context(GameStateContext &ctx, float alpha = 0.0f);
         bool get_player_world_state(WorldVec3 &out_pos_world,
@@ -356,6 +357,7 @@ namespace Game
                                          float axis_hit_px) const;
         void draw_maneuver_gizmo_hover_tooltip(const std::vector<ManeuverAxisMarker> &handles, int hovered_handle_idx) const;
 
+        void update_maneuver_ui_config(GameStateContext &ctx);
         void draw_maneuver_nodes_panel(GameStateContext &ctx);
         void draw_maneuver_imgui_gizmo(GameStateContext &ctx);
         void refresh_maneuver_node_runtime_cache(GameStateContext &ctx);
@@ -363,6 +365,10 @@ namespace Game
         void update_maneuver_nodes_time_warp(GameStateContext &ctx, float fixed_dt);
         void update_maneuver_nodes_execution(GameStateContext &ctx);
         orbitsim::BodyId resolve_maneuver_node_primary_body_id(const ManeuverNode &node, double query_time_s) const;
+        void remove_maneuver_node(int node_id, int hint_index = -1);
+        WorldVec3 compute_maneuver_align_delta(GameStateContext &ctx,
+                                               const OrbitPredictionCache &cache,
+                                               const std::vector<orbitsim::TrajectorySample> &traj_base);
 
         bool _maneuver_nodes_enabled{true};
         bool _maneuver_nodes_debug_draw{true};
@@ -370,6 +376,7 @@ namespace Game
         ManeuverPlanState _maneuver_state{};
         ManeuverGizmoBasisMode _maneuver_gizmo_basis_mode{ManeuverGizmoBasisMode::ProgradeOutwardNormal};
         ManeuverGizmoStyle _maneuver_gizmo_style{};
+        ManeuverUIConfig _maneuver_ui_config{};
         ManeuverGizmoInteraction _maneuver_gizmo_interaction{};
         bool _maneuver_plan_live_preview_active{false};
 
