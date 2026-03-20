@@ -13,6 +13,7 @@
 #include <scene/planet/planet_heightmap.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 
@@ -33,6 +34,8 @@ PlanetSystem::TerrainState *PlanetSystem::get_or_create_terrain_state(std::strin
     }
 
     auto state = std::make_unique<TerrainState>();
+    state->terrain_name = key;
+    refresh_terrain_height_snapshot(*state);
     TerrainState *ptr = state.get();
     _terrain_states.emplace(std::move(key), std::move(state));
     return ptr;
@@ -48,6 +51,12 @@ const PlanetSystem::TerrainState *PlanetSystem::find_terrain_state(std::string_v
 {
     auto it = _terrain_states.find(std::string{name});
     return (it != _terrain_states.end()) ? it->second.get() : nullptr;
+}
+
+void PlanetSystem::refresh_terrain_height_snapshot(TerrainState &state)
+{
+    state.height_faces_snapshot =
+            std::make_shared<const std::array<planet::HeightFace, 6>>(state.height_faces);
 }
 
 PlanetSystem::TerrainPatch *PlanetSystem::find_terrain_patch(TerrainState &state, const planet::PatchKey &key)
@@ -96,6 +105,52 @@ bool PlanetSystem::is_terrain_patch_ready(const TerrainState &state, const plane
 
 void PlanetSystem::clear_terrain_patch_cache(TerrainState &state)
 {
+    ++state.terrain_generation;
+
+    if (!state.terrain_name.empty())
+    {
+        std::lock_guard<std::mutex> lock(_terrain_async.mutex);
+        const auto same_terrain = [&](const auto &item) {
+            return item.terrain_name == state.terrain_name;
+        };
+
+        for (auto it = _terrain_async.pending_requests.begin(); it != _terrain_async.pending_requests.end();)
+        {
+            if (same_terrain(*it))
+            {
+                it = _terrain_async.pending_requests.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
+        for (auto it = _terrain_async.completed_results.begin(); it != _terrain_async.completed_results.end();)
+        {
+            if (same_terrain(*it))
+            {
+                it = _terrain_async.completed_results.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
+        for (auto it = _terrain_async.latest_request_ids.begin(); it != _terrain_async.latest_request_ids.end();)
+        {
+            if (it->first.terrain_name == state.terrain_name)
+            {
+                it = _terrain_async.latest_request_ids.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+
     ResourceManager *rm = _context ? _context->getResources() : nullptr;
     FrameResources *frame = _context ? _context->currentFrame : nullptr;
 
@@ -198,10 +253,13 @@ void PlanetSystem::ensure_earth_patch_index_buffer()
         _earth_patch_index_count = 0;
         _earth_patch_index_resolution = 0;
         _earth_patch_indices_cpu.clear();
+        _earth_patch_indices_cpu_snapshot.reset();
     }
 
     _earth_patch_indices_cpu.clear();
     planet::build_cubesphere_patch_indices(_earth_patch_indices_cpu, _earth_patch_resolution);
+    _earth_patch_indices_cpu_snapshot =
+            std::make_shared<const std::vector<uint32_t>>(_earth_patch_indices_cpu);
     _earth_patch_index_count = static_cast<uint32_t>(_earth_patch_indices_cpu.size());
     _earth_patch_index_buffer =
             rm->upload_buffer(_earth_patch_indices_cpu.data(),
@@ -587,6 +645,7 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
         {
             f = {};
         }
+        refresh_terrain_height_snapshot(state);
     }
 
     if (!want_height)
@@ -595,6 +654,7 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
         {
             f = {};
         }
+        refresh_terrain_height_snapshot(state);
         return;
     }
 
@@ -625,6 +685,7 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
     }
 
     state.height_faces = std::move(loaded_faces);
+    refresh_terrain_height_snapshot(state);
 
     if (!changed)
     {
@@ -634,216 +695,19 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
     }
 }
 
-PlanetSystem::TerrainPatch *PlanetSystem::get_or_create_terrain_patch(TerrainState &state,
-                                                                      const PlanetBody &body,
-                                                                      const planet::PatchKey &key,
-                                                                      uint32_t frame_index,
-                                                                      uint8_t edge_stitch_mask)
+PlanetSystem::TerrainPatch *PlanetSystem::ensure_terrain_patch(TerrainState &state,
+                                                               const planet::PatchKey &key,
+                                                               const uint32_t frame_index)
 {
-    uint32_t reuse_idx = UINT32_MAX;
-    if (TerrainPatch *p = find_terrain_patch(state, key))
+    if (TerrainPatch *patch = find_terrain_patch(state, key))
     {
-        p->last_used_frame = frame_index;
-        state.patch_lru.splice(state.patch_lru.begin(), state.patch_lru, p->lru_it);
-        if (p->edge_stitch_mask == edge_stitch_mask)
-        {
-            return p;
-        }
-
-        reuse_idx = static_cast<uint32_t>(p - state.patches.data());
-        if (_context && p->vertex_buffer.buffer != VK_NULL_HANDLE)
-        {
-            ResourceManager *rm_existing = _context->getResources();
-            FrameResources *frame_existing = _context->currentFrame;
-            if (rm_existing)
-            {
-                const AllocatedBuffer vb_old = p->vertex_buffer;
-                if (frame_existing)
-                {
-                    frame_existing->_deletionQueue.push_function([rm_existing, vb_old]() { rm_existing->destroy_buffer(vb_old); });
-                }
-                else
-                {
-                    rm_existing->destroy_buffer(vb_old);
-                }
-            }
-            p->vertex_buffer = {};
-            p->vertex_buffer_address = 0;
-        }
-        p->pick_bvh.reset();
+        patch->last_used_frame = frame_index;
+        state.patch_lru.splice(state.patch_lru.begin(), state.patch_lru, patch->lru_it);
+        return patch;
     }
-
-    if (!_context)
-    {
-        return nullptr;
-    }
-
-    ResourceManager *rm = _context->getResources();
-    DeviceManager *device = _context->getDevice();
-    if (!rm || !device)
-    {
-        return nullptr;
-    }
-
-    if (_earth_patch_index_buffer.buffer == VK_NULL_HANDLE ||
-        _earth_patch_index_count == 0 ||
-        _earth_patch_indices_cpu.empty())
-    {
-        return nullptr;
-    }
-
-    const glm::vec4 vertex_color =
-            _earth_debug_tint_patches_by_lod ? planet_helpers::debug_color_for_level(key.level) : glm::vec4(1.0f);
-
-    thread_local std::vector<Vertex> scratch_vertices;
-    const uint32_t safe_res = std::max(2u, _earth_patch_resolution);
-    scratch_vertices.reserve(
-        static_cast<size_t>(safe_res) * static_cast<size_t>(safe_res) +
-        static_cast<size_t>(4u) * static_cast<size_t>(safe_res));
-    const glm::dvec3 patch_center_dir =
-            planet::build_cubesphere_patch_vertices(scratch_vertices,
-                                                    body.radius_m,
-                                                    key.face,
-                                                    key.level,
-                                                    key.x,
-                                                    key.y,
-                                                    safe_res,
-                                                    vertex_color);
-
-    if (scratch_vertices.empty())
-    {
-        return nullptr;
-    }
-
-    if (body.terrain_height_max_m > 0.0)
-    {
-        const uint32_t face_index = static_cast<uint32_t>(key.face);
-        if (face_index < state.height_faces.size())
-        {
-            const planet::HeightFace &height_face = state.height_faces[face_index];
-            if (height_face.width > 0 && height_face.height > 0 && !height_face.texels.empty())
-            {
-                const float scale = static_cast<float>(body.terrain_height_max_m);
-                constexpr float kFaceEdgeEpsilon = 1e-6f;
-                for (Vertex &v: scratch_vertices)
-                {
-                    float h01 = 0.0f;
-
-                    // On cube-face boundaries (u/v at 0 or 1), sample via direction mapping so
-                    // both neighboring faces resolve to the same boundary samples.
-                    const bool on_cube_face_edge =
-                            (v.uv_x <= kFaceEdgeEpsilon) ||
-                            (v.uv_x >= 1.0f - kFaceEdgeEpsilon) ||
-                            (v.uv_y <= kFaceEdgeEpsilon) ||
-                            (v.uv_y >= 1.0f - kFaceEdgeEpsilon);
-
-                    if (on_cube_face_edge)
-                    {
-                        planet::CubeFace sample_face = key.face;
-                        double sample_u = static_cast<double>(v.uv_x);
-                        double sample_v = static_cast<double>(v.uv_y);
-                        const glm::vec3 n = glm::normalize(v.normal);
-                        const glm::dvec3 dir(static_cast<double>(n.x),
-                                             static_cast<double>(n.y),
-                                             static_cast<double>(n.z));
-                        if (planet::cubesphere_direction_to_face_uv(dir, sample_face, sample_u, sample_v))
-                        {
-                            const uint32_t sample_face_index = static_cast<uint32_t>(sample_face);
-                            if (sample_face_index < state.height_faces.size())
-                            {
-                                const planet::HeightFace &sample_height_face = state.height_faces[sample_face_index];
-                                if (sample_height_face.width > 0 &&
-                                    sample_height_face.height > 0 &&
-                                    !sample_height_face.texels.empty())
-                                {
-                                    h01 = planet::sample_height(sample_height_face,
-                                                                static_cast<float>(sample_u),
-                                                                static_cast<float>(sample_v));
-                                }
-                                else
-                                {
-                                    h01 = planet::sample_height(height_face, v.uv_x, v.uv_y);
-                                }
-                            }
-                            else
-                            {
-                                h01 = planet::sample_height(height_face, v.uv_x, v.uv_y);
-                            }
-                        }
-                        else
-                        {
-                            h01 = planet::sample_height(height_face, v.uv_x, v.uv_y);
-                        }
-                    }
-                    else
-                    {
-                        h01 = planet::sample_height(height_face, v.uv_x, v.uv_y);
-                    }
-
-                    const float h_m = h01 * scale;
-                    v.position += v.normal * h_m;
-                }
-
-                planet_helpers::stitch_patch_edges_to_parent_grid(scratch_vertices, safe_res, edge_stitch_mask);
-                planet_helpers::recompute_patch_normals(scratch_vertices, safe_res);
-                planet_helpers::refine_patch_edge_normals_from_height(scratch_vertices,
-                                                      safe_res,
-                                                      patch_center_dir,
-                                                      body.radius_m,
-                                                      key.level,
-                                                      edge_stitch_mask,
-                                                      body.terrain_height_max_m,
-                                                      state.height_faces);
-            }
-        }
-    }
-
-    planet_helpers::reinforce_patch_skirts(scratch_vertices,
-                           safe_res,
-                           patch_center_dir,
-                           body.radius_m,
-                           key.level);
-
-    const planet_helpers::PatchBoundsData bounds = planet_helpers::compute_patch_bounds(scratch_vertices);
-    std::shared_ptr<MeshBVH> patch_pick_bvh{};
-    {
-        MeshAsset pick_mesh{};
-        GeoSurface pick_surface{};
-        pick_surface.startIndex = 0;
-        pick_surface.count = _earth_patch_index_count;
-        pick_mesh.surfaces.push_back(pick_surface);
-
-        std::unique_ptr<MeshBVH> built_bvh =
-                build_mesh_bvh(pick_mesh,
-                               std::span<const Vertex>(scratch_vertices),
-                               std::span<const uint32_t>(_earth_patch_indices_cpu));
-        if (built_bvh)
-        {
-            patch_pick_bvh = std::move(built_bvh);
-        }
-    }
-
-    AllocatedBuffer vb =
-            rm->upload_buffer(scratch_vertices.data(),
-                              scratch_vertices.size() * sizeof(Vertex),
-                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                              VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
-    if (vb.buffer == VK_NULL_HANDLE)
-    {
-        return nullptr;
-    }
-
-    VkBufferDeviceAddressInfo addrInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
-    addrInfo.buffer = vb.buffer;
-    VkDeviceAddress addr = vkGetBufferDeviceAddress(device->device(), &addrInfo);
 
     uint32_t idx = 0;
-    if (reuse_idx != UINT32_MAX)
-    {
-        idx = reuse_idx;
-    }
-    else if (!state.patch_free.empty())
+    if (!state.patch_free.empty())
     {
         idx = state.patch_free.back();
         state.patch_free.pop_back();
@@ -859,25 +723,514 @@ PlanetSystem::TerrainPatch *PlanetSystem::get_or_create_terrain_patch(TerrainSta
         return nullptr;
     }
 
-    TerrainPatch &p = state.patches[idx];
-    p.key = key;
-    p.state = TerrainPatchState::Ready;
-    p.edge_stitch_mask = edge_stitch_mask;
-    p.vertex_buffer = vb;
-    p.vertex_buffer_address = addr;
-    p.pick_bvh = std::move(patch_pick_bvh);
-    p.bounds_origin = bounds.origin;
-    p.bounds_extents = bounds.extents;
-    p.bounds_sphere_radius = bounds.sphere_radius;
-    p.patch_center_dir = patch_center_dir;
-    p.last_used_frame = frame_index;
-    if (reuse_idx == UINT32_MAX)
+    TerrainPatch &patch = state.patches[idx];
+    patch = TerrainPatch{};
+    patch.key = key;
+    patch.state = TerrainPatchState::Allocating;
+    patch.last_used_frame = frame_index;
+    state.patch_lru.push_front(idx);
+    patch.lru_it = state.patch_lru.begin();
+    state.patch_lookup[key] = idx;
+    return &patch;
+}
+
+PlanetSystem::TerrainBuildSnapshot PlanetSystem::make_terrain_build_snapshot(const TerrainState &state,
+                                                                             const PlanetBody &body) const
+{
+    TerrainBuildSnapshot snapshot{};
+    snapshot.radius_m = body.radius_m;
+    snapshot.height_max_m = body.terrain_height_max_m;
+    snapshot.patch_resolution = std::max(2u, _earth_patch_resolution);
+    snapshot.debug_tint_by_lod = _earth_debug_tint_patches_by_lod;
+    snapshot.height_faces = state.height_faces_snapshot;
+    snapshot.patch_indices = _earth_patch_indices_cpu_snapshot;
+    return snapshot;
+}
+
+void PlanetSystem::start_terrain_patch_workers()
+{
+    std::lock_guard<std::mutex> lock(_terrain_async.mutex);
+    if (_terrain_async.running)
     {
-        state.patch_lru.push_front(idx);
-        p.lru_it = state.patch_lru.begin();
-        state.patch_lookup.emplace(key, idx);
+        return;
     }
-    return &p;
+
+    _terrain_async.running = true;
+    _terrain_async.next_request_id = 1;
+
+    const unsigned int hw_threads = std::max(1u, std::thread::hardware_concurrency());
+    const std::size_t worker_count = std::clamp<std::size_t>(
+        static_cast<std::size_t>(hw_threads > 1 ? hw_threads - 1 : 1), 1, 2);
+    _terrain_async.workers.reserve(worker_count);
+    for (std::size_t i = 0; i < worker_count; ++i)
+    {
+        _terrain_async.workers.emplace_back(&PlanetSystem::terrain_patch_worker_loop, this);
+    }
+}
+
+void PlanetSystem::stop_terrain_patch_workers()
+{
+    std::vector<std::thread> workers;
+    {
+        std::lock_guard<std::mutex> lock(_terrain_async.mutex);
+        if (!_terrain_async.running && _terrain_async.workers.empty())
+        {
+            return;
+        }
+
+        _terrain_async.running = false;
+        _terrain_async.pending_requests.clear();
+        _terrain_async.latest_request_ids.clear();
+        workers = std::move(_terrain_async.workers);
+    }
+
+    _terrain_async.cv.notify_all();
+    for (std::thread &worker: workers)
+    {
+        if (worker.joinable())
+        {
+            worker.join();
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(_terrain_async.mutex);
+    _terrain_async.completed_results.clear();
+    _terrain_async.next_request_id = 1;
+}
+
+void PlanetSystem::terrain_patch_worker_loop()
+{
+    while (true)
+    {
+        TerrainBuildRequest request{};
+        {
+            std::unique_lock<std::mutex> lock(_terrain_async.mutex);
+            _terrain_async.cv.wait(lock, [&]() {
+                return !_terrain_async.running || !_terrain_async.pending_requests.empty();
+            });
+
+            if (!_terrain_async.running && _terrain_async.pending_requests.empty())
+            {
+                return;
+            }
+
+            request = std::move(_terrain_async.pending_requests.front());
+            _terrain_async.pending_requests.pop_front();
+
+            const TerrainBuildJobKey job_key{request.terrain_name, request.key};
+            auto latest_it = _terrain_async.latest_request_ids.find(job_key);
+            if (latest_it == _terrain_async.latest_request_ids.end() ||
+                latest_it->second != request.request_id)
+            {
+                continue;
+            }
+        }
+
+        TerrainBuildResult result{};
+        result.terrain_name = request.terrain_name;
+        result.key = request.key;
+        result.edge_stitch_mask = request.edge_stitch_mask;
+        result.request_id = request.request_id;
+        result.terrain_generation = request.terrain_generation;
+        result.success = build_terrain_patch_cpu(request, result);
+
+        {
+            std::lock_guard<std::mutex> lock(_terrain_async.mutex);
+            if (!_terrain_async.running)
+            {
+                return;
+            }
+
+            const TerrainBuildJobKey job_key{request.terrain_name, request.key};
+            auto latest_it = _terrain_async.latest_request_ids.find(job_key);
+            if (latest_it != _terrain_async.latest_request_ids.end() &&
+                latest_it->second == request.request_id)
+            {
+                _terrain_async.completed_results.push_back(std::move(result));
+            }
+        }
+    }
+}
+
+bool PlanetSystem::build_terrain_patch_cpu(const TerrainBuildRequest &request, TerrainBuildResult &out_result)
+{
+    if (!request.snapshot.patch_indices || request.snapshot.patch_indices->empty())
+    {
+        return false;
+    }
+
+    const glm::vec4 vertex_color =
+            request.snapshot.debug_tint_by_lod
+                    ? planet_helpers::debug_color_for_level(request.key.level)
+                    : glm::vec4(1.0f);
+
+    thread_local std::vector<Vertex> scratch_vertices;
+    const uint32_t safe_res = std::max(2u, request.snapshot.patch_resolution);
+    scratch_vertices.clear();
+    scratch_vertices.reserve(
+        static_cast<size_t>(safe_res) * static_cast<size_t>(safe_res) +
+        static_cast<size_t>(4u) * static_cast<size_t>(safe_res));
+
+    const glm::dvec3 patch_center_dir =
+            planet::build_cubesphere_patch_vertices(scratch_vertices,
+                                                    request.snapshot.radius_m,
+                                                    request.key.face,
+                                                    request.key.level,
+                                                    request.key.x,
+                                                    request.key.y,
+                                                    safe_res,
+                                                    vertex_color);
+    if (scratch_vertices.empty())
+    {
+        return false;
+    }
+
+    const auto *height_faces = request.snapshot.height_faces.get();
+    if (request.snapshot.height_max_m > 0.0 && height_faces)
+    {
+        const uint32_t face_index = static_cast<uint32_t>(request.key.face);
+        if (face_index < height_faces->size())
+        {
+            const planet::HeightFace &height_face = (*height_faces)[face_index];
+            if (height_face.width > 0 && height_face.height > 0 && !height_face.texels.empty())
+            {
+                const float scale = static_cast<float>(request.snapshot.height_max_m);
+                constexpr float kFaceEdgeEpsilon = 1e-6f;
+                for (Vertex &vertex: scratch_vertices)
+                {
+                    float h01 = 0.0f;
+                    const bool on_cube_face_edge =
+                            (vertex.uv_x <= kFaceEdgeEpsilon) ||
+                            (vertex.uv_x >= 1.0f - kFaceEdgeEpsilon) ||
+                            (vertex.uv_y <= kFaceEdgeEpsilon) ||
+                            (vertex.uv_y >= 1.0f - kFaceEdgeEpsilon);
+
+                    if (on_cube_face_edge)
+                    {
+                        planet::CubeFace sample_face = request.key.face;
+                        double sample_u = static_cast<double>(vertex.uv_x);
+                        double sample_v = static_cast<double>(vertex.uv_y);
+                        const glm::vec3 normal = glm::normalize(vertex.normal);
+                        const glm::dvec3 dir(static_cast<double>(normal.x),
+                                             static_cast<double>(normal.y),
+                                             static_cast<double>(normal.z));
+                        if (planet::cubesphere_direction_to_face_uv(dir, sample_face, sample_u, sample_v))
+                        {
+                            const uint32_t sample_face_index = static_cast<uint32_t>(sample_face);
+                            if (sample_face_index < height_faces->size())
+                            {
+                                const planet::HeightFace &sample_height_face = (*height_faces)[sample_face_index];
+                                if (sample_height_face.width > 0 &&
+                                    sample_height_face.height > 0 &&
+                                    !sample_height_face.texels.empty())
+                                {
+                                    h01 = planet::sample_height(sample_height_face,
+                                                                static_cast<float>(sample_u),
+                                                                static_cast<float>(sample_v));
+                                }
+                                else
+                                {
+                                    h01 = planet::sample_height(height_face, vertex.uv_x, vertex.uv_y);
+                                }
+                            }
+                            else
+                            {
+                                h01 = planet::sample_height(height_face, vertex.uv_x, vertex.uv_y);
+                            }
+                        }
+                        else
+                        {
+                            h01 = planet::sample_height(height_face, vertex.uv_x, vertex.uv_y);
+                        }
+                    }
+                    else
+                    {
+                        h01 = planet::sample_height(height_face, vertex.uv_x, vertex.uv_y);
+                    }
+
+                    vertex.position += vertex.normal * (h01 * scale);
+                }
+
+                planet_helpers::stitch_patch_edges_to_parent_grid(
+                    scratch_vertices, safe_res, request.edge_stitch_mask);
+                planet_helpers::recompute_patch_normals(scratch_vertices, safe_res);
+                planet_helpers::refine_patch_edge_normals_from_height(scratch_vertices,
+                                                                      safe_res,
+                                                                      patch_center_dir,
+                                                                      request.snapshot.radius_m,
+                                                                      request.key.level,
+                                                                      request.edge_stitch_mask,
+                                                                      request.snapshot.height_max_m,
+                                                                      *height_faces);
+            }
+        }
+    }
+
+    planet_helpers::reinforce_patch_skirts(scratch_vertices,
+                                           safe_res,
+                                           patch_center_dir,
+                                           request.snapshot.radius_m,
+                                           request.key.level);
+
+    const planet_helpers::PatchBoundsData bounds = planet_helpers::compute_patch_bounds(scratch_vertices);
+
+    std::shared_ptr<MeshBVH> patch_pick_bvh{};
+    {
+        MeshAsset pick_mesh{};
+        GeoSurface pick_surface{};
+        pick_surface.startIndex = 0;
+        pick_surface.count = static_cast<uint32_t>(request.snapshot.patch_indices->size());
+        pick_mesh.surfaces.push_back(pick_surface);
+
+        std::unique_ptr<MeshBVH> built_bvh =
+                build_mesh_bvh(pick_mesh,
+                               std::span<const Vertex>(scratch_vertices),
+                               std::span<const uint32_t>(*request.snapshot.patch_indices));
+        if (built_bvh)
+        {
+            patch_pick_bvh = std::move(built_bvh);
+        }
+    }
+
+    out_result.success = true;
+    out_result.vertices = scratch_vertices;
+    out_result.pick_bvh = std::move(patch_pick_bvh);
+    out_result.bounds_origin = bounds.origin;
+    out_result.bounds_extents = bounds.extents;
+    out_result.bounds_sphere_radius = bounds.sphere_radius;
+    out_result.patch_center_dir = patch_center_dir;
+    return true;
+}
+
+uint64_t PlanetSystem::request_terrain_patch_build(TerrainState &state,
+                                                   const PlanetBody &body,
+                                                   const planet::PatchKey &key,
+                                                   const uint32_t frame_index,
+                                                   const uint8_t edge_stitch_mask)
+{
+    start_terrain_patch_workers();
+
+    TerrainPatch *patch = ensure_terrain_patch(state, key, frame_index);
+    if (!patch)
+    {
+        return 0;
+    }
+
+    if (patch->build_requested &&
+        patch->pending_edge_stitch_mask == edge_stitch_mask &&
+        patch->pending_request_id != 0)
+    {
+        return patch->pending_request_id;
+    }
+
+    if (patch->state == TerrainPatchState::Ready &&
+        patch->vertex_buffer.buffer != VK_NULL_HANDLE &&
+        patch->vertex_buffer_address != 0 &&
+        patch->edge_stitch_mask == edge_stitch_mask)
+    {
+        return 0;
+    }
+
+    const TerrainBuildSnapshot snapshot = make_terrain_build_snapshot(state, body);
+    if (!snapshot.patch_indices || snapshot.patch_indices->empty())
+    {
+        return 0;
+    }
+
+    TerrainBuildRequest request{};
+    request.terrain_name = body.name;
+    request.key = key;
+    request.edge_stitch_mask = edge_stitch_mask;
+    request.terrain_generation = state.terrain_generation;
+    request.snapshot = snapshot;
+
+    {
+        std::lock_guard<std::mutex> lock(_terrain_async.mutex);
+        if (!_terrain_async.running)
+        {
+            return 0;
+        }
+
+        request.request_id = _terrain_async.next_request_id++;
+        _terrain_async.latest_request_ids[TerrainBuildJobKey{request.terrain_name, request.key}] = request.request_id;
+        _terrain_async.pending_requests.push_back(request);
+    }
+
+    patch->build_requested = true;
+    patch->pending_request_id = request.request_id;
+    patch->pending_edge_stitch_mask = edge_stitch_mask;
+    if (patch->state != TerrainPatchState::Ready)
+    {
+        patch->state = TerrainPatchState::Allocating;
+    }
+
+    _terrain_async.cv.notify_one();
+    return request.request_id;
+}
+
+bool PlanetSystem::commit_terrain_patch_result(TerrainState &state, const TerrainBuildResult &result)
+{
+    TerrainPatch *patch = find_terrain_patch(state, result.key);
+    if (!patch)
+    {
+        return false;
+    }
+
+    const auto clear_request_tracking = [&]() {
+        patch->build_requested = false;
+        patch->pending_request_id = 0;
+        patch->pending_edge_stitch_mask = 0;
+        std::lock_guard<std::mutex> lock(_terrain_async.mutex);
+        const TerrainBuildJobKey job_key{result.terrain_name, result.key};
+        auto latest_it = _terrain_async.latest_request_ids.find(job_key);
+        if (latest_it != _terrain_async.latest_request_ids.end() &&
+            latest_it->second == result.request_id)
+        {
+            _terrain_async.latest_request_ids.erase(latest_it);
+        }
+    };
+
+    if (state.terrain_generation != result.terrain_generation ||
+        !patch->build_requested ||
+        patch->pending_request_id != result.request_id)
+    {
+        return false;
+    }
+
+    if (!result.success || result.vertices.empty() || !_context)
+    {
+        if (patch->state != TerrainPatchState::Ready)
+        {
+            patch->state = TerrainPatchState::Allocating;
+        }
+        clear_request_tracking();
+        return false;
+    }
+
+    ResourceManager *rm = _context->getResources();
+    DeviceManager *device = _context->getDevice();
+    if (!rm || !device)
+    {
+        if (patch->state != TerrainPatchState::Ready)
+        {
+            patch->state = TerrainPatchState::Allocating;
+        }
+        clear_request_tracking();
+        return false;
+    }
+
+    AllocatedBuffer vb =
+            rm->upload_buffer(result.vertices.data(),
+                              result.vertices.size() * sizeof(Vertex),
+                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                              VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
+    if (vb.buffer == VK_NULL_HANDLE)
+    {
+        if (patch->state != TerrainPatchState::Ready)
+        {
+            patch->state = TerrainPatchState::Allocating;
+        }
+        clear_request_tracking();
+        return false;
+    }
+
+    VkBufferDeviceAddressInfo addr_info{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    addr_info.buffer = vb.buffer;
+    const VkDeviceAddress addr = vkGetBufferDeviceAddress(device->device(), &addr_info);
+
+    if (patch->vertex_buffer.buffer != VK_NULL_HANDLE)
+    {
+        FrameResources *frame = _context->currentFrame;
+        const AllocatedBuffer vb_old = patch->vertex_buffer;
+        if (frame)
+        {
+            frame->_deletionQueue.push_function([rm, vb_old]() { rm->destroy_buffer(vb_old); });
+        }
+        else
+        {
+            rm->destroy_buffer(vb_old);
+        }
+    }
+
+    patch->state = TerrainPatchState::Ready;
+    patch->edge_stitch_mask = result.edge_stitch_mask;
+    patch->vertex_buffer = vb;
+    patch->vertex_buffer_address = addr;
+    patch->pick_bvh = result.pick_bvh;
+    patch->bounds_origin = result.bounds_origin;
+    patch->bounds_extents = result.bounds_extents;
+    patch->bounds_sphere_radius = result.bounds_sphere_radius;
+    patch->patch_center_dir = result.patch_center_dir;
+
+    clear_request_tracking();
+    return true;
+}
+
+void PlanetSystem::pump_completed_terrain_patch_builds(TerrainState &state,
+                                                       std::string_view terrain_name,
+                                                       uint32_t &created_patches,
+                                                       double &ms_patch_create,
+                                                       const uint32_t max_create,
+                                                       const double max_create_ms)
+{
+    using Clock = std::chrono::steady_clock;
+
+    while (true)
+    {
+        const bool hit_count_budget = (max_create != 0u) && (created_patches >= max_create);
+        const bool hit_time_budget = (max_create_ms > 0.0) && (ms_patch_create >= max_create_ms);
+        if (hit_count_budget || hit_time_budget)
+        {
+            break;
+        }
+
+        TerrainBuildResult result{};
+        bool found_result = false;
+        {
+            std::lock_guard<std::mutex> lock(_terrain_async.mutex);
+            for (auto it = _terrain_async.completed_results.begin();
+                 it != _terrain_async.completed_results.end();)
+            {
+                if (find_terrain_state(it->terrain_name) == nullptr)
+                {
+                    it = _terrain_async.completed_results.erase(it);
+                    continue;
+                }
+
+                if (it->terrain_name != terrain_name)
+                {
+                    ++it;
+                    continue;
+                }
+
+                if (it->terrain_generation != state.terrain_generation)
+                {
+                    it = _terrain_async.completed_results.erase(it);
+                    continue;
+                }
+
+                result = std::move(*it);
+                it = _terrain_async.completed_results.erase(it);
+                found_result = true;
+                break;
+            }
+        }
+
+        if (!found_result)
+        {
+            break;
+        }
+
+        const Clock::time_point t0 = Clock::now();
+        const bool committed = commit_terrain_patch_result(state, result);
+        const Clock::time_point t1 = Clock::now();
+        ms_patch_create += std::chrono::duration<double, std::milli>(t1 - t0).count();
+        if (committed)
+        {
+            ++created_patches;
+        }
+    }
 }
 
 void PlanetSystem::trim_terrain_patch_cache(TerrainState &state)
@@ -937,7 +1290,7 @@ void PlanetSystem::trim_terrain_patch_cache(TerrainState &state)
             continue;
         }
 
-        if (is_pinned_patch_key(p.key) || protected_keys.contains(p.key))
+        if (is_pinned_patch_key(p.key) || protected_keys.contains(p.key) || p.build_requested)
         {
             state.patch_lru.splice(state.patch_lru.begin(), state.patch_lru, p.lru_it);
             continue;

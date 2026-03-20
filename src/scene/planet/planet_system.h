@@ -1,5 +1,6 @@
 #pragma once
 
+#include <core/types.h>
 #include <core/world.h>
 #include <core/descriptor/descriptors.h>
 #include <scene/planet/planet_heightmap.h>
@@ -7,10 +8,14 @@
 
 #include <cstdint>
 #include <array>
+#include <condition_variable>
+#include <deque>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -202,6 +207,9 @@ private:
         planet::PatchKey key{};
         TerrainPatchState state = TerrainPatchState::Allocating;
         uint8_t edge_stitch_mask = 0;
+        uint8_t pending_edge_stitch_mask = 0;
+        uint64_t pending_request_id = 0;
+        bool build_requested = false;
 
         AllocatedBuffer vertex_buffer{};
         VkDeviceAddress vertex_buffer_address = 0;
@@ -218,6 +226,7 @@ private:
 
     struct TerrainState
     {
+        std::string terrain_name;
         planet::PlanetQuadtree quadtree{};
         EarthDebugStats debug_stats{};
         std::vector<planet::PatchKey> current_render_cut;
@@ -237,10 +246,81 @@ private:
         std::string bound_emission_dir;
         double bound_height_max_m = 0.0;
         std::array<planet::HeightFace, 6> height_faces{};
+        std::shared_ptr<const std::array<planet::HeightFace, 6>> height_faces_snapshot{};
         std::array<MaterialInstance, 6> face_materials{};
 
+        uint64_t terrain_generation = 1;
         uint32_t patch_frame_stamp = 0;
         bool patch_cache_dirty = false;
+    };
+
+    struct TerrainBuildSnapshot
+    {
+        double radius_m = 1.0;
+        double height_max_m = 0.0;
+        uint32_t patch_resolution = 33;
+        bool debug_tint_by_lod = false;
+        std::shared_ptr<const std::array<planet::HeightFace, 6>> height_faces{};
+        std::shared_ptr<const std::vector<uint32_t>> patch_indices{};
+    };
+
+    struct TerrainBuildRequest
+    {
+        std::string terrain_name;
+        planet::PatchKey key{};
+        uint8_t edge_stitch_mask = 0;
+        uint64_t request_id = 0;
+        uint64_t terrain_generation = 0;
+        TerrainBuildSnapshot snapshot{};
+    };
+
+    struct TerrainBuildResult
+    {
+        std::string terrain_name;
+        planet::PatchKey key{};
+        uint8_t edge_stitch_mask = 0;
+        uint64_t request_id = 0;
+        uint64_t terrain_generation = 0;
+        bool success = false;
+        std::vector<Vertex> vertices{};
+        std::shared_ptr<MeshBVH> pick_bvh{};
+        glm::vec3 bounds_origin{0.0f};
+        glm::vec3 bounds_extents{0.5f};
+        float bounds_sphere_radius = 0.5f;
+        WorldVec3 patch_center_dir{0.0, 0.0, 1.0};
+    };
+
+    struct TerrainBuildJobKey
+    {
+        std::string terrain_name;
+        planet::PatchKey key{};
+
+        bool operator==(const TerrainBuildJobKey &other) const
+        {
+            return terrain_name == other.terrain_name && key == other.key;
+        }
+    };
+
+    struct TerrainBuildJobKeyHash
+    {
+        size_t operator()(const TerrainBuildJobKey &value) const noexcept
+        {
+            size_t h = std::hash<std::string>{}(value.terrain_name);
+            h ^= planet::PatchKeyHash{}(value.key) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
+            return h;
+        }
+    };
+
+    struct TerrainAsyncState
+    {
+        std::mutex mutex{};
+        std::condition_variable cv{};
+        bool running = false;
+        uint64_t next_request_id = 1;
+        std::deque<TerrainBuildRequest> pending_requests{};
+        std::deque<TerrainBuildResult> completed_results{};
+        std::unordered_map<TerrainBuildJobKey, uint64_t, TerrainBuildJobKeyHash> latest_request_ids{};
+        std::vector<std::thread> workers{};
     };
 
     TerrainState *get_or_create_terrain_state(std::string_view name);
@@ -254,12 +334,25 @@ private:
 
     bool is_terrain_patch_ready(const TerrainState &state, const planet::PatchKey &key) const;
     static bool is_pinned_patch_key(const planet::PatchKey &key) { return key.level <= k_pinned_patch_level; }
-
-    TerrainPatch *get_or_create_terrain_patch(TerrainState &state,
-                                              const PlanetBody &body,
-                                              const planet::PatchKey &key,
-                                              uint32_t frame_index,
-                                              uint8_t edge_stitch_mask);
+    TerrainPatch *ensure_terrain_patch(TerrainState &state, const planet::PatchKey &key, uint32_t frame_index);
+    TerrainBuildSnapshot make_terrain_build_snapshot(const TerrainState &state, const PlanetBody &body) const;
+    uint64_t request_terrain_patch_build(TerrainState &state,
+                                         const PlanetBody &body,
+                                         const planet::PatchKey &key,
+                                         uint32_t frame_index,
+                                         uint8_t edge_stitch_mask);
+    void pump_completed_terrain_patch_builds(TerrainState &state,
+                                             std::string_view terrain_name,
+                                             uint32_t &created_patches,
+                                             double &ms_patch_create,
+                                             uint32_t max_create,
+                                             double max_create_ms);
+    bool commit_terrain_patch_result(TerrainState &state, const TerrainBuildResult &result);
+    void refresh_terrain_height_snapshot(TerrainState &state);
+    void start_terrain_patch_workers();
+    void stop_terrain_patch_workers();
+    void terrain_patch_worker_loop();
+    static bool build_terrain_patch_cpu(const TerrainBuildRequest &request, TerrainBuildResult &out_result);
 
     void ensure_earth_patch_index_buffer();
 
@@ -290,6 +383,8 @@ private:
     uint32_t _earth_patch_index_count = 0;
     uint32_t _earth_patch_index_resolution = 0;
     std::vector<uint32_t> _earth_patch_indices_cpu{};
+    std::shared_ptr<const std::vector<uint32_t>> _earth_patch_indices_cpu_snapshot{};
+    TerrainAsyncState _terrain_async{};
 
     VkDescriptorSetLayout _earth_patch_material_layout = VK_NULL_HANDLE;
     DescriptorAllocatorGrowable _earth_patch_material_allocator{};

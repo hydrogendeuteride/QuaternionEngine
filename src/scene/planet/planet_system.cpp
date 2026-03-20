@@ -208,6 +208,7 @@ namespace
 void PlanetSystem::init(EngineContext *context)
 {
     _context = context;
+    start_terrain_patch_workers();
 }
 
 void PlanetSystem::set_earth_debug_tint_patches_by_lod(bool enabled)
@@ -234,6 +235,8 @@ void PlanetSystem::set_earth_patch_resolution(uint32_t resolution)
 
 void PlanetSystem::cleanup()
 {
+    stop_terrain_patch_workers();
+
     if (!_context)
     {
         return;
@@ -749,6 +752,13 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
 
             const Clock::time_point t_emit0 = Clock::now();
 
+            pump_completed_terrain_patch_builds(*state,
+                                                body.name,
+                                                created_patches,
+                                                ms_patch_create,
+                                                max_create,
+                                                max_create_ms);
+
             const std::vector<planet::PatchKey> &desired_leaves = state->quadtree.visible_leaves();
             PatchKeySet create_seen;
             std::vector<planet::PatchKey> create_queue;
@@ -794,23 +804,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 {
                     continue;
                 }
-
-                const bool hit_count_budget = (max_create != 0u) && (created_patches >= max_create);
-                const bool hit_time_budget = (max_create_ms > 0.0) && (ms_patch_create >= max_create_ms);
-                if (hit_count_budget || hit_time_budget)
-                {
-                    break;
-                }
-
-                const Clock::time_point t_c0 = Clock::now();
-                TerrainPatch *patch = get_or_create_terrain_patch(*state, body, k, frame_index, 0u);
-                const Clock::time_point t_c1 = Clock::now();
-
-                if (patch)
-                {
-                    created_patches++;
-                }
-                ms_patch_create += std::chrono::duration<double, std::milli>(t_c1 - t_c0).count();
+                request_terrain_patch_build(*state, body, k, frame_index, 0u);
             }
 
             const std::vector<planet::PatchKey> render_keys =
@@ -850,11 +844,20 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             {
                 const uint8_t stitch_mask = stitch_mask_for(k);
                 TerrainPatch *patch = find_terrain_patch(*state, k);
-                if (!patch || patch->edge_stitch_mask != stitch_mask)
-                {
-                    patch = get_or_create_terrain_patch(*state, body, k, frame_index, stitch_mask);
-                }
                 if (!patch)
+                {
+                    request_terrain_patch_build(*state, body, k, frame_index, stitch_mask);
+                    continue;
+                }
+
+                if (patch->edge_stitch_mask != stitch_mask)
+                {
+                    request_terrain_patch_build(*state, body, k, frame_index, stitch_mask);
+                }
+
+                if (patch->state != TerrainPatchState::Ready ||
+                    patch->vertex_buffer.buffer == VK_NULL_HANDLE ||
+                    patch->vertex_buffer_address == 0)
                 {
                     continue;
                 }
