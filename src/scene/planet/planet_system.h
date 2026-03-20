@@ -185,6 +185,8 @@ public:
     void set_earth_debug_tint_patches_by_lod(bool enabled);
 
 private:
+    static constexpr uint32_t k_pinned_patch_level = 2u;
+
     PlanetBody *find_terrain_body();
 
     const PlanetBody *find_terrain_body() const;
@@ -218,6 +220,7 @@ private:
     {
         planet::PlanetQuadtree quadtree{};
         EarthDebugStats debug_stats{};
+        std::vector<planet::PatchKey> current_render_cut;
 
         std::unordered_map<planet::PatchKey, uint32_t, planet::PatchKeyHash> patch_lookup;
         std::vector<TerrainPatch> patches;
@@ -247,6 +250,10 @@ private:
     const TerrainState *find_terrain_state(std::string_view name) const;
 
     TerrainPatch *find_terrain_patch(TerrainState &state, const planet::PatchKey &key);
+    const TerrainPatch *find_terrain_patch(const TerrainState &state, const planet::PatchKey &key) const;
+
+    bool is_terrain_patch_ready(const TerrainState &state, const planet::PatchKey &key) const;
+    static bool is_pinned_patch_key(const planet::PatchKey &key) { return key.level <= k_pinned_patch_level; }
 
     TerrainPatch *get_or_create_terrain_patch(TerrainState &state,
                                               const PlanetBody &body,

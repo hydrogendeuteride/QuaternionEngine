@@ -19,9 +19,191 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "device.h"
+
+namespace
+{
+    using PatchKey = planet::PatchKey;
+    using PatchKeySet = std::unordered_set<PatchKey, planet::PatchKeyHash>;
+    using PatchLevelMap = std::unordered_map<PatchKey, uint32_t, planet::PatchKeyHash>;
+
+    constexpr std::array<planet::CubeFace, 6> k_cube_faces{
+        planet::CubeFace::PosX,
+        planet::CubeFace::NegX,
+        planet::CubeFace::PosY,
+        planet::CubeFace::NegY,
+        planet::CubeFace::PosZ,
+        planet::CubeFace::NegZ,
+    };
+
+    PatchKey make_parent_key(const PatchKey &child)
+    {
+        return PatchKey{child.face, child.level - 1u, child.x >> 1u, child.y >> 1u};
+    }
+
+    void append_child_keys(const PatchKey &parent, std::vector<PatchKey> &out)
+    {
+        const uint32_t child_level = parent.level + 1u;
+        const uint32_t child_x = parent.x * 2u;
+        const uint32_t child_y = parent.y * 2u;
+
+        out.push_back(PatchKey{parent.face, child_level, child_x + 0u, child_y + 0u});
+        out.push_back(PatchKey{parent.face, child_level, child_x + 1u, child_y + 0u});
+        out.push_back(PatchKey{parent.face, child_level, child_x + 0u, child_y + 1u});
+        out.push_back(PatchKey{parent.face, child_level, child_x + 1u, child_y + 1u});
+    }
+
+    PatchKey child_on_leaf_path(const PatchKey &parent, const PatchKey &leaf)
+    {
+        const uint32_t child_level = parent.level + 1u;
+        const uint32_t shift = leaf.level - child_level;
+        const uint32_t child_x = parent.x * 2u + ((leaf.x >> shift) & 1u);
+        const uint32_t child_y = parent.y * 2u + ((leaf.y >> shift) & 1u);
+        return PatchKey{parent.face, child_level, child_x, child_y};
+    }
+
+    void append_pinned_patch_keys(uint32_t max_level, std::vector<PatchKey> &out)
+    {
+        for (planet::CubeFace face: k_cube_faces)
+        {
+            for (uint32_t level = 0u; level <= max_level; ++level)
+            {
+                const uint32_t tiles = 1u << level;
+                for (uint32_t y = 0; y < tiles; ++y)
+                {
+                    for (uint32_t x = 0; x < tiles; ++x)
+                    {
+                        out.push_back(PatchKey{face, level, x, y});
+                    }
+                }
+            }
+        }
+    }
+
+    void append_required_split_groups_for_leaf(const PatchKey &leaf, std::vector<PatchKey> &out)
+    {
+        PatchKey current{leaf.face, 0u, 0u, 0u};
+        while (current.level < leaf.level)
+        {
+            append_child_keys(current, out);
+            current = child_on_leaf_path(current, leaf);
+        }
+    }
+
+    PatchLevelMap build_desired_max_levels(const std::vector<PatchKey> &desired_leaves)
+    {
+        PatchLevelMap desired_max_levels;
+        desired_max_levels.reserve(desired_leaves.size() * 4u + 32u);
+
+        for (const PatchKey &leaf: desired_leaves)
+        {
+            PatchKey current = leaf;
+            while (true)
+            {
+                auto [it, inserted] = desired_max_levels.emplace(current, leaf.level);
+                if (!inserted)
+                {
+                    it->second = std::max(it->second, leaf.level);
+                }
+
+                if (current.level == 0u)
+                {
+                    break;
+                }
+                current = make_parent_key(current);
+            }
+        }
+
+        return desired_max_levels;
+    }
+
+    template<typename ReadyFn>
+    bool all_children_ready(const PatchKey &parent, ReadyFn &&is_ready)
+    {
+        std::vector<PatchKey> children;
+        children.reserve(4u);
+        append_child_keys(parent, children);
+        for (const PatchKey &child: children)
+        {
+            if (!is_ready(child))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    template<typename ReadyFn>
+    std::vector<PatchKey> build_ready_render_cut(const std::vector<PatchKey> &desired_leaves, ReadyFn &&is_ready)
+    {
+        std::vector<PatchKey> render_keys;
+        if (desired_leaves.empty())
+        {
+            return render_keys;
+        }
+
+        const PatchLevelMap desired_max_levels = build_desired_max_levels(desired_leaves);
+        render_keys.reserve(k_cube_faces.size());
+        for (planet::CubeFace face: k_cube_faces)
+        {
+            const PatchKey root{face, 0u, 0u, 0u};
+            if (!desired_max_levels.contains(root) || !is_ready(root))
+            {
+                continue;
+            }
+            render_keys.push_back(root);
+        }
+
+        if (render_keys.empty())
+        {
+            return render_keys;
+        }
+
+        constexpr uint32_t k_max_balance_passes = 32u;
+        for (uint32_t pass = 0u; pass < k_max_balance_passes; ++pass)
+        {
+            PatchKeySet render_set;
+            render_set.reserve(render_keys.size() * 2u);
+            uint32_t max_level_in_render = 0u;
+            for (const PatchKey &key: render_keys)
+            {
+                render_set.insert(key);
+                max_level_in_render = std::max(max_level_in_render, key.level);
+            }
+
+            bool changed = false;
+            std::vector<PatchKey> next_render_cut;
+            next_render_cut.reserve(render_keys.size() * 2u);
+            for (const PatchKey &key: render_keys)
+            {
+                const auto desired_it = desired_max_levels.find(key);
+                const bool wants_split = desired_it != desired_max_levels.end() && desired_it->second > key.level;
+                const bool needs_balance =
+                        planet_helpers::patch_needs_balance_split(key, render_set, max_level_in_render);
+
+                if ((wants_split || needs_balance) && all_children_ready(key, is_ready))
+                {
+                    append_child_keys(key, next_render_cut);
+                    changed = true;
+                    continue;
+                }
+
+                next_render_cut.push_back(key);
+            }
+
+            render_keys = std::move(next_render_cut);
+            if (!changed)
+            {
+                break;
+            }
+        }
+
+        return render_keys;
+    }
+} // namespace
 
 void PlanetSystem::init(EngineContext *context)
 {
@@ -107,6 +289,7 @@ void PlanetSystem::cleanup()
             state.patch_lru.clear();
             state.patch_free.clear();
             state.patches.clear();
+            state.current_render_cut.clear();
 
             if (state.material_constants_buffer.buffer != VK_NULL_HANDLE)
             {
@@ -567,37 +750,39 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             const Clock::time_point t_emit0 = Clock::now();
 
             const std::vector<planet::PatchKey> &desired_leaves = state->quadtree.visible_leaves();
-            std::unordered_set<planet::PatchKey, planet::PatchKeyHash> desired_leaf_set;
-            desired_leaf_set.reserve(desired_leaves.size() * 2u);
-            uint32_t max_level_in_set = 0u;
-            for (const planet::PatchKey &k: desired_leaves)
+            PatchKeySet create_seen;
+            std::vector<planet::PatchKey> create_queue;
+            create_seen.reserve(desired_leaves.size() * 8u + 160u);
+            create_queue.reserve(desired_leaves.size() * 8u + 160u);
+
+            auto enqueue_patch = [&](const planet::PatchKey &key) {
+                if (create_seen.emplace(key).second)
+                {
+                    create_queue.push_back(key);
+                }
+            };
+
+            std::vector<planet::PatchKey> scratch_keys;
+            scratch_keys.reserve(32u);
+            append_pinned_patch_keys(k_pinned_patch_level, scratch_keys);
+            for (const planet::PatchKey &key: scratch_keys)
             {
-                desired_leaf_set.insert(k);
-                max_level_in_set = std::max(max_level_in_set, k.level);
+                enqueue_patch(key);
             }
 
-            std::unordered_map<planet::PatchKey, uint8_t, planet::PatchKeyHash> edge_stitch_masks;
-            edge_stitch_masks.reserve(desired_leaves.size());
-            for (const planet::PatchKey &k: desired_leaves)
+            for (const planet::PatchKey &leaf: desired_leaves)
             {
-                const uint8_t mask = planet_helpers::compute_patch_edge_stitch_mask(k, desired_leaf_set, max_level_in_set);
-                if (mask != 0u)
+                scratch_keys.clear();
+                append_required_split_groups_for_leaf(leaf, scratch_keys);
+                for (const planet::PatchKey &key: scratch_keys)
                 {
-                    edge_stitch_masks.emplace(k, mask);
+                    enqueue_patch(key);
                 }
             }
 
-            auto stitch_mask_for = [&](const planet::PatchKey &k) -> uint8_t {
-                auto it = edge_stitch_masks.find(k);
-                return (it != edge_stitch_masks.end()) ? it->second : 0u;
-            };
-
-            // Patch creation priority: create higher-LOD (smaller) patches first so we fill -> much better at rendering thousands of it
-            // near-camera terrain before spending budget on far patches.
-            std::vector<planet::PatchKey> create_queue = desired_leaves;
             std::sort(create_queue.begin(), create_queue.end(),
                       [](const planet::PatchKey &a, const planet::PatchKey &b) {
-                          if (a.level != b.level) return a.level > b.level;
+                          if (a.level != b.level) return a.level < b.level;
                           if (a.face != b.face) return a.face < b.face;
                           if (a.x != b.x) return a.x < b.x;
                           return a.y < b.y;
@@ -605,9 +790,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
 
             for (const planet::PatchKey &k: create_queue)
             {
-                const uint8_t stitch_mask = stitch_mask_for(k);
-                if (TerrainPatch *existing = find_terrain_patch(*state, k);
-                    existing && existing->edge_stitch_mask == stitch_mask)
+                if (is_terrain_patch_ready(*state, k))
                 {
                     continue;
                 }
@@ -620,7 +803,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 }
 
                 const Clock::time_point t_c0 = Clock::now();
-                TerrainPatch *patch = get_or_create_terrain_patch(*state, body, k, frame_index, stitch_mask);
+                TerrainPatch *patch = get_or_create_terrain_patch(*state, body, k, frame_index, 0u);
                 const Clock::time_point t_c1 = Clock::now();
 
                 if (patch)
@@ -630,145 +813,44 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 ms_patch_create += std::chrono::duration<double, std::milli>(t_c1 - t_c0).count();
             }
 
-            auto is_patch_ready = [&](const planet::PatchKey &k) -> bool {
-                TerrainPatch *p = find_terrain_patch(*state, k);
-                if (!p)
+            const std::vector<planet::PatchKey> render_keys =
+                    build_ready_render_cut(desired_leaves,
+                                           [&](const planet::PatchKey &key) { return is_terrain_patch_ready(*state, key); });
+            state->current_render_cut = render_keys;
+
+            PatchKeySet render_set;
+            render_set.reserve(render_keys.size() * 2u);
+            uint32_t max_level_in_render = 0u;
+            for (const planet::PatchKey &key: render_keys)
+            {
+                render_set.insert(key);
+                max_level_in_render = std::max(max_level_in_render, key.level);
+            }
+
+            std::unordered_map<planet::PatchKey, uint8_t, planet::PatchKeyHash> edge_stitch_masks;
+            edge_stitch_masks.reserve(render_keys.size());
+            for (const planet::PatchKey &key: render_keys)
+            {
+                const uint8_t mask = planet_helpers::compute_patch_edge_stitch_mask(key, render_set, max_level_in_render);
+                if (mask != 0u)
                 {
-                    return false;
+                    edge_stitch_masks.emplace(key, mask);
                 }
+            }
 
-                if (p->state != TerrainPatchState::Ready ||
-                    p->vertex_buffer.buffer == VK_NULL_HANDLE ||
-                    p->vertex_buffer_address == 0)
-                {
-                    return false;
-                }
-
-                return true;
-            };
-
-            // Compute a render cut that never renders holes: if a desired leaf patch isn't ready yet,
-            // fall back to the nearest ready ancestor patch.
-            auto compute_render_cut = [&](const std::vector<planet::PatchKey> &desired_leaves)
-                -> std::vector<planet::PatchKey> {
-                std::vector<planet::PatchKey> render_keys;
-                if (desired_leaves.empty())
-                {
-                    return render_keys;
-                }
-
-                std::unordered_set<planet::PatchKey, planet::PatchKeyHash> leaf_set;
-                leaf_set.reserve(desired_leaves.size() * 2u);
-
-                std::unordered_map<planet::PatchKey, uint8_t, planet::PatchKeyHash> child_masks;
-                child_masks.reserve(desired_leaves.size() * 2u);
-
-                for (const planet::PatchKey &leaf: desired_leaves)
-                {
-                    leaf_set.insert(leaf);
-
-                    planet::PatchKey child = leaf;
-                    while (child.level > 0u)
-                    {
-                        const planet::PatchKey parent{child.face, child.level - 1u, child.x >> 1u, child.y >> 1u};
-                        const uint32_t child_idx = (child.x & 1u) | ((child.y & 1u) << 1u);
-                        child_masks[parent] |= static_cast<uint8_t>(1u << child_idx);
-                        child = parent;
-                    }
-                }
-
-                render_keys.reserve(desired_leaves.size());
-
-                auto traverse = [&](auto &&self, const planet::PatchKey &k) -> bool {
-                    if (leaf_set.contains(k))
-                    {
-                        if (is_patch_ready(k))
-                        {
-                            render_keys.push_back(k);
-                            return true;
-                        }
-                        return false;
-                    }
-
-                    auto it = child_masks.find(k);
-                    if (it == child_masks.end() || it->second == 0u)
-                    {
-                        return true;
-                    }
-
-                    const size_t checkpoint = render_keys.size();
-                    bool ok = true;
-                    const uint8_t mask = it->second;
-
-                    for (uint32_t cy = 0; cy < 2u; ++cy)
-                    {
-                        for (uint32_t cx = 0; cx < 2u; ++cx)
-                        {
-                            const uint32_t child_idx = cx + cy * 2u;
-                            if ((mask & static_cast<uint8_t>(1u << child_idx)) == 0u)
-                            {
-                                continue;
-                            }
-
-                            const planet::PatchKey child{
-                                k.face,
-                                k.level + 1u,
-                                k.x * 2u + cx,
-                                k.y * 2u + cy,
-                            };
-                            if (!self(self, child))
-                            {
-                                ok = false;
-                            }
-                        }
-                    }
-
-                    if (ok)
-                    {
-                        return true;
-                    }
-
-                    // One or more desired children are missing-> fall back to this node to avoid
-                    render_keys.resize(checkpoint);
-                    if (is_patch_ready(k))
-                    {
-                        render_keys.push_back(k);
-                        return true;
-                    }
-                    return false;
-                };
-
-                // Roots in deterministic +X,-X,+Y,-Y,+Z,-Z order.
-                const std::array<planet::CubeFace, 6> faces{
-                    planet::CubeFace::PosX,
-                    planet::CubeFace::NegX,
-                    planet::CubeFace::PosY,
-                    planet::CubeFace::NegY,
-                    planet::CubeFace::PosZ,
-                    planet::CubeFace::NegZ,
-                };
-
-                for (planet::CubeFace face: faces)
-                {
-                    const planet::PatchKey root{face, 0u, 0u, 0u};
-                    if (leaf_set.contains(root) || child_masks.find(root) != child_masks.end())
-                    {
-                        traverse(traverse, root);
-                    }
-                }
-
-                return render_keys;
+            auto stitch_mask_for = [&](const planet::PatchKey &key) -> uint8_t {
+                auto it = edge_stitch_masks.find(key);
+                return (it != edge_stitch_masks.end()) ? it->second : 0u;
             };
 
             std::vector<uint32_t> ready_patch_indices;
-            const std::vector<planet::PatchKey> render_keys = compute_render_cut(desired_leaves);
             ready_patch_indices.reserve(render_keys.size());
 
             for (const planet::PatchKey &k: render_keys)
             {
                 const uint8_t stitch_mask = stitch_mask_for(k);
                 TerrainPatch *patch = find_terrain_patch(*state, k);
-                if (patch && patch->edge_stitch_mask != stitch_mask)
+                if (!patch || patch->edge_stitch_mask != stitch_mask)
                 {
                     patch = get_or_create_terrain_patch(*state, body, k, frame_index, stitch_mask);
                 }
