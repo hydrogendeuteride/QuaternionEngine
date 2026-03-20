@@ -65,15 +65,39 @@ PlanetSystem::TerrainPatch *PlanetSystem::find_terrain_patch(TerrainState &state
     return &state.patches[idx];
 }
 
-void PlanetSystem::clear_terrain_patch_cache(TerrainState &state)
+const PlanetSystem::TerrainPatch *PlanetSystem::find_terrain_patch(const TerrainState &state,
+                                                                   const planet::PatchKey &key) const
 {
-    if (!_context)
+    auto it = state.patch_lookup.find(key);
+    if (it == state.patch_lookup.end())
     {
-        return;
+        return nullptr;
+    }
+    const uint32_t idx = it->second;
+    if (idx >= state.patches.size())
+    {
+        return nullptr;
+    }
+    return &state.patches[idx];
+}
+
+bool PlanetSystem::is_terrain_patch_ready(const TerrainState &state, const planet::PatchKey &key) const
+{
+    const TerrainPatch *p = find_terrain_patch(state, key);
+    if (!p)
+    {
+        return false;
     }
 
-    ResourceManager *rm = _context->getResources();
-    FrameResources *frame = _context->currentFrame;
+    return p->state == TerrainPatchState::Ready &&
+           p->vertex_buffer.buffer != VK_NULL_HANDLE &&
+           p->vertex_buffer_address != 0;
+}
+
+void PlanetSystem::clear_terrain_patch_cache(TerrainState &state)
+{
+    ResourceManager *rm = _context ? _context->getResources() : nullptr;
+    FrameResources *frame = _context ? _context->currentFrame : nullptr;
 
     if (rm)
     {
@@ -101,6 +125,7 @@ void PlanetSystem::clear_terrain_patch_cache(TerrainState &state)
     state.patch_lru.clear();
     state.patch_free.clear();
     state.patches.clear();
+    state.current_render_cut.clear();
 }
 
 void PlanetSystem::clear_all_terrain_patch_caches()
@@ -880,6 +905,12 @@ void PlanetSystem::trim_terrain_patch_cache(TerrainState &state)
 
     FrameResources *frame = _context->currentFrame;
     const uint32_t now = state.patch_frame_stamp;
+    std::unordered_set<planet::PatchKey, planet::PatchKeyHash> protected_keys;
+    protected_keys.reserve(state.current_render_cut.size() * 2u + 128u);
+    for (const planet::PatchKey &key: state.current_render_cut)
+    {
+        protected_keys.insert(key);
+    }
 
     size_t guard = 0;
     const size_t guard_limit = state.patch_lru.size();
@@ -901,6 +932,12 @@ void PlanetSystem::trim_terrain_patch_cache(TerrainState &state)
 
         TerrainPatch &p = state.patches[idx];
         if (p.last_used_frame == now)
+        {
+            state.patch_lru.splice(state.patch_lru.begin(), state.patch_lru, p.lru_it);
+            continue;
+        }
+
+        if (is_pinned_patch_key(p.key) || protected_keys.contains(p.key))
         {
             state.patch_lru.splice(state.patch_lru.begin(), state.patch_lru, p.lru_it);
             continue;

@@ -56,4 +56,8 @@ namespace planet_helpers
     uint8_t compute_patch_edge_stitch_mask(const planet::PatchKey &key,
                                            const std::unordered_set<planet::PatchKey, planet::PatchKeyHash> &leaf_set,
                                            uint32_t max_level_in_set);
+
+    bool patch_needs_balance_split(const planet::PatchKey &key,
+                                   const std::unordered_set<planet::PatchKey, planet::PatchKeyHash> &leaf_set,
+                                   uint32_t max_level_in_set);
 } // namespace planet_helpers
