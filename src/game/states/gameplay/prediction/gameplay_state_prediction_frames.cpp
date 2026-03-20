@@ -1,4 +1,5 @@
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_cache_internal.h"
 
 #include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_prediction_tuning.h"
@@ -15,13 +16,8 @@
 
 namespace Game
 {
-    using detail::finite_vec3;
-
     namespace
     {
-        constexpr orbitsim::SpacecraftId kPlayerDisplayTargetSpacecraftId =
-                static_cast<orbitsim::SpacecraftId>(0x7000'0001u);
-
         bool same_frame_spec(const orbitsim::TrajectoryFrameSpec &a, const orbitsim::TrajectoryFrameSpec &b)
         {
             return a.type == b.type &&
@@ -33,126 +29,6 @@ namespace Game
         bool same_analysis_spec(const PredictionAnalysisSpec &a, const PredictionAnalysisSpec &b)
         {
             return a.mode == b.mode && a.fixed_body_id == b.fixed_body_id;
-        }
-
-        std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_samples(
-                const std::vector<orbitsim::TrajectorySample> &samples)
-        {
-            std::vector<orbitsim::TrajectorySegment> out;
-            if (samples.size() < 2)
-            {
-                return out;
-            }
-
-            out.reserve(samples.size() - 1);
-            for (std::size_t i = 1; i < samples.size(); ++i)
-            {
-                const orbitsim::TrajectorySample &a = samples[i - 1];
-                const orbitsim::TrajectorySample &b = samples[i];
-                const double dt_s = b.t_s - a.t_s;
-                if (!(dt_s > 0.0) || !std::isfinite(dt_s))
-                {
-                    continue;
-                }
-
-                out.push_back(orbitsim::TrajectorySegment{
-                        .t0_s = a.t_s,
-                        .dt_s = dt_s,
-                        .start = orbitsim::make_state(a.position_m, a.velocity_mps),
-                        .end = orbitsim::make_state(b.position_m, b.velocity_mps),
-                        .flags = 0u,
-                });
-            }
-
-            return out;
-        }
-
-        std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> build_gpu_root_cache(
-                const std::vector<orbitsim::TrajectorySegment> &segments)
-        {
-            auto out = std::make_shared<std::vector<OrbitPlotSystem::GpuRootSegment>>();
-            out->reserve(segments.size());
-
-            double prefix_length_m = 0.0;
-            for (const orbitsim::TrajectorySegment &segment : segments)
-            {
-                if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
-                {
-                    continue;
-                }
-
-                const glm::dvec3 p0 = glm::dvec3(segment.start.position_m);
-                const glm::dvec3 p1 = glm::dvec3(segment.end.position_m);
-                const glm::dvec3 v0 = glm::dvec3(segment.start.velocity_mps);
-                const glm::dvec3 v1 = glm::dvec3(segment.end.velocity_mps);
-                if (!finite_vec3(p0) || !finite_vec3(p1) || !finite_vec3(v0) || !finite_vec3(v1))
-                {
-                    continue;
-                }
-
-                OrbitPlotSystem::GpuRootSegment root{};
-                root.t0_s = segment.t0_s;
-                root.p0_bci = p0;
-                root.v0_bci = v0;
-                root.p1_bci = p1;
-                root.v1_bci = v1;
-                root.dt_s = segment.dt_s;
-                root.prefix_length_m = prefix_length_m;
-                out->push_back(root);
-
-                const double chord_m = glm::length(p1 - p0);
-                if (std::isfinite(chord_m) && chord_m > 0.0)
-                {
-                    prefix_length_m += chord_m;
-                }
-            }
-
-            return out;
-        }
-
-        orbitsim::State body_state_for_segment_transform(const OrbitPredictionCache &cache,
-                                                         const orbitsim::MassiveBody &body,
-                                                         const double t_s)
-        {
-            if (cache.shared_ephemeris && !cache.shared_ephemeris->empty())
-            {
-                return cache.shared_ephemeris->body_state_at_by_id(body.id, t_s);
-            }
-            return body.state;
-        }
-
-        std::vector<orbitsim::TrajectorySegment> transform_segments_to_body_centered_inertial(
-                const OrbitPredictionCache &cache,
-                const std::vector<orbitsim::TrajectorySegment> &segments_inertial,
-                const orbitsim::MassiveBody &reference_body)
-        {
-            std::vector<orbitsim::TrajectorySegment> out;
-            out.reserve(segments_inertial.size());
-
-            for (const orbitsim::TrajectorySegment &segment : segments_inertial)
-            {
-                const double t0_s = segment.t0_s;
-                const double t1_s = t0_s + segment.dt_s;
-                if (!(segment.dt_s > 0.0) || !std::isfinite(t0_s) || !std::isfinite(t1_s))
-                {
-                    continue;
-                }
-
-                const orbitsim::State ref_start = body_state_for_segment_transform(cache, reference_body, t0_s);
-                const orbitsim::State ref_end = body_state_for_segment_transform(cache, reference_body, t1_s);
-
-                out.push_back(orbitsim::TrajectorySegment{
-                        .t0_s = t0_s,
-                        .dt_s = segment.dt_s,
-                        .start = orbitsim::make_state(segment.start.position_m - ref_start.position_m,
-                                                      segment.start.velocity_mps - ref_start.velocity_mps),
-                        .end = orbitsim::make_state(segment.end.position_m - ref_end.position_m,
-                                                    segment.end.velocity_mps - ref_end.velocity_mps),
-                        .flags = segment.flags,
-                });
-            }
-
-            return out;
         }
     } // namespace
 
@@ -362,70 +238,7 @@ namespace Game
                                                          const double query_time_s,
                                                          orbitsim::State &out_state) const
     {
-        out_state = {};
-        if (trajectory.empty() || !std::isfinite(query_time_s))
-        {
-            return false;
-        }
-
-        const auto it_hi = std::lower_bound(trajectory.cbegin(),
-                                            trajectory.cend(),
-                                            query_time_s,
-                                            [](const orbitsim::TrajectorySample &sample, const double t_s) {
-                                                return sample.t_s < t_s;
-                                            });
-        const std::size_t i_hi = static_cast<std::size_t>(std::distance(trajectory.cbegin(), it_hi));
-        if (i_hi == 0)
-        {
-            out_state = orbitsim::make_state(trajectory.front().position_m, trajectory.front().velocity_mps);
-            return true;
-        }
-        if (i_hi >= trajectory.size())
-        {
-            out_state = orbitsim::make_state(trajectory.back().position_m, trajectory.back().velocity_mps);
-            return true;
-        }
-
-        const orbitsim::TrajectorySample &a = trajectory[i_hi - 1];
-        const orbitsim::TrajectorySample &b = trajectory[i_hi];
-        const double h = b.t_s - a.t_s;
-        if (!(h > 0.0) || !std::isfinite(h))
-        {
-            out_state = orbitsim::make_state(a.position_m, a.velocity_mps);
-            return true;
-        }
-
-        double u = (query_time_s - a.t_s) / h;
-        if (!std::isfinite(u))
-        {
-            u = 0.0;
-        }
-        u = std::clamp(u, 0.0, 1.0);
-
-        const double u2 = u * u;
-        const double u3 = u2 * u;
-        const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-        const double h10 = u3 - (2.0 * u2) + u;
-        const double h01 = (-2.0 * u3) + (3.0 * u2);
-        const double h11 = u3 - u2;
-        const double dh00 = (6.0 * u2) - (6.0 * u);
-        const double dh10 = (3.0 * u2) - (4.0 * u) + 1.0;
-        const double dh01 = (-6.0 * u2) + (6.0 * u);
-        const double dh11 = (3.0 * u2) - (2.0 * u);
-
-        const glm::dvec3 p0 = glm::dvec3(a.position_m);
-        const glm::dvec3 p1 = glm::dvec3(b.position_m);
-        const glm::dvec3 m0 = glm::dvec3(a.velocity_mps) * h;
-        const glm::dvec3 m1 = glm::dvec3(b.velocity_mps) * h;
-        const glm::dvec3 pos = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-        const glm::dvec3 vel = ((dh00 * p0) + (dh10 * m0) + (dh01 * p1) + (dh11 * m1)) / h;
-        if (!finite_vec3(pos) || !finite_vec3(vel))
-        {
-            return false;
-        }
-
-        out_state = orbitsim::make_state(pos, vel);
-        return true;
+        return PredictionCacheInternal::sample_prediction_inertial_state(trajectory, query_time_s, out_state);
     }
 
     orbitsim::SpacecraftStateLookup GameplayState::build_prediction_player_lookup() const
@@ -450,20 +263,7 @@ namespace Game
             return nullptr;
         }
 
-        return [this, trajectory](const orbitsim::SpacecraftId spacecraft_id, const double t_s)
-                -> std::optional<orbitsim::State> {
-            if (spacecraft_id != kPlayerDisplayTargetSpacecraftId)
-            {
-                return std::nullopt;
-            }
-
-            orbitsim::State sampled{};
-            if (!sample_prediction_inertial_state(*trajectory, t_s, sampled))
-            {
-                return std::nullopt;
-            }
-            return sampled;
-        };
+        return PredictionCacheInternal::build_player_lookup(*trajectory);
     }
 
     orbitsim::TrajectoryFrameSpec GameplayState::resolve_prediction_display_frame_spec(const OrbitPredictionCache &cache,
@@ -654,7 +454,8 @@ namespace Game
             if (player_lookup)
             {
                 options.push_back(PredictionFrameOption{
-                        .spec = orbitsim::TrajectoryFrameSpec::lvlh(kPlayerDisplayTargetSpacecraftId),
+                        .spec = orbitsim::TrajectoryFrameSpec::lvlh(
+                                PredictionCacheInternal::kPlayerDisplayTargetSpacecraftId),
                         .label = "Player LVLH",
                 });
             }
@@ -1039,132 +840,29 @@ namespace Game
 
         if (rebuild_frame_cache)
         {
-            track.cache.trajectory_frame.clear();
-            track.cache.trajectory_frame_planned.clear();
-            track.cache.trajectory_segments_frame.clear();
-            track.cache.trajectory_segments_frame_planned.clear();
-            track.cache.render_curve_frame.clear();
-            track.cache.render_curve_frame_planned.clear();
-
-            if (resolved_frame_spec.type == orbitsim::TrajectoryFrameType::Inertial)
+            std::vector<orbitsim::TrajectorySample> player_lookup_trajectory;
+            if (const PredictionTrackState *player_track = player_prediction_track())
             {
-                track.cache.trajectory_frame = track.cache.trajectory_inertial;
-                track.cache.trajectory_frame_planned = track.cache.trajectory_inertial_planned;
-                track.cache.trajectory_segments_frame = track.cache.trajectory_segments_inertial;
-                track.cache.trajectory_segments_frame_planned = track.cache.trajectory_segments_inertial_planned;
+                if (player_track->cache.trajectory_inertial_planned.size() >= 2)
+                {
+                    player_lookup_trajectory = player_track->cache.trajectory_inertial_planned;
+                }
+                else if (player_track->cache.trajectory_inertial.size() >= 2)
+                {
+                    player_lookup_trajectory = player_track->cache.trajectory_inertial;
+                }
             }
-            else if (resolved_frame_spec.type == orbitsim::TrajectoryFrameType::BodyCenteredInertial)
-            {
-                if (!track.cache.shared_ephemeris || track.cache.shared_ephemeris->empty())
-                {
-                    track.cache.valid = false;
-                    track.cache.resolved_frame_spec_valid = false;
-                    track.cache.metrics_valid = false;
-                    return;
-                }
 
-                const orbitsim::MassiveBody *reference_body =
-                        find_massive_body(track.cache.massive_bodies, resolved_frame_spec.primary_body_id);
-                if (!reference_body)
-                {
-                    track.cache.valid = false;
-                    track.cache.resolved_frame_spec_valid = false;
-                    track.cache.metrics_valid = false;
-                    return;
-                }
-
-                const auto player_lookup = build_prediction_player_lookup();
-                track.cache.trajectory_frame = orbitsim::trajectory_to_frame_spec(
-                        track.cache.trajectory_inertial,
-                        *track.cache.shared_ephemeris,
-                        track.cache.massive_bodies,
+            if (!PredictionCacheInternal::rebuild_prediction_frame_cache(
+                        track.cache,
                         resolved_frame_spec,
-                        player_lookup);
-                if (!track.cache.trajectory_inertial_planned.empty())
-                {
-                    track.cache.trajectory_frame_planned = orbitsim::trajectory_to_frame_spec(
-                            track.cache.trajectory_inertial_planned,
-                            *track.cache.shared_ephemeris,
-                            track.cache.massive_bodies,
-                            resolved_frame_spec,
-                            player_lookup);
-                }
-
-                track.cache.trajectory_segments_frame =
-                        transform_segments_to_body_centered_inertial(
-                                track.cache,
-                                track.cache.trajectory_segments_inertial,
-                                *reference_body);
-                if (!track.cache.trajectory_segments_inertial_planned.empty())
-                {
-                    track.cache.trajectory_segments_frame_planned =
-                            transform_segments_to_body_centered_inertial(
-                                    track.cache,
-                                    track.cache.trajectory_segments_inertial_planned,
-                                    *reference_body);
-                }
-            }
-            else
-            {
-                if (!track.cache.shared_ephemeris || track.cache.shared_ephemeris->empty())
-                {
-                    track.cache.valid = false;
-                    track.cache.resolved_frame_spec_valid = false;
-                    track.cache.metrics_valid = false;
-                    return;
-                }
-
-                const auto player_lookup = build_prediction_player_lookup();
-                track.cache.trajectory_frame = orbitsim::trajectory_to_frame_spec(
-                        track.cache.trajectory_inertial,
-                        *track.cache.shared_ephemeris,
-                        track.cache.massive_bodies,
-                        resolved_frame_spec,
-                        player_lookup);
-                if (!track.cache.trajectory_inertial_planned.empty())
-                {
-                    track.cache.trajectory_frame_planned = orbitsim::trajectory_to_frame_spec(
-                            track.cache.trajectory_inertial_planned,
-                            *track.cache.shared_ephemeris,
-                            track.cache.massive_bodies,
-                            resolved_frame_spec,
-                            player_lookup);
-                }
-            }
-
-            if (track.cache.trajectory_frame.size() < 2)
+                        player_lookup_trajectory))
             {
                 track.cache.valid = false;
                 track.cache.resolved_frame_spec_valid = false;
                 track.cache.metrics_valid = false;
                 return;
             }
-
-            if (track.cache.trajectory_segments_frame.empty())
-            {
-                track.cache.trajectory_segments_frame = trajectory_segments_from_samples(track.cache.trajectory_frame);
-            }
-            if (!track.cache.trajectory_frame_planned.empty() &&
-                track.cache.trajectory_segments_frame_planned.empty())
-            {
-                track.cache.trajectory_segments_frame_planned =
-                        trajectory_segments_from_samples(track.cache.trajectory_frame_planned);
-            }
-
-            track.cache.gpu_roots_frame = build_gpu_root_cache(track.cache.trajectory_segments_frame);
-            track.cache.gpu_roots_frame_planned = build_gpu_root_cache(track.cache.trajectory_segments_frame_planned);
-
-            track.cache.render_curve_frame = track.cache.trajectory_segments_frame.empty()
-                                                    ? OrbitRenderCurve{}
-                                                    : OrbitRenderCurve::build(track.cache.trajectory_segments_frame);
-            track.cache.render_curve_frame_planned = track.cache.trajectory_segments_frame_planned.empty()
-                                                            ? OrbitRenderCurve{}
-                                                            : OrbitRenderCurve::build(
-                                                                      track.cache.trajectory_segments_frame_planned);
-
-            track.cache.resolved_frame_spec = resolved_frame_spec;
-            track.cache.resolved_frame_spec_valid = true;
-            track.cache.metrics_valid = false;
         }
 
         double analysis_time_s = display_time_s;
@@ -1183,77 +881,10 @@ namespace Game
             return;
         }
 
-        track.cache.altitude_km.clear();
-        track.cache.speed_kmps.clear();
-        track.cache.semi_major_axis_m = 0.0;
-        track.cache.eccentricity = 0.0;
-        track.cache.orbital_period_s = 0.0;
-        track.cache.periapsis_alt_km = 0.0;
-        track.cache.apoapsis_alt_km = std::numeric_limits<double>::infinity();
-        track.cache.metrics_body_id = analysis_body_id;
-        track.cache.metrics_valid = true;
-
-        const orbitsim::MassiveBody *analysis_body = find_massive_body(track.cache.massive_bodies, analysis_body_id);
-        if (!analysis_body || !(analysis_body->mass_kg > 0.0))
-        {
-            return;
-        }
-
-        const double mu_ref_m3_s2 = _orbitsim->sim.config().gravitational_constant * analysis_body->mass_kg;
-        if (!(mu_ref_m3_s2 > 0.0) || !std::isfinite(mu_ref_m3_s2))
-        {
-            return;
-        }
-
-        std::vector<orbitsim::TrajectorySample> rel_samples;
-        if (track.cache.resolved_frame_spec_valid &&
-            track.cache.resolved_frame_spec.type == orbitsim::TrajectoryFrameType::BodyCenteredInertial &&
-            analysis_body_id == track.cache.resolved_frame_spec.primary_body_id)
-        {
-            rel_samples = track.cache.trajectory_frame;
-        }
-        else
-        {
-            if (!track.cache.shared_ephemeris || track.cache.shared_ephemeris->empty())
-            {
-                return;
-            }
-            rel_samples = orbitsim::trajectory_to_frame_spec(
-                    track.cache.trajectory_inertial,
-                    *track.cache.shared_ephemeris,
-                    track.cache.massive_bodies,
-                    orbitsim::TrajectoryFrameSpec::body_centered_inertial(analysis_body_id));
-        }
-        if (rel_samples.size() < 2)
-        {
-            return;
-        }
-
-        track.cache.altitude_km.reserve(rel_samples.size());
-        track.cache.speed_kmps.reserve(rel_samples.size());
-        for (const orbitsim::TrajectorySample &sample : rel_samples)
-        {
-            const double r_m = glm::length(sample.position_m);
-            const double alt_km = (r_m - analysis_body->radius_m) * 1.0e-3;
-            const double spd_kmps = glm::length(sample.velocity_mps) * 1.0e-3;
-            track.cache.altitude_km.push_back(static_cast<float>(alt_km));
-            track.cache.speed_kmps.push_back(static_cast<float>(spd_kmps));
-        }
-
-        const OrbitPredictionMath::OrbitalElementsEstimate elements =
-                OrbitPredictionMath::compute_orbital_elements(mu_ref_m3_s2,
-                                                              rel_samples.front().position_m,
-                                                              rel_samples.front().velocity_mps);
-        if (elements.valid)
-        {
-            track.cache.semi_major_axis_m = elements.semi_major_axis_m;
-            track.cache.eccentricity = elements.eccentricity;
-            track.cache.orbital_period_s = elements.orbital_period_s;
-            track.cache.periapsis_alt_km = (elements.periapsis_m - analysis_body->radius_m) * 1.0e-3;
-            track.cache.apoapsis_alt_km = std::isfinite(elements.apoapsis_m)
-                                                  ? (elements.apoapsis_m - analysis_body->radius_m) * 1.0e-3
-                                                  : std::numeric_limits<double>::infinity();
-        }
+        PredictionCacheInternal::rebuild_prediction_metrics(
+                track.cache,
+                _orbitsim ? _orbitsim->sim.config() : orbitsim::GameSimulation::Config{},
+                analysis_body_id);
     }
 
     void GameplayState::refresh_all_prediction_derived_caches()

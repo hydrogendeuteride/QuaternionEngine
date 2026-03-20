@@ -100,6 +100,10 @@ namespace Game
     std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_samples(
             const std::vector<orbitsim::TrajectorySample> &samples);
 
+    std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_body_ephemeris(
+            const orbitsim::CelestialEphemeris &ephemeris,
+            orbitsim::BodyId body_id);
+
     bool eval_segment_state(const orbitsim::TrajectorySegment &segment,
                             const double t_s,
                             orbitsim::State &out_state);
@@ -278,6 +282,14 @@ namespace Game
     double resolve_prediction_ephemeris_dt_s(const OrbitPredictionService::Request &request,
                                              const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec);
     SpacecraftSamplingBudget build_spacecraft_sampling_budget(const OrbitPredictionService::Request &request);
+    orbitsim::AdaptiveSegmentOptions build_spacecraft_adaptive_segment_options(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec,
+            const CancelCheck &cancel_requested = {});
+    orbitsim::AdaptiveEphemerisOptions build_adaptive_ephemeris_options(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec,
+            const CancelCheck &cancel_requested = {});
 
     bool ephemeris_covers_horizon(const OrbitPredictionService::SharedCelestialEphemeris &ephemeris,
                                   double sim_time_s,

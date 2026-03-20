@@ -103,17 +103,16 @@ namespace Game
             orbitsim::GameSimulation::Config sim_config{};
             std::vector<orbitsim::MassiveBody> massive_bodies;
             double duration_s{0.0};
-            double celestial_dt_s{0.0};
-            std::size_t max_samples{0};
+            orbitsim::AdaptiveEphemerisOptions adaptive_options{};
         };
 
         struct CachedEphemerisEntry
         {
             double sim_time_s{0.0};
             double duration_s{0.0};
-            double celestial_dt_s{0.0};
             orbitsim::GameSimulation::Config sim_config{};
             std::vector<orbitsim::MassiveBody> massive_bodies{};
+            orbitsim::AdaptiveEphemerisOptions adaptive_options{};
             SharedCelestialEphemeris ephemeris{};
             uint64_t last_use_serial{0};
         };

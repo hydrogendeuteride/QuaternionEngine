@@ -62,6 +62,49 @@ namespace Game
         return out;
     }
 
+    std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_body_ephemeris(
+            const orbitsim::CelestialEphemeris &ephemeris,
+            const orbitsim::BodyId body_id)
+    {
+        std::vector<orbitsim::TrajectorySegment> out;
+        if (ephemeris.empty() || body_id == orbitsim::kInvalidBodyId)
+        {
+            return out;
+        }
+
+        std::size_t body_index = 0;
+        if (!ephemeris.body_index_for_id(body_id, &body_index))
+        {
+            return out;
+        }
+
+        out.reserve(ephemeris.segments.size());
+        for (const orbitsim::CelestialEphemerisSegment &segment : ephemeris.segments)
+        {
+            if (!(segment.dt_s > 0.0) || body_index >= segment.start.size() || body_index >= segment.end.size())
+            {
+                continue;
+            }
+
+            const orbitsim::State &start = segment.start[body_index];
+            const orbitsim::State &end = segment.end[body_index];
+            if (!finite_state(start) || !finite_state(end))
+            {
+                continue;
+            }
+
+            out.push_back(orbitsim::TrajectorySegment{
+                    .t0_s = segment.t0_s,
+                    .dt_s = segment.dt_s,
+                    .start = start,
+                    .end = end,
+                    .flags = 0u,
+            });
+        }
+
+        return out;
+    }
+
     bool eval_segment_state(const orbitsim::TrajectorySegment &segment,
                             const double t_s,
                             orbitsim::State &out_state)
