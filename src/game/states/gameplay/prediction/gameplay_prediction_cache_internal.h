@@ -89,6 +89,13 @@ namespace Game::PredictionCacheInternal
         return true;
     }
 
+    inline bool sample_prediction_inertial_state(const std::vector<orbitsim::TrajectorySegment> &segments,
+                                                 const double query_time_s,
+                                                 orbitsim::State &out_state)
+    {
+        return sample_trajectory_segment_state(segments, query_time_s, out_state);
+    }
+
     inline orbitsim::SpacecraftStateLookup build_player_lookup(
             const std::vector<orbitsim::TrajectorySample> &trajectory)
     {
@@ -106,6 +113,30 @@ namespace Game::PredictionCacheInternal
 
             orbitsim::State sampled{};
             if (!sample_prediction_inertial_state(trajectory, t_s, sampled))
+            {
+                return std::nullopt;
+            }
+            return sampled;
+        };
+    }
+
+    inline orbitsim::SpacecraftStateLookup build_player_lookup(
+            const std::vector<orbitsim::TrajectorySegment> &segments)
+    {
+        if (segments.empty())
+        {
+            return nullptr;
+        }
+
+        return [&segments](const orbitsim::SpacecraftId spacecraft_id, const double t_s)
+                -> std::optional<orbitsim::State> {
+            if (spacecraft_id != kPlayerDisplayTargetSpacecraftId)
+            {
+                return std::nullopt;
+            }
+
+            orbitsim::State sampled{};
+            if (!sample_prediction_inertial_state(segments, t_s, sampled))
             {
                 return std::nullopt;
             }
@@ -195,24 +226,28 @@ namespace Game::PredictionCacheInternal
                         ? build_multi_band_sample_windows(start_time_s, horizon_s, total_sample_budget)
                         : build_multi_band_sample_windows(start_time_s, horizon_s, total_sample_budget, node_times_s);
         out = sample_trajectory_segments_multi_band(segments, windows);
-        if (out.size() >= 2)
+        return out;
+    }
+
+    inline void update_derived_diagnostics(OrbitPredictionDerivedDiagnostics *diagnostics,
+                                           const OrbitPredictionCache &cache,
+                                           const PredictionDerivedStatus status)
+    {
+        if (!diagnostics)
         {
-            return out;
+            return;
         }
 
-        const double fallback_dt_s = horizon_s / static_cast<double>(std::max<std::size_t>(1, total_sample_budget - 1));
-        return orbitsim::sample_trajectory_segments_uniform_dt(
-                segments,
-                std::max(fallback_dt_s, 1.0e-6),
-                total_sample_budget,
-                true,
-                true);
+        diagnostics->status = status;
+        diagnostics->frame_segment_count = cache.trajectory_segments_frame.size();
+        diagnostics->frame_segment_count_planned = cache.trajectory_segments_frame_planned.size();
+        diagnostics->frame_sample_count = cache.trajectory_frame.size();
+        diagnostics->frame_sample_count_planned = cache.trajectory_frame_planned.size();
     }
 
     inline orbitsim::FrameSegmentTransformOptions build_frame_segment_transform_options(
             const orbitsim::TrajectoryFrameSpec &frame_spec,
             const std::vector<orbitsim::TrajectorySegment> &inertial_segments,
-            const std::size_t sample_budget,
             const CancelCheck &cancel_requested = {})
     {
         orbitsim::FrameSegmentTransformOptions out{};
@@ -233,10 +268,10 @@ namespace Game::PredictionCacheInternal
                                              : OrbitPredictionTuning::kAdaptiveFrameTransformMaxDtS);
         out.soft_max_segments =
                 std::max<std::size_t>(OrbitPredictionTuning::kAdaptiveFrameTransformSoftMaxSegments,
-                                      std::max<std::size_t>(sample_budget, inertial_segments.size()));
+                                      inertial_segments.size());
         out.hard_max_segments =
                 std::max<std::size_t>(OrbitPredictionTuning::kAdaptiveFrameTransformHardMaxSegments,
-                                      std::max<std::size_t>(out.soft_max_segments, inertial_segments.size()));
+                                      out.soft_max_segments);
         out.tolerance.pos_near_m = OrbitPredictionTuning::kAdaptiveFrameTransformPosTolNearM;
         out.tolerance.pos_far_m = OrbitPredictionTuning::kAdaptiveFrameTransformPosTolFarM;
         out.tolerance.vel_near_mps = OrbitPredictionTuning::kAdaptiveFrameTransformVelTolNearMps;
@@ -257,9 +292,15 @@ namespace Game::PredictionCacheInternal
     inline bool rebuild_prediction_frame_cache(
             OrbitPredictionCache &cache,
             const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
-            const std::vector<orbitsim::TrajectorySample> &player_lookup_trajectory_inertial,
-            const CancelCheck &cancel_requested = {})
+            const std::vector<orbitsim::TrajectorySegment> &player_lookup_segments_inertial,
+            const CancelCheck &cancel_requested = {},
+            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr)
     {
+        if (diagnostics)
+        {
+            *diagnostics = {};
+        }
+
         cache.trajectory_frame.clear();
         cache.trajectory_frame_planned.clear();
         cache.trajectory_segments_frame.clear();
@@ -283,10 +324,11 @@ namespace Game::PredictionCacheInternal
         {
             if (!cache.shared_ephemeris || cache.shared_ephemeris->empty())
             {
+                update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::MissingEphemeris);
                 return false;
             }
 
-            const auto player_lookup = build_player_lookup(player_lookup_trajectory_inertial);
+            const auto player_lookup = build_player_lookup(player_lookup_segments_inertial);
             const std::size_t base_sample_budget = std::max<std::size_t>(cache.trajectory_inertial.size(), 2);
             const std::size_t planned_sample_budget =
                     cache.trajectory_inertial_planned.size() >= 2 ? cache.trajectory_inertial_planned.size()
@@ -297,7 +339,6 @@ namespace Game::PredictionCacheInternal
                     build_frame_segment_transform_options(
                             resolved_frame_spec,
                             cache.trajectory_segments_inertial,
-                            base_sample_budget,
                             cancel_requested);
             cache.trajectory_segments_frame = orbitsim::transform_trajectory_segments_to_frame_spec(
                     cache.trajectory_segments_inertial,
@@ -308,13 +349,20 @@ namespace Game::PredictionCacheInternal
                     player_lookup);
             if (cancel_requested && cancel_requested())
             {
+                update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::Cancelled);
                 return false;
             }
             if (cache.trajectory_segments_frame.empty())
             {
+                update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::FrameTransformFailed);
                 return false;
             }
             cache.trajectory_frame = sample_prediction_segments(cache.trajectory_segments_frame, base_sample_budget);
+            if (cache.trajectory_frame.size() < 2)
+            {
+                update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::FrameSamplesUnavailable);
+                return false;
+            }
 
             if (!cache.trajectory_segments_inertial_planned.empty())
             {
@@ -322,7 +370,6 @@ namespace Game::PredictionCacheInternal
                         build_frame_segment_transform_options(
                                 resolved_frame_spec,
                                 cache.trajectory_segments_inertial_planned,
-                                planned_sample_budget,
                                 cancel_requested);
                 cache.trajectory_segments_frame_planned = orbitsim::transform_trajectory_segments_to_frame_spec(
                         cache.trajectory_segments_inertial_planned,
@@ -333,6 +380,7 @@ namespace Game::PredictionCacheInternal
                         player_lookup);
                 if (cancel_requested && cancel_requested())
                 {
+                    update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::Cancelled);
                     return false;
                 }
                 if (!cache.trajectory_segments_frame_planned.empty())
@@ -347,6 +395,7 @@ namespace Game::PredictionCacheInternal
 
         if (cache.trajectory_frame.size() < 2 || cache.trajectory_segments_frame.empty())
         {
+            update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::MissingSolverData);
             return false;
         }
 
@@ -358,6 +407,7 @@ namespace Game::PredictionCacheInternal
                                                   : OrbitRenderCurve::build(cache.trajectory_segments_frame_planned);
         cache.resolved_frame_spec = resolved_frame_spec;
         cache.resolved_frame_spec_valid = true;
+        update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::Success);
         return true;
     }
 
@@ -414,7 +464,6 @@ namespace Game::PredictionCacheInternal
                     build_frame_segment_transform_options(
                             analysis_frame,
                             cache.trajectory_segments_inertial,
-                            sample_budget,
                             cancel_requested);
             const std::vector<orbitsim::TrajectorySegment> rel_segments =
                     orbitsim::transform_trajectory_segments_to_frame_spec(

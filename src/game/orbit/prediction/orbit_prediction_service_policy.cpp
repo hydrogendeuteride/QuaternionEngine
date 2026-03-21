@@ -33,9 +33,9 @@ namespace Game
 
     std::size_t resolve_spacecraft_segment_budget(const OrbitPredictionService::Request &request,
                                                   const double horizon_s,
-                                                  const std::size_t sample_budget)
+                                                  const std::size_t base_budget)
     {
-        std::size_t budget = std::max<std::size_t>(1, sample_budget);
+        std::size_t budget = std::max<std::size_t>(1, base_budget);
         if (!request_uses_long_range_prediction_policy(request) || !(horizon_s > 0.0))
         {
             return budget;
@@ -317,14 +317,9 @@ namespace Game
             return out;
         }
 
-        const SpacecraftSamplingBudget sampling_budget = build_spacecraft_sampling_budget(request);
-        const std::size_t sample_budget =
-                (sampling_spec.max_samples > 0) ? std::max<std::size_t>(sampling_spec.max_samples - 1, 1) : 1;
-        const std::size_t soft_cap = std::max<std::size_t>(
-                static_cast<std::size_t>(std::max(sampling_budget.soft_max_steps, 2)),
-                OrbitPredictionTuning::kAdaptiveSegmentSoftMaxSegmentsNormal);
+        const std::size_t soft_cap = OrbitPredictionTuning::kAdaptiveSegmentSoftMaxSegmentsNormal;
         const std::size_t hard_cap = std::max<std::size_t>(
-                resolve_spacecraft_segment_budget(request, sampling_spec.horizon_s, sample_budget),
+                resolve_spacecraft_segment_budget(request, sampling_spec.horizon_s, soft_cap),
                 std::max<std::size_t>(soft_cap, OrbitPredictionTuning::kAdaptiveSegmentHardMaxSegmentsNormal));
 
         const double max_dt_s = request_needs_control_sensitive_prediction(request)
@@ -364,9 +359,7 @@ namespace Game
             return out;
         }
 
-        const std::size_t soft_cap =
-                std::max<std::size_t>(OrbitPredictionTuning::kAdaptiveEphemerisSoftMaxSegments,
-                                      std::max<std::size_t>(sampling_spec.max_samples, 2));
+        const std::size_t soft_cap = OrbitPredictionTuning::kAdaptiveEphemerisSoftMaxSegments;
         const std::size_t hard_cap = std::max<std::size_t>(resolve_prediction_ephemeris_max_segments(request), soft_cap);
 
         out.duration_s = sampling_spec.horizon_s;

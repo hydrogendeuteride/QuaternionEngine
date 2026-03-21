@@ -363,25 +363,13 @@ namespace Game
                 }
             }
 
-            std::vector<orbitsim::TrajectorySegment> base_segments_fallback;
             const std::vector<orbitsim::TrajectorySegment> *traj_base_segments = &track->cache.trajectory_segments_frame;
-            if (traj_base_segments->empty())
-            {
-                base_segments_fallback = Draw::trajectory_segments_from_samples(traj_base);
-                traj_base_segments = &base_segments_fallback;
-            }
             if (traj_base_segments->empty())
             {
                 continue;
             }
 
-            std::vector<orbitsim::TrajectorySegment> planned_segments_fallback;
             const std::vector<orbitsim::TrajectorySegment> *traj_planned_segments = &track->cache.trajectory_segments_frame_planned;
-            if (traj_planned_segments->empty() && !traj_planned.empty())
-            {
-                planned_segments_fallback = Draw::trajectory_segments_from_samples(traj_planned);
-                traj_planned_segments = &planned_segments_fallback;
-            }
 
             const bool is_active = track->key == _prediction_selection.active_subject;
             const bool active_player_track = is_active && prediction_subject_is_player(track->key);

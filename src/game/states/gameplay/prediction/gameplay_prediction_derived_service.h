@@ -26,7 +26,7 @@ namespace Game
             orbitsim::GameSimulation::Config sim_config{};
             orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
             orbitsim::BodyId analysis_body_id{orbitsim::kInvalidBodyId};
-            std::vector<orbitsim::TrajectorySample> player_lookup_trajectory_inertial{};
+            std::vector<orbitsim::TrajectorySegment> player_lookup_segments_inertial{};
         };
 
         struct Result
@@ -34,6 +34,7 @@ namespace Game
             uint64_t track_id{0};
             uint64_t generation_id{0};
             bool valid{false};
+            OrbitPredictionDerivedDiagnostics diagnostics{};
             OrbitPredictionCache cache{};
         };
 

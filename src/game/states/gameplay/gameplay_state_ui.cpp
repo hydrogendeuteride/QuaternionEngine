@@ -20,6 +20,56 @@ namespace Game
 
     namespace
     {
+        const char *prediction_solver_status_label(const OrbitPredictionService::Status status)
+        {
+            switch (status)
+            {
+                case OrbitPredictionService::Status::None:
+                    return "None";
+                case OrbitPredictionService::Status::Success:
+                    return "Success";
+                case OrbitPredictionService::Status::InvalidInput:
+                    return "Invalid input";
+                case OrbitPredictionService::Status::InvalidSubject:
+                    return "Invalid subject";
+                case OrbitPredictionService::Status::InvalidSamplingSpec:
+                    return "Invalid sampling spec";
+                case OrbitPredictionService::Status::EphemerisUnavailable:
+                    return "Ephemeris unavailable";
+                case OrbitPredictionService::Status::TrajectorySegmentsUnavailable:
+                    return "Segments unavailable";
+                case OrbitPredictionService::Status::TrajectorySamplesUnavailable:
+                    return "Samples unavailable";
+                case OrbitPredictionService::Status::Cancelled:
+                    return "Cancelled";
+            }
+
+            return "Unknown";
+        }
+
+        const char *prediction_derived_status_label(const PredictionDerivedStatus status)
+        {
+            switch (status)
+            {
+                case PredictionDerivedStatus::None:
+                    return "None";
+                case PredictionDerivedStatus::Success:
+                    return "Success";
+                case PredictionDerivedStatus::MissingSolverData:
+                    return "Missing solver data";
+                case PredictionDerivedStatus::MissingEphemeris:
+                    return "Missing ephemeris";
+                case PredictionDerivedStatus::FrameTransformFailed:
+                    return "Frame transform failed";
+                case PredictionDerivedStatus::FrameSamplesUnavailable:
+                    return "Frame samples unavailable";
+                case PredictionDerivedStatus::Cancelled:
+                    return "Cancelled";
+            }
+
+            return "Unknown";
+        }
+
         std::string resolve_asset_rel_path(const GameStateContext &ctx, const std::string &rel_path)
         {
             const std::filesystem::path rel(rel_path);
@@ -684,6 +734,7 @@ namespace Game
                 {
                     const OrbitPlotSystem::Stats &plot_stats = orbit_plot->stats();
                     const OrbitPlotPerfStats &perf = _orbit_plot_perf;
+                    const PredictionTrackState *active_track = active_prediction_track();
                     const double upload_mib =
                             static_cast<double>(plot_stats.upload_bytes_last_frame) / (1024.0 * 1024.0);
                     const double budget_mib =
@@ -695,6 +746,25 @@ namespace Game
                     ImGui::Text("Solver segments (base/planned): %u / %u",
                                 perf.solver_segments_base,
                                 perf.solver_segments_planned);
+                    if (active_track)
+                    {
+                        const OrbitPredictionService::Diagnostics &solver_diag = active_track->solver_diagnostics;
+                        const OrbitPredictionDerivedDiagnostics &derived_diag = active_track->derived_diagnostics;
+                        ImGui::Text("Prediction status (solver/frame): %s / %s",
+                                    prediction_solver_status_label(solver_diag.status),
+                                    prediction_derived_status_label(derived_diag.status));
+                        ImGui::Text("Solver diag (eph/base/planned seg, base/planned sample): %zu / %zu / %zu, %zu / %zu",
+                                    solver_diag.ephemeris_segment_count,
+                                    solver_diag.trajectory_segment_count,
+                                    solver_diag.trajectory_segment_count_planned,
+                                    solver_diag.trajectory_sample_count,
+                                    solver_diag.trajectory_sample_count_planned);
+                        ImGui::Text("Frame diag (base/planned seg, base/planned sample): %zu / %zu, %zu / %zu",
+                                    derived_diag.frame_segment_count,
+                                    derived_diag.frame_segment_count_planned,
+                                    derived_diag.frame_sample_count,
+                                    derived_diag.frame_sample_count_planned);
+                    }
                     ImGui::Text("Orbit lines (active/pending): %u / %u",
                                 plot_stats.active_line_count,
                                 plot_stats.pending_line_count);
