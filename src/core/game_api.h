@@ -188,6 +188,7 @@ struct AtmosphereSettings
     // Sun glare controls (applied by SunDiskPass; independent of atmosphere scattering).
     float sunHaloIntensity{0.0f};
     float sunHaloRadiusDeg{2.0f};
+    bool sunAnamorphicStreakEnabled{false};
     float sunStarburstIntensity{0.0f};
     float sunStarburstRadiusDeg{6.0f};
     int sunStarburstSpikes{8};
