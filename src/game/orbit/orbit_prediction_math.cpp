@@ -122,9 +122,9 @@ namespace Game::OrbitPredictionMath
                                                                 const glm::dvec3 &v_mps)
     {
         const double period_s = estimate_orbital_period_s(mu_m3_s2, r_m, v_mps);
-        const double horizon_s = std::clamp(period_s * OrbitPredictionTuning::kBaseHorizonFromPeriodScale,
-                                            OrbitPredictionTuning::kMinHorizonS,
-                                            OrbitPredictionTuning::kMaxHorizonS);
+        const double horizon_s = std::max(
+                OrbitPredictionTuning::kMinHorizonS,
+                period_s * OrbitPredictionTuning::kBaseHorizonFromPeriodScale);
         const double target_samples = std::clamp(horizon_s / OrbitPredictionTuning::kTargetSamplesDivisorS,
                                                  OrbitPredictionTuning::kTargetSamplesMin,
                                                  OrbitPredictionTuning::kTargetSamplesMax);
