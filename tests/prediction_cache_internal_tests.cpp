@@ -134,6 +134,21 @@ TEST(PredictionCacheInternalTests, RebuildPredictionMetricsUsesSegmentDerivedSam
     EXPECT_NEAR(fixture.cache.speed_kmps.front(), 0.0005f, 1.0e-5f);
 }
 
+TEST(PredictionCacheInternalTests, RebuildPredictionMetricsCachesAnalysisTransformResults)
+{
+    LinearPredictionFixture fixture = make_linear_cache();
+    ASSERT_TRUE(fixture.cache.valid);
+    ASSERT_NE(fixture.body_id, orbitsim::kInvalidBodyId);
+
+    Game::PredictionCacheInternal::rebuild_prediction_metrics(fixture.cache, fixture.sim.config(), fixture.body_id);
+
+    EXPECT_TRUE(fixture.cache.metrics_valid);
+    EXPECT_TRUE(fixture.cache.analysis_cache_valid);
+    EXPECT_EQ(fixture.cache.analysis_cache_body_id, fixture.body_id);
+    EXPECT_FALSE(fixture.cache.trajectory_segments_analysis_bci.empty());
+    EXPECT_FALSE(fixture.cache.trajectory_analysis_bci.empty());
+}
+
 TEST(PredictionCacheInternalTests, RebuildFrameCacheRejectsDiscontinuousSegments)
 {
     LinearPredictionFixture fixture = make_linear_cache();

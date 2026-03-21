@@ -117,7 +117,7 @@ namespace Game
                generation_id >= latest_it->second;
     }
 
-    OrbitPredictionDerivedService::Result OrbitPredictionDerivedService::build_cache(const PendingJob &job) const
+    OrbitPredictionDerivedService::Result OrbitPredictionDerivedService::build_cache(PendingJob job) const
     {
         Result out{};
         out.track_id = job.track_id;
@@ -130,8 +130,8 @@ namespace Game
             return !should_continue_job(track_id, generation_id, request_epoch);
         };
 
-        const Request &request = job.request;
-        const OrbitPredictionService::Result &solver = request.solver_result;
+        Request &request = job.request;
+        OrbitPredictionService::Result &solver = request.solver_result;
         if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
         {
             out.diagnostics.status = PredictionDerivedStatus::MissingSolverData;
@@ -144,12 +144,12 @@ namespace Game
         cache.build_pos_world = request.build_pos_world;
         cache.build_vel_world = request.build_vel_world;
         cache.shared_ephemeris = solver.shared_ephemeris;
-        cache.massive_bodies = solver.massive_bodies;
-        cache.trajectory_inertial = solver.trajectory_inertial;
-        cache.trajectory_inertial_planned = solver.trajectory_inertial_planned;
-        cache.trajectory_segments_inertial = solver.trajectory_segments_inertial;
-        cache.trajectory_segments_inertial_planned = solver.trajectory_segments_inertial_planned;
-        cache.maneuver_previews = solver.maneuver_previews;
+        cache.massive_bodies = std::move(solver.massive_bodies);
+        cache.trajectory_inertial = std::move(solver.trajectory_inertial);
+        cache.trajectory_inertial_planned = std::move(solver.trajectory_inertial_planned);
+        cache.trajectory_segments_inertial = std::move(solver.trajectory_segments_inertial);
+        cache.trajectory_segments_inertial_planned = std::move(solver.trajectory_segments_inertial_planned);
+        cache.maneuver_previews = std::move(solver.maneuver_previews);
         cache.valid = true;
 
         const orbitsim::TrajectoryFrameSpec &resolved_frame_spec = request.resolved_frame_spec;
@@ -210,7 +210,7 @@ namespace Game
                 continue;
             }
 
-            Result result = build_cache(job);
+            Result result = build_cache(std::move(job));
 
             {
                 std::lock_guard<std::mutex> lock(_mutex);

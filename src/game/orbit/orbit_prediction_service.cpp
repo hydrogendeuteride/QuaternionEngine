@@ -253,70 +253,27 @@ namespace Game
             return out;
         }
 
-        const auto [horizon_s_auto, dt_s_auto] =
-                OrbitPredictionMath::select_prediction_horizon_and_dt(mu_ref_m3_s2, ship_rel_pos_m, ship_rel_vel_mps);
+        const double horizon_s_auto =
+                OrbitPredictionMath::select_prediction_horizon(mu_ref_m3_s2, ship_rel_pos_m, ship_rel_vel_mps);
 
-        // Start from orbital-state-driven defaults, then expand to cover the requested view window.
         double horizon_s = std::max(OrbitPredictionTuning::kMinHorizonS, horizon_s_auto);
-        const SpacecraftSamplingBudget sampling_budget = build_spacecraft_sampling_budget(request);
-        int max_steps = sampling_budget.soft_max_steps;
-        double dt_min_s = 0.01;
-        // Keep solver coverage aligned with the UI's requested future draw window.
         const double requested_window_s =
                 std::isfinite(request.future_window_s) ? std::max(0.0, request.future_window_s) : 0.0;
-        double min_horizon_s = std::max(1.0, requested_window_s);
-        horizon_s = std::max(horizon_s, min_horizon_s);
-        double dt_max_s = resolve_prediction_sample_dt_cap_s(request, horizon_s);
-        double dt_s = std::clamp(dt_s_auto, 0.01, dt_max_s);
+        horizon_s = std::max(horizon_s, std::max(1.0, requested_window_s));
 
         if (request.thrusting)
         {
-            // During active thrust we trade long horizons for denser near-term sampling.
             const double thrust_horizon_cap_s =
                     std::clamp(std::max(OrbitPredictionTuning::kThrustHorizonMinS,
                                         requested_window_s * OrbitPredictionTuning::kThrustHorizonWindowScale),
                                OrbitPredictionTuning::kThrustHorizonMinS,
                                OrbitPredictionTuning::kThrustHorizonMaxS);
             horizon_s = std::min(horizon_s, thrust_horizon_cap_s);
-            horizon_s = std::max(horizon_s, min_horizon_s);
-
-            const double target_samples = std::clamp(horizon_s / OrbitPredictionTuning::kTargetSamplesDivisorS,
-                                                     OrbitPredictionTuning::kThrustTargetSamplesMin,
-                                                     OrbitPredictionTuning::kThrustTargetSamplesMax);
-            dt_min_s = OrbitPredictionTuning::kThrustMinSampleDtS;
-            dt_max_s = OrbitPredictionTuning::kThrustMaxSampleDtS;
-            dt_s = std::clamp(horizon_s / target_samples, dt_min_s, dt_max_s);
-            max_steps = OrbitPredictionTuning::kMaxStepsThrust;
-        }
-        else
-        {
-            const double target_samples = std::clamp(horizon_s / OrbitPredictionTuning::kTargetSamplesDivisorS,
-                                                     OrbitPredictionTuning::kTargetSamplesMin,
-                                                     sampling_budget.target_samples_max);
-            dt_s = std::clamp(horizon_s / target_samples, dt_min_s, dt_max_s);
-
-            const int required_steps = std::clamp(static_cast<int>(std::ceil(horizon_s / dt_s)),
-                                                  2,
-                                                  sampling_budget.hard_max_steps);
-            max_steps = std::clamp(std::max(sampling_budget.soft_max_steps, required_steps),
-                                   2,
-                                   sampling_budget.hard_max_steps);
+            horizon_s = std::max(horizon_s, std::max(1.0, requested_window_s));
         }
 
-        const double min_dt_for_step_budget = horizon_s / static_cast<double>(std::max(1, max_steps));
-        if (std::isfinite(min_dt_for_step_budget) && min_dt_for_step_budget > 0.0)
-        {
-            dt_s = std::max(dt_s, min_dt_for_step_budget);
-        }
-
-        dt_s = std::clamp(dt_s, dt_min_s, dt_max_s);
-        horizon_s = std::max(horizon_s, dt_s);
-        const int steps = std::clamp(static_cast<int>(std::ceil(horizon_s / dt_s)), 2, max_steps);
-
-        out.valid = (steps >= 2) && (horizon_s > 0.0) && (dt_s > 0.0);
+        out.valid = (horizon_s > 0.0);
         out.horizon_s = horizon_s;
-        out.sample_dt_s = dt_s;
-        out.max_samples = static_cast<std::size_t>(steps) + 1;
         return out;
     }
 
@@ -537,8 +494,6 @@ namespace Game
                 EphemerisSamplingSpec ephemeris_sampling_spec{};
                 ephemeris_sampling_spec.valid = true;
                 ephemeris_sampling_spec.horizon_s = sampling_spec.horizon_s;
-                ephemeris_sampling_spec.sample_dt_s = sampling_spec.sample_dt_s;
-                ephemeris_sampling_spec.max_samples = sampling_spec.max_samples;
                 shared_ephemeris = get_or_build_ephemeris(build_ephemeris_build_request(request, ephemeris_sampling_spec),
                                                           cancel_requested,
                                                           &ephemeris_diag);
@@ -563,12 +518,13 @@ namespace Game
                 return cancel();
             }
 
-            const std::vector<MultiBandSampleWindow> sample_windows =
-                    build_multi_band_sample_windows(request.sim_time_s,
-                                                    sampling_spec.horizon_s,
-                                                    sampling_spec.max_samples);
+            constexpr std::size_t kCelestialUISampleCount = 2'000;
+            const std::size_t celestial_sample_count = kCelestialUISampleCount;
             std::vector<orbitsim::TrajectorySample> traj_inertial =
-                    sample_body_ephemeris_multi_band(*shared_ephemeris, subject_sim->id, sample_windows);
+                    resample_ephemeris_uniform(*shared_ephemeris, subject_sim->id,
+                                              request.sim_time_s,
+                                              request.sim_time_s + sampling_spec.horizon_s,
+                                              celestial_sample_count);
             if (traj_inertial.size() < 2)
             {
                 return fail(Status::TrajectorySamplesUnavailable);
@@ -673,13 +629,10 @@ namespace Game
             return cancel();
         }
 
-        const double baseline_end_s = prediction_segment_end_time(traj_segments_inertial_baseline.back());
-        const std::vector<MultiBandSampleWindow> baseline_sample_windows =
-                build_multi_band_sample_windows(request.sim_time_s,
-                                                std::max(0.0, baseline_end_s - request.sim_time_s),
-                                                sampling_spec.max_samples);
+        const std::size_t baseline_sample_count =
+                std::clamp<std::size_t>(traj_segments_inertial_baseline.size() * 2, 2, 4'000);
         const std::vector<orbitsim::TrajectorySample> traj_inertial_baseline =
-                sample_trajectory_segments_multi_band(traj_segments_inertial_baseline, baseline_sample_windows);
+                resample_segments_uniform(traj_segments_inertial_baseline, baseline_sample_count);
         if (traj_inertial_baseline.size() < 2)
         {
             return fail(Status::TrajectorySamplesUnavailable);
@@ -804,8 +757,15 @@ namespace Game
             orbitsim::AdaptiveSegmentDiagnostics planned_diag{};
             std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_planned =
                     orbitsim::predict_spacecraft_trajectory_segments_adaptive(sim, eph, ship_h.id, segment_opt, &planned_diag);
-            traj_segments_inertial_planned =
-                    split_trajectory_segments_at_known_boundaries(traj_segments_inertial_planned, planned_boundary_states);
+            if (!planned_boundary_states.empty())
+            {
+                std::vector<orbitsim::TrajectorySegment> split_planned =
+                        split_trajectory_segments_at_known_boundaries(traj_segments_inertial_planned, planned_boundary_states);
+                if (!split_planned.empty() && validate_trajectory_segment_continuity(split_planned))
+                {
+                    traj_segments_inertial_planned = std::move(split_planned);
+                }
+            }
             if (!traj_segments_inertial_planned.empty())
             {
                 if (cancel_requested())
@@ -824,20 +784,10 @@ namespace Game
                 sync_stage_counts();
                 out.trajectory_segments_inertial_planned = traj_segments_inertial_planned;
 
-                const double planned_end_s = prediction_segment_end_time(traj_segments_inertial_planned.back());
-                std::vector<double> node_times;
-                node_times.reserve(request.maneuver_impulses.size());
-                for (const auto &imp : request.maneuver_impulses)
-                {
-                    node_times.push_back(imp.t_s);
-                }
-                const std::vector<MultiBandSampleWindow> planned_sample_windows =
-                        build_multi_band_sample_windows(request.sim_time_s,
-                                                        std::max(0.0, planned_end_s - request.sim_time_s),
-                                                        sampling_spec.max_samples,
-                                                        node_times);
+                const std::size_t planned_sample_count =
+                        std::clamp<std::size_t>(traj_segments_inertial_planned.size() * 2, 2, 4'000);
                 const std::vector<orbitsim::TrajectorySample> traj_inertial_planned =
-                        sample_trajectory_segments_multi_band(traj_segments_inertial_planned, planned_sample_windows);
+                        resample_segments_uniform(traj_segments_inertial_planned, planned_sample_count);
                 if (traj_inertial_planned.size() >= 2)
                 {
                     out.diagnostics.trajectory_sample_count_planned = traj_inertial_planned.size();

@@ -57,7 +57,7 @@ namespace Game
             Request request{};
         };
 
-        Result build_cache(const PendingJob &job) const;
+        Result build_cache(PendingJob job) const;
         static bool should_publish_result(const PendingJob &job,
                                           uint64_t current_request_epoch,
                                           const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track);
