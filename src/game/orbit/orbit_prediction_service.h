@@ -29,6 +29,30 @@ namespace Game
             Celestial,
         };
 
+        enum class Status : uint8_t
+        {
+            None = 0,
+            Success,
+            InvalidInput,
+            InvalidSubject,
+            InvalidSamplingSpec,
+            EphemerisUnavailable,
+            TrajectorySegmentsUnavailable,
+            TrajectorySamplesUnavailable,
+            Cancelled,
+        };
+
+        struct Diagnostics
+        {
+            Status status{Status::None};
+            bool cancelled{false};
+            std::size_t ephemeris_segment_count{0};
+            std::size_t trajectory_segment_count{0};
+            std::size_t trajectory_segment_count_planned{0};
+            std::size_t trajectory_sample_count{0};
+            std::size_t trajectory_sample_count_planned{0};
+        };
+
         struct ManeuverNodePreview
         {
             int node_id{-1};
@@ -77,6 +101,7 @@ namespace Game
             uint64_t generation_id{0};
             bool valid{false};
             double compute_time_ms{0.0};
+            Diagnostics diagnostics{};
 
             double build_time_s{0.0};
             SharedCelestialEphemeris shared_ephemeris{};

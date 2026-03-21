@@ -132,8 +132,9 @@ namespace Game
 
         const Request &request = job.request;
         const OrbitPredictionService::Result &solver = request.solver_result;
-        if (!solver.valid || solver.trajectory_inertial.size() < 2)
+        if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
         {
+            out.diagnostics.status = PredictionDerivedStatus::MissingSolverData;
             return out;
         }
 
@@ -155,8 +156,9 @@ namespace Game
         if (!PredictionCacheInternal::rebuild_prediction_frame_cache(
                     cache,
                     resolved_frame_spec,
-                    request.player_lookup_trajectory_inertial,
-                    cancel_requested))
+                    request.player_lookup_segments_inertial,
+                    cancel_requested,
+                    &out.diagnostics))
         {
             return out;
         }
@@ -169,6 +171,7 @@ namespace Game
 
         if (cancel_requested())
         {
+            out.diagnostics.status = PredictionDerivedStatus::Cancelled;
             return out;
         }
 

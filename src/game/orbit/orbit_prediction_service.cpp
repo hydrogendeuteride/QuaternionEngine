@@ -397,11 +397,24 @@ namespace Game
                                        request_epoch]() {
             return !should_continue_job(track_id, generation_id, request_epoch);
         };
+        const auto fail = [&out](const Status status) -> Result {
+            out.diagnostics.status = status;
+            return out;
+        };
+        const auto cancel = [&out]() -> Result {
+            out.diagnostics.cancelled = true;
+            out.diagnostics.status = Status::Cancelled;
+            return out;
+        };
+        const auto record_ephemeris_segments = [&out](const SharedCelestialEphemeris &shared_ephemeris) {
+            out.diagnostics.ephemeris_segment_count =
+                    (shared_ephemeris && !shared_ephemeris->empty()) ? shared_ephemeris->segments.size() : 0;
+        };
 
         // Invalid inputs produce an invalid result rather than throwing on the worker thread.
         if (!std::isfinite(request.sim_time_s))
         {
-            return out;
+            return fail(Status::InvalidInput);
         }
 
         orbitsim::GameSimulation::Config sim_config = request.sim_config;
@@ -414,12 +427,12 @@ namespace Game
         orbitsim::GameSimulation sim(sim_config);
         if (!sim.set_time_s(request.sim_time_s))
         {
-            return out;
+            return fail(Status::InvalidInput);
         }
 
         if (cancel_requested())
         {
-            return out;
+            return cancel();
         }
 
         for (const orbitsim::MassiveBody &body : request.massive_bodies)
@@ -430,13 +443,13 @@ namespace Game
                         : sim.create_body(body);
             if (!body_handle.valid())
             {
-                return out;
+                return fail(Status::InvalidSubject);
             }
         }
 
         if (cancel_requested())
         {
-            return out;
+            return cancel();
         }
 
         out.massive_bodies = sim.massive_bodies();
@@ -446,20 +459,20 @@ namespace Game
         {
             if (request.subject_body_id == orbitsim::kInvalidBodyId)
             {
-                return out;
+                return fail(Status::InvalidSubject);
             }
 
             const orbitsim::MassiveBody *subject_sim = sim.body_by_id(request.subject_body_id);
             if (!subject_sim)
             {
-                return out;
+                return fail(Status::InvalidSubject);
             }
 
             const CelestialPredictionSamplingSpec sampling_spec =
                     build_celestial_prediction_sampling_spec(request, *subject_sim);
             if (!sampling_spec.valid)
             {
-                return out;
+                return fail(Status::InvalidSamplingSpec);
             }
 
             SharedCelestialEphemeris shared_ephemeris = request.shared_ephemeris;
@@ -476,12 +489,13 @@ namespace Game
             }
             if (!shared_ephemeris || shared_ephemeris->empty())
             {
-                return out;
+                return fail(Status::EphemerisUnavailable);
             }
+            record_ephemeris_segments(shared_ephemeris);
 
             if (cancel_requested())
             {
-                return out;
+                return cancel();
             }
 
             const std::vector<MultiBandSampleWindow> sample_windows =
@@ -492,20 +506,23 @@ namespace Game
                     sample_body_ephemeris_multi_band(*shared_ephemeris, subject_sim->id, sample_windows);
             if (traj_inertial.size() < 2)
             {
-                return out;
+                return fail(Status::TrajectorySamplesUnavailable);
             }
 
             const std::vector<orbitsim::TrajectorySegment> traj_segments_inertial =
                     trajectory_segments_from_body_ephemeris(*shared_ephemeris, subject_sim->id);
             if (traj_segments_inertial.empty())
             {
-                return out;
+                return fail(Status::TrajectorySegmentsUnavailable);
             }
 
             out.shared_ephemeris = shared_ephemeris;
+            out.diagnostics.trajectory_sample_count = traj_inertial.size();
+            out.diagnostics.trajectory_segment_count = traj_segments_inertial.size();
             out.trajectory_inertial = std::move(traj_inertial);
             out.trajectory_segments_inertial = std::move(traj_segments_inertial);
             out.valid = true;
+            out.diagnostics.status = Status::Success;
             return out;
         }
 
@@ -514,13 +531,13 @@ namespace Game
         const glm::dvec3 ship_bary_vel_mps = request.ship_bary_velocity_mps;
         if (!finite_vec3(ship_bary_pos_m) || !finite_vec3(ship_bary_vel_mps))
         {
-            return out;
+            return fail(Status::InvalidInput);
         }
 
         const EphemerisSamplingSpec sampling_spec = build_ephemeris_sampling_spec(request);
         if (!sampling_spec.valid)
         {
-            return out;
+            return fail(Status::InvalidSamplingSpec);
         }
 
         const double horizon_s = sampling_spec.horizon_s;
@@ -531,7 +548,7 @@ namespace Game
         const auto ship_h = sim.create_spacecraft(ship_sc);
         if (!ship_h.valid())
         {
-            return out;
+            return fail(Status::InvalidSubject);
         }
 
         sim.maneuver_plan() = orbitsim::ManeuverPlan{};
@@ -548,12 +565,13 @@ namespace Game
         }
         if (!shared_ephemeris || shared_ephemeris->empty())
         {
-            return out;
+            return fail(Status::EphemerisUnavailable);
         }
+        record_ephemeris_segments(shared_ephemeris);
 
         if (cancel_requested())
         {
-            return out;
+            return cancel();
         }
         const orbitsim::CelestialEphemeris &eph = *shared_ephemeris;
 
@@ -561,12 +579,13 @@ namespace Game
                 orbitsim::predict_spacecraft_trajectory_segments_adaptive(sim, eph, ship_h.id, segment_opt);
         if (traj_segments_inertial_baseline.empty())
         {
-            return out;
+            return fail(Status::TrajectorySegmentsUnavailable);
         }
+        out.diagnostics.trajectory_segment_count = traj_segments_inertial_baseline.size();
 
         if (cancel_requested())
         {
-            return out;
+            return cancel();
         }
 
         const double baseline_end_s = prediction_segment_end_time(traj_segments_inertial_baseline.back());
@@ -578,12 +597,13 @@ namespace Game
                 sample_trajectory_segments_multi_band(traj_segments_inertial_baseline, baseline_sample_windows);
         if (traj_inertial_baseline.size() < 2)
         {
-            return out;
+            return fail(Status::TrajectorySamplesUnavailable);
         }
+        out.diagnostics.trajectory_sample_count = traj_inertial_baseline.size();
 
         if (cancel_requested())
         {
-            return out;
+            return cancel();
         }
 
         out.shared_ephemeris = shared_ephemeris;
@@ -612,7 +632,7 @@ namespace Game
             {
                 if (cancel_requested())
                 {
-                    return out;
+                    return cancel();
                 }
 
                 if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rtn_mps))
@@ -703,9 +723,10 @@ namespace Game
             {
                 if (cancel_requested())
                 {
-                    return out;
+                    return cancel();
                 }
 
+                out.diagnostics.trajectory_segment_count_planned = traj_segments_inertial_planned.size();
                 out.trajectory_segments_inertial_planned = traj_segments_inertial_planned;
 
                 const double planned_end_s = prediction_segment_end_time(traj_segments_inertial_planned.back());
@@ -724,12 +745,14 @@ namespace Game
                         sample_trajectory_segments_multi_band(traj_segments_inertial_planned, planned_sample_windows);
                 if (traj_inertial_planned.size() >= 2)
                 {
+                    out.diagnostics.trajectory_sample_count_planned = traj_inertial_planned.size();
                     out.trajectory_inertial_planned = traj_inertial_planned;
                 }
             }
         }
 
         out.valid = true;
+        out.diagnostics.status = Status::Success;
         return out;
     }
 } // namespace Game

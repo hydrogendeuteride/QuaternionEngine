@@ -97,6 +97,26 @@ namespace Game
         bool draw_planned_as_dashed{true};
     };
 
+    enum class PredictionDerivedStatus : uint8_t
+    {
+        None = 0,
+        Success,
+        MissingSolverData,
+        MissingEphemeris,
+        FrameTransformFailed,
+        FrameSamplesUnavailable,
+        Cancelled,
+    };
+
+    struct OrbitPredictionDerivedDiagnostics
+    {
+        PredictionDerivedStatus status{PredictionDerivedStatus::None};
+        std::size_t frame_segment_count{0};
+        std::size_t frame_segment_count_planned{0};
+        std::size_t frame_sample_count{0};
+        std::size_t frame_sample_count_planned{0};
+    };
+
     struct OrbitPredictionCache
     {
         using ManeuverNodePreview = OrbitPredictionService::ManeuverNodePreview;
@@ -299,6 +319,8 @@ namespace Game
         bool is_celestial{false};
         orbitsim::BodyId auto_primary_body_id{orbitsim::kInvalidBodyId};
         double solver_ms_last{0.0};
+        OrbitPredictionService::Diagnostics solver_diagnostics{};
+        OrbitPredictionDerivedDiagnostics derived_diagnostics{};
 
         void clear_runtime()
         {
@@ -310,6 +332,8 @@ namespace Game
             invalidated_while_pending = false;
             auto_primary_body_id = orbitsim::kInvalidBodyId;
             solver_ms_last = 0.0;
+            solver_diagnostics = {};
+            derived_diagnostics = {};
         }
     };
 
