@@ -213,6 +213,7 @@ struct AtmosphereSettings
     // Set intensities to 0 to disable the respective component.
     float sunHaloIntensity = 0.0f;
     float sunHaloRadiusDeg = 2.0f;
+    bool sunAnamorphicStreakEnabled = false;
     float sunStarburstIntensity = 0.0f;
     float sunStarburstRadiusDeg = 6.0f;
     int sunStarburstSpikes = 8;       // number of rays (recommended even)

@@ -1957,6 +1957,7 @@ namespace
         ImGui::SliderFloat("Sun Disk", &atm.sunDiskIntensity, 0.0f, 10.0f, "%.2f");
         ImGui::SliderFloat("Sun Halo", &atm.sunHaloIntensity, 0.0f, 4.0f, "%.2f");
         ImGui::SliderFloat("Halo Radius (deg)", &atm.sunHaloRadiusDeg, 0.0f, 20.0f, "%.2f");
+        ImGui::Checkbox("Anamorphic Streak", &atm.sunAnamorphicStreakEnabled);
         ImGui::SliderFloat("Sun Starburst", &atm.sunStarburstIntensity, 0.0f, 4.0f, "%.2f");
         ImGui::SliderFloat("Starburst Radius (deg)", &atm.sunStarburstRadiusDeg, 0.0f, 30.0f, "%.2f");
         int spikes = std::clamp(atm.sunStarburstSpikes, 2, 64);
