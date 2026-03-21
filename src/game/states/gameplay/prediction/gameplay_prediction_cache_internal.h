@@ -187,6 +187,17 @@ namespace Game::PredictionCacheInternal
         return out;
     }
 
+    inline const std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> &ensure_gpu_root_cache(
+            std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> &cache_roots,
+            const std::vector<orbitsim::TrajectorySegment> &segments)
+    {
+        if (!cache_roots && !segments.empty())
+        {
+            cache_roots = build_gpu_root_cache(segments);
+        }
+        return cache_roots;
+    }
+
     inline std::vector<double> collect_maneuver_node_times(const OrbitPredictionCache &cache)
     {
         std::vector<double> out;
@@ -204,29 +215,9 @@ namespace Game::PredictionCacheInternal
     inline std::vector<orbitsim::TrajectorySample> sample_prediction_segments(
             const std::vector<orbitsim::TrajectorySegment> &segments,
             std::size_t total_sample_budget,
-            const std::vector<double> &node_times_s = {})
+            const std::vector<double> & /*node_times_s*/ = {})
     {
-        std::vector<orbitsim::TrajectorySample> out;
-        if (segments.empty())
-        {
-            return out;
-        }
-
-        total_sample_budget = std::max<std::size_t>(total_sample_budget, 2);
-        const double start_time_s = segments.front().t0_s;
-        const double end_time_s = prediction_segment_end_time(segments.back());
-        const double horizon_s = std::max(0.0, end_time_s - start_time_s);
-        if (!(horizon_s > 0.0))
-        {
-            return out;
-        }
-
-        const std::vector<MultiBandSampleWindow> windows =
-                node_times_s.empty()
-                        ? build_multi_band_sample_windows(start_time_s, horizon_s, total_sample_budget)
-                        : build_multi_band_sample_windows(start_time_s, horizon_s, total_sample_budget, node_times_s);
-        out = sample_trajectory_segments_multi_band(segments, windows);
-        return out;
+        return resample_segments_uniform(segments, std::max<std::size_t>(total_sample_budget, 2));
     }
 
     inline void update_derived_diagnostics(OrbitPredictionDerivedDiagnostics *diagnostics,
@@ -259,17 +250,14 @@ namespace Game::PredictionCacheInternal
         const double end_time_s =
                 inertial_segments.empty() ? 0.0 : prediction_segment_end_time(inertial_segments.back());
         const double horizon_s = std::max(0.0, end_time_s - start_time_s);
-        const bool long_range = horizon_s > OrbitPredictionTuning::kLongRangeHorizonThresholdS;
         const bool sensitive = frame_spec.type == orbitsim::TrajectoryFrameType::Synodic ||
                                frame_spec.type == orbitsim::TrajectoryFrameType::LVLH;
 
         out.min_dt_s = OrbitPredictionTuning::kAdaptiveFrameTransformMinDtS;
         out.max_dt_s = sensitive
                                ? std::min(OrbitPredictionTuning::kAdaptiveFrameTransformMaxDtSensitiveS,
-                                          long_range ? OrbitPredictionTuning::kAdaptiveFrameTransformMaxDtLongRangeS
-                                                     : OrbitPredictionTuning::kAdaptiveFrameTransformMaxDtS)
-                               : (long_range ? OrbitPredictionTuning::kAdaptiveFrameTransformMaxDtLongRangeS
-                                             : OrbitPredictionTuning::kAdaptiveFrameTransformMaxDtS);
+                                          OrbitPredictionTuning::kAdaptiveFrameTransformMaxDtS)
+                               : OrbitPredictionTuning::kAdaptiveFrameTransformMaxDtS;
         out.soft_max_segments =
                 std::max<std::size_t>(OrbitPredictionTuning::kAdaptiveFrameTransformSoftMaxSegments,
                                       inertial_segments.size());
@@ -315,6 +303,10 @@ namespace Game::PredictionCacheInternal
         cache.render_curve_frame_planned.clear();
         cache.resolved_frame_spec = {};
         cache.resolved_frame_spec_valid = false;
+        cache.trajectory_analysis_bci.clear();
+        cache.trajectory_segments_analysis_bci.clear();
+        cache.analysis_cache_body_id = orbitsim::kInvalidBodyId;
+        cache.analysis_cache_valid = false;
         cache.metrics_valid = false;
 
         if (resolved_frame_spec.type == orbitsim::TrajectoryFrameType::Inertial)
@@ -457,8 +449,6 @@ namespace Game::PredictionCacheInternal
             return false;
         }
 
-        cache.gpu_roots_frame = build_gpu_root_cache(cache.trajectory_segments_frame);
-        cache.gpu_roots_frame_planned = build_gpu_root_cache(cache.trajectory_segments_frame_planned);
         cache.render_curve_frame = OrbitRenderCurve::build(cache.trajectory_segments_frame);
         cache.render_curve_frame_planned = cache.trajectory_segments_frame_planned.empty()
                                                   ? OrbitRenderCurve{}
@@ -512,6 +502,14 @@ namespace Game::PredictionCacheInternal
             cache.resolved_frame_spec.primary_body_id == analysis_body_id)
         {
             rel_samples = cache.trajectory_frame;
+            cache.trajectory_segments_analysis_bci = cache.trajectory_segments_frame;
+            cache.trajectory_analysis_bci = rel_samples;
+            cache.analysis_cache_body_id = analysis_body_id;
+            cache.analysis_cache_valid = true;
+        }
+        else if (cache.analysis_cache_valid && cache.analysis_cache_body_id == analysis_body_id)
+        {
+            rel_samples = cache.trajectory_analysis_bci;
         }
         else if (cache.shared_ephemeris && !cache.shared_ephemeris->empty())
         {
@@ -535,6 +533,10 @@ namespace Game::PredictionCacheInternal
                 return;
             }
             rel_samples = sample_prediction_segments(rel_segments, sample_budget);
+            cache.trajectory_segments_analysis_bci = std::move(rel_segments);
+            cache.trajectory_analysis_bci = rel_samples;
+            cache.analysis_cache_body_id = analysis_body_id;
+            cache.analysis_cache_valid = !cache.trajectory_analysis_bci.empty();
         }
 
         if (rel_samples.size() < 2)

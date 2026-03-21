@@ -200,6 +200,8 @@ namespace Game
         derived_request.analysis_body_id = analysis_body_id;
         derived_request.player_lookup_segments_inertial = std::move(player_lookup_segments);
         _prediction_derived_service.request(std::move(derived_request));
+        // Let the solver queue accept a fresher generation while derived work finishes in parallel.
+        track->request_pending = false;
         track->derived_request_pending = true;
     }
 
@@ -328,11 +330,6 @@ namespace Game
             return rebuild;
         }
 
-        if (with_maneuvers && !maneuver_live_preview)
-        {
-            return false;
-        }
-
         double cache_end_s = track.cache.trajectory_inertial.back().t_s;
         if (!track.cache.trajectory_segments_inertial.empty())
         {
@@ -421,7 +418,11 @@ namespace Game
                 OrbitPredictionService::ManeuverImpulse impulse{};
                 impulse.node_id = node.id;
                 impulse.t_s = node.time_s;
-                impulse.primary_body_id = resolve_maneuver_node_primary_body_id(node, node.time_s);
+                // For auto-primary nodes, let the worker resolve the dominant body at the node time
+                // from the propagated state instead of baking in a stale cache-based guess here.
+                impulse.primary_body_id = node.primary_body_auto
+                                                  ? orbitsim::kInvalidBodyId
+                                                  : resolve_maneuver_node_primary_body_id(node, node.time_s);
                 impulse.dv_rtn_mps = orbitsim::Vec3{node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z};
                 request.maneuver_impulses.push_back(impulse);
             }

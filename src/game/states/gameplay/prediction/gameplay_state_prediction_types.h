@@ -143,12 +143,16 @@ namespace Game
         std::vector<orbitsim::TrajectorySample> trajectory_frame_planned;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame_planned;
+        std::vector<orbitsim::TrajectorySample> trajectory_analysis_bci;
+        std::vector<orbitsim::TrajectorySegment> trajectory_segments_analysis_bci;
         std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> gpu_roots_frame;
         std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> gpu_roots_frame_planned;
         OrbitRenderCurve render_curve_frame;
         OrbitRenderCurve render_curve_frame_planned;
         orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
         bool resolved_frame_spec_valid{false};
+        orbitsim::BodyId analysis_cache_body_id{orbitsim::kInvalidBodyId};
+        bool analysis_cache_valid{false};
         std::vector<ManeuverNodePreview> maneuver_previews;
 
         std::vector<float> altitude_km;
@@ -181,12 +185,16 @@ namespace Game
             trajectory_frame_planned.clear();
             trajectory_segments_frame.clear();
             trajectory_segments_frame_planned.clear();
+            trajectory_analysis_bci.clear();
+            trajectory_segments_analysis_bci.clear();
             gpu_roots_frame.reset();
             gpu_roots_frame_planned.reset();
             render_curve_frame.clear();
             render_curve_frame_planned.clear();
             resolved_frame_spec = {};
             resolved_frame_spec_valid = false;
+            analysis_cache_body_id = orbitsim::kInvalidBodyId;
+            analysis_cache_valid = false;
             maneuver_previews.clear();
             altitude_km.clear();
             speed_kmps.clear();
