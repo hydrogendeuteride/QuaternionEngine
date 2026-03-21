@@ -20,7 +20,7 @@ namespace
     struct SunDiskPush
     {
         glm::vec4 params0; // x: disk intensity, y: halo intensity, z: starburst intensity, w: halo radius (deg)
-        glm::vec4 params1; // x: starburst radius (deg), y: spikes, z: sharpness, w: reserved
+        glm::vec4 params1; // x: starburst radius (deg), y: spikes, z: sharpness, w: anamorphic streak enabled
     };
 
     static_assert(sizeof(SunDiskPush) % 16 == 0);
@@ -125,6 +125,7 @@ void SunDiskPass::draw_sun_disk(VkCommandBuffer cmd,
     const float haloIntensity = std::max(0.0f, s.sunHaloIntensity);
     const float starIntensity = std::max(0.0f, s.sunStarburstIntensity);
     const float haloRadiusDeg = std::max(0.0f, s.sunHaloRadiusDeg);
+    const float anamorphicStreakEnabled = s.sunAnamorphicStreakEnabled ? 1.0f : 0.0f;
     const float starRadiusDeg = std::max(0.0f, s.sunStarburstRadiusDeg);
     const float starSharpness = std::max(1.0f, s.sunStarburstSharpness);
     const int starSpikesInt = std::clamp(s.sunStarburstSpikes, 2, 64);
@@ -165,7 +166,7 @@ void SunDiskPass::draw_sun_disk(VkCommandBuffer cmd,
 
     SunDiskPush pc{};
     pc.params0 = glm::vec4(diskIntensity, haloIntensity, starIntensity, haloRadiusDeg);
-    pc.params1 = glm::vec4(starRadiusDeg, starSpikes, starSharpness, 0.0f);
+    pc.params1 = glm::vec4(starRadiusDeg, starSpikes, starSharpness, anamorphicStreakEnabled);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &globalDescriptor, 0, nullptr);

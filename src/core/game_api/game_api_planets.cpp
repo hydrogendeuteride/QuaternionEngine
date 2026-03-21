@@ -426,6 +426,7 @@ void Engine::set_atmosphere_settings(const AtmosphereSettings &settings)
     dst.sunDiskIntensity = settings.sunDiskIntensity;
     dst.sunHaloIntensity = settings.sunHaloIntensity;
     dst.sunHaloRadiusDeg = settings.sunHaloRadiusDeg;
+    dst.sunAnamorphicStreakEnabled = settings.sunAnamorphicStreakEnabled;
     dst.sunStarburstIntensity = settings.sunStarburstIntensity;
     dst.sunStarburstRadiusDeg = settings.sunStarburstRadiusDeg;
     dst.sunStarburstSpikes = settings.sunStarburstSpikes;
@@ -455,6 +456,7 @@ AtmosphereSettings Engine::get_atmosphere_settings() const
     out.sunDiskIntensity = src.sunDiskIntensity;
     out.sunHaloIntensity = src.sunHaloIntensity;
     out.sunHaloRadiusDeg = src.sunHaloRadiusDeg;
+    out.sunAnamorphicStreakEnabled = src.sunAnamorphicStreakEnabled;
     out.sunStarburstIntensity = src.sunStarburstIntensity;
     out.sunStarburstRadiusDeg = src.sunStarburstRadiusDeg;
     out.sunStarburstSpikes = src.sunStarburstSpikes;
