@@ -340,51 +340,18 @@ namespace Game
         std::uint32_t flags{orbitsim::kTrajectorySegmentFlagImpulseBoundary};
     };
 
-    struct MultiBandSampleWindow
-    {
-        double t0_s{0.0};
-        double t1_s{0.0};
-        double density{1.0};
-        std::size_t interval_count{0};
-        double sample_dt_s{0.0};
-    };
-
-    struct BandTemplate
-    {
-        double duration_cap_s;
-        double density;
-    };
-
-    constexpr std::array<BandTemplate, 3> kBandTemplates{{
-            {OrbitPredictionTuning::kMultiBandNearDurationS, OrbitPredictionTuning::kMultiBandNearDensity},
-            {OrbitPredictionTuning::kMultiBandMidDurationS, OrbitPredictionTuning::kMultiBandMidDensity},
-            {std::numeric_limits<double>::infinity(), OrbitPredictionTuning::kMultiBandFarDensity},
-    }};
-
-    struct SpacecraftSamplingBudget
-    {
-        double target_samples_max{OrbitPredictionTuning::kSpacecraftTargetSamplesSoftNormal};
-        int soft_max_steps{OrbitPredictionTuning::kSpacecraftMaxStepsSoftNormal};
-        int hard_max_steps{OrbitPredictionTuning::kSpacecraftMaxStepsHardNormal};
-    };
-
     struct CelestialPredictionSamplingSpec
     {
         bool valid{false};
         glm::dvec3 rel_pos_m{0.0};
         glm::dvec3 rel_vel_mps{0.0};
         double horizon_s{0.0};
-        double sample_dt_s{0.0};
-        std::size_t max_samples{0};
     };
 
     // ── Trajectory helpers (orbit_prediction_service_trajectory.cpp) ──────────
     bool build_maneuver_preview(const orbitsim::State &ship_state,
                                 const double node_time_s,
                                 OrbitPredictionService::ManeuverNodePreview &out_preview);
-
-    std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_samples(
-            const std::vector<orbitsim::TrajectorySample> &samples);
 
     std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_body_ephemeris(
             const orbitsim::CelestialEphemeris &ephemeris,
@@ -409,88 +376,16 @@ namespace Game
             const std::vector<PlannedSegmentBoundaryState> &boundaries);
 
     // ── Sampling helpers (orbit_prediction_service_sampling.cpp) ──────────────
-    void distribute_sample_budget(std::vector<MultiBandSampleWindow> &windows,
-                                  std::size_t total_sample_budget,
-                                  double start_time_s,
-                                  double end_time_s,
-                                  double horizon_s);
-
-    std::vector<MultiBandSampleWindow> build_base_band_windows(double start_time_s, double end_time_s);
-
-    std::vector<MultiBandSampleWindow> build_multi_band_sample_windows(double start_time_s,
-                                                                       double horizon_s,
-                                                                       std::size_t total_sample_budget);
-
-    std::vector<MultiBandSampleWindow> build_multi_band_sample_windows(double start_time_s,
-                                                                       double horizon_s,
-                                                                       std::size_t total_sample_budget,
-                                                                       const std::vector<double> &node_times_s);
-
-    std::vector<orbitsim::TrajectorySample> sample_trajectory_segments_multi_band(
+    std::vector<orbitsim::TrajectorySample> resample_segments_uniform(
             const std::vector<orbitsim::TrajectorySegment> &segments,
-            const std::vector<MultiBandSampleWindow> &windows);
+            std::size_t sample_count);
 
-    std::vector<orbitsim::TrajectorySample> sample_body_ephemeris_multi_band(
+    std::vector<orbitsim::TrajectorySample> resample_ephemeris_uniform(
             const orbitsim::CelestialEphemeris &ephemeris,
             orbitsim::BodyId body_id,
-            const std::vector<MultiBandSampleWindow> &windows);
-
-    // ── sample_multi_band template (used only by sampling .cpp, kept inline) ──
-    template<typename StateSamplerFn>
-    std::vector<orbitsim::TrajectorySample> sample_multi_band(
-            const std::vector<MultiBandSampleWindow> &windows,
-            StateSamplerFn &&sample_state_at)
-    {
-        std::vector<orbitsim::TrajectorySample> samples{};
-        if (windows.empty())
-        {
-            return samples;
-        }
-
-        std::size_t reserve_count = 1;
-        for (const MultiBandSampleWindow &window : windows)
-        {
-            reserve_count += window.interval_count;
-        }
-        samples.reserve(reserve_count);
-
-        for (std::size_t band_idx = 0; band_idx < windows.size(); ++band_idx)
-        {
-            const MultiBandSampleWindow &window = windows[band_idx];
-            if (!(window.t1_s > window.t0_s) || window.interval_count == 0)
-            {
-                continue;
-            }
-
-            for (std::size_t i = 0; i <= window.interval_count; ++i)
-            {
-                if (band_idx > 0 && i == 0)
-                {
-                    continue;
-                }
-
-                const double u =
-                        static_cast<double>(i) / static_cast<double>(std::max<std::size_t>(1, window.interval_count));
-                const double t_s = std::clamp(window.t0_s + ((window.t1_s - window.t0_s) * u),
-                                              window.t0_s,
-                                              window.t1_s);
-
-                const auto state_opt = sample_state_at(t_s);
-                if (!state_opt.has_value())
-                {
-                    continue;
-                }
-
-                samples.push_back(orbitsim::TrajectorySample{
-                        .t_s = t_s,
-                        .position_m = state_opt->position_m,
-                        .velocity_mps = state_opt->velocity_mps,
-                });
-            }
-        }
-
-        return samples;
-    }
+            double t0_s,
+            double t1_s,
+            std::size_t sample_count);
 
     // ── select_primary_index_with_hysteresis template ─────────────────────────
     template<typename BodyPositionAt>
@@ -552,13 +447,6 @@ namespace Game
     }
 
     // ── Policy helpers (orbit_prediction_service_policy.cpp) ──────────────────
-    bool request_uses_long_range_prediction_policy(const OrbitPredictionService::Request &request,
-                                                   double resolved_horizon_s);
-    double resolve_prediction_sample_dt_cap_s(const OrbitPredictionService::Request &request,
-                                              double resolved_horizon_s);
-    std::size_t resolve_spacecraft_segment_budget(const OrbitPredictionService::Request &request,
-                                                  double horizon_s,
-                                                  std::size_t sample_budget);
     void apply_lagrange_integrator_profile(orbitsim::GameSimulation::Config &sim_config);
     std::size_t count_future_maneuver_impulses(const OrbitPredictionService::Request &request);
     bool request_needs_control_sensitive_prediction(const OrbitPredictionService::Request &request);
@@ -567,12 +455,6 @@ namespace Game
     void apply_prediction_integrator_profile(orbitsim::GameSimulation::Config &sim_config,
                                              const OrbitPredictionService::Request &request,
                                              double resolved_horizon_s);
-    std::size_t resolve_prediction_ephemeris_max_segments(const OrbitPredictionService::Request &request);
-    double resolve_prediction_ephemeris_dt_cap_s(const OrbitPredictionService::Request &request,
-                                                 double resolved_horizon_s);
-    double resolve_prediction_ephemeris_dt_s(const OrbitPredictionService::Request &request,
-                                             const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec);
-    SpacecraftSamplingBudget build_spacecraft_sampling_budget(const OrbitPredictionService::Request &request);
     orbitsim::AdaptiveSegmentOptions build_spacecraft_adaptive_segment_options(
             const OrbitPredictionService::Request &request,
             const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec,

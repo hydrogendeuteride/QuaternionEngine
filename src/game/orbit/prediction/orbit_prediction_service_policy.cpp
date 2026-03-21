@@ -6,42 +6,6 @@
 
 namespace Game
 {
-    bool request_uses_long_range_prediction_policy(const OrbitPredictionService::Request &request,
-                                                   const double resolved_horizon_s)
-    {
-        return std::isfinite(resolved_horizon_s) &&
-               resolved_horizon_s > OrbitPredictionTuning::kLongRangeHorizonThresholdS;
-    }
-
-    double resolve_prediction_sample_dt_cap_s(const OrbitPredictionService::Request &request,
-                                              const double resolved_horizon_s)
-    {
-        if (request.lagrange_sensitive)
-        {
-            return OrbitPredictionTuning::kMaxSampleDtS;
-        }
-
-        return request_uses_long_range_prediction_policy(request, resolved_horizon_s)
-                       ? OrbitPredictionTuning::kLongRangeMaxSampleDtS
-                       : OrbitPredictionTuning::kMaxSampleDtS;
-    }
-
-    std::size_t resolve_spacecraft_segment_budget(const OrbitPredictionService::Request &request,
-                                                  const double horizon_s,
-                                                  const std::size_t base_budget)
-    {
-        std::size_t budget = std::max<std::size_t>(1, base_budget);
-        if (!request_uses_long_range_prediction_policy(request, horizon_s) || !(horizon_s > 0.0))
-        {
-            return budget;
-        }
-
-        const std::size_t desired_long_range_budget =
-                static_cast<std::size_t>(std::ceil(horizon_s / OrbitPredictionTuning::kLongRangeSegmentTargetDtS));
-        budget = std::max(budget, desired_long_range_budget);
-        return std::clamp<std::size_t>(budget, 1, OrbitPredictionTuning::kLongRangeMaxSegmentsHard);
-    }
-
     void apply_lagrange_integrator_profile(orbitsim::GameSimulation::Config &sim_config)
     {
         orbitsim::DOPRI5Options &integrator = sim_config.spacecraft_integrator;
@@ -69,16 +33,14 @@ namespace Game
     }
 
     double resolve_prediction_integrator_max_step_s(const OrbitPredictionService::Request &request,
-                                                    const double resolved_horizon_s)
+                                                    const double /*resolved_horizon_s*/)
     {
         if (request_needs_control_sensitive_prediction(request))
         {
             return OrbitPredictionTuning::kPredictionIntegratorMaxStepControlledS;
         }
 
-        return request_uses_long_range_prediction_policy(request, resolved_horizon_s)
-                       ? OrbitPredictionTuning::kPredictionIntegratorMaxStepLongRangeS
-                       : OrbitPredictionTuning::kPredictionIntegratorMaxStepS;
+        return OrbitPredictionTuning::kPredictionIntegratorMaxStepS;
     }
 
     void apply_prediction_integrator_profile(orbitsim::GameSimulation::Config &sim_config,
@@ -100,78 +62,6 @@ namespace Game
                           OrbitPredictionTuning::kPredictionIntegratorMaxSubstepsHard});
         integrator.max_interval_splits =
                 std::max(integrator.max_interval_splits, OrbitPredictionTuning::kPredictionIntegratorMaxIntervalSplits);
-    }
-
-    std::size_t resolve_prediction_ephemeris_max_segments(const OrbitPredictionService::Request &request)
-    {
-        if (request.lagrange_sensitive)
-        {
-            return OrbitPredictionTuning::kLagrangeEphemerisMaxSamples;
-        }
-
-        return OrbitPredictionTuning::kPredictionEphemerisMaxSegmentsHard;
-    }
-
-    double resolve_prediction_ephemeris_dt_cap_s(const OrbitPredictionService::Request &request,
-                                                 const double resolved_horizon_s)
-    {
-        double dt_cap_s = request_uses_long_range_prediction_policy(request, resolved_horizon_s)
-                                  ? OrbitPredictionTuning::kPredictionEphemerisMaxDtLongRangeS
-                                  : OrbitPredictionTuning::kPredictionEphemerisMaxDtS;
-        if (request_needs_control_sensitive_prediction(request))
-        {
-            dt_cap_s = std::min(dt_cap_s, OrbitPredictionTuning::kPredictionEphemerisMaxDtControlledS);
-        }
-        if (request.lagrange_sensitive)
-        {
-            dt_cap_s = std::min(dt_cap_s, OrbitPredictionTuning::kLagrangeEphemerisMaxDtS);
-        }
-        return dt_cap_s;
-    }
-
-    double resolve_prediction_ephemeris_dt_s(const OrbitPredictionService::Request &request,
-                                             const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec)
-    {
-        double dt_s = sampling_spec.sample_dt_s;
-        dt_s = std::min(dt_s, resolve_prediction_ephemeris_dt_cap_s(request, sampling_spec.horizon_s));
-        if (request.celestial_ephemeris_dt_s > 0.0)
-        {
-            dt_s = std::min(dt_s, request.celestial_ephemeris_dt_s);
-        }
-
-        const std::size_t max_segments = std::max<std::size_t>(1, resolve_prediction_ephemeris_max_segments(request));
-        const double min_dt_for_budget_s = sampling_spec.horizon_s / static_cast<double>(max_segments);
-        if (std::isfinite(min_dt_for_budget_s) && min_dt_for_budget_s > 0.0)
-        {
-            dt_s = std::max(dt_s, min_dt_for_budget_s);
-        }
-
-        return std::max(1.0e-3, dt_s);
-    }
-
-    SpacecraftSamplingBudget build_spacecraft_sampling_budget(const OrbitPredictionService::Request &request)
-    {
-        SpacecraftSamplingBudget out{};
-        const double future_maneuvers = static_cast<double>(count_future_maneuver_impulses(request));
-
-        const double target_bonus = std::min(
-                future_maneuvers * OrbitPredictionTuning::kSpacecraftTargetSamplesBonusPerManeuver,
-                OrbitPredictionTuning::kSpacecraftTargetSamplesHardNormal -
-                        OrbitPredictionTuning::kSpacecraftTargetSamplesSoftNormal);
-        out.target_samples_max =
-                std::clamp(OrbitPredictionTuning::kSpacecraftTargetSamplesSoftNormal + target_bonus,
-                           OrbitPredictionTuning::kSpacecraftTargetSamplesSoftNormal,
-                           OrbitPredictionTuning::kSpacecraftTargetSamplesHardNormal);
-
-        const double step_bonus = std::min(
-                future_maneuvers * static_cast<double>(OrbitPredictionTuning::kSpacecraftMaxStepsBonusPerManeuver),
-                static_cast<double>(OrbitPredictionTuning::kSpacecraftMaxStepsHardNormal -
-                                    OrbitPredictionTuning::kSpacecraftMaxStepsSoftNormal));
-        out.soft_max_steps =
-                std::clamp(OrbitPredictionTuning::kSpacecraftMaxStepsSoftNormal + static_cast<int>(std::lround(step_bonus)),
-                           OrbitPredictionTuning::kSpacecraftMaxStepsSoftNormal,
-                           OrbitPredictionTuning::kSpacecraftMaxStepsHardNormal);
-        return out;
     }
 
     namespace
@@ -315,20 +205,26 @@ namespace Game
             return out;
         }
 
-        const std::size_t soft_cap = OrbitPredictionTuning::kAdaptiveSegmentSoftMaxSegmentsNormal;
-        const std::size_t hard_cap = std::max<std::size_t>(
-                resolve_spacecraft_segment_budget(request, sampling_spec.horizon_s, soft_cap),
-                std::max<std::size_t>(soft_cap, OrbitPredictionTuning::kAdaptiveSegmentHardMaxSegmentsNormal));
+        const bool controlled = request_needs_control_sensitive_prediction(request);
 
-        const double max_dt_s = request_needs_control_sensitive_prediction(request)
-                                        ? std::min(resolve_prediction_sample_dt_cap_s(request, sampling_spec.horizon_s),
-                                                   OrbitPredictionTuning::kAdaptiveSegmentMaxDtControlledS)
-                                        : resolve_prediction_sample_dt_cap_s(request, sampling_spec.horizon_s);
-        const double lookup_max_dt_s = request_needs_control_sensitive_prediction(request)
+        const std::size_t soft_cap = OrbitPredictionTuning::kAdaptiveSegmentSoftMaxSegmentsNormal;
+        std::size_t hard_cap = OrbitPredictionTuning::kAdaptiveSegmentHardMaxSegmentsNormal;
+        if (sampling_spec.horizon_s > 0.0)
+        {
+            const auto horizon_scaled = static_cast<std::size_t>(
+                    std::ceil(sampling_spec.horizon_s / OrbitPredictionTuning::kAdaptiveSegmentMaxDtS));
+            hard_cap = std::max(hard_cap, horizon_scaled);
+        }
+
+        double max_dt_s = OrbitPredictionTuning::kAdaptiveSegmentMaxDtS;
+        if (controlled)
+        {
+            max_dt_s = std::min(max_dt_s, OrbitPredictionTuning::kAdaptiveSegmentMaxDtControlledS);
+        }
+
+        const double lookup_max_dt_s = controlled
                                                ? OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtControlledS
-                                               : (request_uses_long_range_prediction_policy(request, sampling_spec.horizon_s)
-                                                          ? OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtLongRangeS
-                                                          : OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtS);
+                                               : OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtS;
 
         out.duration_s = sampling_spec.horizon_s;
         out.min_dt_s = request_needs_control_sensitive_prediction(request)
@@ -357,14 +253,28 @@ namespace Game
             return out;
         }
 
+        const bool controlled = request_needs_control_sensitive_prediction(request);
+
         const std::size_t soft_cap = OrbitPredictionTuning::kAdaptiveEphemerisSoftMaxSegments;
-        const std::size_t hard_cap = std::max<std::size_t>(resolve_prediction_ephemeris_max_segments(request), soft_cap);
+        const std::size_t hard_cap = std::max<std::size_t>(
+                request.lagrange_sensitive ? OrbitPredictionTuning::kLagrangeEphemerisMaxSamples : soft_cap,
+                soft_cap);
 
         out.duration_s = sampling_spec.horizon_s;
-        out.min_dt_s = request_needs_control_sensitive_prediction(request)
+        out.min_dt_s = controlled
                                ? OrbitPredictionTuning::kAdaptiveEphemerisMinDtControlledS
                                : OrbitPredictionTuning::kAdaptiveEphemerisMinDtS;
-        out.max_dt_s = std::max(out.min_dt_s, resolve_prediction_ephemeris_dt_cap_s(request, sampling_spec.horizon_s));
+
+        double max_dt_s = OrbitPredictionTuning::kAdaptiveEphemerisMaxDtS;
+        if (controlled)
+        {
+            max_dt_s = std::min(max_dt_s, OrbitPredictionTuning::kAdaptiveEphemerisMaxDtControlledS);
+        }
+        if (request.lagrange_sensitive)
+        {
+            max_dt_s = std::min(max_dt_s, OrbitPredictionTuning::kLagrangeEphemerisMaxDtS);
+        }
+        out.max_dt_s = std::max(out.min_dt_s, max_dt_s);
         const double min_max_dt_for_soft_cap =
                 sampling_spec.horizon_s / static_cast<double>(std::max<std::size_t>(soft_cap, 1));
         if (std::isfinite(min_max_dt_for_soft_cap) && min_max_dt_for_soft_cap > 0.0)
@@ -530,34 +440,20 @@ namespace Game
             return out;
         }
 
-        const auto [horizon_s_auto, dt_s_auto] =
-                OrbitPredictionMath::select_prediction_horizon_and_dt(mu_ref_m3_s2, out.rel_pos_m, out.rel_vel_mps);
+        const double horizon_s_auto =
+                OrbitPredictionMath::select_prediction_horizon(mu_ref_m3_s2, out.rel_pos_m, out.rel_vel_mps);
 
         const double requested_window_s =
                 std::isfinite(request.future_window_s) ? std::max(0.0, request.future_window_s) : 0.0;
         double horizon_s = std::max(OrbitPredictionTuning::kMinHorizonS, horizon_s_auto);
         horizon_s = std::max(horizon_s, std::max(1.0, requested_window_s));
-        const double sample_dt_cap_s = resolve_prediction_sample_dt_cap_s(request, horizon_s);
-        double dt_s = std::clamp(dt_s_auto, 0.01, sample_dt_cap_s);
-        const int max_steps = OrbitPredictionTuning::kMaxStepsNormal;
-        const double min_dt_for_step_budget = horizon_s / static_cast<double>(std::max(1, max_steps));
-        if (std::isfinite(min_dt_for_step_budget) && min_dt_for_step_budget > 0.0)
-        {
-            dt_s = std::max(dt_s, min_dt_for_step_budget);
-        }
-
-        dt_s = std::clamp(dt_s, 0.01, sample_dt_cap_s);
-        horizon_s = std::max(horizon_s, dt_s);
-        const int sample_count = std::clamp(static_cast<int>(std::ceil(horizon_s / dt_s)) + 1, 2, max_steps);
-        if (!(horizon_s > 0.0) || !(dt_s > 0.0) || sample_count < 2)
+        if (!(horizon_s > 0.0))
         {
             return out;
         }
 
         out.valid = true;
         out.horizon_s = horizon_s;
-        out.sample_dt_s = dt_s;
-        out.max_samples = static_cast<std::size_t>(sample_count);
         return out;
     }
 } // namespace Game

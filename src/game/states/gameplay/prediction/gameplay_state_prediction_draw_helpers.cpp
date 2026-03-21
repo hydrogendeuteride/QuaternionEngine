@@ -86,45 +86,6 @@ namespace Game::PredictionDrawDetail
         return OrbitPlotUtil::meters_per_px_at_world(ctx.camera_world, ctx.tan_half_fov, ctx.viewport_height_px, p_world);
     }
 
-    std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_samples(
-            const std::vector<orbitsim::TrajectorySample> &samples)
-    {
-        std::vector<orbitsim::TrajectorySegment> out;
-        if (samples.size() < 2)
-        {
-            return out;
-        }
-
-        out.reserve(samples.size() - 1);
-        for (std::size_t i = 1; i < samples.size(); ++i)
-        {
-            const orbitsim::TrajectorySample &a = samples[i - 1];
-            const orbitsim::TrajectorySample &b = samples[i];
-            const double dt_s = b.t_s - a.t_s;
-            if (!(dt_s > 0.0) || !std::isfinite(dt_s))
-            {
-                continue;
-            }
-
-            orbitsim::State start{};
-            start.position_m = a.position_m;
-            start.velocity_mps = a.velocity_mps;
-            orbitsim::State end{};
-            end.position_m = b.position_m;
-            end.velocity_mps = b.velocity_mps;
-
-            out.push_back(orbitsim::TrajectorySegment{
-                    .t0_s = a.t_s,
-                    .dt_s = dt_s,
-                    .start = start,
-                    .end = end,
-                    .flags = 0u,
-            });
-        }
-
-        return out;
-    }
-
     double snap_time_past_straddling_segment(const std::vector<orbitsim::TrajectorySegment> &traj_segments, double t_s)
     {
         double snapped_t_s = t_s;
