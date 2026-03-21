@@ -118,18 +118,13 @@ namespace Game::OrbitPredictionMath
         return out;
     }
 
-    std::pair<double, double> select_prediction_horizon_and_dt(const double mu_m3_s2, const glm::dvec3 &r_m,
-                                                                const glm::dvec3 &v_mps)
+    double select_prediction_horizon(const double mu_m3_s2, const glm::dvec3 &r_m,
+                                      const glm::dvec3 &v_mps)
     {
         const double period_s = estimate_orbital_period_s(mu_m3_s2, r_m, v_mps);
-        const double horizon_s = std::max(
+        return std::max(
                 OrbitPredictionTuning::kMinHorizonS,
                 period_s * OrbitPredictionTuning::kBaseHorizonFromPeriodScale);
-        const double target_samples = std::clamp(horizon_s / OrbitPredictionTuning::kTargetSamplesDivisorS,
-                                                 OrbitPredictionTuning::kTargetSamplesMin,
-                                                 OrbitPredictionTuning::kTargetSamplesMax);
-        const double dt_s = std::clamp(horizon_s / target_samples, 0.01, OrbitPredictionTuning::kMaxSampleDtS);
-        return {horizon_s, dt_s};
     }
 
     WorldVec3 hermite_position_world(const WorldVec3 &ref_body_world,

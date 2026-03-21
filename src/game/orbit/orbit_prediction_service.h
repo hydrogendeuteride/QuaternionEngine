@@ -138,8 +138,6 @@ namespace Game
         {
             bool valid{false};
             double horizon_s{0.0};
-            double sample_dt_s{0.0};
-            std::size_t max_samples{0};
         };
 
         struct EphemerisBuildRequest
