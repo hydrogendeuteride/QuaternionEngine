@@ -40,6 +40,8 @@ namespace Game
                     return "Segments unavailable";
                 case OrbitPredictionService::Status::TrajectorySamplesUnavailable:
                     return "Samples unavailable";
+                case OrbitPredictionService::Status::ContinuityFailed:
+                    return "Continuity failed";
                 case OrbitPredictionService::Status::Cancelled:
                     return "Cancelled";
             }
@@ -63,11 +65,40 @@ namespace Game
                     return "Frame transform failed";
                 case PredictionDerivedStatus::FrameSamplesUnavailable:
                     return "Frame samples unavailable";
+                case PredictionDerivedStatus::ContinuityFailed:
+                    return "Continuity failed";
                 case PredictionDerivedStatus::Cancelled:
                     return "Cancelled";
             }
 
             return "Unknown";
+        }
+
+        void draw_prediction_stage_diag(const char *label,
+                                        const OrbitPredictionService::AdaptiveStageDiagnostics &diag,
+                                        const std::size_t sample_count)
+        {
+            std::string extra{};
+            if (diag.frame_resegmentation_count > 0)
+            {
+                extra = ", reseg " + std::to_string(diag.frame_resegmentation_count);
+            }
+            ImGui::Text("%s: req %.2f s, cov %.2f s, seg %zu, samples %zu%s%s",
+                        label,
+                        diag.requested_duration_s,
+                        diag.covered_duration_s,
+                        diag.accepted_segments,
+                        sample_count,
+                        diag.cache_reused ? ", cache" : "",
+                        diag.hard_cap_hit ? ", cap" : "");
+            ImGui::Text("%s dt min/avg/max: %.6f / %.6f / %.6f, rejected %zu, forced %zu%s",
+                        label,
+                        diag.min_dt_s,
+                        diag.avg_dt_s,
+                        diag.max_dt_s,
+                        diag.rejected_splits,
+                        diag.forced_boundary_splits,
+                        extra.c_str());
         }
 
         std::string resolve_asset_rel_path(const GameStateContext &ctx, const std::string &rel_path)
@@ -753,17 +784,31 @@ namespace Game
                         ImGui::Text("Prediction status (solver/frame): %s / %s",
                                     prediction_solver_status_label(solver_diag.status),
                                     prediction_derived_status_label(derived_diag.status));
-                        ImGui::Text("Solver diag (eph/base/planned seg, base/planned sample): %zu / %zu / %zu, %zu / %zu",
-                                    solver_diag.ephemeris_segment_count,
-                                    solver_diag.trajectory_segment_count,
-                                    solver_diag.trajectory_segment_count_planned,
-                                    solver_diag.trajectory_sample_count,
+                        draw_prediction_stage_diag("Ephemeris", solver_diag.ephemeris, 0);
+                        draw_prediction_stage_diag(
+                                "Solver base",
+                                solver_diag.trajectory_base,
+                                solver_diag.trajectory_sample_count);
+                        if (solver_diag.trajectory_planned.accepted_segments > 0 ||
+                            solver_diag.trajectory_sample_count_planned > 0)
+                        {
+                            draw_prediction_stage_diag(
+                                    "Solver planned",
+                                    solver_diag.trajectory_planned,
                                     solver_diag.trajectory_sample_count_planned);
-                        ImGui::Text("Frame diag (base/planned seg, base/planned sample): %zu / %zu, %zu / %zu",
-                                    derived_diag.frame_segment_count,
-                                    derived_diag.frame_segment_count_planned,
-                                    derived_diag.frame_sample_count,
+                        }
+                        draw_prediction_stage_diag(
+                                "Frame base",
+                                derived_diag.frame_base,
+                                derived_diag.frame_sample_count);
+                        if (derived_diag.frame_planned.accepted_segments > 0 ||
+                            derived_diag.frame_sample_count_planned > 0)
+                        {
+                            draw_prediction_stage_diag(
+                                    "Frame planned",
+                                    derived_diag.frame_planned,
                                     derived_diag.frame_sample_count_planned);
+                        }
                     }
                     ImGui::Text("Orbit lines (active/pending): %u / %u",
                                 plot_stats.active_line_count,

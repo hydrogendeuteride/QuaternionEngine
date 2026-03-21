@@ -175,7 +175,8 @@ namespace Game
     void append_or_merge_planned_boundary_state(std::vector<PlannedSegmentBoundaryState> &states,
                                                 const double t_s,
                                                 const orbitsim::State &state_before,
-                                                const orbitsim::State &state_after)
+                                                const orbitsim::State &state_after,
+                                                const std::uint32_t flags)
     {
         if (!std::isfinite(t_s) || !finite_state(state_before) || !finite_state(state_after))
         {
@@ -186,6 +187,7 @@ namespace Game
         if (!states.empty() && std::abs(states.back().t_s - t_s) <= kBoundaryMergeToleranceS)
         {
             states.back().state_after = state_after;
+            states.back().flags |= flags;
             return;
         }
 
@@ -193,6 +195,7 @@ namespace Game
                 .t_s = t_s,
                 .state_before = state_before,
                 .state_after = state_after,
+                .flags = flags,
         });
     }
 
@@ -222,6 +225,7 @@ namespace Game
 
             double cursor_t_s = seg_t0_s;
             orbitsim::State cursor_state = segment.start;
+            std::uint32_t cursor_flags = segment.flags;
 
             while (boundary_index < boundaries.size() &&
                    boundaries[boundary_index].t_s <= (seg_t0_s + kBoundaryEpsilonS))
@@ -229,6 +233,7 @@ namespace Game
                 if (std::abs(boundaries[boundary_index].t_s - seg_t0_s) <= kBoundaryEpsilonS)
                 {
                     cursor_state = boundaries[boundary_index].state_after;
+                    cursor_flags = boundaries[boundary_index].flags;
                 }
                 ++boundary_index;
             }
@@ -244,6 +249,7 @@ namespace Game
                 if (!(boundary.t_s > (cursor_t_s + kBoundaryEpsilonS)))
                 {
                     cursor_state = boundary.state_after;
+                    cursor_flags = boundary.flags;
                     ++local_boundary_index;
                     continue;
                 }
@@ -256,12 +262,13 @@ namespace Game
                             .dt_s = part_dt_s,
                             .start = cursor_state,
                             .end = boundary.state_before,
-                            .flags = segment.flags,
+                            .flags = cursor_flags,
                     });
                 }
 
                 cursor_t_s = boundary.t_s;
                 cursor_state = boundary.state_after;
+                cursor_flags = boundary.flags;
                 ++local_boundary_index;
             }
 
@@ -273,7 +280,7 @@ namespace Game
                         .dt_s = tail_dt_s,
                         .start = cursor_state,
                         .end = segment.end,
-                        .flags = segment.flags,
+                        .flags = cursor_flags,
                 });
             }
 

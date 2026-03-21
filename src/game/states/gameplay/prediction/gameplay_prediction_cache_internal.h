@@ -239,8 +239,12 @@ namespace Game::PredictionCacheInternal
         }
 
         diagnostics->status = status;
-        diagnostics->frame_segment_count = cache.trajectory_segments_frame.size();
-        diagnostics->frame_segment_count_planned = cache.trajectory_segments_frame_planned.size();
+        diagnostics->frame_segment_count =
+                diagnostics->frame_base.accepted_segments > 0 ? diagnostics->frame_base.accepted_segments
+                                                              : cache.trajectory_segments_frame.size();
+        diagnostics->frame_segment_count_planned =
+                diagnostics->frame_planned.accepted_segments > 0 ? diagnostics->frame_planned.accepted_segments
+                                                                 : cache.trajectory_segments_frame_planned.size();
         diagnostics->frame_sample_count = cache.trajectory_frame.size();
         diagnostics->frame_sample_count_planned = cache.trajectory_frame_planned.size();
     }
@@ -319,6 +323,26 @@ namespace Game::PredictionCacheInternal
             cache.trajectory_frame_planned = cache.trajectory_inertial_planned;
             cache.trajectory_segments_frame = cache.trajectory_segments_inertial;
             cache.trajectory_segments_frame_planned = cache.trajectory_segments_inertial_planned;
+            if (!validate_trajectory_segment_continuity(cache.trajectory_segments_frame))
+            {
+                update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::ContinuityFailed);
+                return false;
+            }
+            if (!cache.trajectory_segments_frame_planned.empty() &&
+                !validate_trajectory_segment_continuity(cache.trajectory_segments_frame_planned))
+            {
+                update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::ContinuityFailed);
+                return false;
+            }
+            if (diagnostics)
+            {
+                diagnostics->frame_base = make_stage_diagnostics_from_segments(
+                        cache.trajectory_segments_frame,
+                        prediction_segment_span_s(cache.trajectory_segments_inertial));
+                diagnostics->frame_planned = make_stage_diagnostics_from_segments(
+                        cache.trajectory_segments_frame_planned,
+                        prediction_segment_span_s(cache.trajectory_segments_inertial_planned));
+            }
         }
         else
         {
@@ -340,13 +364,15 @@ namespace Game::PredictionCacheInternal
                             resolved_frame_spec,
                             cache.trajectory_segments_inertial,
                             cancel_requested);
+            orbitsim::FrameSegmentTransformDiagnostics base_frame_diag{};
             cache.trajectory_segments_frame = orbitsim::transform_trajectory_segments_to_frame_spec(
                     cache.trajectory_segments_inertial,
                     *cache.shared_ephemeris,
                     cache.massive_bodies,
                     resolved_frame_spec,
                     base_opt,
-                    player_lookup);
+                    player_lookup,
+                    &base_frame_diag);
             if (cancel_requested && cancel_requested())
             {
                 update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::Cancelled);
@@ -356,6 +382,20 @@ namespace Game::PredictionCacheInternal
             {
                 update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::FrameTransformFailed);
                 return false;
+            }
+            if (!validate_trajectory_segment_continuity(cache.trajectory_segments_frame))
+            {
+                update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::ContinuityFailed);
+                return false;
+            }
+            if (diagnostics)
+            {
+                diagnostics->frame_base = make_stage_diagnostics_from_adaptive(
+                        base_frame_diag,
+                        prediction_segment_span_s(cache.trajectory_segments_inertial));
+                diagnostics->frame_base.accepted_segments = cache.trajectory_segments_frame.size();
+                diagnostics->frame_base.covered_duration_s = prediction_segment_span_s(cache.trajectory_segments_frame);
+                diagnostics->frame_base.frame_resegmentation_count = base_frame_diag.frame_resegmentation_count;
             }
             cache.trajectory_frame = sample_prediction_segments(cache.trajectory_segments_frame, base_sample_budget);
             if (cache.trajectory_frame.size() < 2)
@@ -371,13 +411,15 @@ namespace Game::PredictionCacheInternal
                                 resolved_frame_spec,
                                 cache.trajectory_segments_inertial_planned,
                                 cancel_requested);
+                orbitsim::FrameSegmentTransformDiagnostics planned_frame_diag{};
                 cache.trajectory_segments_frame_planned = orbitsim::transform_trajectory_segments_to_frame_spec(
                         cache.trajectory_segments_inertial_planned,
                         *cache.shared_ephemeris,
                         cache.massive_bodies,
                         resolved_frame_spec,
                         planned_opt,
-                        player_lookup);
+                        player_lookup,
+                        &planned_frame_diag);
                 if (cancel_requested && cancel_requested())
                 {
                     update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::Cancelled);
@@ -385,6 +427,22 @@ namespace Game::PredictionCacheInternal
                 }
                 if (!cache.trajectory_segments_frame_planned.empty())
                 {
+                    if (!validate_trajectory_segment_continuity(cache.trajectory_segments_frame_planned))
+                    {
+                        update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::ContinuityFailed);
+                        return false;
+                    }
+                    if (diagnostics)
+                    {
+                        diagnostics->frame_planned = make_stage_diagnostics_from_adaptive(
+                                planned_frame_diag,
+                                prediction_segment_span_s(cache.trajectory_segments_inertial_planned));
+                        diagnostics->frame_planned.accepted_segments = cache.trajectory_segments_frame_planned.size();
+                        diagnostics->frame_planned.covered_duration_s =
+                                prediction_segment_span_s(cache.trajectory_segments_frame_planned);
+                        diagnostics->frame_planned.frame_resegmentation_count =
+                                planned_frame_diag.frame_resegmentation_count;
+                    }
                     cache.trajectory_frame_planned = sample_prediction_segments(
                             cache.trajectory_segments_frame_planned,
                             planned_sample_budget,

@@ -120,8 +120,20 @@ namespace Game
 
     OrbitPredictionService::SharedCelestialEphemeris OrbitPredictionService::get_or_build_ephemeris(
             const EphemerisBuildRequest &request,
-            const std::function<bool()> &cancel_requested)
+            const std::function<bool()> &cancel_requested,
+            AdaptiveStageDiagnostics *out_diagnostics,
+            bool *out_cache_reused)
     {
+        if (out_diagnostics)
+        {
+            *out_diagnostics = {};
+            out_diagnostics->requested_duration_s = std::max(0.0, request.duration_s);
+        }
+        if (out_cache_reused)
+        {
+            *out_cache_reused = false;
+        }
+
         // Reuse an equal-or-better ephemeris when another prediction already paid the build cost.
         {
             std::lock_guard<std::mutex> lock(_ephemeris_mutex);
@@ -133,11 +145,21 @@ namespace Game
                 }
 
                 entry.last_use_serial = _next_ephemeris_use_serial++;
+                if (out_diagnostics)
+                {
+                    *out_diagnostics = entry.diagnostics;
+                    out_diagnostics->cache_reused = true;
+                }
+                if (out_cache_reused)
+                {
+                    *out_cache_reused = true;
+                }
                 return entry.ephemeris;
             }
         }
 
-        SharedCelestialEphemeris built = build_ephemeris_from_request(request, cancel_requested);
+        orbitsim::AdaptiveEphemerisDiagnostics build_diag{};
+        SharedCelestialEphemeris built = build_ephemeris_from_request(request, cancel_requested, &build_diag);
         if (!built)
         {
             return {};
@@ -153,6 +175,15 @@ namespace Game
             }
 
             entry.last_use_serial = _next_ephemeris_use_serial++;
+            if (out_diagnostics)
+            {
+                *out_diagnostics = entry.diagnostics;
+                out_diagnostics->cache_reused = true;
+            }
+            if (out_cache_reused)
+            {
+                *out_cache_reused = true;
+            }
             return entry.ephemeris;
         }
 
@@ -164,6 +195,7 @@ namespace Game
         entry.adaptive_options = request.adaptive_options;
         entry.adaptive_options.cancel_requested = {};
         entry.ephemeris = std::move(built);
+        entry.diagnostics = make_stage_diagnostics_from_adaptive(build_diag, request.duration_s);
         entry.last_use_serial = _next_ephemeris_use_serial++;
         _ephemeris_cache.push_back(std::move(entry));
 
@@ -181,6 +213,10 @@ namespace Game
             }
         }
 
+        if (out_diagnostics)
+        {
+            *out_diagnostics = _ephemeris_cache.back().diagnostics;
+        }
         return _ephemeris_cache.back().ephemeris;
     }
 
@@ -220,24 +256,25 @@ namespace Game
         const auto [horizon_s_auto, dt_s_auto] =
                 OrbitPredictionMath::select_prediction_horizon_and_dt(mu_ref_m3_s2, ship_rel_pos_m, ship_rel_vel_mps);
 
-        // Start from orbital-state-driven defaults, then clamp into service-wide budgets.
-        const double horizon_cap_s = resolve_prediction_horizon_cap_s(request);
-        double horizon_s = std::clamp(horizon_s_auto, OrbitPredictionTuning::kMinHorizonS, horizon_cap_s);
-        double dt_s = std::clamp(dt_s_auto, 0.01, resolve_prediction_sample_dt_cap_s(request));
+        // Start from orbital-state-driven defaults, then expand to cover the requested view window.
+        double horizon_s = std::max(OrbitPredictionTuning::kMinHorizonS, horizon_s_auto);
         const SpacecraftSamplingBudget sampling_budget = build_spacecraft_sampling_budget(request);
         int max_steps = sampling_budget.soft_max_steps;
         double dt_min_s = 0.01;
-        double dt_max_s = resolve_prediction_sample_dt_cap_s(request);
         // Keep solver coverage aligned with the UI's requested future draw window.
-        double min_horizon_s = std::max(1.0, request.future_window_s);
+        const double requested_window_s =
+                std::isfinite(request.future_window_s) ? std::max(0.0, request.future_window_s) : 0.0;
+        double min_horizon_s = std::max(1.0, requested_window_s);
         horizon_s = std::max(horizon_s, min_horizon_s);
+        double dt_max_s = resolve_prediction_sample_dt_cap_s(request, horizon_s);
+        double dt_s = std::clamp(dt_s_auto, 0.01, dt_max_s);
 
         if (request.thrusting)
         {
             // During active thrust we trade long horizons for denser near-term sampling.
             const double thrust_horizon_cap_s =
                     std::clamp(std::max(OrbitPredictionTuning::kThrustHorizonMinS,
-                                        std::max(0.0, request.future_window_s) * OrbitPredictionTuning::kThrustHorizonWindowScale),
+                                        requested_window_s * OrbitPredictionTuning::kThrustHorizonWindowScale),
                                OrbitPredictionTuning::kThrustHorizonMinS,
                                OrbitPredictionTuning::kThrustHorizonMaxS);
             horizon_s = std::min(horizon_s, thrust_horizon_cap_s);
@@ -273,7 +310,7 @@ namespace Game
         }
 
         dt_s = std::clamp(dt_s, dt_min_s, dt_max_s);
-        horizon_s = std::clamp(horizon_s, dt_s, horizon_cap_s);
+        horizon_s = std::max(horizon_s, dt_s);
         const int steps = std::clamp(static_cast<int>(std::ceil(horizon_s / dt_s)), 2, max_steps);
 
         out.valid = (steps >= 2) && (horizon_s > 0.0) && (dt_s > 0.0);
@@ -406,9 +443,10 @@ namespace Game
             out.diagnostics.status = Status::Cancelled;
             return out;
         };
-        const auto record_ephemeris_segments = [&out](const SharedCelestialEphemeris &shared_ephemeris) {
-            out.diagnostics.ephemeris_segment_count =
-                    (shared_ephemeris && !shared_ephemeris->empty()) ? shared_ephemeris->segments.size() : 0;
+        const auto sync_stage_counts = [&out]() {
+            out.diagnostics.ephemeris_segment_count = out.diagnostics.ephemeris.accepted_segments;
+            out.diagnostics.trajectory_segment_count = out.diagnostics.trajectory_base.accepted_segments;
+            out.diagnostics.trajectory_segment_count_planned = out.diagnostics.trajectory_planned.accepted_segments;
         };
 
         // Invalid inputs produce an invalid result rather than throwing on the worker thread.
@@ -417,8 +455,24 @@ namespace Game
             return fail(Status::InvalidInput);
         }
 
+        std::optional<EphemerisSamplingSpec> spacecraft_sampling_spec{};
+        if (request.kind == RequestKind::Spacecraft)
+        {
+            spacecraft_sampling_spec = build_ephemeris_sampling_spec(request);
+            if (!spacecraft_sampling_spec->valid)
+            {
+                return fail(Status::InvalidSamplingSpec);
+            }
+        }
+
         orbitsim::GameSimulation::Config sim_config = request.sim_config;
-        apply_prediction_integrator_profile(sim_config, request);
+        const double resolved_integrator_horizon_s =
+                spacecraft_sampling_spec.has_value()
+                        ? spacecraft_sampling_spec->horizon_s
+                        : std::max(OrbitPredictionTuning::kMinHorizonS,
+                                   std::isfinite(request.future_window_s) ? std::max(0.0, request.future_window_s)
+                                                                          : 0.0);
+        apply_prediction_integrator_profile(sim_config, request, resolved_integrator_horizon_s);
         if (request.lagrange_sensitive)
         {
             apply_lagrange_integrator_profile(sim_config);
@@ -476,6 +530,7 @@ namespace Game
             }
 
             SharedCelestialEphemeris shared_ephemeris = request.shared_ephemeris;
+            AdaptiveStageDiagnostics ephemeris_diag{};
             if (!ephemeris_covers_horizon(shared_ephemeris, request.sim_time_s, sampling_spec.horizon_s))
             {
                 // Keep ephemeris construction on the worker so gameplay only enqueues work.
@@ -485,13 +540,23 @@ namespace Game
                 ephemeris_sampling_spec.sample_dt_s = sampling_spec.sample_dt_s;
                 ephemeris_sampling_spec.max_samples = sampling_spec.max_samples;
                 shared_ephemeris = get_or_build_ephemeris(build_ephemeris_build_request(request, ephemeris_sampling_spec),
-                                                          cancel_requested);
+                                                          cancel_requested,
+                                                          &ephemeris_diag);
+            }
+            else
+            {
+                ephemeris_diag = make_stage_diagnostics_from_ephemeris(shared_ephemeris, sampling_spec.horizon_s, true);
             }
             if (!shared_ephemeris || shared_ephemeris->empty())
             {
                 return fail(Status::EphemerisUnavailable);
             }
-            record_ephemeris_segments(shared_ephemeris);
+            if (!validate_ephemeris_continuity(*shared_ephemeris))
+            {
+                return fail(Status::ContinuityFailed);
+            }
+            out.diagnostics.ephemeris = ephemeris_diag;
+            sync_stage_counts();
 
             if (cancel_requested())
             {
@@ -515,10 +580,16 @@ namespace Game
             {
                 return fail(Status::TrajectorySegmentsUnavailable);
             }
+            if (!validate_trajectory_segment_continuity(traj_segments_inertial))
+            {
+                return fail(Status::ContinuityFailed);
+            }
 
             out.shared_ephemeris = shared_ephemeris;
+            out.diagnostics.trajectory_base =
+                    make_stage_diagnostics_from_segments(traj_segments_inertial, sampling_spec.horizon_s);
             out.diagnostics.trajectory_sample_count = traj_inertial.size();
-            out.diagnostics.trajectory_segment_count = traj_segments_inertial.size();
+            sync_stage_counts();
             out.trajectory_inertial = std::move(traj_inertial);
             out.trajectory_segments_inertial = std::move(traj_segments_inertial);
             out.valid = true;
@@ -534,12 +605,7 @@ namespace Game
             return fail(Status::InvalidInput);
         }
 
-        const EphemerisSamplingSpec sampling_spec = build_ephemeris_sampling_spec(request);
-        if (!sampling_spec.valid)
-        {
-            return fail(Status::InvalidSamplingSpec);
-        }
-
+        const EphemerisSamplingSpec sampling_spec = *spacecraft_sampling_spec;
         const double horizon_s = sampling_spec.horizon_s;
         orbitsim::Spacecraft ship_sc{};
         ship_sc.state = orbitsim::make_state(ship_bary_pos_m, ship_bary_vel_mps);
@@ -557,17 +623,28 @@ namespace Game
                 build_spacecraft_adaptive_segment_options(request, sampling_spec, cancel_requested);
 
         SharedCelestialEphemeris shared_ephemeris = request.shared_ephemeris;
+        AdaptiveStageDiagnostics ephemeris_diag{};
         if (!ephemeris_covers_horizon(shared_ephemeris, request.sim_time_s, horizon_s))
         {
             // Spacecraft requests follow the same rule: never build ephemeris on the gameplay thread.
             shared_ephemeris = get_or_build_ephemeris(build_ephemeris_build_request(request, sampling_spec),
-                                                      cancel_requested);
+                                                      cancel_requested,
+                                                      &ephemeris_diag);
+        }
+        else
+        {
+            ephemeris_diag = make_stage_diagnostics_from_ephemeris(shared_ephemeris, horizon_s, true);
         }
         if (!shared_ephemeris || shared_ephemeris->empty())
         {
             return fail(Status::EphemerisUnavailable);
         }
-        record_ephemeris_segments(shared_ephemeris);
+        if (!validate_ephemeris_continuity(*shared_ephemeris))
+        {
+            return fail(Status::ContinuityFailed);
+        }
+        out.diagnostics.ephemeris = ephemeris_diag;
+        sync_stage_counts();
 
         if (cancel_requested())
         {
@@ -575,13 +652,21 @@ namespace Game
         }
         const orbitsim::CelestialEphemeris &eph = *shared_ephemeris;
 
+        orbitsim::AdaptiveSegmentDiagnostics base_diag{};
         const std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_baseline =
-                orbitsim::predict_spacecraft_trajectory_segments_adaptive(sim, eph, ship_h.id, segment_opt);
+                orbitsim::predict_spacecraft_trajectory_segments_adaptive(sim, eph, ship_h.id, segment_opt, &base_diag);
         if (traj_segments_inertial_baseline.empty())
         {
             return fail(Status::TrajectorySegmentsUnavailable);
         }
-        out.diagnostics.trajectory_segment_count = traj_segments_inertial_baseline.size();
+        if (!validate_trajectory_segment_continuity(traj_segments_inertial_baseline))
+        {
+            return fail(Status::ContinuityFailed);
+        }
+        out.diagnostics.trajectory_base = make_stage_diagnostics_from_adaptive(base_diag, horizon_s);
+        out.diagnostics.trajectory_base.accepted_segments = traj_segments_inertial_baseline.size();
+        out.diagnostics.trajectory_base.covered_duration_s = prediction_segment_span_s(traj_segments_inertial_baseline);
+        sync_stage_counts();
 
         if (cancel_requested())
         {
@@ -600,6 +685,7 @@ namespace Game
             return fail(Status::TrajectorySamplesUnavailable);
         }
         out.diagnostics.trajectory_sample_count = traj_inertial_baseline.size();
+        sync_stage_counts();
 
         if (cancel_requested())
         {
@@ -715,8 +801,9 @@ namespace Game
             sim.maneuver_plan() = std::move(plan);
 
             // Planned output shows the same prediction window with all maneuver nodes applied.
+            orbitsim::AdaptiveSegmentDiagnostics planned_diag{};
             std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_planned =
-                    orbitsim::predict_spacecraft_trajectory_segments_adaptive(sim, eph, ship_h.id, segment_opt);
+                    orbitsim::predict_spacecraft_trajectory_segments_adaptive(sim, eph, ship_h.id, segment_opt, &planned_diag);
             traj_segments_inertial_planned =
                     split_trajectory_segments_at_known_boundaries(traj_segments_inertial_planned, planned_boundary_states);
             if (!traj_segments_inertial_planned.empty())
@@ -726,7 +813,15 @@ namespace Game
                     return cancel();
                 }
 
-                out.diagnostics.trajectory_segment_count_planned = traj_segments_inertial_planned.size();
+                if (!validate_trajectory_segment_continuity(traj_segments_inertial_planned))
+                {
+                    return fail(Status::ContinuityFailed);
+                }
+                out.diagnostics.trajectory_planned = make_stage_diagnostics_from_adaptive(planned_diag, horizon_s);
+                out.diagnostics.trajectory_planned.accepted_segments = traj_segments_inertial_planned.size();
+                out.diagnostics.trajectory_planned.covered_duration_s =
+                        prediction_segment_span_s(traj_segments_inertial_planned);
+                sync_stage_counts();
                 out.trajectory_segments_inertial_planned = traj_segments_inertial_planned;
 
                 const double planned_end_s = prediction_segment_end_time(traj_segments_inertial_planned.back());
@@ -746,6 +841,7 @@ namespace Game
                 if (traj_inertial_planned.size() >= 2)
                 {
                     out.diagnostics.trajectory_sample_count_planned = traj_inertial_planned.size();
+                    sync_stage_counts();
                     out.trajectory_inertial_planned = traj_inertial_planned;
                 }
             }

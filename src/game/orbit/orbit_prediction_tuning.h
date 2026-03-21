@@ -14,11 +14,11 @@ namespace Game::OrbitPredictionTuning
     // Fallback orbital period used when orbit elements cannot be estimated reliably.
     inline constexpr double kEscapeDefaultPeriodS = 7'200.0;
 
-    // Global horizon bounds (in seconds) used by both gameplay and worker prediction code.
+    // Global horizon thresholds (in seconds) used to switch long-range policy profiles.
     inline constexpr double kMinHorizonS = 60.0;
-    inline constexpr double kMaxHorizonS = 15'552'000.0; // 180 days
+    inline constexpr double kMaxHorizonS = 15'552'000.0; // 180 days, now used as the long-range policy threshold.
     inline constexpr double kLongRangeHorizonThresholdS = kMaxHorizonS;
-    inline constexpr double kLongRangeHorizonCapS = 631'152'000.0; // 20 years
+    inline constexpr double kLongRangeHorizonCapS = 631'152'000.0; // Legacy safety rail, not a hard request clamp.
 
     // Generic trajectory sampling limits.
     inline constexpr double kMaxSampleDtS = 900.0;

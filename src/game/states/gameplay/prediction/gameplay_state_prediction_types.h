@@ -105,6 +105,7 @@ namespace Game
         MissingEphemeris,
         FrameTransformFailed,
         FrameSamplesUnavailable,
+        ContinuityFailed,
         Cancelled,
     };
 
@@ -115,6 +116,8 @@ namespace Game
         std::size_t frame_segment_count_planned{0};
         std::size_t frame_sample_count{0};
         std::size_t frame_sample_count_planned{0};
+        OrbitPredictionService::AdaptiveStageDiagnostics frame_base{};
+        OrbitPredictionService::AdaptiveStageDiagnostics frame_planned{};
     };
 
     struct OrbitPredictionCache

@@ -39,7 +39,24 @@ namespace Game
             EphemerisUnavailable,
             TrajectorySegmentsUnavailable,
             TrajectorySamplesUnavailable,
+            ContinuityFailed,
             Cancelled,
+        };
+
+        struct AdaptiveStageDiagnostics
+        {
+            double requested_duration_s{0.0};
+            double covered_duration_s{0.0};
+            std::size_t accepted_segments{0};
+            std::size_t rejected_splits{0};
+            std::size_t forced_boundary_splits{0};
+            std::size_t frame_resegmentation_count{0};
+            double min_dt_s{0.0};
+            double max_dt_s{0.0};
+            double avg_dt_s{0.0};
+            bool hard_cap_hit{false};
+            bool cancelled{false};
+            bool cache_reused{false};
         };
 
         struct Diagnostics
@@ -51,6 +68,9 @@ namespace Game
             std::size_t trajectory_segment_count_planned{0};
             std::size_t trajectory_sample_count{0};
             std::size_t trajectory_sample_count_planned{0};
+            AdaptiveStageDiagnostics ephemeris{};
+            AdaptiveStageDiagnostics trajectory_base{};
+            AdaptiveStageDiagnostics trajectory_planned{};
         };
 
         struct ManeuverNodePreview
@@ -139,6 +159,7 @@ namespace Game
             std::vector<orbitsim::MassiveBody> massive_bodies{};
             orbitsim::AdaptiveEphemerisOptions adaptive_options{};
             SharedCelestialEphemeris ephemeris{};
+            AdaptiveStageDiagnostics diagnostics{};
             uint64_t last_use_serial{0};
         };
 
@@ -178,7 +199,9 @@ namespace Game
         // Background loop that consumes queued jobs and publishes fresh results.
         void worker_loop();
         SharedCelestialEphemeris get_or_build_ephemeris(const EphemerisBuildRequest &request,
-                                                        const std::function<bool()> &cancel_requested);
+                                                        const std::function<bool()> &cancel_requested,
+                                                        AdaptiveStageDiagnostics *out_diagnostics = nullptr,
+                                                        bool *out_cache_reused = nullptr);
 
         std::vector<std::thread> _workers;
         mutable std::mutex _mutex;

@@ -101,6 +101,18 @@ namespace Game
         return comp_ctx;
     }
 
+    OrbiterInfo *GameplayState::find_player_orbiter()
+    {
+        for (auto &o : _orbiters)
+        {
+            if (o.is_player)
+            {
+                return &o;
+            }
+        }
+        return nullptr;
+    }
+
     const OrbiterInfo *GameplayState::find_player_orbiter() const
     {
         for (const auto &o : _orbiters)
@@ -119,6 +131,24 @@ namespace Game
         return p ? p->entity : EntityId{};
     }
 
+    OrbiterInfo *GameplayState::find_orbiter(const EntityId entity)
+    {
+        if (!entity.is_valid())
+        {
+            return nullptr;
+        }
+
+        for (auto &orbiter : _orbiters)
+        {
+            if (orbiter.entity == entity)
+            {
+                return &orbiter;
+            }
+        }
+
+        return nullptr;
+    }
+
     const OrbiterInfo *GameplayState::find_orbiter(const EntityId entity) const
     {
         if (!entity.is_valid())
@@ -129,6 +159,42 @@ namespace Game
         for (const auto &orbiter : _orbiters)
         {
             if (orbiter.entity == entity)
+            {
+                return &orbiter;
+            }
+        }
+
+        return nullptr;
+    }
+
+    OrbiterInfo *GameplayState::find_orbiter(const std::string_view name)
+    {
+        if (name.empty())
+        {
+            return nullptr;
+        }
+
+        for (auto &orbiter : _orbiters)
+        {
+            if (orbiter.name == name)
+            {
+                return &orbiter;
+            }
+        }
+
+        return nullptr;
+    }
+
+    const OrbiterInfo *GameplayState::find_orbiter(const std::string_view name) const
+    {
+        if (name.empty())
+        {
+            return nullptr;
+        }
+
+        for (const auto &orbiter : _orbiters)
+        {
+            if (orbiter.name == name)
             {
                 return &orbiter;
             }
