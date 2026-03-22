@@ -128,7 +128,7 @@ namespace Game
 
         ImGui::SameLine();
         float window_s = static_cast<float>(_maneuver_timeline_window_s);
-        if (ImGui::DragFloat("Timeline Window (s)", &window_s, 10.0f, 60.0f, 36'000.0f, "%.0f"))
+        if (ImGui::DragFloat("Timeline Window (s)", &window_s, 10.0f, 60.0f, 15'552'000.0f, "%.0f"))
         {
             _maneuver_timeline_window_s = static_cast<double>(std::max(60.0f, window_s));
         }
@@ -637,7 +637,7 @@ namespace Game
         }
 
         float t_from_now = static_cast<float>(sel->time_s - now_s);
-        if (ImGui::DragFloat("T+ (s)", &t_from_now, 1.0f, 0.0f, 36'000.0f, "%.1f"))
+        if (ImGui::DragFloat("T+ (s)", &t_from_now, 1.0f, 0.0f, 15'552'000.0f, "%.1f"))
         {
             sel->time_s = now_s + static_cast<double>(std::max(0.0f, t_from_now));
             needs_sort = true;

@@ -26,9 +26,9 @@ namespace Game::OrbitPredictionMath
                                                      const glm::dvec3 &r_m,
                                                      const glm::dvec3 &v_mps);
 
-    std::pair<double, double> select_prediction_horizon_and_dt(double mu_m3_s2,
-                                                                const glm::dvec3 &r_m,
-                                                                const glm::dvec3 &v_mps);
+    double select_prediction_horizon(double mu_m3_s2,
+                                     const glm::dvec3 &r_m,
+                                     const glm::dvec3 &v_mps);
 
     WorldVec3 hermite_position_world(const WorldVec3 &ref_body_world,
                                      const orbitsim::TrajectorySample &a,

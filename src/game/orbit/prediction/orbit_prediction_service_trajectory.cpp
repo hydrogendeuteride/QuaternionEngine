@@ -23,36 +23,40 @@ namespace Game
         return true;
     }
 
-    std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_samples(
-            const std::vector<orbitsim::TrajectorySample> &samples)
+    std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_body_ephemeris(
+            const orbitsim::CelestialEphemeris &ephemeris,
+            const orbitsim::BodyId body_id)
     {
         std::vector<orbitsim::TrajectorySegment> out;
-        if (samples.size() < 2)
+        if (ephemeris.empty() || body_id == orbitsim::kInvalidBodyId)
         {
             return out;
         }
 
-        out.reserve(samples.size() - 1);
-        for (std::size_t i = 1; i < samples.size(); ++i)
+        std::size_t body_index = 0;
+        if (!ephemeris.body_index_for_id(body_id, &body_index))
         {
-            const orbitsim::TrajectorySample &a = samples[i - 1];
-            const orbitsim::TrajectorySample &b = samples[i];
-            const double dt_s = b.t_s - a.t_s;
-            if (!(dt_s > 0.0) || !std::isfinite(dt_s))
+            return out;
+        }
+
+        out.reserve(ephemeris.segments.size());
+        for (const orbitsim::CelestialEphemerisSegment &segment : ephemeris.segments)
+        {
+            if (!(segment.dt_s > 0.0) || body_index >= segment.start.size() || body_index >= segment.end.size())
             {
                 continue;
             }
 
-            orbitsim::State start{};
-            start.position_m = a.position_m;
-            start.velocity_mps = a.velocity_mps;
-            orbitsim::State end{};
-            end.position_m = b.position_m;
-            end.velocity_mps = b.velocity_mps;
+            const orbitsim::State &start = segment.start[body_index];
+            const orbitsim::State &end = segment.end[body_index];
+            if (!finite_state(start) || !finite_state(end))
+            {
+                continue;
+            }
 
             out.push_back(orbitsim::TrajectorySegment{
-                    .t0_s = a.t_s,
-                    .dt_s = dt_s,
+                    .t0_s = segment.t0_s,
+                    .dt_s = segment.dt_s,
                     .start = start,
                     .end = end,
                     .flags = 0u,
@@ -132,7 +136,8 @@ namespace Game
     void append_or_merge_planned_boundary_state(std::vector<PlannedSegmentBoundaryState> &states,
                                                 const double t_s,
                                                 const orbitsim::State &state_before,
-                                                const orbitsim::State &state_after)
+                                                const orbitsim::State &state_after,
+                                                const std::uint32_t flags)
     {
         if (!std::isfinite(t_s) || !finite_state(state_before) || !finite_state(state_after))
         {
@@ -143,6 +148,7 @@ namespace Game
         if (!states.empty() && std::abs(states.back().t_s - t_s) <= kBoundaryMergeToleranceS)
         {
             states.back().state_after = state_after;
+            states.back().flags |= flags;
             return;
         }
 
@@ -150,6 +156,7 @@ namespace Game
                 .t_s = t_s,
                 .state_before = state_before,
                 .state_after = state_after,
+                .flags = flags,
         });
     }
 
@@ -179,6 +186,7 @@ namespace Game
 
             double cursor_t_s = seg_t0_s;
             orbitsim::State cursor_state = segment.start;
+            std::uint32_t cursor_flags = segment.flags;
 
             while (boundary_index < boundaries.size() &&
                    boundaries[boundary_index].t_s <= (seg_t0_s + kBoundaryEpsilonS))
@@ -186,6 +194,7 @@ namespace Game
                 if (std::abs(boundaries[boundary_index].t_s - seg_t0_s) <= kBoundaryEpsilonS)
                 {
                     cursor_state = boundaries[boundary_index].state_after;
+                    cursor_flags = boundaries[boundary_index].flags;
                 }
                 ++boundary_index;
             }
@@ -201,6 +210,7 @@ namespace Game
                 if (!(boundary.t_s > (cursor_t_s + kBoundaryEpsilonS)))
                 {
                     cursor_state = boundary.state_after;
+                    cursor_flags = boundary.flags;
                     ++local_boundary_index;
                     continue;
                 }
@@ -213,12 +223,13 @@ namespace Game
                             .dt_s = part_dt_s,
                             .start = cursor_state,
                             .end = boundary.state_before,
-                            .flags = segment.flags,
+                            .flags = cursor_flags,
                     });
                 }
 
                 cursor_t_s = boundary.t_s;
                 cursor_state = boundary.state_after;
+                cursor_flags = boundary.flags;
                 ++local_boundary_index;
             }
 
@@ -230,7 +241,7 @@ namespace Game
                         .dt_s = tail_dt_s,
                         .start = cursor_state,
                         .end = segment.end,
-                        .flags = segment.flags,
+                        .flags = cursor_flags,
                 });
             }
 

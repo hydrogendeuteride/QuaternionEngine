@@ -97,6 +97,29 @@ namespace Game
         bool draw_planned_as_dashed{true};
     };
 
+    enum class PredictionDerivedStatus : uint8_t
+    {
+        None = 0,
+        Success,
+        MissingSolverData,
+        MissingEphemeris,
+        FrameTransformFailed,
+        FrameSamplesUnavailable,
+        ContinuityFailed,
+        Cancelled,
+    };
+
+    struct OrbitPredictionDerivedDiagnostics
+    {
+        PredictionDerivedStatus status{PredictionDerivedStatus::None};
+        std::size_t frame_segment_count{0};
+        std::size_t frame_segment_count_planned{0};
+        std::size_t frame_sample_count{0};
+        std::size_t frame_sample_count_planned{0};
+        OrbitPredictionService::AdaptiveStageDiagnostics frame_base{};
+        OrbitPredictionService::AdaptiveStageDiagnostics frame_planned{};
+    };
+
     struct OrbitPredictionCache
     {
         using ManeuverNodePreview = OrbitPredictionService::ManeuverNodePreview;
@@ -120,12 +143,16 @@ namespace Game
         std::vector<orbitsim::TrajectorySample> trajectory_frame_planned;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame_planned;
+        std::vector<orbitsim::TrajectorySample> trajectory_analysis_bci;
+        std::vector<orbitsim::TrajectorySegment> trajectory_segments_analysis_bci;
         std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> gpu_roots_frame;
         std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> gpu_roots_frame_planned;
         OrbitRenderCurve render_curve_frame;
         OrbitRenderCurve render_curve_frame_planned;
         orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
         bool resolved_frame_spec_valid{false};
+        orbitsim::BodyId analysis_cache_body_id{orbitsim::kInvalidBodyId};
+        bool analysis_cache_valid{false};
         std::vector<ManeuverNodePreview> maneuver_previews;
 
         std::vector<float> altitude_km;
@@ -158,12 +185,16 @@ namespace Game
             trajectory_frame_planned.clear();
             trajectory_segments_frame.clear();
             trajectory_segments_frame_planned.clear();
+            trajectory_analysis_bci.clear();
+            trajectory_segments_analysis_bci.clear();
             gpu_roots_frame.reset();
             gpu_roots_frame_planned.reset();
             render_curve_frame.clear();
             render_curve_frame_planned.clear();
             resolved_frame_spec = {};
             resolved_frame_spec_valid = false;
+            analysis_cache_body_id = orbitsim::kInvalidBodyId;
+            analysis_cache_valid = false;
             maneuver_previews.clear();
             altitude_km.clear();
             speed_kmps.clear();
@@ -299,6 +330,8 @@ namespace Game
         bool is_celestial{false};
         orbitsim::BodyId auto_primary_body_id{orbitsim::kInvalidBodyId};
         double solver_ms_last{0.0};
+        OrbitPredictionService::Diagnostics solver_diagnostics{};
+        OrbitPredictionDerivedDiagnostics derived_diagnostics{};
 
         void clear_runtime()
         {
@@ -310,6 +343,8 @@ namespace Game
             invalidated_while_pending = false;
             auto_primary_body_id = orbitsim::kInvalidBodyId;
             solver_ms_last = 0.0;
+            solver_diagnostics = {};
+            derived_diagnostics = {};
         }
     };
 

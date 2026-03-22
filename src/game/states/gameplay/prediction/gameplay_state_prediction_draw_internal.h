@@ -51,8 +51,6 @@ namespace Game::PredictionDrawDetail
                                              float alpha_f);
     double compute_prediction_now_s(double display_time_s, double t0, double t1);
     double meters_per_px_at_world(const OrbitDrawWindowContext &ctx, const WorldVec3 &p_world);
-    std::vector<orbitsim::TrajectorySegment> trajectory_segments_from_samples(
-            const std::vector<orbitsim::TrajectorySample> &samples);
     double snap_time_past_straddling_segment(const std::vector<orbitsim::TrajectorySegment> &traj_segments, double t_s);
     std::vector<double> collect_maneuver_node_times(const std::vector<ManeuverNode> &nodes);
     std::size_t lower_bound_sample_index(const std::vector<orbitsim::TrajectorySample> &traj, double t_s);
