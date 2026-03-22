@@ -26,7 +26,7 @@ namespace Game
             orbitsim::GameSimulation::Config sim_config{};
             orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
             orbitsim::BodyId analysis_body_id{orbitsim::kInvalidBodyId};
-            std::vector<orbitsim::TrajectorySample> player_lookup_trajectory_inertial{};
+            std::vector<orbitsim::TrajectorySegment> player_lookup_segments_inertial{};
         };
 
         struct Result
@@ -34,6 +34,7 @@ namespace Game
             uint64_t track_id{0};
             uint64_t generation_id{0};
             bool valid{false};
+            OrbitPredictionDerivedDiagnostics diagnostics{};
             OrbitPredictionCache cache{};
         };
 
@@ -56,7 +57,7 @@ namespace Game
             Request request{};
         };
 
-        Result build_cache(const PendingJob &job) const;
+        Result build_cache(PendingJob job) const;
         static bool should_publish_result(const PendingJob &job,
                                           uint64_t current_request_epoch,
                                           const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track);

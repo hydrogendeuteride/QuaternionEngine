@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <unordered_map>
 
 namespace Game
 {
@@ -359,6 +360,12 @@ namespace Game
                     : prediction_cache->trajectory_inertial;
         const double traj_node_t0 = traj_node_world.front().t_s;
         const double traj_node_t1 = traj_node_world.back().t_s;
+        std::unordered_map<int, const OrbitPredictionCache::ManeuverNodePreview *> preview_by_node_id;
+        preview_by_node_id.reserve(prediction_cache->maneuver_previews.size());
+        for (const OrbitPredictionCache::ManeuverNodePreview &preview : prediction_cache->maneuver_previews)
+        {
+            preview_by_node_id[preview.node_id] = &preview;
+        }
         glm::dmat3 display_frame_to_world(1.0);
         orbitsim::RotatingFrame display_frame_now{};
         const bool have_display_frame = build_prediction_display_frame(*prediction_cache, display_frame_now, now_s);
@@ -374,19 +381,28 @@ namespace Game
                                                            display_frame_now.ez_i.y,
                                                            display_frame_now.ez_i.z));
         }
+        double cached_sample_frame_time_s = std::numeric_limits<double>::quiet_NaN();
+        orbitsim::RotatingFrame cached_sample_frame{};
+        bool cached_sample_frame_valid = false;
 
         const auto transform_inertial_basis_to_display_world =
                 [&](const glm::dvec3 &basis_inertial, const double sample_time_s, const glm::dvec3 &fallback) -> glm::dvec3 {
                     glm::dvec3 basis_in_display = basis_inertial;
-                    orbitsim::RotatingFrame sample_frame{};
-                    if (have_display_frame &&
-                        std::isfinite(sample_time_s) &&
-                        build_prediction_display_frame(*prediction_cache, sample_frame, sample_time_s))
+                    if (have_display_frame && std::isfinite(sample_time_s))
                     {
-                        const orbitsim::Vec3 frame_vec = orbitsim::inertial_vector_to_frame(
-                                sample_frame,
-                                orbitsim::Vec3{basis_inertial.x, basis_inertial.y, basis_inertial.z});
-                        basis_in_display = glm::dvec3(frame_vec.x, frame_vec.y, frame_vec.z);
+                        if (!cached_sample_frame_valid || sample_time_s != cached_sample_frame_time_s)
+                        {
+                            cached_sample_frame_valid =
+                                    build_prediction_display_frame(*prediction_cache, cached_sample_frame, sample_time_s);
+                            cached_sample_frame_time_s = sample_time_s;
+                        }
+                        if (cached_sample_frame_valid)
+                        {
+                            const orbitsim::Vec3 frame_vec = orbitsim::inertial_vector_to_frame(
+                                    cached_sample_frame,
+                                    orbitsim::Vec3{basis_inertial.x, basis_inertial.y, basis_inertial.z});
+                            basis_in_display = glm::dvec3(frame_vec.x, frame_vec.y, frame_vec.z);
+                        }
                     }
                     return normalized_or(display_frame_to_world * basis_in_display, fallback);
                 };
@@ -466,15 +482,9 @@ namespace Game
                 continue;
             }
 
-            const OrbitPredictionCache::ManeuverNodePreview *preview = nullptr;
-            for (const OrbitPredictionCache::ManeuverNodePreview &candidate : prediction_cache->maneuver_previews)
-            {
-                if (candidate.node_id == node.id)
-                {
-                    preview = &candidate;
-                    break;
-                }
-            }
+            const auto preview_it = preview_by_node_id.find(node.id);
+            const OrbitPredictionCache::ManeuverNodePreview *preview =
+                    (preview_it != preview_by_node_id.end()) ? preview_it->second : nullptr;
 
             glm::dvec3 r_rel_m{0.0, 0.0, 0.0};
             glm::dvec3 v_rel_mps{0.0, 0.0, 0.0};

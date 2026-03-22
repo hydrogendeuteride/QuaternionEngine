@@ -1,4 +1,5 @@
 #include "game/states/gameplay/prediction/gameplay_state_prediction_draw_internal.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_cache_internal.h"
 
 #include "game/orbit/orbit_prediction_tuning.h"
 
@@ -363,25 +364,13 @@ namespace Game
                 }
             }
 
-            std::vector<orbitsim::TrajectorySegment> base_segments_fallback;
             const std::vector<orbitsim::TrajectorySegment> *traj_base_segments = &track->cache.trajectory_segments_frame;
-            if (traj_base_segments->empty())
-            {
-                base_segments_fallback = Draw::trajectory_segments_from_samples(traj_base);
-                traj_base_segments = &base_segments_fallback;
-            }
             if (traj_base_segments->empty())
             {
                 continue;
             }
 
-            std::vector<orbitsim::TrajectorySegment> planned_segments_fallback;
             const std::vector<orbitsim::TrajectorySegment> *traj_planned_segments = &track->cache.trajectory_segments_frame_planned;
-            if (traj_planned_segments->empty() && !traj_planned.empty())
-            {
-                planned_segments_fallback = Draw::trajectory_segments_from_samples(traj_planned);
-                traj_planned_segments = &planned_segments_fallback;
-            }
 
             const bool is_active = track->key == _prediction_selection.active_subject;
             const bool active_player_track = is_active && prediction_subject_is_player(track->key);
@@ -629,6 +618,29 @@ namespace Game
                                                 false,
                                                 draw_ctx.line_overlay_boost);
                 }
+                else if (use_persistent_gpu_roots)
+                {
+                    const auto &gpu_roots = PredictionCacheInternal::ensure_gpu_root_cache(
+                            track->cache.gpu_roots_frame,
+                            track->cache.trajectory_segments_frame);
+                    if (gpu_roots && !gpu_roots->empty())
+                    {
+                        enqueue_cached_orbit_window(orbit_plot,
+                                                    gpu_roots,
+                                                    ref_body_world,
+                                                    frame_to_world,
+                                                    align_delta,
+                                                    t0,
+                                                    t_full_end,
+                                                    track_color_full,
+                                                    false,
+                                                    draw_ctx.line_overlay_boost);
+                    }
+                    else
+                    {
+                        draw_cpu_base_window(t0, t_full_end, track_color_full);
+                    }
+                }
                 else
                 {
                     draw_cpu_base_window(t0, t_full_end, track_color_full);
@@ -667,6 +679,29 @@ namespace Game
                                                 track_color_future,
                                                 false,
                                                 draw_ctx.line_overlay_boost);
+                }
+                else if (use_persistent_gpu_roots)
+                {
+                    const auto &gpu_roots = PredictionCacheInternal::ensure_gpu_root_cache(
+                            track->cache.gpu_roots_frame,
+                            track->cache.trajectory_segments_frame);
+                    if (gpu_roots && !gpu_roots->empty())
+                    {
+                        enqueue_cached_orbit_window(orbit_plot,
+                                                    gpu_roots,
+                                                    ref_body_world,
+                                                    frame_to_world,
+                                                    align_delta,
+                                                    now_s,
+                                                    t_end,
+                                                    track_color_future,
+                                                    false,
+                                                    draw_ctx.line_overlay_boost);
+                    }
+                    else
+                    {
+                        draw_cpu_base_window(now_s, t_end, track_color_future);
+                    }
                 }
                 else
                 {
@@ -717,6 +752,47 @@ namespace Game
                                                 track_color_plan,
                                                 _prediction_draw_config.draw_planned_as_dashed,
                                                 draw_ctx.line_overlay_boost);
+                }
+                else if (use_persistent_gpu_roots)
+                {
+                    const auto &gpu_roots_planned = PredictionCacheInternal::ensure_gpu_root_cache(
+                            track->cache.gpu_roots_frame_planned,
+                            track->cache.trajectory_segments_frame_planned);
+                    if (gpu_roots_planned && !gpu_roots_planned->empty())
+                    {
+                        enqueue_cached_orbit_window(orbit_plot,
+                                                    gpu_roots_planned,
+                                                    ref_body_world,
+                                                    frame_to_world,
+                                                    align_delta,
+                                                    planned_pick_window.t0_s,
+                                                    planned_pick_window.t1_s,
+                                                    track_color_plan,
+                                                    _prediction_draw_config.draw_planned_as_dashed,
+                                                    draw_ctx.line_overlay_boost);
+                    }
+                    else if (use_planned_adaptive_curve)
+                    {
+                        Draw::draw_adaptive_curve_window(draw_ctx,
+                                                         _prediction_draw_config,
+                                                         _orbit_plot_perf,
+                                                         track->cache.render_curve_frame_planned,
+                                                         planned_pick_window.t0_s,
+                                                         planned_pick_window.t1_s,
+                                                         track_color_plan,
+                                                         _prediction_draw_config.draw_planned_as_dashed);
+                    }
+                    else
+                    {
+                        Draw::draw_orbit_window(draw_ctx,
+                                                _prediction_draw_config,
+                                                _orbit_plot_perf,
+                                                *traj_planned_segments,
+                                                planned_pick_window.t0_s,
+                                                planned_pick_window.t1_s,
+                                                track_color_plan,
+                                                _prediction_draw_config.draw_planned_as_dashed);
+                    }
                 }
                 else if (use_planned_adaptive_curve)
                 {

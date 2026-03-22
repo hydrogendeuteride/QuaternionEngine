@@ -88,6 +88,9 @@ namespace Game
             track.dirty = false;
             track.invalidated_while_pending = false;
             track.auto_primary_body_id = orbitsim::kInvalidBodyId;
+            track.solver_ms_last = 0.0;
+            track.solver_diagnostics = {};
+            track.derived_diagnostics = {};
         }
         _prediction_service.reset();
         _prediction_derived_service.reset();
@@ -126,6 +129,8 @@ namespace Game
         }
 
         track->solver_ms_last = std::max(0.0, result.compute_time_ms);
+        track->solver_diagnostics = result.diagnostics;
+        track->derived_diagnostics = {};
 
         if (!result.valid || result.trajectory_inertial.size() < 2)
         {
@@ -144,6 +149,7 @@ namespace Game
         resolve_cache.build_time_s = result.build_time_s;
         resolve_cache.shared_ephemeris = result.shared_ephemeris;
         resolve_cache.massive_bodies = result.massive_bodies;
+        resolve_cache.trajectory_segments_inertial = result.trajectory_segments_inertial;
         const double reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : result.build_time_s;
         const orbitsim::TrajectoryFrameSpec resolved_frame_spec =
                 resolve_prediction_display_frame_spec(resolve_cache, reference_time_s);
@@ -159,27 +165,27 @@ namespace Game
             track->auto_primary_body_id = analysis_body_id;
         }
 
-        std::vector<orbitsim::TrajectorySample> player_lookup_trajectory;
+        std::vector<orbitsim::TrajectorySegment> player_lookup_segments;
         if (prediction_subject_is_player(track->key))
         {
-            if (result.trajectory_inertial_planned.size() >= 2)
+            if (!result.trajectory_segments_inertial_planned.empty())
             {
-                player_lookup_trajectory = result.trajectory_inertial_planned;
+                player_lookup_segments = result.trajectory_segments_inertial_planned;
             }
-            else
+            else if (!result.trajectory_segments_inertial.empty())
             {
-                player_lookup_trajectory = result.trajectory_inertial;
+                player_lookup_segments = result.trajectory_segments_inertial;
             }
         }
         else if (const PredictionTrackState *player_track = player_prediction_track())
         {
-            if (player_track->cache.trajectory_inertial_planned.size() >= 2)
+            if (!player_track->cache.trajectory_segments_inertial_planned.empty())
             {
-                player_lookup_trajectory = player_track->cache.trajectory_inertial_planned;
+                player_lookup_segments = player_track->cache.trajectory_segments_inertial_planned;
             }
-            else if (player_track->cache.trajectory_inertial.size() >= 2)
+            else if (!player_track->cache.trajectory_segments_inertial.empty())
             {
-                player_lookup_trajectory = player_track->cache.trajectory_inertial;
+                player_lookup_segments = player_track->cache.trajectory_segments_inertial;
             }
         }
 
@@ -192,8 +198,10 @@ namespace Game
         derived_request.sim_config = _orbitsim ? _orbitsim->sim.config() : orbitsim::GameSimulation::Config{};
         derived_request.resolved_frame_spec = resolved_frame_spec;
         derived_request.analysis_body_id = analysis_body_id;
-        derived_request.player_lookup_trajectory_inertial = std::move(player_lookup_trajectory);
+        derived_request.player_lookup_segments_inertial = std::move(player_lookup_segments);
         _prediction_derived_service.request(std::move(derived_request));
+        // Let the solver queue accept a fresher generation while derived work finishes in parallel.
+        track->request_pending = false;
         track->derived_request_pending = true;
     }
 
@@ -216,6 +224,7 @@ namespace Game
 
         track->derived_request_pending = false;
         track->request_pending = false;
+        track->derived_diagnostics = result.diagnostics;
         const bool keep_dirty_for_followup = track->invalidated_while_pending;
         track->invalidated_while_pending = false;
 
@@ -321,11 +330,6 @@ namespace Game
             return rebuild;
         }
 
-        if (with_maneuvers && !maneuver_live_preview)
-        {
-            return false;
-        }
-
         double cache_end_s = track.cache.trajectory_inertial.back().t_s;
         if (!track.cache.trajectory_segments_inertial.empty())
         {
@@ -414,7 +418,11 @@ namespace Game
                 OrbitPredictionService::ManeuverImpulse impulse{};
                 impulse.node_id = node.id;
                 impulse.t_s = node.time_s;
-                impulse.primary_body_id = resolve_maneuver_node_primary_body_id(node, node.time_s);
+                // For auto-primary nodes, let the worker resolve the dominant body at the node time
+                // from the propagated state instead of baking in a stale cache-based guess here.
+                impulse.primary_body_id = node.primary_body_auto
+                                                  ? orbitsim::kInvalidBodyId
+                                                  : resolve_maneuver_node_primary_body_id(node, node.time_s);
                 impulse.dv_rtn_mps = orbitsim::Vec3{node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z};
                 request.maneuver_impulses.push_back(impulse);
             }
