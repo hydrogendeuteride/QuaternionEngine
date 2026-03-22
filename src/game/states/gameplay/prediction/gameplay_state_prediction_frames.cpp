@@ -87,9 +87,16 @@ namespace Game
                 cache.resolved_frame_spec_valid
                     ? cache.resolved_frame_spec
                     : resolve_prediction_display_frame_spec(cache, reference_time_s);
-        const bool maneuver_live_preview =
-                _maneuver_plan_live_preview_active ||
+        const bool dragging_maneuver_axis =
                 _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
+        if (dragging_maneuver_axis &&
+            prediction_frame_is_lagrange_sensitive(frame_spec) &&
+            std::isfinite(_maneuver_gizmo_interaction.drag_display_reference_time_s))
+        {
+            return _maneuver_gizmo_interaction.drag_display_reference_time_s;
+        }
+        const bool maneuver_live_preview =
+                _maneuver_plan_live_preview_active || dragging_maneuver_axis;
         const bool freeze_planned_synodic =
                 prediction_frame_is_lagrange_sensitive(frame_spec) &&
                 _maneuver_nodes_enabled &&

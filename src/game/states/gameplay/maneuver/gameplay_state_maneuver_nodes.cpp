@@ -634,7 +634,6 @@ namespace Game
             }
             else
             {
-                const glm::dvec3 fallback_rtn_r(solver_frame.R.x, solver_frame.R.y, solver_frame.R.z);
                 const glm::dvec3 fallback_rtn_t(solver_frame.T.x, solver_frame.T.y, solver_frame.T.z);
                 glm::dvec3 prograde_inertial = normalized_or(v_rel_mps, fallback_rtn_t);
                 glm::dvec3 normal_inertial = normalized_or(glm::dvec3(solver_frame.N.x, solver_frame.N.y, solver_frame.N.z),
@@ -648,8 +647,6 @@ namespace Game
                 }
                 const glm::dvec3 normal_world_fallback =
                         transform_inertial_basis_to_world(normal_inertial, node.maneuver_basis_n_world);
-                // PON gizmo must stay aligned to the pre-burn orbital frame. Sampling the displayed trajectory
-                // near the node can cross the burn discontinuity and rotate the basis toward the post-burn orbit.
                 glm::dvec3 prograde_world = prograde_world_fallback;
                 glm::dvec3 normal_world = normalized_or(normal_world_fallback, node.maneuver_basis_n_world);
                 glm::dvec3 outward_world = normalized_or(glm::cross(prograde_world, normal_world), node.maneuver_basis_r_world);
@@ -667,6 +664,14 @@ namespace Game
                 node.basis_r_world = outward_world;
                 node.basis_t_world = prograde_world;
                 node.basis_n_world = normal_world;
+            }
+
+            if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis &&
+                _maneuver_gizmo_interaction.node_id == node.id)
+            {
+                node.basis_r_world = _maneuver_gizmo_interaction.drag_basis_r_world;
+                node.basis_t_world = _maneuver_gizmo_interaction.drag_basis_t_world;
+                node.basis_n_world = _maneuver_gizmo_interaction.drag_basis_n_world;
             }
 
             // Burn direction is used purely for debug visualization; zero-DV nodes fall back to the tangential axis.
