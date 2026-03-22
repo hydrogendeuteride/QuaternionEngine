@@ -385,6 +385,7 @@ namespace Game
         out.generation_id = generation_id;
         out.track_id = request.track_id;
         out.build_time_s = request.sim_time_s;
+        out.solve_quality = request.solve_quality;
         const auto cancel_requested = [this,
                                        track_id = request.track_id,
                                        generation_id,
@@ -530,7 +531,7 @@ namespace Game
                 return fail(Status::TrajectorySamplesUnavailable);
             }
 
-            const std::vector<orbitsim::TrajectorySegment> traj_segments_inertial =
+            std::vector<orbitsim::TrajectorySegment> traj_segments_inertial =
                     trajectory_segments_from_body_ephemeris(*shared_ephemeris, subject_sim->id);
             if (traj_segments_inertial.empty())
             {
@@ -609,7 +610,7 @@ namespace Game
         const orbitsim::CelestialEphemeris &eph = *shared_ephemeris;
 
         orbitsim::AdaptiveSegmentDiagnostics base_diag{};
-        const std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_baseline =
+        std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_baseline =
                 orbitsim::predict_spacecraft_trajectory_segments_adaptive(sim, eph, ship_h.id, segment_opt, &base_diag);
         if (traj_segments_inertial_baseline.empty())
         {
@@ -630,8 +631,8 @@ namespace Game
         }
 
         const std::size_t baseline_sample_count =
-                std::clamp<std::size_t>(traj_segments_inertial_baseline.size() * 2, 2, 4'000);
-        const std::vector<orbitsim::TrajectorySample> traj_inertial_baseline =
+                prediction_sample_budget(request, traj_segments_inertial_baseline.size());
+        std::vector<orbitsim::TrajectorySample> traj_inertial_baseline =
                 resample_segments_uniform(traj_segments_inertial_baseline, baseline_sample_count);
         if (traj_inertial_baseline.size() < 2)
         {
@@ -646,8 +647,8 @@ namespace Game
         }
 
         out.shared_ephemeris = shared_ephemeris;
-        out.trajectory_segments_inertial = traj_segments_inertial_baseline;
-        out.trajectory_inertial = traj_inertial_baseline;
+        out.trajectory_segments_inertial = std::move(traj_segments_inertial_baseline);
+        out.trajectory_inertial = std::move(traj_inertial_baseline);
 
         if (!request.maneuver_impulses.empty())
         {
@@ -782,17 +783,17 @@ namespace Game
                 out.diagnostics.trajectory_planned.covered_duration_s =
                         prediction_segment_span_s(traj_segments_inertial_planned);
                 sync_stage_counts();
-                out.trajectory_segments_inertial_planned = traj_segments_inertial_planned;
+                out.trajectory_segments_inertial_planned = std::move(traj_segments_inertial_planned);
 
                 const std::size_t planned_sample_count =
-                        std::clamp<std::size_t>(traj_segments_inertial_planned.size() * 2, 2, 4'000);
-                const std::vector<orbitsim::TrajectorySample> traj_inertial_planned =
-                        resample_segments_uniform(traj_segments_inertial_planned, planned_sample_count);
+                        prediction_sample_budget(request, out.trajectory_segments_inertial_planned.size());
+                std::vector<orbitsim::TrajectorySample> traj_inertial_planned =
+                        resample_segments_uniform(out.trajectory_segments_inertial_planned, planned_sample_count);
                 if (traj_inertial_planned.size() >= 2)
                 {
                     out.diagnostics.trajectory_sample_count_planned = traj_inertial_planned.size();
                     sync_stage_counts();
-                    out.trajectory_inertial_planned = traj_inertial_planned;
+                    out.trajectory_inertial_planned = std::move(traj_inertial_planned);
                 }
             }
         }

@@ -255,6 +255,57 @@ namespace Game
         mark_maneuver_plan_dirty();
     }
 
+    void GameplayState::remove_maneuver_node_suffix(const int node_id, const int hint_index)
+    {
+        const auto erase_begin = std::find_if(_maneuver_state.nodes.begin(),
+                                              _maneuver_state.nodes.end(),
+                                              [node_id](const ManeuverNode &n) { return n.id == node_id; });
+        if (erase_begin == _maneuver_state.nodes.end())
+        {
+            return;
+        }
+
+        const auto removes_node_id = [erase_begin, this](const int candidate_id) {
+            return std::any_of(erase_begin,
+                               _maneuver_state.nodes.end(),
+                               [candidate_id](const ManeuverNode &n) { return n.id == candidate_id; });
+        };
+
+        const bool removed_selected = removes_node_id(_maneuver_state.selected_node_id);
+        const bool removed_gizmo = removes_node_id(_maneuver_gizmo_interaction.node_id);
+        const bool removed_execute = _execute_node_armed && removes_node_id(_execute_node_id);
+        _maneuver_state.nodes.erase(erase_begin, _maneuver_state.nodes.end());
+
+        if (removed_selected)
+        {
+            if (_maneuver_state.nodes.empty())
+            {
+                _maneuver_state.selected_node_id = -1;
+            }
+            else if (hint_index >= 0)
+            {
+                const int new_idx = std::clamp(hint_index, 0, static_cast<int>(_maneuver_state.nodes.size()) - 1);
+                _maneuver_state.selected_node_id = _maneuver_state.nodes[static_cast<size_t>(new_idx)].id;
+            }
+            else
+            {
+                _maneuver_state.selected_node_id = _maneuver_state.nodes.front().id;
+            }
+        }
+
+        if (removed_gizmo)
+        {
+            _maneuver_gizmo_interaction = {};
+        }
+        if (removed_execute)
+        {
+            _execute_node_armed = false;
+            _execute_node_id = -1;
+        }
+
+        mark_maneuver_plan_dirty();
+    }
+
     WorldVec3 GameplayState::compute_maneuver_align_delta(GameStateContext &ctx,
                                                           const OrbitPredictionCache &cache,
                                                           const std::vector<orbitsim::TrajectorySample> &traj_base)
@@ -366,45 +417,12 @@ namespace Game
         {
             preview_by_node_id[preview.node_id] = &preview;
         }
-        glm::dmat3 display_frame_to_world(1.0);
-        orbitsim::RotatingFrame display_frame_now{};
-        const bool have_display_frame = build_prediction_display_frame(*prediction_cache, display_frame_now, now_s);
-        if (have_display_frame)
-        {
-            display_frame_to_world = glm::dmat3(glm::dvec3(display_frame_now.ex_i.x,
-                                                           display_frame_now.ex_i.y,
-                                                           display_frame_now.ex_i.z),
-                                                glm::dvec3(display_frame_now.ey_i.x,
-                                                           display_frame_now.ey_i.y,
-                                                           display_frame_now.ey_i.z),
-                                                glm::dvec3(display_frame_now.ez_i.x,
-                                                           display_frame_now.ez_i.y,
-                                                           display_frame_now.ez_i.z));
-        }
-        double cached_sample_frame_time_s = std::numeric_limits<double>::quiet_NaN();
-        orbitsim::RotatingFrame cached_sample_frame{};
-        bool cached_sample_frame_valid = false;
-
-        const auto transform_inertial_basis_to_display_world =
-                [&](const glm::dvec3 &basis_inertial, const double sample_time_s, const glm::dvec3 &fallback) -> glm::dvec3 {
-                    glm::dvec3 basis_in_display = basis_inertial;
-                    if (have_display_frame && std::isfinite(sample_time_s))
-                    {
-                        if (!cached_sample_frame_valid || sample_time_s != cached_sample_frame_time_s)
-                        {
-                            cached_sample_frame_valid =
-                                    build_prediction_display_frame(*prediction_cache, cached_sample_frame, sample_time_s);
-                            cached_sample_frame_time_s = sample_time_s;
-                        }
-                        if (cached_sample_frame_valid)
-                        {
-                            const orbitsim::Vec3 frame_vec = orbitsim::inertial_vector_to_frame(
-                                    cached_sample_frame,
-                                    orbitsim::Vec3{basis_inertial.x, basis_inertial.y, basis_inertial.z});
-                            basis_in_display = glm::dvec3(frame_vec.x, frame_vec.y, frame_vec.z);
-                        }
-                    }
-                    return normalized_or(display_frame_to_world * basis_in_display, fallback);
+        const auto transform_inertial_basis_to_world =
+                [&](const glm::dvec3 &basis_inertial, const glm::dvec3 &fallback) -> glm::dvec3 {
+                    // Keep maneuver axes in physical inertial/world orientation. If we remap them
+                    // through the active display frame, Synodic rotation feeds back into RTN/PON
+                    // and the gizmo visibly twists while editing.
+                    return normalized_or(basis_inertial, fallback);
                 };
 
         const auto sample_displayed_node_world = [&](const double sample_time_s, WorldVec3 &out_world) -> bool {
@@ -438,6 +456,43 @@ namespace Game
                             : prediction_sample_position_world(*prediction_cache, traj_node_world.front(), now_s);
             out_world += align_delta;
             return finite3(glm::dvec3(out_world));
+        };
+
+        const auto sample_displayed_tangent_world = [&](const double sample_time_s, glm::dvec3 &out_tangent_world) -> bool {
+            out_tangent_world = glm::dvec3(0.0, 0.0, 0.0);
+            if (traj_node_world.size() < 2 || !std::isfinite(sample_time_s))
+            {
+                return false;
+            }
+
+            const double backward_dt_s = std::min(0.25, std::max(0.0, sample_time_s - traj_node_t0));
+            const double forward_dt_s = std::min(0.25, std::max(0.0, traj_node_t1 - sample_time_s));
+
+            WorldVec3 p0_world{0.0, 0.0, 0.0};
+            WorldVec3 p1_world{0.0, 0.0, 0.0};
+            if (backward_dt_s >= 1.0e-4)
+            {
+                if (!sample_displayed_node_world(sample_time_s - backward_dt_s, p0_world) ||
+                    !sample_displayed_node_world(sample_time_s, p1_world))
+                {
+                    return false;
+                }
+            }
+            else if (forward_dt_s >= 1.0e-4)
+            {
+                if (!sample_displayed_node_world(sample_time_s, p0_world) ||
+                    !sample_displayed_node_world(sample_time_s + forward_dt_s, p1_world))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            out_tangent_world = normalized_or(glm::dvec3(p1_world - p0_world), glm::dvec3(0.0, 1.0, 0.0));
+            return finite3(out_tangent_world);
         };
 
         const auto resolve_node_primary_body_id =
@@ -558,21 +613,18 @@ namespace Game
 
             const orbitsim::RtnFrame solver_frame = compute_maneuver_frame(r_rel_m, v_rel_mps);
             // Cache the authored true-RTN basis once and keep the visible/editable handles on that same basis.
-            node.maneuver_basis_r_world = transform_inertial_basis_to_display_world(glm::dvec3(solver_frame.R.x,
-                                                                                                solver_frame.R.y,
-                                                                                                solver_frame.R.z),
-                                                                                    basis_time_s,
-                                                                                    glm::dvec3(1.0, 0.0, 0.0));
-            node.maneuver_basis_t_world = transform_inertial_basis_to_display_world(glm::dvec3(solver_frame.T.x,
-                                                                                                solver_frame.T.y,
-                                                                                                solver_frame.T.z),
-                                                                                    basis_time_s,
-                                                                                    glm::dvec3(0.0, 1.0, 0.0));
-            node.maneuver_basis_n_world = transform_inertial_basis_to_display_world(glm::dvec3(solver_frame.N.x,
-                                                                                                solver_frame.N.y,
-                                                                                                solver_frame.N.z),
-                                                                                    basis_time_s,
-                                                                                    glm::dvec3(0.0, 0.0, 1.0));
+            node.maneuver_basis_r_world = transform_inertial_basis_to_world(glm::dvec3(solver_frame.R.x,
+                                                                                        solver_frame.R.y,
+                                                                                        solver_frame.R.z),
+                                                                            glm::dvec3(1.0, 0.0, 0.0));
+            node.maneuver_basis_t_world = transform_inertial_basis_to_world(glm::dvec3(solver_frame.T.x,
+                                                                                        solver_frame.T.y,
+                                                                                        solver_frame.T.z),
+                                                                            glm::dvec3(0.0, 1.0, 0.0));
+            node.maneuver_basis_n_world = transform_inertial_basis_to_world(glm::dvec3(solver_frame.N.x,
+                                                                                        solver_frame.N.y,
+                                                                                        solver_frame.N.z),
+                                                                            glm::dvec3(0.0, 0.0, 1.0));
 
             if (_maneuver_gizmo_basis_mode == ManeuverGizmoBasisMode::RTN)
             {
@@ -587,10 +639,15 @@ namespace Game
                 glm::dvec3 prograde_inertial = normalized_or(v_rel_mps, fallback_rtn_t);
                 glm::dvec3 normal_inertial = normalized_or(glm::dvec3(solver_frame.N.x, solver_frame.N.y, solver_frame.N.z),
                                                            glm::dvec3(0.0, 0.0, 1.0));
-                const glm::dvec3 prograde_world_fallback =
-                        transform_inertial_basis_to_display_world(prograde_inertial, basis_time_s, node.maneuver_basis_t_world);
+                glm::dvec3 prograde_world_fallback =
+                        transform_inertial_basis_to_world(prograde_inertial, node.maneuver_basis_t_world);
+                glm::dvec3 displayed_tangent_world{0.0, 0.0, 0.0};
+                if (sample_displayed_tangent_world(basis_time_s, displayed_tangent_world))
+                {
+                    prograde_world_fallback = displayed_tangent_world;
+                }
                 const glm::dvec3 normal_world_fallback =
-                        transform_inertial_basis_to_display_world(normal_inertial, basis_time_s, node.maneuver_basis_n_world);
+                        transform_inertial_basis_to_world(normal_inertial, node.maneuver_basis_n_world);
                 // PON gizmo must stay aligned to the pre-burn orbital frame. Sampling the displayed trajectory
                 // near the node can cross the burn discontinuity and rotate the basis toward the post-burn orbit.
                 glm::dvec3 prograde_world = prograde_world_fallback;

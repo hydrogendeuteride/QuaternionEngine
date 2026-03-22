@@ -33,6 +33,20 @@ namespace Game
 
     using CancelCheck = std::function<bool()>;
 
+    inline bool request_uses_fast_preview(const OrbitPredictionService::Request &request)
+    {
+        return request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
+    }
+
+    inline std::size_t prediction_sample_budget(const OrbitPredictionService::Request &request,
+                                                const std::size_t segment_count)
+    {
+        const std::size_t sample_multiplier = request_uses_fast_preview(request) ? 1u : 2u;
+        const std::size_t sample_cap =
+                request_uses_fast_preview(request) ? OrbitPredictionTuning::kFastPreviewTrajectorySampleCap : 4'000u;
+        return std::clamp<std::size_t>(segment_count * sample_multiplier, 2u, sample_cap);
+    }
+
     // ── Inline micro-helpers ──────────────────────────────────────────────────
     inline bool finite_vec3(const glm::dvec3 &v)
     {

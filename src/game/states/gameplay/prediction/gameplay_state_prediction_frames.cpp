@@ -74,6 +74,31 @@ namespace Game
         return spec.type == orbitsim::TrajectoryFrameType::Synodic;
     }
 
+    double GameplayState::resolve_prediction_display_reference_time_s(const OrbitPredictionCache &cache,
+                                                                      const double display_time_s) const
+    {
+        double reference_time_s = display_time_s;
+        if (!std::isfinite(reference_time_s))
+        {
+            reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : cache.build_time_s;
+        }
+
+        const orbitsim::TrajectoryFrameSpec frame_spec =
+                cache.resolved_frame_spec_valid
+                    ? cache.resolved_frame_spec
+                    : resolve_prediction_display_frame_spec(cache, reference_time_s);
+        const bool maneuver_live_preview =
+                _maneuver_plan_live_preview_active ||
+                _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
+        const bool freeze_planned_synodic =
+                prediction_frame_is_lagrange_sensitive(frame_spec) &&
+                _maneuver_nodes_enabled &&
+                !_maneuver_state.nodes.empty() &&
+                !maneuver_live_preview &&
+                std::isfinite(cache.build_time_s);
+        return freeze_planned_synodic ? cache.build_time_s : reference_time_s;
+    }
+
     orbitsim::BodyId GameplayState::select_prediction_primary_body_id(const std::vector<orbitsim::MassiveBody> &bodies,
                                                                       const OrbitPredictionCache *cache,
                                                                       const orbitsim::Vec3 &query_pos_m,
@@ -568,11 +593,7 @@ namespace Game
                                                        double display_time_s) const
     {
         out_frame = {};
-        double reference_time_s = display_time_s;
-        if (!std::isfinite(reference_time_s))
-        {
-            reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : cache.build_time_s;
-        }
+        const double reference_time_s = resolve_prediction_display_reference_time_s(cache, display_time_s);
         const orbitsim::TrajectoryFrameSpec frame_spec =
                 cache.resolved_frame_spec_valid
                     ? cache.resolved_frame_spec
@@ -687,11 +708,7 @@ namespace Game
     {
         out_origin_world = _scenario_config.system_center;
         out_frame_to_world = glm::dmat3(1.0);
-        double reference_time_s = display_time_s;
-        if (!std::isfinite(reference_time_s))
-        {
-            reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : cache.build_time_s;
-        }
+        const double reference_time_s = resolve_prediction_display_reference_time_s(cache, display_time_s);
         const WorldVec3 world_ref_world = prediction_world_reference_body_world();
 
         const auto state_at = [&](const orbitsim::MassiveBody &body) -> orbitsim::State {

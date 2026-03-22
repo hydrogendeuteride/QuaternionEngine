@@ -22,14 +22,23 @@ namespace Game
 
         std::vector<orbitsim::TrajectorySample> out;
         out.reserve(sample_count);
+        std::size_t segment_index = 0;
 
         for (std::size_t i = 0; i < sample_count; ++i)
         {
             const double t = (i < sample_count - 1)
                                      ? (t0 + static_cast<double>(i) * dt)
                                      : t1;
+            while ((segment_index + 1) < segments.size() &&
+                   prediction_segment_end_time(segments[segment_index]) < t)
+            {
+                ++segment_index;
+            }
+
+            const orbitsim::TrajectorySegment &segment =
+                    (segment_index < segments.size()) ? segments[segment_index] : segments.back();
             orbitsim::State state{};
-            if (sample_trajectory_segment_state(segments, t, state))
+            if (eval_segment_state(segment, t, state))
             {
                 out.push_back(orbitsim::TrajectorySample{
                         .t_s = t,

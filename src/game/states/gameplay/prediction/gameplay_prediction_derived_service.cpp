@@ -132,6 +132,7 @@ namespace Game
 
         Request &request = job.request;
         OrbitPredictionService::Result &solver = request.solver_result;
+        out.solve_quality = solver.solve_quality;
         if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
         {
             out.diagnostics.status = PredictionDerivedStatus::MissingSolverData;
@@ -163,11 +164,14 @@ namespace Game
             return out;
         }
 
-        PredictionCacheInternal::rebuild_prediction_metrics(
-                cache,
-                request.sim_config,
-                request.analysis_body_id,
-                cancel_requested);
+        if (solver.solve_quality != OrbitPredictionService::SolveQuality::FastPreview)
+        {
+            PredictionCacheInternal::rebuild_prediction_metrics(
+                    cache,
+                    request.sim_config,
+                    request.analysis_body_id,
+                    cancel_requested);
+        }
 
         if (cancel_requested())
         {
