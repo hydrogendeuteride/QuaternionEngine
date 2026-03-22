@@ -18,6 +18,32 @@ namespace Game
             return std::find(items.begin(), items.end(), needle) != items.end();
         }
 
+        OrbitPredictionService::RequestPriority classify_prediction_request_priority(
+                const PredictionSelectionState &selection,
+                const PredictionSubjectKey key,
+                const bool is_celestial,
+                const bool interactive)
+        {
+            if (selection.active_subject == key)
+            {
+                return interactive
+                               ? OrbitPredictionService::RequestPriority::ActiveInteractiveTrack
+                               : OrbitPredictionService::RequestPriority::ActiveTrack;
+            }
+
+            for (const auto &overlay : selection.overlay_subjects)
+            {
+                if (overlay == key)
+                {
+                    return OrbitPredictionService::RequestPriority::Overlay;
+                }
+            }
+
+            return is_celestial
+                           ? OrbitPredictionService::RequestPriority::BackgroundCelestial
+                           : OrbitPredictionService::RequestPriority::BackgroundOrbiter;
+        }
+
         const ManeuverNode *select_preview_anchor_node(const ManeuverPlanState &plan, const double now_s)
         {
             if (const ManeuverNode *selected = plan.find_node(plan.selected_node_id))
@@ -243,6 +269,13 @@ namespace Game
         // Let the solver queue accept a fresher generation while derived work finishes in parallel.
         track->request_pending = false;
         track->derived_request_pending = true;
+        // If the input changed while this solve was in-flight, promote straight to dirty so the
+        // next update tick can submit a fresh solver request without waiting for derived to finish.
+        if (track->invalidated_while_pending)
+        {
+            track->dirty = true;
+            track->invalidated_while_pending = false;
+        }
         track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
     }
 
@@ -264,8 +297,8 @@ namespace Game
         }
 
         track->derived_request_pending = false;
-        track->request_pending = false;
-        track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+        // Do NOT clear request_pending here — a newer solver request may already be in-flight.
+        // Only the solver completion path and request submission paths manage that flag.
         track->derived_diagnostics = result.diagnostics;
         const bool keep_dirty_for_followup = track->invalidated_while_pending;
         track->invalidated_while_pending = false;
@@ -471,9 +504,16 @@ namespace Game
                 with_maneuvers &&
                 (_maneuver_plan_live_preview_active ||
                  _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis);
+        const bool interactive_request =
+                track.key == _prediction_selection.active_subject && (thrusting || maneuver_live_preview);
         request.solve_quality = maneuver_live_preview
                                         ? OrbitPredictionService::SolveQuality::FastPreview
                                         : OrbitPredictionService::SolveQuality::Full;
+        request.priority = classify_prediction_request_priority(
+                _prediction_selection,
+                track.key,
+                track.is_celestial,
+                interactive_request);
         request.future_window_s = prediction_required_window_s(track.key, now_s, with_maneuvers);
         const orbitsim::TrajectoryFrameSpec display_frame_spec =
                 track.cache.resolved_frame_spec_valid ? track.cache.resolved_frame_spec : _prediction_frame_selection.spec;
@@ -553,6 +593,11 @@ namespace Game
         request.massive_bodies = _orbitsim->sim.massive_bodies();
         request.shared_ephemeris = track.cache.shared_ephemeris;
         request.subject_body_id = body->id;
+        request.priority = classify_prediction_request_priority(
+                _prediction_selection,
+                track.key,
+                true,
+                false);
         request.future_window_s = prediction_future_window_s(track.key);
         request.lagrange_sensitive = prediction_frame_is_lagrange_sensitive(_prediction_frame_selection.spec);
         if (_prediction_analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&

@@ -486,6 +486,18 @@ namespace Game
         _maneuver_gizmo_interaction.start_dv_rtn_mps = node->dv_rtn_mps;
         _maneuver_gizmo_interaction.start_dv_display_mps = dv_rtn_to_display_basis(*node);
         _maneuver_gizmo_interaction.start_axis_t_m = start_t;
+        const float alpha_f = std::clamp(ctx.interpolation_alpha(), 0.0f, 1.0f);
+        const double interp_dt_s =
+                (_last_sim_step_dt_s > 0.0) ? _last_sim_step_dt_s : static_cast<double>(ctx.fixed_delta_time());
+        double drag_display_reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : 0.0;
+        if (std::isfinite(interp_dt_s) && interp_dt_s > 0.0)
+        {
+            drag_display_reference_time_s -= (1.0 - static_cast<double>(alpha_f)) * interp_dt_s;
+        }
+        _maneuver_gizmo_interaction.drag_display_reference_time_s = drag_display_reference_time_s;
+        _maneuver_gizmo_interaction.drag_basis_r_world = node->basis_r_world;
+        _maneuver_gizmo_interaction.drag_basis_t_world = node->basis_t_world;
+        _maneuver_gizmo_interaction.drag_basis_n_world = node->basis_n_world;
         _maneuver_gizmo_interaction.applied_delta = false;
         return true;
     }
