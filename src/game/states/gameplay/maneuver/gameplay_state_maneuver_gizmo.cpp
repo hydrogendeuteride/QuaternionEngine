@@ -498,6 +498,23 @@ namespace Game
         _maneuver_gizmo_interaction.drag_basis_r_world = node->basis_r_world;
         _maneuver_gizmo_interaction.drag_basis_t_world = node->basis_t_world;
         _maneuver_gizmo_interaction.drag_basis_n_world = node->basis_n_world;
+        _maneuver_gizmo_interaction.drag_display_snapshots.clear();
+        _maneuver_gizmo_interaction.drag_display_snapshots.reserve(_maneuver_state.nodes.size());
+        for (const ManeuverNode &candidate : _maneuver_state.nodes)
+        {
+            if (!candidate.gizmo_valid)
+            {
+                continue;
+            }
+
+            _maneuver_gizmo_interaction.drag_display_snapshots.push_back(ManeuverNodeDisplaySnapshot{
+                    .node_id = candidate.id,
+                    .position_world = candidate.position_world,
+                    .basis_r_world = candidate.basis_r_world,
+                    .basis_t_world = candidate.basis_t_world,
+                    .basis_n_world = candidate.basis_n_world,
+            });
+        }
         _maneuver_gizmo_interaction.applied_delta = false;
         return true;
     }

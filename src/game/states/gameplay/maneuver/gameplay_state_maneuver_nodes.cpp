@@ -417,6 +417,25 @@ namespace Game
         {
             preview_by_node_id[preview.node_id] = &preview;
         }
+        const orbitsim::TrajectoryFrameSpec display_frame_spec =
+                prediction_cache->resolved_frame_spec_valid
+                    ? prediction_cache->resolved_frame_spec
+                    : resolve_prediction_display_frame_spec(*prediction_cache, now_s);
+        const bool display_frame_uses_preview_anchor =
+                display_frame_spec.type == orbitsim::TrajectoryFrameType::Inertial ||
+                display_frame_spec.type == orbitsim::TrajectoryFrameType::BodyCenteredInertial;
+        const bool freeze_nonrotating_drag_snapshots =
+                display_frame_uses_preview_anchor &&
+                _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis &&
+                !_maneuver_gizmo_interaction.drag_display_snapshots.empty();
+        WorldVec3 display_origin_world_now{0.0, 0.0, 0.0};
+        glm::dmat3 display_frame_to_world_now{1.0};
+        const bool have_display_transform_now =
+                !display_frame_uses_preview_anchor ||
+                build_prediction_display_transform(*prediction_cache,
+                                                   display_origin_world_now,
+                                                   display_frame_to_world_now,
+                                                   now_s);
         const auto transform_inertial_basis_to_world =
                 [&](const glm::dvec3 &basis_inertial, const glm::dvec3 &fallback) -> glm::dvec3 {
                     // Keep maneuver axes in physical inertial/world orientation. If we remap them
@@ -495,6 +514,74 @@ namespace Game
             return finite3(out_tangent_world);
         };
 
+        const auto display_frame_origin_state_at = [&](const double sample_time_s, orbitsim::State &out_state) -> bool {
+            out_state = {};
+            switch (display_frame_spec.type)
+            {
+                case orbitsim::TrajectoryFrameType::Inertial:
+                    return true;
+                case orbitsim::TrajectoryFrameType::BodyCenteredInertial:
+                {
+                    const orbitsim::MassiveBody *frame_body =
+                            find_massive_body(prediction_cache->massive_bodies, display_frame_spec.primary_body_id);
+                    if (!frame_body)
+                    {
+                        return false;
+                    }
+
+                    out_state =
+                            (prediction_cache->shared_ephemeris && !prediction_cache->shared_ephemeris->empty())
+                                ? prediction_cache->shared_ephemeris->body_state_at_by_id(frame_body->id, sample_time_s)
+                                : frame_body->state;
+                    return finite3(glm::dvec3(out_state.position_m)) && finite3(glm::dvec3(out_state.velocity_mps));
+                }
+                default:
+                    return false;
+            }
+        };
+
+        const auto sample_preview_node_world = [&](const double sample_time_s,
+                                                   const glm::dvec3 &preview_position_m,
+                                                   WorldVec3 &out_world) -> bool {
+            out_world = WorldVec3(0.0, 0.0, 0.0);
+            if (!display_frame_uses_preview_anchor || !have_display_transform_now || !std::isfinite(sample_time_s) ||
+                !finite3(preview_position_m))
+            {
+                return false;
+            }
+
+            orbitsim::State frame_origin_state{};
+            if (!display_frame_origin_state_at(sample_time_s, frame_origin_state))
+            {
+                return false;
+            }
+
+            const glm::dvec3 local_position_m = preview_position_m - glm::dvec3(frame_origin_state.position_m);
+            out_world = display_origin_world_now + WorldVec3(display_frame_to_world_now * local_position_m) + align_delta;
+            return finite3(glm::dvec3(out_world));
+        };
+
+        const auto sample_preview_tangent_world = [&](const double sample_time_s,
+                                                      const glm::dvec3 &preview_velocity_mps,
+                                                      glm::dvec3 &out_tangent_world) -> bool {
+            out_tangent_world = glm::dvec3(0.0, 0.0, 0.0);
+            if (!display_frame_uses_preview_anchor || !have_display_transform_now || !std::isfinite(sample_time_s) ||
+                !finite3(preview_velocity_mps))
+            {
+                return false;
+            }
+
+            orbitsim::State frame_origin_state{};
+            if (!display_frame_origin_state_at(sample_time_s, frame_origin_state))
+            {
+                return false;
+            }
+
+            const glm::dvec3 local_velocity_mps = preview_velocity_mps - glm::dvec3(frame_origin_state.velocity_mps);
+            out_tangent_world = normalized_or(display_frame_to_world_now * local_velocity_mps, glm::dvec3(0.0, 1.0, 0.0));
+            return finite3(out_tangent_world);
+        };
+
         const auto resolve_node_primary_body_id =
                 [&](const ManeuverNode &node, const double sample_time_s, const glm::dvec3 &inertial_position_m)
                 -> orbitsim::BodyId {
@@ -529,6 +616,16 @@ namespace Game
                     }
                     return prediction_cache->massive_bodies[primary_index].id;
                 };
+        const auto find_drag_display_snapshot = [&](const int node_id) -> const ManeuverNodeDisplaySnapshot * {
+            for (const ManeuverNodeDisplaySnapshot &snapshot : _maneuver_gizmo_interaction.drag_display_snapshots)
+            {
+                if (snapshot.node_id == node_id)
+                {
+                    return &snapshot;
+                }
+            }
+            return nullptr;
+        };
 
         for (ManeuverNode &node : _maneuver_state.nodes)
         {
@@ -551,7 +648,10 @@ namespace Game
                 basis_time_s = std::max(traj_node_t0, basis_time_s - 1e-3);
             }
 
-            if (!sample_displayed_node_world(node.time_s, node_position_world))
+            const bool have_preview_position_world =
+                    preview && preview->valid &&
+                    sample_preview_node_world(node.time_s, glm::dvec3(preview->inertial_position_m), node_position_world);
+            if (!have_preview_position_world && !sample_displayed_node_world(node.time_s, node_position_world))
             {
                 continue;
             }
@@ -640,8 +740,14 @@ namespace Game
                                                            glm::dvec3(0.0, 0.0, 1.0));
                 glm::dvec3 prograde_world_fallback =
                         transform_inertial_basis_to_world(prograde_inertial, node.maneuver_basis_t_world);
+                glm::dvec3 preview_tangent_world{0.0, 0.0, 0.0};
                 glm::dvec3 displayed_tangent_world{0.0, 0.0, 0.0};
-                if (sample_displayed_tangent_world(basis_time_s, displayed_tangent_world))
+                if (preview && preview->valid &&
+                    sample_preview_tangent_world(node.time_s, glm::dvec3(preview->inertial_velocity_mps), preview_tangent_world))
+                {
+                    prograde_world_fallback = preview_tangent_world;
+                }
+                else if (sample_displayed_tangent_world(basis_time_s, displayed_tangent_world))
                 {
                     prograde_world_fallback = displayed_tangent_world;
                 }
@@ -666,8 +772,17 @@ namespace Game
                 node.basis_n_world = normal_world;
             }
 
-            if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis &&
-                _maneuver_gizmo_interaction.node_id == node.id)
+            const ManeuverNodeDisplaySnapshot *drag_snapshot =
+                    freeze_nonrotating_drag_snapshots ? find_drag_display_snapshot(node.id) : nullptr;
+            if (drag_snapshot)
+            {
+                node_position_world = drag_snapshot->position_world;
+                node.basis_r_world = drag_snapshot->basis_r_world;
+                node.basis_t_world = drag_snapshot->basis_t_world;
+                node.basis_n_world = drag_snapshot->basis_n_world;
+            }
+            else if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis &&
+                     _maneuver_gizmo_interaction.node_id == node.id)
             {
                 node.basis_r_world = _maneuver_gizmo_interaction.drag_basis_r_world;
                 node.basis_t_world = _maneuver_gizmo_interaction.drag_basis_t_world;
