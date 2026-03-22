@@ -29,6 +29,12 @@ namespace Game
             Celestial,
         };
 
+        enum class SolveQuality : uint8_t
+        {
+            Full = 0,
+            FastPreview,
+        };
+
         enum class Status : uint8_t
         {
             None = 0,
@@ -109,6 +115,7 @@ namespace Game
 
             bool thrusting{false};
             bool lagrange_sensitive{false};
+            SolveQuality solve_quality{SolveQuality::Full};
             double future_window_s{600.0};
             double celestial_ephemeris_dt_s{0.0};
             orbitsim::BodyId preferred_primary_body_id{orbitsim::kInvalidBodyId};
@@ -120,6 +127,7 @@ namespace Game
             uint64_t track_id{0};
             uint64_t generation_id{0};
             bool valid{false};
+            SolveQuality solve_quality{SolveQuality::Full};
             double compute_time_ms{0.0};
             Diagnostics diagnostics{};
 

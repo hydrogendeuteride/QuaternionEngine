@@ -62,6 +62,7 @@ namespace Game::OrbitPredictionTuning
     // ── Integrator safety rails ─────────────────────────────────────────────────
     inline constexpr double kPredictionIntegratorMaxStepS = 600.0;       // 10 min
     inline constexpr double kPredictionIntegratorMaxStepControlledS = 30.0;
+    inline constexpr double kPredictionIntegratorMaxStepPreviewS = 120.0;
     inline constexpr int kPredictionIntegratorMaxSubstepsSoft = 128;
     inline constexpr int kPredictionIntegratorMaxSubstepsHard = 512;
     inline constexpr int kPredictionIntegratorMaxIntervalSplits = 10;
@@ -77,6 +78,16 @@ namespace Game::OrbitPredictionTuning
     inline constexpr double kPrimaryBodyHysteresisKeepRatio = 0.90;
     inline constexpr double kPostNodeCoverageMinS = 120.0;
     inline constexpr double kManeuverRefreshS = 0.1;
+    inline constexpr double kFastPreviewAdaptiveSegmentMinDtS = 0.25;
+    inline constexpr double kFastPreviewAdaptiveSegmentMaxDtS = 600.0;
+    inline constexpr double kFastPreviewAdaptiveSegmentLookupMaxDtS = 120.0;
+    inline constexpr std::size_t kFastPreviewAdaptiveSegmentSoftMaxSegments = 1'500;
+    inline constexpr double kFastPreviewAdaptiveSegmentToleranceScale = 4.0;
+    inline constexpr double kFastPreviewAdaptiveEphemerisMinDtS = 0.25;
+    inline constexpr double kFastPreviewAdaptiveEphemerisMaxDtS = 120.0;
+    inline constexpr std::size_t kFastPreviewAdaptiveEphemerisSoftMaxSegments = 1'500;
+    inline constexpr double kFastPreviewAdaptiveEphemerisToleranceScale = 4.0;
+    inline constexpr std::size_t kFastPreviewTrajectorySampleCap = 1'200;
 
     // While thrusting, shorten the horizon so updates can happen more often.
     inline constexpr double kThrustHorizonMinS = 120.0;

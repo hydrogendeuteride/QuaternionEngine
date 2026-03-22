@@ -325,6 +325,7 @@ namespace Game
         bool dirty{true};
         bool request_pending{false};
         bool derived_request_pending{false};
+        OrbitPredictionService::SolveQuality pending_solve_quality{OrbitPredictionService::SolveQuality::Full};
         bool invalidated_while_pending{false};
         bool supports_maneuvers{false};
         bool is_celestial{false};
@@ -340,6 +341,7 @@ namespace Game
             dirty = true;
             request_pending = false;
             derived_request_pending = false;
+            pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             invalidated_while_pending = false;
             auto_primary_body_id = orbitsim::kInvalidBodyId;
             solver_ms_last = 0.0;
