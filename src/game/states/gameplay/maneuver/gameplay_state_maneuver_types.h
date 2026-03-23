@@ -125,6 +125,15 @@ namespace Game
         float drag_sensitivity_mps_per_m{0.00025f};
     };
 
+    struct ManeuverNodeDisplaySnapshot
+    {
+        int node_id{-1};
+        WorldVec3 position_world{0.0, 0.0, 0.0};
+        glm::dvec3 basis_r_world{1.0, 0.0, 0.0};
+        glm::dvec3 basis_t_world{0.0, 1.0, 0.0};
+        glm::dvec3 basis_n_world{0.0, 0.0, 1.0};
+    };
+
     struct ManeuverGizmoInteraction
     {
         enum class State
@@ -141,6 +150,11 @@ namespace Game
         glm::dvec3 start_dv_rtn_mps{0.0, 0.0, 0.0};
         glm::dvec3 start_dv_display_mps{0.0, 0.0, 0.0};
         double start_axis_t_m{0.0};
+        double drag_display_reference_time_s{0.0};
+        glm::dvec3 drag_basis_r_world{1.0, 0.0, 0.0};
+        glm::dvec3 drag_basis_t_world{0.0, 1.0, 0.0};
+        glm::dvec3 drag_basis_n_world{0.0, 0.0, 1.0};
+        std::vector<ManeuverNodeDisplaySnapshot> drag_display_snapshots{};
         bool applied_delta{false};
     };
 

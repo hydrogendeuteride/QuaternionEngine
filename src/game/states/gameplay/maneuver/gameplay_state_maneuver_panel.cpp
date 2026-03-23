@@ -625,15 +625,20 @@ namespace Game
         if (ImGui::Button("Delete"))
         {
             const int del_id = sel->id;
-            const int del_idx = find_node_index(del_id);
-            remove_maneuver_node(del_id, del_idx);
-            ImGui::EndChild();
             if (needs_sort)
             {
                 _maneuver_state.sort_by_time();
+                needs_sort = false;
             }
+            const int del_idx = find_node_index(del_id);
+            remove_maneuver_node_suffix(del_id, del_idx);
+            ImGui::EndChild();
             ImGui::End();
             return;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Deletes the selected node and all later nodes.");
         }
 
         float t_from_now = static_cast<float>(sel->time_s - now_s);

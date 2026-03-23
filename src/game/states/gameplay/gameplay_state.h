@@ -177,6 +177,9 @@ namespace Game
         bool build_prediction_display_frame(const OrbitPredictionCache &cache,
                                             orbitsim::RotatingFrame &out_frame,
                                             double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
+        double resolve_prediction_display_reference_time_s(
+                const OrbitPredictionCache &cache,
+                double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
         bool build_prediction_display_transform(const OrbitPredictionCache &cache,
                                                WorldVec3 &out_origin_world,
                                                glm::dmat3 &out_frame_to_world,
@@ -366,6 +369,7 @@ namespace Game
         void update_maneuver_nodes_execution(GameStateContext &ctx);
         orbitsim::BodyId resolve_maneuver_node_primary_body_id(const ManeuverNode &node, double query_time_s) const;
         void remove_maneuver_node(int node_id, int hint_index = -1);
+        void remove_maneuver_node_suffix(int node_id, int hint_index = -1);
         WorldVec3 compute_maneuver_align_delta(GameStateContext &ctx,
                                                const OrbitPredictionCache &cache,
                                                const std::vector<orbitsim::TrajectorySample> &traj_base);

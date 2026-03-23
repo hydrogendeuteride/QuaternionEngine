@@ -1,6 +1,8 @@
 #include "game/orbit/orbit_prediction_service.h"
 #include "game/orbit/prediction/orbit_prediction_service_internal.h"
 
+#include <algorithm>
+
 #include "orbitsim/coordinate_frames.hpp"
 #include "orbitsim/detail/spacecraft_propagation.hpp"
 #include "orbitsim/frame_utils.hpp"
@@ -61,22 +63,26 @@ namespace Game
             auto existing = std::find_if(_pending_jobs.begin(),
                                          _pending_jobs.end(),
                                          [track_id](const PendingJob &job) { return job.track_id == track_id; });
+            PendingJob job{};
             if (existing != _pending_jobs.end())
             {
-                existing->track_id = track_id;
-                existing->request_epoch = request_epoch;
-                existing->generation_id = generation_id;
-                existing->request = std::move(request);
+                job = std::move(*existing);
+                _pending_jobs.erase(existing);
             }
-            else
-            {
-                PendingJob job{};
-                job.track_id = track_id;
-                job.request_epoch = request_epoch;
-                job.generation_id = generation_id;
-                job.request = std::move(request);
-                _pending_jobs.push_back(std::move(job));
-            }
+
+            job.track_id = track_id;
+            job.request_epoch = request_epoch;
+            job.generation_id = generation_id;
+            job.request = std::move(request);
+
+            auto insert_it = std::find_if(
+                    _pending_jobs.begin(),
+                    _pending_jobs.end(),
+                    [&job](const PendingJob &queued) {
+                        return static_cast<uint8_t>(job.request.priority) >
+                               static_cast<uint8_t>(queued.request.priority);
+                    });
+            _pending_jobs.insert(insert_it, std::move(job));
         }
         _cv.notify_one();
     }
@@ -106,10 +112,66 @@ namespace Game
         }
 
         {
+            std::lock_guard<std::mutex> lock(_baseline_cache_mutex);
+            _reusable_baseline_by_track.clear();
+        }
+
+        {
             std::lock_guard<std::mutex> cache_lock(_ephemeris_mutex);
             _ephemeris_cache.clear();
             _next_ephemeris_use_serial = 1;
         }
+    }
+
+    std::optional<OrbitPredictionService::ReusableBaselineCacheEntry> OrbitPredictionService::find_reusable_baseline(
+            const uint64_t track_id,
+            const uint64_t request_epoch) const
+    {
+        std::lock_guard<std::mutex> lock(_baseline_cache_mutex);
+        const auto it = _reusable_baseline_by_track.find(track_id);
+        if (it == _reusable_baseline_by_track.end() || it->second.request_epoch != request_epoch)
+        {
+            return std::nullopt;
+        }
+        return it->second;
+    }
+
+    void OrbitPredictionService::store_reusable_baseline(
+            const uint64_t track_id,
+            const uint64_t generation_id,
+            const uint64_t request_epoch,
+            SharedCelestialEphemeris shared_ephemeris,
+            std::vector<orbitsim::TrajectorySample> trajectory_inertial,
+            std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial)
+    {
+        if (!shared_ephemeris || trajectory_inertial.size() < 2 || !validate_trajectory_segment_continuity(trajectory_segments_inertial))
+        {
+            return;
+        }
+
+        std::lock_guard<std::mutex> state_lock(_mutex);
+        if (!_running || request_epoch != _request_epoch)
+        {
+            return;
+        }
+        const auto latest_it = _latest_requested_generation_by_track.find(track_id);
+        if (latest_it != _latest_requested_generation_by_track.end() && generation_id < latest_it->second)
+        {
+            return;
+        }
+
+        std::lock_guard<std::mutex> baseline_lock(_baseline_cache_mutex);
+        ReusableBaselineCacheEntry &entry = _reusable_baseline_by_track[track_id];
+        if (entry.request_epoch == request_epoch && entry.generation_id > generation_id)
+        {
+            return;
+        }
+
+        entry.generation_id = generation_id;
+        entry.request_epoch = request_epoch;
+        entry.shared_ephemeris = std::move(shared_ephemeris);
+        entry.trajectory_inertial = std::move(trajectory_inertial);
+        entry.trajectory_segments_inertial = std::move(trajectory_segments_inertial);
     }
 
     OrbitPredictionService::SharedCelestialEphemeris OrbitPredictionService::get_or_build_ephemeris(
@@ -385,6 +447,7 @@ namespace Game
         out.generation_id = generation_id;
         out.track_id = request.track_id;
         out.build_time_s = request.sim_time_s;
+        out.solve_quality = request.solve_quality;
         const auto cancel_requested = [this,
                                        track_id = request.track_id,
                                        generation_id,
@@ -530,7 +593,7 @@ namespace Game
                 return fail(Status::TrajectorySamplesUnavailable);
             }
 
-            const std::vector<orbitsim::TrajectorySegment> traj_segments_inertial =
+            std::vector<orbitsim::TrajectorySegment> traj_segments_inertial =
                     trajectory_segments_from_body_ephemeris(*shared_ephemeris, subject_sim->id);
             if (traj_segments_inertial.empty())
             {
@@ -607,47 +670,74 @@ namespace Game
             return cancel();
         }
         const orbitsim::CelestialEphemeris &eph = *shared_ephemeris;
+        const std::optional<ReusableBaselineCacheEntry> reusable_baseline =
+                request_can_reuse_spacecraft_baseline(request)
+                        ? find_reusable_baseline(request.track_id, request_epoch)
+                        : std::nullopt;
+        const double reusable_window_s =
+                std::isfinite(request.future_window_s) ? std::max(0.0, request.future_window_s) : 0.0;
 
-        orbitsim::AdaptiveSegmentDiagnostics base_diag{};
-        const std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_baseline =
-                orbitsim::predict_spacecraft_trajectory_segments_adaptive(sim, eph, ship_h.id, segment_opt, &base_diag);
-        if (traj_segments_inertial_baseline.empty())
+        bool reused_baseline = false;
+        if (reusable_baseline.has_value() &&
+            reusable_baseline->trajectory_inertial.size() >= 2 &&
+            validate_trajectory_segment_continuity(reusable_baseline->trajectory_segments_inertial) &&
+            trajectory_segments_cover_window(reusable_baseline->trajectory_segments_inertial,
+                                             request.sim_time_s,
+                                             reusable_window_s))
         {
-            return fail(Status::TrajectorySegmentsUnavailable);
-        }
-        if (!validate_trajectory_segment_continuity(traj_segments_inertial_baseline))
-        {
-            return fail(Status::ContinuityFailed);
-        }
-        out.diagnostics.trajectory_base = make_stage_diagnostics_from_adaptive(base_diag, horizon_s);
-        out.diagnostics.trajectory_base.accepted_segments = traj_segments_inertial_baseline.size();
-        out.diagnostics.trajectory_base.covered_duration_s = prediction_segment_span_s(traj_segments_inertial_baseline);
-        sync_stage_counts();
-
-        if (cancel_requested())
-        {
-            return cancel();
-        }
-
-        const std::size_t baseline_sample_count =
-                std::clamp<std::size_t>(traj_segments_inertial_baseline.size() * 2, 2, 4'000);
-        const std::vector<orbitsim::TrajectorySample> traj_inertial_baseline =
-                resample_segments_uniform(traj_segments_inertial_baseline, baseline_sample_count);
-        if (traj_inertial_baseline.size() < 2)
-        {
-            return fail(Status::TrajectorySamplesUnavailable);
-        }
-        out.diagnostics.trajectory_sample_count = traj_inertial_baseline.size();
-        sync_stage_counts();
-
-        if (cancel_requested())
-        {
-            return cancel();
+            out.diagnostics.trajectory_base =
+                    make_stage_diagnostics_from_segments(reusable_baseline->trajectory_segments_inertial, horizon_s, true);
+            out.diagnostics.trajectory_sample_count = reusable_baseline->trajectory_inertial.size();
+            sync_stage_counts();
+            out.shared_ephemeris = shared_ephemeris;
+            out.trajectory_segments_inertial = reusable_baseline->trajectory_segments_inertial;
+            out.trajectory_inertial = reusable_baseline->trajectory_inertial;
+            reused_baseline = true;
         }
 
-        out.shared_ephemeris = shared_ephemeris;
-        out.trajectory_segments_inertial = traj_segments_inertial_baseline;
-        out.trajectory_inertial = traj_inertial_baseline;
+        if (!reused_baseline)
+        {
+            orbitsim::AdaptiveSegmentDiagnostics base_diag{};
+            std::vector<orbitsim::TrajectorySegment> traj_segments_inertial_baseline =
+                    orbitsim::predict_spacecraft_trajectory_segments_adaptive(sim, eph, ship_h.id, segment_opt, &base_diag);
+            if (traj_segments_inertial_baseline.empty())
+            {
+                return fail(Status::TrajectorySegmentsUnavailable);
+            }
+            if (!validate_trajectory_segment_continuity(traj_segments_inertial_baseline))
+            {
+                return fail(Status::ContinuityFailed);
+            }
+            out.diagnostics.trajectory_base = make_stage_diagnostics_from_adaptive(base_diag, horizon_s);
+            out.diagnostics.trajectory_base.accepted_segments = traj_segments_inertial_baseline.size();
+            out.diagnostics.trajectory_base.covered_duration_s = prediction_segment_span_s(traj_segments_inertial_baseline);
+            sync_stage_counts();
+
+            if (cancel_requested())
+            {
+                return cancel();
+            }
+
+            const std::size_t baseline_sample_count =
+                    prediction_sample_budget(request, traj_segments_inertial_baseline.size());
+            std::vector<orbitsim::TrajectorySample> traj_inertial_baseline =
+                    resample_segments_uniform(traj_segments_inertial_baseline, baseline_sample_count);
+            if (traj_inertial_baseline.size() < 2)
+            {
+                return fail(Status::TrajectorySamplesUnavailable);
+            }
+            out.diagnostics.trajectory_sample_count = traj_inertial_baseline.size();
+            sync_stage_counts();
+
+            if (cancel_requested())
+            {
+                return cancel();
+            }
+
+            out.shared_ephemeris = shared_ephemeris;
+            out.trajectory_segments_inertial = std::move(traj_segments_inertial_baseline);
+            out.trajectory_inertial = std::move(traj_inertial_baseline);
+        }
 
         if (!request.maneuver_impulses.empty())
         {
@@ -782,21 +872,27 @@ namespace Game
                 out.diagnostics.trajectory_planned.covered_duration_s =
                         prediction_segment_span_s(traj_segments_inertial_planned);
                 sync_stage_counts();
-                out.trajectory_segments_inertial_planned = traj_segments_inertial_planned;
+                out.trajectory_segments_inertial_planned = std::move(traj_segments_inertial_planned);
 
                 const std::size_t planned_sample_count =
-                        std::clamp<std::size_t>(traj_segments_inertial_planned.size() * 2, 2, 4'000);
-                const std::vector<orbitsim::TrajectorySample> traj_inertial_planned =
-                        resample_segments_uniform(traj_segments_inertial_planned, planned_sample_count);
+                        prediction_sample_budget(request, out.trajectory_segments_inertial_planned.size());
+                std::vector<orbitsim::TrajectorySample> traj_inertial_planned =
+                        resample_segments_uniform(out.trajectory_segments_inertial_planned, planned_sample_count);
                 if (traj_inertial_planned.size() >= 2)
                 {
                     out.diagnostics.trajectory_sample_count_planned = traj_inertial_planned.size();
                     sync_stage_counts();
-                    out.trajectory_inertial_planned = traj_inertial_planned;
+                    out.trajectory_inertial_planned = std::move(traj_inertial_planned);
                 }
             }
         }
 
+        store_reusable_baseline(request.track_id,
+                                generation_id,
+                                request_epoch,
+                                out.shared_ephemeris,
+                                out.trajectory_inertial,
+                                out.trajectory_segments_inertial);
         out.valid = true;
         out.diagnostics.status = Status::Success;
         return out;

@@ -17,14 +17,72 @@ namespace Game
         {
             return std::find(items.begin(), items.end(), needle) != items.end();
         }
+
+        OrbitPredictionService::RequestPriority classify_prediction_request_priority(
+                const PredictionSelectionState &selection,
+                const PredictionSubjectKey key,
+                const bool is_celestial,
+                const bool interactive)
+        {
+            if (selection.active_subject == key)
+            {
+                return interactive
+                               ? OrbitPredictionService::RequestPriority::ActiveInteractiveTrack
+                               : OrbitPredictionService::RequestPriority::ActiveTrack;
+            }
+
+            for (const auto &overlay : selection.overlay_subjects)
+            {
+                if (overlay == key)
+                {
+                    return OrbitPredictionService::RequestPriority::Overlay;
+                }
+            }
+
+            return is_celestial
+                           ? OrbitPredictionService::RequestPriority::BackgroundCelestial
+                           : OrbitPredictionService::RequestPriority::BackgroundOrbiter;
+        }
+
+        const ManeuverNode *select_preview_anchor_node(const ManeuverPlanState &plan, const double now_s)
+        {
+            if (const ManeuverNode *selected = plan.find_node(plan.selected_node_id))
+            {
+                if (std::isfinite(selected->time_s))
+                {
+                    return selected;
+                }
+            }
+
+            const ManeuverNode *first_future = nullptr;
+            for (const ManeuverNode &node : plan.nodes)
+            {
+                if (!std::isfinite(node.time_s) || node.time_s < now_s)
+                {
+                    continue;
+                }
+
+                if (!first_future || node.time_s < first_future->time_s)
+                {
+                    first_future = &node;
+                }
+            }
+            return first_future;
+        }
     } // namespace
 
     void GameplayState::sync_prediction_dirty_flag()
     {
-        // Collapse only actual rebuild demand into one cheap UI-facing flag.
+        // Collapse only visible-track rebuild demand into one cheap UI-facing flag.
+        const std::vector<PredictionSubjectKey> visible_subjects = collect_visible_prediction_subjects();
         _prediction_dirty = false;
         for (const PredictionTrackState &track : _prediction_tracks)
         {
+            if (!contains_key(visible_subjects, track.key))
+            {
+                continue;
+            }
+
             if (track.dirty)
             {
                 _prediction_dirty = true;
@@ -35,9 +93,15 @@ namespace Game
 
     void GameplayState::mark_prediction_dirty()
     {
-        // Force every cached track to rebuild on the next prediction update.
+        // Force only the active/overlay-visible tracks to rebuild on the next prediction update.
+        const std::vector<PredictionSubjectKey> visible_subjects = collect_visible_prediction_subjects();
         for (PredictionTrackState &track : _prediction_tracks)
         {
+            if (!contains_key(visible_subjects, track.key))
+            {
+                continue;
+            }
+
             if (track.request_pending)
             {
                 track.invalidated_while_pending = true;
@@ -85,6 +149,7 @@ namespace Game
             track.cache.clear();
             track.request_pending = false;
             track.derived_request_pending = false;
+            track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             track.dirty = false;
             track.invalidated_while_pending = false;
             track.auto_primary_body_id = orbitsim::kInvalidBodyId;
@@ -136,6 +201,7 @@ namespace Game
         {
             track->request_pending = false;
             track->derived_request_pending = false;
+            track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             track->dirty = true;
             return;
         }
@@ -203,6 +269,14 @@ namespace Game
         // Let the solver queue accept a fresher generation while derived work finishes in parallel.
         track->request_pending = false;
         track->derived_request_pending = true;
+        // If the input changed while this solve was in-flight, promote straight to dirty so the
+        // next update tick can submit a fresh solver request without waiting for derived to finish.
+        if (track->invalidated_while_pending)
+        {
+            track->dirty = true;
+            track->invalidated_while_pending = false;
+        }
+        track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
     }
 
     void GameplayState::apply_completed_prediction_derived_result(OrbitPredictionDerivedService::Result result)
@@ -223,7 +297,8 @@ namespace Game
         }
 
         track->derived_request_pending = false;
-        track->request_pending = false;
+        // Do NOT clear request_pending here — a newer solver request may already be in-flight.
+        // Only the solver completion path and request submission paths manage that flag.
         track->derived_diagnostics = result.diagnostics;
         const bool keep_dirty_for_followup = track->invalidated_while_pending;
         track->invalidated_while_pending = false;
@@ -236,15 +311,32 @@ namespace Game
 
         track->cache = std::move(result.cache);
         track->pick_cache.clear();
-        track->dirty = keep_dirty_for_followup;
-
-        const bool freeze_maneuver_plan =
+        const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
+        const bool maneuver_preview_subject =
                 prediction_subject_supports_maneuvers(track->key) &&
                 _maneuver_nodes_enabled &&
-                !_maneuver_state.nodes.empty() &&
+                !_maneuver_state.nodes.empty();
+        const bool interaction_idle =
+                _maneuver_gizmo_interaction.state != ManeuverGizmoInteraction::State::DragAxis;
+        const bool schedule_full_refine =
+                preview_result &&
+                maneuver_preview_subject &&
                 _maneuver_plan_live_preview_active &&
-                _maneuver_gizmo_interaction.state != ManeuverGizmoInteraction::State::DragAxis &&
+                interaction_idle &&
                 !keep_dirty_for_followup;
+        track->dirty = keep_dirty_for_followup || schedule_full_refine;
+
+        const bool freeze_maneuver_plan =
+                maneuver_preview_subject &&
+                _maneuver_plan_live_preview_active &&
+                interaction_idle &&
+                !preview_result &&
+                !keep_dirty_for_followup;
+        if (schedule_full_refine)
+        {
+            // Publish a cheap preview first, then immediately fall through to a full rebuild.
+            _maneuver_plan_live_preview_active = false;
+        }
         if (freeze_maneuver_plan)
         {
             _maneuver_plan_live_preview_active = false;
@@ -260,6 +352,19 @@ namespace Game
 
         if (!with_maneuvers)
         {
+            return required_ahead_s;
+        }
+
+        const bool maneuver_live_preview =
+                _maneuver_plan_live_preview_active ||
+                _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
+        if (maneuver_live_preview)
+        {
+            const ManeuverNode *anchor_node = select_preview_anchor_node(_maneuver_state, now_s);
+            const double anchor_time_s =
+                    (anchor_node && std::isfinite(anchor_node->time_s)) ? std::max(now_s, anchor_node->time_s) : now_s;
+            const double preview_window_s = std::max(maneuver_plan_preview_window_s(), maneuver_post_node_coverage_s());
+            required_ahead_s = std::max(required_ahead_s, (anchor_time_s - now_s) + preview_window_s);
             return required_ahead_s;
         }
 
@@ -293,6 +398,14 @@ namespace Game
                 (_maneuver_plan_live_preview_active ||
                  _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis);
         bool rebuild = track.dirty || !track.cache.valid;
+        if (!rebuild &&
+            track.request_pending &&
+            maneuver_live_preview &&
+            (track.invalidated_while_pending ||
+             track.pending_solve_quality != OrbitPredictionService::SolveQuality::FastPreview))
+        {
+            rebuild = true;
+        }
 
         if (!rebuild && thrusting)
         {
@@ -387,6 +500,20 @@ namespace Game
         request.ship_bary_position_m = ship_bary_pos_m;
         request.ship_bary_velocity_mps = ship_bary_vel_mps;
         request.thrusting = thrusting;
+        const bool maneuver_live_preview =
+                with_maneuvers &&
+                (_maneuver_plan_live_preview_active ||
+                 _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis);
+        const bool interactive_request =
+                track.key == _prediction_selection.active_subject && (thrusting || maneuver_live_preview);
+        request.solve_quality = maneuver_live_preview
+                                        ? OrbitPredictionService::SolveQuality::FastPreview
+                                        : OrbitPredictionService::SolveQuality::Full;
+        request.priority = classify_prediction_request_priority(
+                _prediction_selection,
+                track.key,
+                track.is_celestial,
+                interactive_request);
         request.future_window_s = prediction_required_window_s(track.key, now_s, with_maneuvers);
         const orbitsim::TrajectoryFrameSpec display_frame_spec =
                 track.cache.resolved_frame_spec_valid ? track.cache.resolved_frame_spec : _prediction_frame_selection.spec;
@@ -408,9 +535,16 @@ namespace Game
         if (with_maneuvers)
         {
             request.maneuver_impulses.reserve(_maneuver_state.nodes.size());
+            const double preview_horizon_end_s = now_s + request.future_window_s;
             for (const ManeuverNode &node : _maneuver_state.nodes)
             {
                 if (!std::isfinite(node.time_s))
+                {
+                    continue;
+                }
+
+                if (request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+                    node.time_s > preview_horizon_end_s)
                 {
                     continue;
                 }
@@ -431,6 +565,9 @@ namespace Game
         _prediction_service.request(std::move(request));
         track.request_pending = true;
         track.derived_request_pending = false;
+        track.pending_solve_quality = maneuver_live_preview
+                                              ? OrbitPredictionService::SolveQuality::FastPreview
+                                              : OrbitPredictionService::SolveQuality::Full;
         track.invalidated_while_pending = false;
         return true;
     }
@@ -456,6 +593,11 @@ namespace Game
         request.massive_bodies = _orbitsim->sim.massive_bodies();
         request.shared_ephemeris = track.cache.shared_ephemeris;
         request.subject_body_id = body->id;
+        request.priority = classify_prediction_request_priority(
+                _prediction_selection,
+                track.key,
+                true,
+                false);
         request.future_window_s = prediction_future_window_s(track.key);
         request.lagrange_sensitive = prediction_frame_is_lagrange_sensitive(_prediction_frame_selection.spec);
         if (_prediction_analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
@@ -473,6 +615,7 @@ namespace Game
         _prediction_service.request(std::move(request));
         track.request_pending = true;
         track.derived_request_pending = false;
+        track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
         track.invalidated_while_pending = false;
         return true;
     }
@@ -491,10 +634,20 @@ namespace Game
             track.cache.clear();
             track.dirty = true;
             track.request_pending = false;
+            track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             return;
         }
 
-        if (track.request_pending)
+        const bool maneuver_live_preview =
+                with_maneuvers &&
+                (_maneuver_plan_live_preview_active ||
+                 _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis);
+        const bool supersede_preview_request =
+                track.request_pending &&
+                maneuver_live_preview &&
+                (track.invalidated_while_pending ||
+                 track.pending_solve_quality != OrbitPredictionService::SolveQuality::FastPreview);
+        if (track.request_pending && !supersede_preview_request)
         {
             return;
         }
@@ -506,6 +659,7 @@ namespace Game
         {
             track.cache.clear();
             track.request_pending = false;
+            track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
         }
     }
 
@@ -517,6 +671,7 @@ namespace Game
             track.cache.clear();
             track.dirty = true;
             track.request_pending = false;
+            track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             return;
         }
 
@@ -532,6 +687,7 @@ namespace Game
         {
             track.cache.clear();
             track.request_pending = false;
+            track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
         }
     }
 

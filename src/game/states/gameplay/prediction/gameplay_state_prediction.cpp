@@ -133,6 +133,7 @@ namespace Game
     {
         // Rebuild the subject list while preserving any reusable runtime cache/state.
         const PredictionSubjectKey old_active = _prediction_selection.active_subject;
+        const std::vector<PredictionSubjectKey> old_overlays = _prediction_selection.overlay_subjects;
         std::vector<PredictionTrackState> old_tracks = std::move(_prediction_tracks);
 
         _prediction_tracks.clear();
@@ -204,14 +205,14 @@ namespace Game
             return find_prediction_track(key) != nullptr;
         };
 
-        // Keep the player as the focused subject so maneuver/picking flows still target one stable track.
-        if (const PredictionTrackState *player_track = player_prediction_track())
-        {
-            _prediction_selection.active_subject = player_track->key;
-        }
-        else if (track_exists(old_active))
+        // Preserve the user's active subject when it still exists; otherwise fall back to the player.
+        if (track_exists(old_active))
         {
             _prediction_selection.active_subject = old_active;
+        }
+        else if (const PredictionTrackState *player_track = player_prediction_track())
+        {
+            _prediction_selection.active_subject = player_track->key;
         }
         else if (!_prediction_tracks.empty())
         {
@@ -223,6 +224,37 @@ namespace Game
         }
 
         _prediction_selection.overlay_subjects.clear();
+        _prediction_selection.overlay_subjects.reserve(old_overlays.size());
+        for (PredictionSubjectKey key : old_overlays)
+        {
+            if (!track_exists(key))
+            {
+                continue;
+            }
+
+            if (std::find(_prediction_selection.overlay_subjects.begin(),
+                          _prediction_selection.overlay_subjects.end(),
+                          key) == _prediction_selection.overlay_subjects.end())
+            {
+                _prediction_selection.overlay_subjects.push_back(key);
+            }
+        }
+
+        // There is no dedicated subject/overlay picker in the current UI yet, so keep
+        // other live orbiters visible by default even after narrowing prediction work
+        // to the active/overlay set.
+        if (_prediction_selection.overlay_subjects.empty())
+        {
+            for (const PredictionTrackState &track : _prediction_tracks)
+            {
+                if (track.is_celestial || track.key == _prediction_selection.active_subject)
+                {
+                    continue;
+                }
+
+                _prediction_selection.overlay_subjects.push_back(track.key);
+            }
+        }
         _prediction_selection.selected_group_index = -1;
 
         sync_prediction_dirty_flag();
@@ -230,16 +262,33 @@ namespace Game
 
     std::vector<GameplayState::PredictionSubjectKey> GameplayState::collect_visible_prediction_subjects() const
     {
-        // Render and refresh every live prediction subject.
+        // Visible prediction work is centered on the focused subject plus any explicit overlays.
         std::vector<PredictionSubjectKey> out;
-        out.reserve(_prediction_tracks.size());
-        for (const PredictionTrackState &track : _prediction_tracks)
-        {
-            if (track.key.valid())
+        out.reserve(1 + _prediction_selection.overlay_subjects.size());
+
+        const auto append_visible = [&](PredictionSubjectKey key) {
+            if (!key.valid() || !find_prediction_track(key))
             {
-                out.push_back(track.key);
+                return;
             }
+
+            if (std::find(out.begin(), out.end(), key) == out.end())
+            {
+                out.push_back(key);
+            }
+        };
+
+        append_visible(_prediction_selection.active_subject);
+        for (PredictionSubjectKey key : _prediction_selection.overlay_subjects)
+        {
+            append_visible(key);
         }
+
+        if (out.empty() && !_prediction_tracks.empty())
+        {
+            append_visible(_prediction_tracks.front().key);
+        }
+
         return out;
     }
 

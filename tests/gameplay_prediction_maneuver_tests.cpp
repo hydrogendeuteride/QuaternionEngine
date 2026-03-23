@@ -316,6 +316,41 @@ TEST(GameplayPredictionManeuverTests, PredictionServiceSupportsFarFutureManeuver
     EXPECT_GE(planned_end_s, impulse.t_s);
 }
 
+TEST(GameplayPredictionManeuverTests, PredictionServiceReusesBaselineForFastManeuverPreview)
+{
+    Game::OrbitPredictionService service{};
+
+    Game::OrbitPredictionService::Request baseline_request = make_prediction_request(0.0, 120.0);
+    const Game::OrbitPredictionService::Result baseline_result = service.compute_prediction(1, baseline_request, 1);
+
+    ASSERT_TRUE(baseline_result.valid);
+    ASSERT_FALSE(baseline_result.trajectory_inertial.empty());
+    ASSERT_FALSE(baseline_result.trajectory_segments_inertial.empty());
+    ASSERT_TRUE(baseline_result.shared_ephemeris);
+    EXPECT_FALSE(baseline_result.diagnostics.trajectory_base.cache_reused);
+
+    Game::OrbitPredictionService::Request preview_request = make_prediction_request(5.0, 120.0);
+    preview_request.solve_quality = Game::OrbitPredictionService::SolveQuality::FastPreview;
+    preview_request.shared_ephemeris = baseline_result.shared_ephemeris;
+
+    Game::OrbitPredictionService::ManeuverImpulse impulse{};
+    impulse.node_id = 1;
+    impulse.t_s = 20.0;
+    impulse.primary_body_id = 1;
+    impulse.dv_rtn_mps = glm::dvec3(0.0, 0.0, 10.0);
+    preview_request.maneuver_impulses.push_back(impulse);
+
+    const Game::OrbitPredictionService::Result preview_result = service.compute_prediction(2, preview_request, 1);
+
+    ASSERT_TRUE(preview_result.valid);
+    EXPECT_TRUE(preview_result.diagnostics.trajectory_base.cache_reused);
+    EXPECT_EQ(preview_result.diagnostics.trajectory_sample_count, baseline_result.diagnostics.trajectory_sample_count);
+    ASSERT_FALSE(preview_result.trajectory_segments_inertial_planned.empty());
+    EXPECT_GE(preview_result.trajectory_segments_inertial.back().t0_s +
+                      preview_result.trajectory_segments_inertial.back().dt_s,
+              preview_request.sim_time_s + preview_request.future_window_s);
+}
+
 TEST(GameplayPredictionManeuverTests, PredictionServiceRejectsResultsFromPreviousResetEpoch)
 {
     Game::OrbitPredictionService::PendingJob stale_job{};

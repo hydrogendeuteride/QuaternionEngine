@@ -29,6 +29,21 @@ namespace Game
             Celestial,
         };
 
+        enum class SolveQuality : uint8_t
+        {
+            Full = 0,
+            FastPreview,
+        };
+
+        enum class RequestPriority : uint8_t
+        {
+            BackgroundCelestial = 0,
+            BackgroundOrbiter,
+            Overlay,
+            ActiveTrack,
+            ActiveInteractiveTrack,
+        };
+
         enum class Status : uint8_t
         {
             None = 0,
@@ -109,6 +124,8 @@ namespace Game
 
             bool thrusting{false};
             bool lagrange_sensitive{false};
+            SolveQuality solve_quality{SolveQuality::Full};
+            RequestPriority priority{RequestPriority::BackgroundOrbiter};
             double future_window_s{600.0};
             double celestial_ephemeris_dt_s{0.0};
             orbitsim::BodyId preferred_primary_body_id{orbitsim::kInvalidBodyId};
@@ -120,6 +137,7 @@ namespace Game
             uint64_t track_id{0};
             uint64_t generation_id{0};
             bool valid{false};
+            SolveQuality solve_quality{SolveQuality::Full};
             double compute_time_ms{0.0};
             Diagnostics diagnostics{};
 
@@ -179,6 +197,15 @@ namespace Game
         static EphemerisSamplingSpec build_ephemeris_sampling_spec(const Request &request);
 
     private:
+        struct ReusableBaselineCacheEntry
+        {
+            uint64_t generation_id{0};
+            uint64_t request_epoch{0};
+            SharedCelestialEphemeris shared_ephemeris{};
+            std::vector<orbitsim::TrajectorySample> trajectory_inertial{};
+            std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial{};
+        };
+
         struct PendingJob
         {
             uint64_t track_id{0};
@@ -189,6 +216,13 @@ namespace Game
 
         // Execute a single queued prediction request on the worker.
         Result compute_prediction(uint64_t generation_id, const Request &request, uint64_t request_epoch);
+        std::optional<ReusableBaselineCacheEntry> find_reusable_baseline(uint64_t track_id, uint64_t request_epoch) const;
+        void store_reusable_baseline(uint64_t track_id,
+                                     uint64_t generation_id,
+                                     uint64_t request_epoch,
+                                     SharedCelestialEphemeris shared_ephemeris,
+                                     std::vector<orbitsim::TrajectorySample> trajectory_inertial,
+                                     std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial);
         // Drop stale results after reset() or when a newer request supersedes the same track.
         static bool should_publish_result(const PendingJob &job,
                                           uint64_t current_request_epoch,
@@ -212,6 +246,9 @@ namespace Game
         uint64_t _request_epoch{1};
         uint64_t _next_generation_id{1};
         std::unordered_map<uint64_t, uint64_t> _latest_requested_generation_by_track{};
+
+        mutable std::mutex _baseline_cache_mutex;
+        std::unordered_map<uint64_t, ReusableBaselineCacheEntry> _reusable_baseline_by_track{};
 
         std::mutex _ephemeris_mutex;
         std::vector<CachedEphemerisEntry> _ephemeris_cache{};
