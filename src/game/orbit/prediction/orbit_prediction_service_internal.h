@@ -38,6 +38,14 @@ namespace Game
         return request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
     }
 
+    inline bool request_can_reuse_spacecraft_baseline(const OrbitPredictionService::Request &request)
+    {
+        return request.kind == OrbitPredictionService::RequestKind::Spacecraft &&
+               request_uses_fast_preview(request) &&
+               !request.thrusting &&
+               !request.maneuver_impulses.empty();
+    }
+
     inline std::size_t prediction_sample_budget(const OrbitPredictionService::Request &request,
                                                 const std::size_t segment_count)
     {
@@ -83,6 +91,23 @@ namespace Game
     inline double continuity_time_epsilon_s(const double reference_time_s)
     {
         return std::max(kContinuityMinTimeEpsilonS, std::abs(reference_time_s) * 1.0e-12);
+    }
+
+    inline bool trajectory_segments_cover_window(const std::vector<orbitsim::TrajectorySegment> &segments,
+                                                 const double sim_time_s,
+                                                 const double required_duration_s)
+    {
+        if (segments.empty() || !std::isfinite(sim_time_s))
+        {
+            return false;
+        }
+
+        const double end_time_s = prediction_segment_end_time(segments.back());
+        const double start_epsilon_s = continuity_time_epsilon_s(sim_time_s);
+        const double end_epsilon_s = continuity_time_epsilon_s(end_time_s);
+        const double required_end_s = sim_time_s + std::max(0.0, required_duration_s);
+        return segments.front().t0_s <= (sim_time_s + start_epsilon_s) &&
+               end_time_s >= (required_end_s - end_epsilon_s);
     }
 
     inline double continuity_pos_tolerance_m(const orbitsim::State &a, const orbitsim::State &b)
