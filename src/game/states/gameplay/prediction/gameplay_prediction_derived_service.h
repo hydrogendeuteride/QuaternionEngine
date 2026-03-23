@@ -34,6 +34,7 @@ namespace Game
             uint64_t track_id{0};
             uint64_t generation_id{0};
             bool valid{false};
+            OrbitPredictionService::SolveQuality solve_quality{OrbitPredictionService::SolveQuality::Full};
             OrbitPredictionDerivedDiagnostics diagnostics{};
             OrbitPredictionCache cache{};
         };

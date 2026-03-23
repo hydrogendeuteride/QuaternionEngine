@@ -37,6 +37,12 @@ namespace Game
     {
         if (request_needs_control_sensitive_prediction(request))
         {
+            if (request_uses_fast_preview(request))
+            {
+                return std::min(OrbitPredictionTuning::kPredictionIntegratorMaxStepS,
+                                OrbitPredictionTuning::kPredictionIntegratorMaxStepPreviewS);
+            }
+
             return OrbitPredictionTuning::kPredictionIntegratorMaxStepControlledS;
         }
 
@@ -92,6 +98,14 @@ namespace Game
                 ramp.vel_far_mps *= 0.25;
             }
 
+            if (request_uses_fast_preview(request))
+            {
+                ramp.pos_near_m *= OrbitPredictionTuning::kFastPreviewAdaptiveSegmentToleranceScale;
+                ramp.pos_far_m *= OrbitPredictionTuning::kFastPreviewAdaptiveSegmentToleranceScale;
+                ramp.vel_near_mps *= OrbitPredictionTuning::kFastPreviewAdaptiveSegmentToleranceScale;
+                ramp.vel_far_mps *= OrbitPredictionTuning::kFastPreviewAdaptiveSegmentToleranceScale;
+            }
+
             return ramp;
         }
 
@@ -119,6 +133,14 @@ namespace Game
                 ramp.pos_far_m *= 0.5;
                 ramp.vel_near_mps *= 0.5;
                 ramp.vel_far_mps *= 0.5;
+            }
+
+            if (request_uses_fast_preview(request))
+            {
+                ramp.pos_near_m *= OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisToleranceScale;
+                ramp.pos_far_m *= OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisToleranceScale;
+                ramp.vel_near_mps *= OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisToleranceScale;
+                ramp.vel_far_mps *= OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisToleranceScale;
             }
 
             return ramp;
@@ -207,8 +229,14 @@ namespace Game
 
         const bool controlled = request_needs_control_sensitive_prediction(request);
 
-        const std::size_t soft_cap = OrbitPredictionTuning::kAdaptiveSegmentSoftMaxSegmentsNormal;
-        std::size_t hard_cap = OrbitPredictionTuning::kAdaptiveSegmentHardMaxSegmentsNormal;
+        const std::size_t soft_cap =
+                request_uses_fast_preview(request)
+                    ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentSoftMaxSegments
+                    : OrbitPredictionTuning::kAdaptiveSegmentSoftMaxSegmentsNormal;
+        std::size_t hard_cap =
+                request_uses_fast_preview(request)
+                    ? std::max<std::size_t>(soft_cap * 2u, soft_cap)
+                    : OrbitPredictionTuning::kAdaptiveSegmentHardMaxSegmentsNormal;
         if (sampling_spec.horizon_s > 0.0)
         {
             const auto horizon_scaled = static_cast<std::size_t>(
@@ -219,16 +247,23 @@ namespace Game
         double max_dt_s = OrbitPredictionTuning::kAdaptiveSegmentMaxDtS;
         if (controlled)
         {
-            max_dt_s = std::min(max_dt_s, OrbitPredictionTuning::kAdaptiveSegmentMaxDtControlledS);
+            max_dt_s = std::min(max_dt_s,
+                                request_uses_fast_preview(request)
+                                    ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentMaxDtS
+                                    : OrbitPredictionTuning::kAdaptiveSegmentMaxDtControlledS);
         }
 
         const double lookup_max_dt_s = controlled
-                                               ? OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtControlledS
+                                               ? (request_uses_fast_preview(request)
+                                                      ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentLookupMaxDtS
+                                                      : OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtControlledS)
                                                : OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtS;
 
         out.duration_s = sampling_spec.horizon_s;
         out.min_dt_s = request_needs_control_sensitive_prediction(request)
-                               ? OrbitPredictionTuning::kAdaptiveSegmentMinDtControlledS
+                               ? (request_uses_fast_preview(request)
+                                      ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentMinDtS
+                                      : OrbitPredictionTuning::kAdaptiveSegmentMinDtControlledS)
                                : OrbitPredictionTuning::kAdaptiveSegmentMinDtS;
         out.max_dt_s = std::max(out.min_dt_s, max_dt_s);
         out.lookup_max_dt_s = std::clamp(lookup_max_dt_s, out.min_dt_s, out.max_dt_s);
@@ -255,20 +290,28 @@ namespace Game
 
         const bool controlled = request_needs_control_sensitive_prediction(request);
 
-        const std::size_t soft_cap = OrbitPredictionTuning::kAdaptiveEphemerisSoftMaxSegments;
+        const std::size_t soft_cap =
+                request_uses_fast_preview(request)
+                    ? OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisSoftMaxSegments
+                    : OrbitPredictionTuning::kAdaptiveEphemerisSoftMaxSegments;
         const std::size_t hard_cap = std::max<std::size_t>(
                 request.lagrange_sensitive ? OrbitPredictionTuning::kLagrangeEphemerisMaxSamples : soft_cap,
                 soft_cap);
 
         out.duration_s = sampling_spec.horizon_s;
         out.min_dt_s = controlled
-                               ? OrbitPredictionTuning::kAdaptiveEphemerisMinDtControlledS
+                               ? (request_uses_fast_preview(request)
+                                      ? OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisMinDtS
+                                      : OrbitPredictionTuning::kAdaptiveEphemerisMinDtControlledS)
                                : OrbitPredictionTuning::kAdaptiveEphemerisMinDtS;
 
         double max_dt_s = OrbitPredictionTuning::kAdaptiveEphemerisMaxDtS;
         if (controlled)
         {
-            max_dt_s = std::min(max_dt_s, OrbitPredictionTuning::kAdaptiveEphemerisMaxDtControlledS);
+            max_dt_s = std::min(max_dt_s,
+                                request_uses_fast_preview(request)
+                                    ? OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisMaxDtS
+                                    : OrbitPredictionTuning::kAdaptiveEphemerisMaxDtControlledS);
         }
         if (request.lagrange_sensitive)
         {
