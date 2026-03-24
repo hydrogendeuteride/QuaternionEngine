@@ -424,10 +424,12 @@ namespace Game
         const bool display_frame_uses_preview_anchor =
                 display_frame_spec.type == orbitsim::TrajectoryFrameType::Inertial ||
                 display_frame_spec.type == orbitsim::TrajectoryFrameType::BodyCenteredInertial;
-        const bool freeze_nonrotating_drag_snapshots =
-                display_frame_uses_preview_anchor &&
+        const bool drag_display_snapshots_available =
                 _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis &&
                 !_maneuver_gizmo_interaction.drag_display_snapshots.empty();
+        const bool freeze_nonrotating_drag_snapshots =
+                display_frame_uses_preview_anchor &&
+                drag_display_snapshots_available;
         WorldVec3 display_origin_world_now{0.0, 0.0, 0.0};
         glm::dmat3 display_frame_to_world_now{1.0};
         const bool have_display_transform_now =
@@ -772,8 +774,13 @@ namespace Game
                 node.basis_n_world = normal_world;
             }
 
+            const bool freeze_active_drag_snapshot =
+                    drag_display_snapshots_available &&
+                    _maneuver_gizmo_interaction.node_id == node.id;
             const ManeuverNodeDisplaySnapshot *drag_snapshot =
-                    freeze_nonrotating_drag_snapshots ? find_drag_display_snapshot(node.id) : nullptr;
+                    (freeze_nonrotating_drag_snapshots || freeze_active_drag_snapshot)
+                            ? find_drag_display_snapshot(node.id)
+                            : nullptr;
             if (drag_snapshot)
             {
                 node_position_world = drag_snapshot->position_world;

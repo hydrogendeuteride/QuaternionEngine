@@ -21,6 +21,8 @@ namespace Game
             uint64_t track_id{0};
             uint64_t generation_id{0};
             OrbitPredictionService::Result solver_result{};
+            bool reuse_existing_base_frame{false};
+            OrbitPredictionService::AdaptiveStageDiagnostics reused_base_frame_diagnostics{};
             WorldVec3 build_pos_world{0.0, 0.0, 0.0};
             glm::dvec3 build_vel_world{0.0, 0.0, 0.0};
             orbitsim::GameSimulation::Config sim_config{};
@@ -34,6 +36,7 @@ namespace Game
             uint64_t track_id{0};
             uint64_t generation_id{0};
             bool valid{false};
+            bool base_frame_reused{false};
             OrbitPredictionService::SolveQuality solve_quality{OrbitPredictionService::SolveQuality::Full};
             OrbitPredictionDerivedDiagnostics diagnostics{};
             OrbitPredictionCache cache{};
