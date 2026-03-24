@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <utility>
 
 namespace Game
@@ -209,6 +210,164 @@ namespace Game
                 preview_cache.metrics_body_id = base_cache.metrics_body_id;
                 preview_cache.metrics_valid = base_cache.metrics_valid;
             }
+            preview_cache.valid = preview_cache.trajectory_inertial.size() >= 2 &&
+                                  preview_cache.trajectory_frame.size() >= 2 &&
+                                  !preview_cache.trajectory_segments_frame.empty();
+            return preview_cache;
+        }
+
+        template<typename SampleT>
+        std::vector<SampleT> merge_planned_sample_prefix(const std::vector<SampleT> &previous_samples,
+                                                         const std::vector<SampleT> &patch_samples,
+                                                         const double patch_t0_s)
+        {
+            if (previous_samples.empty() || patch_samples.empty() || !std::isfinite(patch_t0_s))
+            {
+                return patch_samples;
+            }
+
+            constexpr double kTimeEpsilonS = 1.0e-6;
+            std::vector<SampleT> merged;
+            merged.reserve(previous_samples.size() + patch_samples.size());
+            for (const SampleT &sample : previous_samples)
+            {
+                if (!std::isfinite(sample.t_s) || sample.t_s >= (patch_t0_s - kTimeEpsilonS))
+                {
+                    break;
+                }
+                merged.push_back(sample);
+            }
+            merged.insert(merged.end(), patch_samples.begin(), patch_samples.end());
+            return merged;
+        }
+
+        std::vector<orbitsim::TrajectorySegment> merge_planned_segment_prefix(
+                const std::vector<orbitsim::TrajectorySegment> &previous_segments,
+                const std::vector<orbitsim::TrajectorySegment> &patch_segments,
+                const double patch_t0_s)
+        {
+            if (previous_segments.empty() || patch_segments.empty() || !std::isfinite(patch_t0_s))
+            {
+                return patch_segments;
+            }
+
+            constexpr double kTimeEpsilonS = 1.0e-6;
+            std::vector<orbitsim::TrajectorySegment> merged;
+            merged.reserve(previous_segments.size() + patch_segments.size());
+            for (const orbitsim::TrajectorySegment &segment : previous_segments)
+            {
+                const double segment_t1_s = segment.t0_s + segment.dt_s;
+                if (!std::isfinite(segment.t0_s) || !std::isfinite(segment_t1_s) || !(segment.dt_s > 0.0))
+                {
+                    continue;
+                }
+                if (segment_t1_s > (patch_t0_s + kTimeEpsilonS))
+                {
+                    break;
+                }
+                merged.push_back(segment);
+            }
+            merged.insert(merged.end(), patch_segments.begin(), patch_segments.end());
+            return merged;
+        }
+
+        std::vector<OrbitPredictionCache::ManeuverNodePreview> merge_maneuver_previews(
+                const std::vector<OrbitPredictionCache::ManeuverNodePreview> &previous_previews,
+                const std::vector<OrbitPredictionCache::ManeuverNodePreview> &patch_previews)
+        {
+            std::vector<OrbitPredictionCache::ManeuverNodePreview> merged = previous_previews;
+            for (const OrbitPredictionCache::ManeuverNodePreview &patch_preview : patch_previews)
+            {
+                const auto existing_it = std::find_if(
+                        merged.begin(),
+                        merged.end(),
+                        [&patch_preview](const OrbitPredictionCache::ManeuverNodePreview &candidate) {
+                            return candidate.node_id == patch_preview.node_id;
+                        });
+                if (existing_it != merged.end())
+                {
+                    *existing_it = patch_preview;
+                }
+                else
+                {
+                    merged.push_back(patch_preview);
+                }
+            }
+
+            std::stable_sort(
+                    merged.begin(),
+                    merged.end(),
+                    [](const OrbitPredictionCache::ManeuverNodePreview &a, const OrbitPredictionCache::ManeuverNodePreview &b) {
+                        if (a.t_s == b.t_s)
+                        {
+                            return a.node_id < b.node_id;
+                        }
+                        return a.t_s < b.t_s;
+                    });
+            return merged;
+        }
+
+        OrbitPredictionCache merge_preview_planned_prefix_cache(const OrbitPredictionCache &previous_cache,
+                                                                OrbitPredictionCache preview_cache)
+        {
+            if (!previous_cache.valid)
+            {
+                return preview_cache;
+            }
+
+            double inertial_patch_t0_s = std::numeric_limits<double>::quiet_NaN();
+            if (!preview_cache.trajectory_segments_inertial_planned.empty())
+            {
+                inertial_patch_t0_s = preview_cache.trajectory_segments_inertial_planned.front().t0_s;
+            }
+            else if (!preview_cache.trajectory_inertial_planned.empty())
+            {
+                inertial_patch_t0_s = preview_cache.trajectory_inertial_planned.front().t_s;
+            }
+
+            if (std::isfinite(inertial_patch_t0_s))
+            {
+                preview_cache.trajectory_inertial_planned = merge_planned_sample_prefix(
+                        previous_cache.trajectory_inertial_planned,
+                        preview_cache.trajectory_inertial_planned,
+                        inertial_patch_t0_s);
+                preview_cache.trajectory_segments_inertial_planned = merge_planned_segment_prefix(
+                        previous_cache.trajectory_segments_inertial_planned,
+                        preview_cache.trajectory_segments_inertial_planned,
+                        inertial_patch_t0_s);
+            }
+
+            double frame_patch_t0_s = std::numeric_limits<double>::quiet_NaN();
+            if (!preview_cache.trajectory_segments_frame_planned.empty())
+            {
+                frame_patch_t0_s = preview_cache.trajectory_segments_frame_planned.front().t0_s;
+            }
+            else if (!preview_cache.trajectory_frame_planned.empty())
+            {
+                frame_patch_t0_s = preview_cache.trajectory_frame_planned.front().t_s;
+            }
+
+            if (std::isfinite(frame_patch_t0_s))
+            {
+                preview_cache.trajectory_frame_planned = merge_planned_sample_prefix(
+                        previous_cache.trajectory_frame_planned,
+                        preview_cache.trajectory_frame_planned,
+                        frame_patch_t0_s);
+                preview_cache.trajectory_segments_frame_planned = merge_planned_segment_prefix(
+                        previous_cache.trajectory_segments_frame_planned,
+                        preview_cache.trajectory_segments_frame_planned,
+                        frame_patch_t0_s);
+            }
+
+            preview_cache.maneuver_previews = merge_maneuver_previews(
+                    previous_cache.maneuver_previews,
+                    preview_cache.maneuver_previews);
+
+            preview_cache.gpu_roots_frame_planned.reset();
+            preview_cache.render_curve_frame_planned = preview_cache.trajectory_segments_frame_planned.empty()
+                                                              ? OrbitRenderCurve{}
+                                                              : OrbitRenderCurve::build(
+                                                                        preview_cache.trajectory_segments_frame_planned);
             preview_cache.valid = preview_cache.trajectory_inertial.size() >= 2 &&
                                   preview_cache.trajectory_frame.size() >= 2 &&
                                   !preview_cache.trajectory_segments_frame.empty();
@@ -470,9 +629,11 @@ namespace Game
 
         if (!result.valid || result.trajectory_inertial.size() < 2)
         {
-            track->request_pending = false;
+            track->request_pending = !result.generation_complete;
             track->derived_request_pending = false;
-            track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+            track->pending_solve_quality = result.generation_complete
+                                                   ? OrbitPredictionService::SolveQuality::Full
+                                                   : result.solve_quality;
             track->dirty = true;
             return;
         }
@@ -542,8 +703,8 @@ namespace Game
         derived_request.analysis_body_id = analysis_body_id;
         derived_request.player_lookup_segments_inertial = std::move(player_lookup_segments);
         _prediction_derived_service.request(std::move(derived_request));
-        // Let the solver queue accept a fresher generation while derived work finishes in parallel.
-        track->request_pending = false;
+        // Keep request_pending set until the solver publishes the final staged preview result for this generation.
+        track->request_pending = !result.generation_complete;
         track->derived_request_pending = true;
         // If the input changed while this solve was in-flight, promote straight to dirty so the
         // next update tick can submit a fresh solver request without waiting for derived to finish.
@@ -552,7 +713,9 @@ namespace Game
             track->dirty = true;
             track->invalidated_while_pending = false;
         }
-        track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+        track->pending_solve_quality = result.generation_complete
+                                               ? OrbitPredictionService::SolveQuality::Full
+                                               : result.solve_quality;
     }
 
     void GameplayState::apply_completed_prediction_derived_result(OrbitPredictionDerivedService::Result result)
@@ -607,6 +770,13 @@ namespace Game
                 cache_to_publish = std::move(result.cache);
                 have_cache_to_publish = cache_to_publish.valid;
             }
+
+            if (have_cache_to_publish &&
+                result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview)
+            {
+                cache_to_publish = merge_preview_planned_prefix_cache(track->cache, std::move(cache_to_publish));
+                have_cache_to_publish = cache_to_publish.valid;
+            }
         }
 
         track->derived_diagnostics = diagnostics_to_publish;
@@ -639,6 +809,7 @@ namespace Game
                 _maneuver_gizmo_interaction.state != ManeuverGizmoInteraction::State::DragAxis;
         const bool schedule_full_refine =
                 preview_result &&
+                result.generation_complete &&
                 maneuver_preview_subject &&
                 _maneuver_plan_live_preview_active &&
                 interaction_idle &&
@@ -901,6 +1072,18 @@ namespace Game
                 track.is_celestial,
                 interactive_request);
         request.future_window_s = prediction_required_window_s(track, now_s, with_maneuvers);
+        if (request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+            track.preview_anchor.valid &&
+            finite_vec3(track.preview_anchor.anchor_state_inertial.position_m) &&
+            finite_vec3(track.preview_anchor.anchor_state_inertial.velocity_mps))
+        {
+            request.preview_patch.active = true;
+            request.preview_patch.anchor_state_valid = true;
+            request.preview_patch.baseline_generation_id = track.preview_anchor.baseline_generation_id;
+            request.preview_patch.anchor_time_s = track.preview_anchor.anchor_time_s;
+            request.preview_patch.patch_window_s = std::max(0.0, track.preview_anchor.patch_window_s);
+            request.preview_patch.anchor_state_inertial = track.preview_anchor.anchor_state_inertial;
+        }
         const orbitsim::TrajectoryFrameSpec display_frame_spec =
                 track.cache.resolved_frame_spec_valid ? track.cache.resolved_frame_spec : _prediction_frame_selection.spec;
         request.lagrange_sensitive = prediction_frame_is_lagrange_sensitive(display_frame_spec);

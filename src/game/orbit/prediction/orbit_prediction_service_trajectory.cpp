@@ -250,4 +250,61 @@ namespace Game
 
         return out;
     }
+
+    std::vector<orbitsim::TrajectorySegment> slice_trajectory_segments(
+            const std::vector<orbitsim::TrajectorySegment> &segments,
+            const double t0_s,
+            const double t1_s)
+    {
+        std::vector<orbitsim::TrajectorySegment> out;
+        if (segments.empty() || !std::isfinite(t0_s) || !std::isfinite(t1_s) || !(t1_s > t0_s))
+        {
+            return out;
+        }
+
+        out.reserve(segments.size());
+        for (const orbitsim::TrajectorySegment &segment : segments)
+        {
+            const double seg_t0_s = segment.t0_s;
+            const double seg_t1_s = prediction_segment_end_time(segment);
+            if (!(segment.dt_s > 0.0) || !std::isfinite(seg_t0_s) || !std::isfinite(seg_t1_s) || !(seg_t1_s > seg_t0_s))
+            {
+                continue;
+            }
+
+            const double overlap_t0_s = std::max(seg_t0_s, t0_s);
+            const double overlap_t1_s = std::min(seg_t1_s, t1_s);
+            if (!(overlap_t1_s > overlap_t0_s))
+            {
+                continue;
+            }
+
+            orbitsim::State start_state = segment.start;
+            orbitsim::State end_state = segment.end;
+            if (overlap_t0_s > seg_t0_s && !eval_segment_state(segment, overlap_t0_s, start_state))
+            {
+                continue;
+            }
+            if (overlap_t1_s < seg_t1_s && !eval_segment_state(segment, overlap_t1_s, end_state))
+            {
+                continue;
+            }
+
+            std::uint32_t flags = segment.flags;
+            if (overlap_t0_s > seg_t0_s || overlap_t1_s < seg_t1_s)
+            {
+                flags |= orbitsim::kTrajectorySegmentFlagForcedBoundary;
+            }
+
+            out.push_back(orbitsim::TrajectorySegment{
+                    .t0_s = overlap_t0_s,
+                    .dt_s = overlap_t1_s - overlap_t0_s,
+                    .start = start_state,
+                    .end = end_state,
+                    .flags = flags,
+            });
+        }
+
+        return out;
+    }
 } // namespace Game

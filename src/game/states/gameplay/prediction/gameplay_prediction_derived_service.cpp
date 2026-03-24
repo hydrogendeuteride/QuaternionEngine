@@ -133,6 +133,8 @@ namespace Game
         Request &request = job.request;
         OrbitPredictionService::Result &solver = request.solver_result;
         out.solve_quality = solver.solve_quality;
+        out.publish_stage = solver.publish_stage;
+        out.generation_complete = solver.generation_complete;
         if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
         {
             out.diagnostics.status = PredictionDerivedStatus::MissingSolverData;
