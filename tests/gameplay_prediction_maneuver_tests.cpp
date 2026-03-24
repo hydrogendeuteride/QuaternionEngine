@@ -179,6 +179,26 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowSupportsFarFutureM
     EXPECT_DOUBLE_EQ(required_window_s, 50'200.0);
 }
 
+TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowCapsLivePreviewToAnchorWindow)
+{
+    Game::GameplayState state{};
+    state._prediction_draw_future_segment = true;
+    state._prediction_sampling_policy.orbiter_min_window_s = 50'000.0;
+    state._maneuver_plan_windows.preview_window_s = 180.0;
+    state._maneuver_plan_windows.solve_margin_s = 300.0;
+    state._maneuver_plan_live_preview_active = true;
+
+    Game::GameplayState::ManeuverNode selected{};
+    selected.id = 7;
+    selected.time_s = 240.0;
+    state._maneuver_state.selected_node_id = selected.id;
+    state._maneuver_state.nodes.push_back(selected);
+
+    const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
+    const double required_window_s = state.prediction_required_window_s(orbiter_key, 100.0, true);
+    EXPECT_DOUBLE_EQ(required_window_s, 440.0);
+}
+
 TEST(GameplayPredictionManeuverTests, ShouldRebuildPredictionTrackWhenCoverageFallsShort)
 {
     Game::GameplayState state{};
@@ -397,6 +417,43 @@ TEST(GameplayPredictionManeuverTests, CompletedSolverResultClearsSolverPendingAn
     ASSERT_EQ(state._prediction_tracks.size(), 1u);
     EXPECT_FALSE(state._prediction_tracks.front().request_pending);
     EXPECT_TRUE(state._prediction_tracks.front().derived_request_pending);
+}
+
+TEST(GameplayPredictionManeuverTests, ReusedBaseFrameDerivedResultPreservesBaseDiagnostics)
+{
+    Game::GameplayState state{};
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.cache.valid = true;
+    track.cache.resolved_frame_spec_valid = true;
+    track.cache.resolved_frame_spec = orbitsim::TrajectoryFrameSpec::body_centered_inertial(1);
+    track.cache.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(60.0, 7'100'000.0)};
+    track.cache.trajectory_segments_inertial = {make_segment(0.0, 60.0, 7'000'000.0, 7'100'000.0)};
+    track.cache.trajectory_frame = track.cache.trajectory_inertial;
+    track.cache.trajectory_segments_frame = track.cache.trajectory_segments_inertial;
+    track.derived_diagnostics.frame_base.accepted_segments = 11;
+    state._prediction_tracks.push_back(track);
+
+    Game::OrbitPredictionDerivedService::Result result{};
+    result.track_id = state._prediction_tracks.front().key.track_id();
+    result.generation_id = 1;
+    result.valid = true;
+    result.base_frame_reused = true;
+    result.diagnostics.frame_base.accepted_segments = 11;
+    result.cache.valid = true;
+    result.cache.resolved_frame_spec_valid = true;
+    result.cache.resolved_frame_spec = orbitsim::TrajectoryFrameSpec::body_centered_inertial(1);
+    result.cache.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(60.0, 7'100'000.0)};
+    result.cache.trajectory_segments_inertial = {make_segment(0.0, 60.0, 7'000'000.0, 7'100'000.0)};
+    result.cache.trajectory_inertial_planned = {make_sample(0.0, 7'000'000.0), make_sample(60.0, 7'200'000.0)};
+    result.cache.trajectory_segments_inertial_planned = {make_segment(0.0, 60.0, 7'000'000.0, 7'200'000.0)};
+
+    state.apply_completed_prediction_derived_result(std::move(result));
+
+    ASSERT_EQ(state._prediction_tracks.size(), 1u);
+    EXPECT_EQ(state._prediction_tracks.front().derived_diagnostics.frame_base.accepted_segments, 11u);
+    EXPECT_EQ(state._prediction_tracks.front().derived_diagnostics.status, Game::PredictionDerivedStatus::Success);
 }
 
 int main(int argc, char **argv)

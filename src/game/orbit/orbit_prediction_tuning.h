@@ -68,10 +68,10 @@ namespace Game::OrbitPredictionTuning
     inline constexpr int kPredictionIntegratorMaxIntervalSplits = 10;
 
     // ── Synodic/Lagrange sensitivity ────────────────────────────────────────────
-    inline constexpr double kLagrangeIntegratorMaxStepS = 60.0;
-    inline constexpr double kLagrangeIntegratorAbsTol = 1.0e-4;
-    inline constexpr double kLagrangeIntegratorRelTol = 1.0e-10;
-    inline constexpr double kLagrangeEphemerisMaxDtS = 60.0;
+    inline constexpr double kLagrangeIntegratorMaxStepS = 300.0;
+    inline constexpr double kLagrangeIntegratorAbsTol = 1.0e-6;
+    inline constexpr double kLagrangeIntegratorRelTol = 1.0e-6;
+    inline constexpr double kLagrangeEphemerisMaxDtS = 600.0;
     inline constexpr std::size_t kLagrangeEphemerisMaxSamples = 24'000;
 
     // ── Misc policy ─────────────────────────────────────────────────────────────
