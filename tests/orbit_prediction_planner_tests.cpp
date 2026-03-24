@@ -18,6 +18,21 @@ namespace
         return request;
     }
 
+    orbitsim::TrajectorySegment make_activity_segment(const double t0_s,
+                                                      const double t1_s,
+                                                      const orbitsim::Vec3 &p0_m,
+                                                      const orbitsim::Vec3 &v0_mps,
+                                                      const orbitsim::Vec3 &p1_m,
+                                                      const orbitsim::Vec3 &v1_mps)
+    {
+        orbitsim::TrajectorySegment segment{};
+        segment.t0_s = t0_s;
+        segment.dt_s = t1_s - t0_s;
+        segment.start = orbitsim::make_state(p0_m, v0_mps);
+        segment.end = orbitsim::make_state(p1_m, v1_mps);
+        return segment;
+    }
+
     bool has_boundary(const Game::OrbitPredictionService::PredictionSolvePlan &plan, const double time_s)
     {
         for (const Game::OrbitPredictionService::PredictionChunkPlan &chunk : plan.chunks)
@@ -235,6 +250,96 @@ TEST(OrbitPredictionPlannerTests, PreviewAndManeuverChunksTightenProfiles)
     EXPECT_LT(interactive_opt.max_dt_s, maneuver_opt.max_dt_s);
     EXPECT_LE(interactive_opt.lookup_max_dt_s, maneuver_opt.lookup_max_dt_s);
     EXPECT_GT(interactive_opt.soft_max_segments, maneuver_opt.soft_max_segments);
+}
+
+TEST(OrbitPredictionPlannerTests, ActivityClassifierKeepsCalmChunkStable)
+{
+    using Profile = Game::OrbitPredictionService::PredictionProfileId;
+
+    Game::OrbitPredictionService::Request request =
+            make_request(0.0, 20.0 * Game::OrbitPredictionTuning::kSecondsPerDay);
+    request.preferred_primary_body_id = 1;
+
+    orbitsim::MassiveBody primary{};
+    primary.id = 1;
+    primary.mass_kg = 5.972e24;
+    primary.state = orbitsim::make_state(orbitsim::Vec3(0.0), orbitsim::Vec3(0.0));
+    request.massive_bodies.push_back(primary);
+
+    const Game::OrbitPredictionService::PredictionChunkPlan chunk{
+            .chunk_id = 0u,
+            .t0_s = 0.0,
+            .t1_s = 10.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
+            .profile_id = Profile::DeepTail,
+    };
+    const std::vector<orbitsim::TrajectorySegment> baseline{
+            make_activity_segment(0.0,
+                                  5.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
+                                  orbitsim::Vec3(10'000'000.0, 0.0, 0.0),
+                                  orbitsim::Vec3(0.0, 2'500.0, 0.0),
+                                  orbitsim::Vec3(10'000'000.0, 1.08e9, 0.0),
+                                  orbitsim::Vec3(0.0, 2'500.0, 0.0)),
+            make_activity_segment(5.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
+                                  10.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
+                                  orbitsim::Vec3(10'000'000.0, 1.08e9, 0.0),
+                                  orbitsim::Vec3(0.0, 2'500.0, 0.0),
+                                  orbitsim::Vec3(10'000'000.0, 2.16e9, 0.0),
+                                  orbitsim::Vec3(0.0, 2'500.0, 0.0)),
+    };
+
+    const auto probe = Game::classify_chunk_activity(request, chunk, &baseline);
+    ASSERT_TRUE(probe.valid);
+    EXPECT_FALSE(probe.should_split);
+    EXPECT_EQ(probe.recommended_profile_id, Profile::DeepTail);
+    EXPECT_GT(probe.dominant_gravity_ratio, 0.99);
+}
+
+TEST(OrbitPredictionPlannerTests, ActivityClassifierPromotesAndSplitsHighCurvatureChunk)
+{
+    using Profile = Game::OrbitPredictionService::PredictionProfileId;
+
+    Game::OrbitPredictionService::Request request =
+            make_request(0.0, 20.0 * Game::OrbitPredictionTuning::kSecondsPerDay);
+    request.preferred_primary_body_id = 1;
+
+    orbitsim::MassiveBody primary_a{};
+    primary_a.id = 1;
+    primary_a.mass_kg = 5.0e24;
+    primary_a.state = orbitsim::make_state(orbitsim::Vec3(-10'000'000.0, 0.0, 0.0), orbitsim::Vec3(0.0));
+    request.massive_bodies.push_back(primary_a);
+
+    orbitsim::MassiveBody primary_b{};
+    primary_b.id = 2;
+    primary_b.mass_kg = 5.0e24;
+    primary_b.state = orbitsim::make_state(orbitsim::Vec3(10'000'000.0, 0.0, 0.0), orbitsim::Vec3(0.0));
+    request.massive_bodies.push_back(primary_b);
+
+    const Game::OrbitPredictionService::PredictionChunkPlan chunk{
+            .chunk_id = 0u,
+            .t0_s = 0.0,
+            .t1_s = 10.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
+            .profile_id = Profile::DeepTail,
+    };
+    const std::vector<orbitsim::TrajectorySegment> baseline{
+            make_activity_segment(0.0,
+                                  5.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
+                                  orbitsim::Vec3(0.0, 0.0, 0.0),
+                                  orbitsim::Vec3(2'000.0, 0.0, 0.0),
+                                  orbitsim::Vec3(2.0e8, 0.0, 0.0),
+                                  orbitsim::Vec3(0.0, 2'000.0, 0.0)),
+            make_activity_segment(5.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
+                                  10.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
+                                  orbitsim::Vec3(2.0e8, 0.0, 0.0),
+                                  orbitsim::Vec3(0.0, 2'000.0, 0.0),
+                                  orbitsim::Vec3(2.0e8, 2.0e8, 0.0),
+                                  orbitsim::Vec3(-2'000.0, 0.0, 0.0)),
+    };
+
+    const auto probe = Game::classify_chunk_activity(request, chunk, &baseline);
+    ASSERT_TRUE(probe.valid);
+    EXPECT_TRUE(probe.should_split);
+    EXPECT_LT(static_cast<int>(probe.recommended_profile_id), static_cast<int>(Profile::DeepTail));
+    EXPECT_LT(probe.dominant_gravity_ratio, 0.8);
 }
 
 int main(int argc, char **argv)

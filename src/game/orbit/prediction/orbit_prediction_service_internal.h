@@ -537,6 +537,14 @@ namespace Game
                                              double resolved_horizon_s);
     OrbitPredictionService::PredictionSolvePlan build_prediction_solve_plan(
             const OrbitPredictionService::Request &request);
+    OrbitPredictionService::PredictionProfileId promote_prediction_profile(
+            OrbitPredictionService::PredictionProfileId profile_id,
+            uint32_t steps = 1u);
+    OrbitPredictionService::ChunkActivityProbe classify_chunk_activity(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionChunkPlan &chunk,
+            const std::vector<orbitsim::TrajectorySegment> *baseline_segments = nullptr,
+            const OrbitPredictionService::SharedCelestialEphemeris &shared_ephemeris = {});
     OrbitPredictionService::PredictionProfileDefinition resolve_prediction_profile_definition(
             const OrbitPredictionService::Request &request,
             const OrbitPredictionService::PredictionChunkPlan &chunk);
