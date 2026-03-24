@@ -581,6 +581,209 @@ namespace Game::PredictionCacheInternal
         return true;
     }
 
+    // -----------------------------------------------------------------------
+    // Chunk-based planned-path rebuild (Slice 3)
+    // -----------------------------------------------------------------------
+
+    // Extract a continuity-safe slice of segments in [range_t0, range_t1].
+    // Segment boundaries are clipped to the requested range so adjacent chunks
+    // do not duplicate straddling segments when flattened back into a cache.
+    inline std::vector<orbitsim::TrajectorySegment> extract_segments_in_range(
+            const std::vector<orbitsim::TrajectorySegment> &segments,
+            const double range_t0_s,
+            const double range_t1_s)
+    {
+        return slice_trajectory_segments(segments, range_t0_s, range_t1_s);
+    }
+
+    // Build frame-derived data for a single chunk from its inertial segments.
+    inline bool build_chunk_frame_data(
+            OrbitChunk &chunk,
+            const OrbitPredictionCache &cache,
+            const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
+            const orbitsim::SpacecraftStateLookup &player_lookup,
+            const CancelCheck &cancel_requested = {})
+    {
+        const std::vector<orbitsim::TrajectorySegment> inertial_segments =
+                extract_segments_in_range(cache.trajectory_segments_inertial_planned,
+                                          chunk.t0_s,
+                                          chunk.t1_s);
+        if (inertial_segments.empty())
+        {
+            chunk.valid = false;
+            return false;
+        }
+
+        if (resolved_frame_spec.type == orbitsim::TrajectoryFrameType::Inertial)
+        {
+            chunk.frame_segments = inertial_segments;
+            if (!validate_trajectory_segment_continuity(chunk.frame_segments))
+            {
+                chunk.valid = false;
+                return false;
+            }
+        }
+        else
+        {
+            if (!cache.shared_ephemeris || cache.shared_ephemeris->empty())
+            {
+                chunk.valid = false;
+                return false;
+            }
+
+            const orbitsim::FrameSegmentTransformOptions opt =
+                    build_frame_segment_transform_options(
+                            resolved_frame_spec,
+                            inertial_segments,
+                            cancel_requested);
+            chunk.frame_segments = orbitsim::transform_trajectory_segments_to_frame_spec(
+                    inertial_segments,
+                    *cache.shared_ephemeris,
+                    cache.massive_bodies,
+                    resolved_frame_spec,
+                    opt,
+                    player_lookup);
+            if (cancel_requested && cancel_requested())
+            {
+                chunk.valid = false;
+                return false;
+            }
+            if (chunk.frame_segments.empty())
+            {
+                chunk.valid = false;
+                return false;
+            }
+            if (!validate_trajectory_segment_continuity(chunk.frame_segments))
+            {
+                chunk.valid = false;
+                return false;
+            }
+        }
+
+        const std::size_t sample_budget = std::max<std::size_t>(inertial_segments.size(), 2);
+        chunk.frame_samples = sample_prediction_segments(chunk.frame_segments, sample_budget);
+        chunk.render_curve = OrbitRenderCurve::build(chunk.frame_segments);
+        chunk.gpu_roots = build_gpu_root_cache(chunk.frame_segments);
+        chunk.valid = true;
+        return true;
+    }
+
+    // Build per-chunk frame data for all published chunks in a preview result.
+    // Returns true if at least one chunk was successfully built.
+    inline bool rebuild_prediction_patch_chunks(
+            PredictionChunkAssembly &assembly,
+            const OrbitPredictionCache &cache,
+            const std::vector<OrbitPredictionService::PublishedChunk> &published_chunks,
+            const uint64_t generation_id,
+            const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
+            const std::vector<orbitsim::TrajectorySegment> &player_lookup_segments_inertial,
+            const CancelCheck &cancel_requested = {},
+            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr)
+    {
+        assembly.clear();
+        assembly.generation_id = generation_id;
+
+        if (published_chunks.empty() || cache.trajectory_segments_inertial_planned.empty())
+        {
+            if (diagnostics)
+            {
+                diagnostics->status = PredictionDerivedStatus::MissingSolverData;
+            }
+            return false;
+        }
+
+        const auto player_lookup = build_player_lookup(player_lookup_segments_inertial);
+        assembly.chunks.reserve(published_chunks.size());
+
+        std::size_t total_frame_segments = 0;
+        std::size_t total_frame_samples = 0;
+
+        for (const OrbitPredictionService::PublishedChunk &pc : published_chunks)
+        {
+            if (!std::isfinite(pc.t0_s) || !std::isfinite(pc.t1_s) || !(pc.t1_s > pc.t0_s))
+            {
+                continue;
+            }
+
+            OrbitChunk chunk{};
+            chunk.chunk_id = pc.chunk_id;
+            chunk.generation_id = generation_id;
+            chunk.quality_state = pc.quality_state;
+            chunk.t0_s = pc.t0_s;
+            chunk.t1_s = pc.t1_s;
+
+            if (build_chunk_frame_data(chunk, cache, resolved_frame_spec, player_lookup, cancel_requested))
+            {
+                total_frame_segments += chunk.frame_segments.size();
+                total_frame_samples += chunk.frame_samples.size();
+                assembly.chunks.push_back(std::move(chunk));
+            }
+
+            if (cancel_requested && cancel_requested())
+            {
+                if (diagnostics)
+                {
+                    diagnostics->status = PredictionDerivedStatus::Cancelled;
+                }
+                return false;
+            }
+        }
+
+        assembly.valid = !assembly.chunks.empty();
+
+        if (diagnostics && assembly.valid)
+        {
+            diagnostics->status = PredictionDerivedStatus::Success;
+            diagnostics->frame_segment_count_planned = total_frame_segments;
+            diagnostics->frame_sample_count_planned = total_frame_samples;
+        }
+
+        return assembly.valid;
+    }
+
+    // Flatten a chunk assembly into cache planned-path fields for backward
+    // compatibility with the existing draw/pick code that reads flat vectors.
+    inline void flatten_chunk_assembly_to_cache(OrbitPredictionCache &cache,
+                                                const PredictionChunkAssembly &assembly)
+    {
+        cache.trajectory_frame_planned.clear();
+        cache.trajectory_segments_frame_planned.clear();
+        cache.gpu_roots_frame_planned.reset();
+        cache.render_curve_frame_planned.clear();
+
+        if (!assembly.valid || assembly.chunks.empty())
+        {
+            return;
+        }
+
+        std::size_t total_samples = 0;
+        std::size_t total_segments = 0;
+        for (const OrbitChunk &chunk : assembly.chunks)
+        {
+            total_samples += chunk.frame_samples.size();
+            total_segments += chunk.frame_segments.size();
+        }
+
+        cache.trajectory_frame_planned.reserve(total_samples);
+        cache.trajectory_segments_frame_planned.reserve(total_segments);
+
+        for (const OrbitChunk &chunk : assembly.chunks)
+        {
+            cache.trajectory_segments_frame_planned.insert(
+                    cache.trajectory_segments_frame_planned.end(),
+                    chunk.frame_segments.begin(),
+                    chunk.frame_segments.end());
+            cache.trajectory_frame_planned.insert(
+                    cache.trajectory_frame_planned.end(),
+                    chunk.frame_samples.begin(),
+                    chunk.frame_samples.end());
+        }
+
+        cache.render_curve_frame_planned = cache.trajectory_segments_frame_planned.empty()
+                                                  ? OrbitRenderCurve{}
+                                                  : OrbitRenderCurve::build(cache.trajectory_segments_frame_planned);
+    }
+
     inline void clear_prediction_metrics(OrbitPredictionCache &cache, const orbitsim::BodyId analysis_body_id)
     {
         cache.altitude_km.clear();

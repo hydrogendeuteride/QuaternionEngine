@@ -374,6 +374,74 @@ namespace Game
             return preview_cache;
         }
 
+        PredictionChunkAssembly merge_planned_chunk_assembly(const PredictionChunkAssembly &previous_assembly,
+                                                             PredictionChunkAssembly incoming_assembly)
+        {
+            if (!incoming_assembly.valid || incoming_assembly.chunks.empty())
+            {
+                return previous_assembly;
+            }
+
+            auto sort_and_validate = [](PredictionChunkAssembly &assembly) {
+                std::sort(assembly.chunks.begin(),
+                          assembly.chunks.end(),
+                          [](const OrbitChunk &a, const OrbitChunk &b) {
+                              if (a.t0_s == b.t0_s)
+                              {
+                                  return a.chunk_id < b.chunk_id;
+                              }
+                              return a.t0_s < b.t0_s;
+                          });
+
+                constexpr double kTimeEpsilonS = 1.0e-6;
+                bool ordered = true;
+                for (std::size_t i = 1; i < assembly.chunks.size(); ++i)
+                {
+                    const OrbitChunk &prev = assembly.chunks[i - 1];
+                    const OrbitChunk &cur = assembly.chunks[i];
+                    if (!(cur.t0_s + kTimeEpsilonS >= prev.t1_s))
+                    {
+                        ordered = false;
+                        break;
+                    }
+                }
+                assembly.valid = ordered && !assembly.chunks.empty();
+            };
+
+            if (!previous_assembly.valid ||
+                previous_assembly.generation_id != incoming_assembly.generation_id)
+            {
+                sort_and_validate(incoming_assembly);
+                return incoming_assembly;
+            }
+
+            constexpr double kTimeEpsilonS = 1.0e-6;
+            PredictionChunkAssembly merged = previous_assembly;
+            for (OrbitChunk &incoming_chunk : incoming_assembly.chunks)
+            {
+                merged.chunks.erase(
+                        std::remove_if(
+                                merged.chunks.begin(),
+                                merged.chunks.end(),
+                                [&incoming_chunk, kTimeEpsilonS](const OrbitChunk &existing_chunk) {
+                                    if (existing_chunk.chunk_id == incoming_chunk.chunk_id)
+                                    {
+                                        return true;
+                                    }
+                                    const bool overlaps_in_time =
+                                            incoming_chunk.t0_s < (existing_chunk.t1_s - kTimeEpsilonS) &&
+                                            existing_chunk.t0_s < (incoming_chunk.t1_s - kTimeEpsilonS);
+                                    return overlaps_in_time;
+                                }),
+                        merged.chunks.end());
+                merged.chunks.push_back(std::move(incoming_chunk));
+            }
+
+            merged.generation_id = incoming_assembly.generation_id;
+            sort_and_validate(merged);
+            return merged;
+        }
+
         bool preview_anchor_matches(const PreviewAnchorCache &a, const PreviewAnchorCache &b)
         {
             return a.valid == b.valid &&
@@ -798,6 +866,15 @@ namespace Game
 
         track->cache = std::move(cache_to_publish);
         track->pick_cache.clear();
+        if (result.chunk_assembly.valid)
+        {
+            track->planned_chunk_assembly = merge_planned_chunk_assembly(track->planned_chunk_assembly,
+                                                                         std::move(result.chunk_assembly));
+        }
+        else if (result.solve_quality != OrbitPredictionService::SolveQuality::FastPreview)
+        {
+            track->planned_chunk_assembly.clear();
+        }
         const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
         if (preview_result)
         {
