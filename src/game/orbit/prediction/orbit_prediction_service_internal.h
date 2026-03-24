@@ -537,13 +537,28 @@ namespace Game
                                              double resolved_horizon_s);
     OrbitPredictionService::PredictionSolvePlan build_prediction_solve_plan(
             const OrbitPredictionService::Request &request);
+    OrbitPredictionService::PredictionProfileDefinition resolve_prediction_profile_definition(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionChunkPlan &chunk);
+    std::size_t prediction_sample_budget_for_chunk(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionChunkPlan &chunk,
+            std::size_t segment_count);
     orbitsim::AdaptiveSegmentOptions build_spacecraft_adaptive_segment_options(
             const OrbitPredictionService::Request &request,
             const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec,
             const CancelCheck &cancel_requested = {});
+    orbitsim::AdaptiveSegmentOptions build_spacecraft_adaptive_segment_options_for_chunk(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionChunkPlan &chunk,
+            const CancelCheck &cancel_requested = {});
     orbitsim::AdaptiveEphemerisOptions build_adaptive_ephemeris_options(
             const OrbitPredictionService::Request &request,
             const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec,
+            const CancelCheck &cancel_requested = {});
+    orbitsim::AdaptiveEphemerisOptions build_adaptive_ephemeris_options_for_chunk(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionChunkPlan &chunk,
             const CancelCheck &cancel_requested = {});
 
     bool ephemeris_covers_horizon(const OrbitPredictionService::SharedCelestialEphemeris &ephemeris,

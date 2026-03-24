@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <optional>
 #include <vector>
 
 namespace
@@ -27,6 +28,34 @@ namespace
             }
         }
         return false;
+    }
+
+    std::optional<Game::OrbitPredictionService::PredictionChunkPlan> find_first_chunk_with_profile(
+            const Game::OrbitPredictionService::PredictionSolvePlan &plan,
+            const Game::OrbitPredictionService::PredictionProfileId profile_id)
+    {
+        for (const Game::OrbitPredictionService::PredictionChunkPlan &chunk : plan.chunks)
+        {
+            if (chunk.profile_id == profile_id)
+            {
+                return chunk;
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<Game::OrbitPredictionService::PredictionChunkPlan> find_first_chunk_with_flags(
+            const Game::OrbitPredictionService::PredictionSolvePlan &plan,
+            const uint32_t flags)
+    {
+        for (const Game::OrbitPredictionService::PredictionChunkPlan &chunk : plan.chunks)
+        {
+            if ((chunk.boundary_flags & flags) == flags)
+            {
+                return chunk;
+            }
+        }
+        return std::nullopt;
     }
 } // namespace
 
@@ -106,6 +135,106 @@ TEST(OrbitPredictionPlannerTests, InsertsManeuverAndPreviewBoundaries)
     EXPECT_NE((interactive_chunks[1].boundary_flags & static_cast<uint32_t>(Flags::PreviewChunk)), 0u);
     EXPECT_FALSE(interactive_chunks[0].allow_reuse);
     EXPECT_FALSE(interactive_chunks[1].allow_reuse);
+}
+
+TEST(OrbitPredictionPlannerTests, ResolvesChunkAdaptiveOptionsPerProfile)
+{
+    using Profile = Game::OrbitPredictionService::PredictionProfileId;
+
+    Game::OrbitPredictionService::Request request =
+            make_request(0.0, 6.0 * Game::OrbitPredictionTuning::kSecondsPerYear);
+
+    const Game::OrbitPredictionService::PredictionSolvePlan plan = Game::build_prediction_solve_plan(request);
+    ASSERT_TRUE(plan.valid);
+
+    const auto near_chunk = find_first_chunk_with_profile(plan, Profile::NearBody);
+    const auto transfer_chunk = find_first_chunk_with_profile(plan, Profile::Transfer);
+    const auto cruise_chunk = find_first_chunk_with_profile(plan, Profile::Cruise);
+    const auto deep_tail_chunk = find_first_chunk_with_profile(plan, Profile::DeepTail);
+    ASSERT_TRUE(near_chunk.has_value());
+    ASSERT_TRUE(transfer_chunk.has_value());
+    ASSERT_TRUE(cruise_chunk.has_value());
+    ASSERT_TRUE(deep_tail_chunk.has_value());
+
+    const auto near_def = Game::resolve_prediction_profile_definition(request, *near_chunk);
+    const auto transfer_def = Game::resolve_prediction_profile_definition(request, *transfer_chunk);
+    const auto cruise_def = Game::resolve_prediction_profile_definition(request, *cruise_chunk);
+    const auto deep_tail_def = Game::resolve_prediction_profile_definition(request, *deep_tail_chunk);
+
+    EXPECT_LT(near_def.max_dt_s, transfer_def.max_dt_s);
+    EXPECT_LT(transfer_def.max_dt_s, cruise_def.max_dt_s);
+    EXPECT_LT(cruise_def.max_dt_s, deep_tail_def.max_dt_s);
+    EXPECT_GT(near_def.soft_max_segments, transfer_def.soft_max_segments);
+    EXPECT_GT(transfer_def.soft_max_segments, cruise_def.soft_max_segments);
+    EXPECT_GT(cruise_def.soft_max_segments, deep_tail_def.soft_max_segments);
+    EXPECT_GT(near_def.output_sample_density_scale, transfer_def.output_sample_density_scale);
+    EXPECT_GT(transfer_def.output_sample_density_scale, cruise_def.output_sample_density_scale);
+    EXPECT_GT(cruise_def.output_sample_density_scale, deep_tail_def.output_sample_density_scale);
+
+    const auto near_segment_opt =
+            Game::build_spacecraft_adaptive_segment_options_for_chunk(request, *near_chunk);
+    const auto deep_tail_segment_opt =
+            Game::build_spacecraft_adaptive_segment_options_for_chunk(request, *deep_tail_chunk);
+    const auto near_ephemeris_opt =
+            Game::build_adaptive_ephemeris_options_for_chunk(request, *near_chunk);
+    const auto deep_tail_ephemeris_opt =
+            Game::build_adaptive_ephemeris_options_for_chunk(request, *deep_tail_chunk);
+
+    EXPECT_DOUBLE_EQ(near_segment_opt.duration_s, near_chunk->t1_s - near_chunk->t0_s);
+    EXPECT_DOUBLE_EQ(deep_tail_segment_opt.duration_s, deep_tail_chunk->t1_s - deep_tail_chunk->t0_s);
+    EXPECT_LT(near_segment_opt.max_dt_s, deep_tail_segment_opt.max_dt_s);
+    EXPECT_GT(near_segment_opt.soft_max_segments, deep_tail_segment_opt.soft_max_segments);
+    EXPECT_LT(near_ephemeris_opt.max_dt_s, deep_tail_ephemeris_opt.max_dt_s);
+    EXPECT_GT(near_ephemeris_opt.soft_max_segments, deep_tail_ephemeris_opt.soft_max_segments);
+
+    const std::size_t near_sample_budget =
+            Game::prediction_sample_budget_for_chunk(request, *near_chunk, 256u);
+    const std::size_t deep_tail_sample_budget =
+            Game::prediction_sample_budget_for_chunk(request, *deep_tail_chunk, 256u);
+    EXPECT_GT(near_sample_budget, deep_tail_sample_budget);
+}
+
+TEST(OrbitPredictionPlannerTests, PreviewAndManeuverChunksTightenProfiles)
+{
+    using Flags = Game::OrbitPredictionService::PredictionChunkBoundaryFlags;
+    using Profile = Game::OrbitPredictionService::PredictionProfileId;
+
+    Game::OrbitPredictionService::Request request =
+            make_request(500.0, 40.0 * Game::OrbitPredictionTuning::kSecondsPerDay);
+    request.solve_quality = Game::OrbitPredictionService::SolveQuality::FastPreview;
+    request.preview_patch.active = true;
+    request.preview_patch.anchor_state_valid = true;
+    request.preview_patch.anchor_time_s = request.sim_time_s + 2.0 * Game::OrbitPredictionTuning::kSecondsPerHour;
+    request.preview_patch.patch_window_s = 0.5 * Game::OrbitPredictionTuning::kSecondsPerHour;
+
+    Game::OrbitPredictionService::ManeuverImpulse maneuver{};
+    maneuver.node_id = 7;
+    maneuver.t_s = request.sim_time_s + 5.0 * Game::OrbitPredictionTuning::kSecondsPerDay;
+    request.maneuver_impulses.push_back(maneuver);
+
+    const Game::OrbitPredictionService::PredictionSolvePlan plan = Game::build_prediction_solve_plan(request);
+    ASSERT_TRUE(plan.valid);
+
+    const auto interactive_chunk = find_first_chunk_with_profile(plan, Profile::InteractiveExact);
+    ASSERT_TRUE(interactive_chunk.has_value());
+
+    const auto maneuver_chunk = find_first_chunk_with_flags(plan, static_cast<uint32_t>(Flags::Maneuver));
+    ASSERT_TRUE(maneuver_chunk.has_value());
+
+    const auto interactive_def = Game::resolve_prediction_profile_definition(request, *interactive_chunk);
+    const auto maneuver_def = Game::resolve_prediction_profile_definition(request, *maneuver_chunk);
+
+    EXPECT_LT(interactive_def.integrator_tolerance_multiplier, 1.0);
+    EXPECT_LT(interactive_def.max_dt_s, maneuver_def.max_dt_s);
+    EXPECT_GT(interactive_def.output_sample_density_scale, maneuver_def.output_sample_density_scale);
+
+    const auto interactive_opt =
+            Game::build_spacecraft_adaptive_segment_options_for_chunk(request, *interactive_chunk);
+    const auto maneuver_opt =
+            Game::build_spacecraft_adaptive_segment_options_for_chunk(request, *maneuver_chunk);
+    EXPECT_LT(interactive_opt.max_dt_s, maneuver_opt.max_dt_s);
+    EXPECT_LE(interactive_opt.lookup_max_dt_s, maneuver_opt.lookup_max_dt_s);
+    EXPECT_GT(interactive_opt.soft_max_segments, maneuver_opt.soft_max_segments);
 }
 
 int main(int argc, char **argv)

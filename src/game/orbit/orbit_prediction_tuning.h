@@ -4,6 +4,7 @@
 
 namespace Game::OrbitPredictionTuning
 {
+    inline constexpr double kSecondsPerMinute = 60.0;
     inline constexpr double kSecondsPerHour = 3'600.0;
     inline constexpr double kSecondsPerDay = 86'400.0;
     inline constexpr double kSecondsPerYear = 365.0 * kSecondsPerDay;
