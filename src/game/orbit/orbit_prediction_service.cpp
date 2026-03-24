@@ -19,11 +19,14 @@ namespace Game
 {
     namespace
     {
+        constexpr std::size_t kMaxCachedPlannedChunks = 512u;
+
         OrbitPredictionService::PublishedChunk make_published_chunk(const uint32_t chunk_id,
                                                                     const OrbitPredictionService::ChunkQualityState quality_state,
                                                                     const double t0_s,
                                                                     const double t1_s,
-                                                                    const bool includes_planned_path)
+                                                                    const bool includes_planned_path,
+                                                                    const bool reused_from_cache = false)
         {
             OrbitPredictionService::PublishedChunk chunk{};
             chunk.chunk_id = chunk_id;
@@ -31,7 +34,91 @@ namespace Game
             chunk.t0_s = t0_s;
             chunk.t1_s = t1_s;
             chunk.includes_planned_path = includes_planned_path;
+            chunk.reused_from_cache = reused_from_cache;
             return chunk;
+        }
+
+        template<typename T>
+        void hash_combine(uint64_t &seed, const T &value)
+        {
+            seed ^= static_cast<uint64_t>(std::hash<T>{}(value)) + 0x9e3779b97f4a7c15ULL + (seed << 6u) + (seed >> 2u);
+        }
+
+        uint64_t hash_vec3(const orbitsim::Vec3 &v)
+        {
+            uint64_t seed = 0xcbf29ce484222325ULL;
+            hash_combine(seed, v.x);
+            hash_combine(seed, v.y);
+            hash_combine(seed, v.z);
+            return seed;
+        }
+
+        uint64_t hash_state(const orbitsim::State &state)
+        {
+            uint64_t seed = hash_vec3(state.position_m);
+            hash_combine(seed, hash_vec3(state.velocity_mps));
+            hash_combine(seed, state.spin.axis.x);
+            hash_combine(seed, state.spin.axis.y);
+            hash_combine(seed, state.spin.axis.z);
+            hash_combine(seed, state.spin.angle_rad);
+            hash_combine(seed, state.spin.rate_rad_per_s);
+            return seed;
+        }
+
+        uint64_t hash_massive_body_set(const std::vector<orbitsim::MassiveBody> &bodies)
+        {
+            uint64_t seed = 0xcbf29ce484222325ULL;
+            for (const orbitsim::MassiveBody &body : bodies)
+            {
+                hash_combine(seed, body.id);
+                hash_combine(seed, body.mass_kg);
+                hash_combine(seed, hash_state(body.state));
+            }
+            return seed;
+        }
+
+        uint64_t hash_solver_context(const OrbitPredictionService::Request &request,
+                                     const std::vector<orbitsim::MassiveBody> &massive_bodies)
+        {
+            uint64_t seed = 0xcbf29ce484222325ULL;
+            hash_combine(seed, static_cast<uint8_t>(request.solve_quality));
+            hash_combine(seed, request.thrusting);
+            hash_combine(seed, request.lagrange_sensitive);
+            hash_combine(seed, request.sim_config.gravitational_constant);
+            hash_combine(seed, request.sim_config.softening_length_m);
+            hash_combine(seed, request.sim_config.spacecraft_integrator.adaptive);
+            hash_combine(seed, request.sim_config.spacecraft_integrator.max_step_s);
+            hash_combine(seed, request.sim_config.spacecraft_integrator.abs_tol);
+            hash_combine(seed, request.sim_config.spacecraft_integrator.rel_tol);
+            hash_combine(seed, request.sim_config.spacecraft_integrator.max_substeps);
+            hash_combine(seed, request.sim_config.spacecraft_integrator.max_substeps_hard);
+            hash_combine(seed, request.sim_config.spacecraft_integrator.max_interval_splits);
+            hash_combine(seed, request.preferred_primary_body_id);
+            hash_combine(seed, hash_massive_body_set(massive_bodies));
+            return seed;
+        }
+
+        uint64_t hash_baseline_generation(const OrbitPredictionService::Request &request,
+                                          const double start_time_s,
+                                          const orbitsim::State &start_state)
+        {
+            uint64_t seed = 0xcbf29ce484222325ULL;
+            hash_combine(seed, request.track_id);
+            hash_combine(seed, start_time_s);
+            hash_combine(seed, hash_state(start_state));
+            return seed;
+        }
+
+        uint64_t hash_maneuver_impulse(const OrbitPredictionService::ManeuverImpulse &impulse)
+        {
+            uint64_t seed = 0xcbf29ce484222325ULL;
+            hash_combine(seed, impulse.node_id);
+            hash_combine(seed, impulse.t_s);
+            hash_combine(seed, impulse.primary_body_id);
+            hash_combine(seed, impulse.dv_rtn_mps.x);
+            hash_combine(seed, impulse.dv_rtn_mps.y);
+            hash_combine(seed, impulse.dv_rtn_mps.z);
+            return seed;
         }
 
         void accumulate_stage_diagnostics(OrbitPredictionService::AdaptiveStageDiagnostics &dst,
@@ -192,6 +279,12 @@ namespace Game
         {
             std::lock_guard<std::mutex> lock(_baseline_cache_mutex);
             _reusable_baseline_by_track.clear();
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(_planned_chunk_cache_mutex);
+            _planned_chunk_cache.clear();
+            _next_planned_chunk_cache_use_serial = 1;
         }
 
         {
@@ -915,6 +1008,7 @@ namespace Game
                 std::vector<orbitsim::TrajectorySegment> segments{};
                 std::vector<orbitsim::TrajectorySample> samples{};
                 std::vector<ManeuverNodePreview> previews{};
+                std::vector<bool> chunk_reused{};
                 AdaptiveStageDiagnostics diagnostics{};
                 Status status{Status::Success};
             };
@@ -1000,6 +1094,85 @@ namespace Game
                 return finite_state(out_anchor_state);
             };
 
+            const auto planned_chunk_cache_key_matches =
+                    [](const OrbitPredictionService::PlannedChunkCacheKey &a,
+                       const OrbitPredictionService::PlannedChunkCacheKey &b) {
+                return a.track_id == b.track_id &&
+                       a.baseline_generation_id == b.baseline_generation_id &&
+                       a.upstream_maneuver_hash == b.upstream_maneuver_hash &&
+                       a.frame_independent_generation == b.frame_independent_generation &&
+                       a.chunk_t0_s == b.chunk_t0_s &&
+                       a.chunk_t1_s == b.chunk_t1_s &&
+                       a.profile_id == b.profile_id;
+            };
+
+            const auto find_cached_planned_chunk =
+                    [this, &planned_chunk_cache_key_matches](const OrbitPredictionService::PlannedChunkCacheKey &key,
+                                                             const orbitsim::State &expected_start_state)
+                    -> std::optional<OrbitPredictionService::PlannedChunkCacheEntry> {
+                std::lock_guard<std::mutex> lock(_planned_chunk_cache_mutex);
+                for (OrbitPredictionService::PlannedChunkCacheEntry &entry : _planned_chunk_cache)
+                {
+                    if (!planned_chunk_cache_key_matches(entry.key, key) ||
+                        !states_are_continuous(entry.start_state, expected_start_state) ||
+                        entry.samples.size() < 2u ||
+                        entry.segments.empty() ||
+                        !validate_trajectory_segment_continuity(entry.segments))
+                    {
+                        continue;
+                    }
+
+                    entry.last_use_serial = _next_planned_chunk_cache_use_serial++;
+                    return entry;
+                }
+                return std::nullopt;
+            };
+
+            const auto store_cached_planned_chunk =
+                    [this, &planned_chunk_cache_key_matches](OrbitPredictionService::PlannedChunkCacheEntry entry) {
+                if (entry.samples.size() < 2u ||
+                    entry.segments.empty() ||
+                    !validate_trajectory_segment_continuity(entry.segments) ||
+                    !finite_state(entry.start_state) ||
+                    !finite_state(entry.end_state))
+                {
+                    return;
+                }
+
+                std::lock_guard<std::mutex> lock(_planned_chunk_cache_mutex);
+                entry.last_use_serial = _next_planned_chunk_cache_use_serial++;
+                const auto existing_it = std::find_if(
+                        _planned_chunk_cache.begin(),
+                        _planned_chunk_cache.end(),
+                        [&entry, &planned_chunk_cache_key_matches](
+                                const OrbitPredictionService::PlannedChunkCacheEntry &cached) {
+                            return planned_chunk_cache_key_matches(cached.key, entry.key);
+                        });
+                if (existing_it != _planned_chunk_cache.end())
+                {
+                    *existing_it = std::move(entry);
+                }
+                else
+                {
+                    _planned_chunk_cache.push_back(std::move(entry));
+                }
+
+                if (_planned_chunk_cache.size() > kMaxCachedPlannedChunks)
+                {
+                    const auto lru_it = std::min_element(
+                            _planned_chunk_cache.begin(),
+                            _planned_chunk_cache.end(),
+                            [](const OrbitPredictionService::PlannedChunkCacheEntry &a,
+                               const OrbitPredictionService::PlannedChunkCacheEntry &b) {
+                                return a.last_use_serial < b.last_use_serial;
+                            });
+                    if (lru_it != _planned_chunk_cache.end())
+                    {
+                        _planned_chunk_cache.erase(lru_it);
+                    }
+                }
+            };
+
             const auto solve_planned_chunk_range =
                     [&](const OrbitPredictionService::Request &planner_request,
                         const OrbitPredictionService::PredictionSolvePlan &solve_plan,
@@ -1018,6 +1191,10 @@ namespace Game
 
                 constexpr double kChunkBoundaryEpsilonS = 1.0e-9;
                 orbitsim::State chunk_start_state = range_start_state;
+                const uint64_t baseline_generation_id =
+                        hash_baseline_generation(planner_request, solve_plan.t0_s, range_start_state);
+                const uint64_t frame_independent_generation =
+                        hash_solver_context(planner_request, out.massive_bodies);
                 double diagnostic_dt_sum_s = 0.0;
                 bool have_dt = false;
                 const orbitsim::SpacecraftStateLookup empty_lookup{};
@@ -1037,9 +1214,58 @@ namespace Game
                         return planned;
                     }
 
+                    const bool include_chunk_end_impulse = (chunk_index + 1u) == solve_plan.chunks.size();
+                    uint64_t upstream_maneuver_hash = 0xcbf29ce484222325ULL;
+                    for (const ManeuverImpulse &upstream_impulse : planner_request.maneuver_impulses)
+                    {
+                        if (!std::isfinite(upstream_impulse.t_s) || !finite_vec3(upstream_impulse.dv_rtn_mps))
+                        {
+                            continue;
+                        }
+                        if (upstream_impulse.t_s > (chunk.t1_s + kChunkBoundaryEpsilonS))
+                        {
+                            break;
+                        }
+
+                        const bool before_chunk_end = upstream_impulse.t_s < (chunk.t1_s - kChunkBoundaryEpsilonS);
+                        const bool at_chunk_end =
+                                std::abs(upstream_impulse.t_s - chunk.t1_s) <= kChunkBoundaryEpsilonS;
+                        if (before_chunk_end || (include_chunk_end_impulse && at_chunk_end))
+                        {
+                            hash_combine(upstream_maneuver_hash, hash_maneuver_impulse(upstream_impulse));
+                        }
+                    }
+
+                    const OrbitPredictionService::PlannedChunkCacheKey cache_key{
+                            .track_id = planner_request.track_id,
+                            .baseline_generation_id = baseline_generation_id,
+                            .upstream_maneuver_hash = upstream_maneuver_hash,
+                            .frame_independent_generation = frame_independent_generation,
+                            .chunk_t0_s = chunk.t0_s,
+                            .chunk_t1_s = chunk.t1_s,
+                            .profile_id = chunk.profile_id,
+                    };
+                    if (chunk.allow_reuse)
+                    {
+                        if (const auto cached = find_cached_planned_chunk(cache_key, chunk_start_state); cached.has_value())
+                        {
+                            OrbitPredictionService::AdaptiveStageDiagnostics chunk_stage_diag = cached->diagnostics;
+                            chunk_stage_diag.cache_reused = true;
+                            accumulate_stage_diagnostics(planned.diagnostics,
+                                                         chunk_stage_diag,
+                                                         diagnostic_dt_sum_s,
+                                                         have_dt);
+                            chunk_start_state = cached->end_state;
+                            planned.chunk_reused.push_back(true);
+                            planned.previews.insert(planned.previews.end(), cached->previews.begin(), cached->previews.end());
+                            planned.segments.insert(planned.segments.end(), cached->segments.begin(), cached->segments.end());
+                            append_chunk_samples(planned.samples, cached->samples);
+                            continue;
+                        }
+                    }
+
                     std::vector<ManeuverImpulse> chunk_impulses;
                     chunk_impulses.reserve(planner_request.maneuver_impulses.size());
-                    const bool include_chunk_end_impulse = (chunk_index + 1u) == solve_plan.chunks.size();
                     for (const ManeuverImpulse &impulse : planner_request.maneuver_impulses)
                     {
                         if (!std::isfinite(impulse.t_s) || !finite_vec3(impulse.dv_rtn_mps))
@@ -1121,6 +1347,8 @@ namespace Game
 
                     orbitsim::ManeuverPlan chunk_plan{};
                     chunk_plan.impulses.reserve(chunk_impulses.size());
+                    std::vector<ManeuverNodePreview> chunk_previews;
+                    chunk_previews.reserve(chunk_impulses.size());
                     std::vector<PlannedSegmentBoundaryState> planned_boundary_states;
                     planned_boundary_states.reserve(chunk_impulses.size());
                     orbitsim::Spacecraft preview_spacecraft = planned_ship;
@@ -1161,7 +1389,7 @@ namespace Game
                         if (!apply_maneuver_impulse_to_spacecraft(
                                     preview_spacecraft,
                                     src,
-                                    &planned.previews,
+                                    &chunk_previews,
                                     &planned_boundary_states))
                         {
                             planned.status = Status::InvalidInput;
@@ -1217,7 +1445,24 @@ namespace Game
                         return planned;
                     }
 
-                    chunk_start_state = chunk_segments.back().end;
+                    planned.previews.insert(planned.previews.end(), chunk_previews.begin(), chunk_previews.end());
+
+                    const orbitsim::State chunk_end_state = chunk_segments.back().end;
+                    if (chunk.allow_reuse)
+                    {
+                        OrbitPredictionService::PlannedChunkCacheEntry cache_entry{};
+                        cache_entry.key = cache_key;
+                        cache_entry.start_state = chunk_start_state;
+                        cache_entry.end_state = chunk_end_state;
+                        cache_entry.diagnostics = chunk_stage_diag;
+                        cache_entry.segments = chunk_segments;
+                        cache_entry.samples = chunk_samples;
+                        cache_entry.previews = chunk_previews;
+                        store_cached_planned_chunk(std::move(cache_entry));
+                    }
+
+                    planned.chunk_reused.push_back(false);
+                    chunk_start_state = chunk_end_state;
                     planned.segments.insert(planned.segments.end(),
                                             std::make_move_iterator(chunk_segments.begin()),
                                             std::make_move_iterator(chunk_segments.end()));
@@ -1252,7 +1497,8 @@ namespace Game
                     [](const OrbitPredictionService::PredictionSolvePlan &solve_plan,
                        const std::size_t chunk_begin_index,
                        const std::size_t chunk_end_index,
-                       const OrbitPredictionService::ChunkQualityState quality_state) {
+                       const OrbitPredictionService::ChunkQualityState quality_state,
+                       const std::vector<bool> *chunk_reused = nullptr) {
                         std::vector<OrbitPredictionService::PublishedChunk> chunks;
                         if (!solve_plan.valid || chunk_begin_index >= chunk_end_index ||
                             chunk_end_index > solve_plan.chunks.size())
@@ -1264,11 +1510,21 @@ namespace Game
                         for (std::size_t chunk_index = chunk_begin_index; chunk_index < chunk_end_index; ++chunk_index)
                         {
                             const OrbitPredictionService::PredictionChunkPlan &chunk = solve_plan.chunks[chunk_index];
+                            bool reused_from_cache = false;
+                            if (chunk_reused)
+                            {
+                                const std::size_t local_index = chunk_index - chunk_begin_index;
+                                if (local_index < chunk_reused->size())
+                                {
+                                    reused_from_cache = (*chunk_reused)[local_index];
+                                }
+                            }
                             chunks.push_back(make_published_chunk(chunk.chunk_id,
                                                                   quality_state,
                                                                   chunk.t0_s,
                                                                   chunk.t1_s,
-                                                                  true));
+                                                                  true,
+                                                                  reused_from_cache));
                         }
                         return chunks;
                     };
@@ -1362,7 +1618,8 @@ namespace Game
                             solve_plan,
                             0u,
                             fp0_chunk_end_index,
-                            fp0_result.generation_complete ? ChunkQualityState::Final : ChunkQualityState::PreviewPatch);
+                            fp0_result.generation_complete ? ChunkQualityState::Final : ChunkQualityState::PreviewPatch,
+                            &fp0_planned.chunk_reused);
 
                     fp0_result.valid = true;
                     fp0_result.diagnostics.status = Status::Success;
@@ -1418,7 +1675,8 @@ namespace Game
                             collect_published_chunks(solve_plan,
                                                      fp0_chunk_end_index,
                                                      solve_plan.chunks.size(),
-                                                     ChunkQualityState::Final);
+                                                     ChunkQualityState::Final,
+                                                     &final_planned.chunk_reused);
                     out.diagnostics.trajectory_segment_count_planned = out.diagnostics.trajectory_planned.accepted_segments;
                     out.valid = true;
                     out.diagnostics.status = Status::Success;
@@ -1452,6 +1710,12 @@ namespace Game
             out.trajectory_segments_inertial_planned = planned.segments;
             out.trajectory_inertial_planned = planned.samples;
             out.maneuver_previews = planned.previews;
+            out.published_chunks =
+                    collect_published_chunks(solve_plan,
+                                             0u,
+                                             solve_plan.chunks.size(),
+                                             ChunkQualityState::Final,
+                                             &planned.chunk_reused);
         }
 
         store_reusable_baseline(request.track_id,
