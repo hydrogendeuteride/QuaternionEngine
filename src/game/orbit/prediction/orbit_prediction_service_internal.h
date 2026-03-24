@@ -38,6 +38,15 @@ namespace Game
         return request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
     }
 
+    inline bool request_uses_preview_patch(const OrbitPredictionService::Request &request)
+    {
+        return request_uses_fast_preview(request) &&
+               request.preview_patch.active &&
+               request.preview_patch.anchor_state_valid &&
+               std::isfinite(request.preview_patch.anchor_time_s) &&
+               request.preview_patch.anchor_time_s >= request.sim_time_s;
+    }
+
     inline bool request_can_reuse_spacecraft_baseline(const OrbitPredictionService::Request &request)
     {
         return request.kind == OrbitPredictionService::RequestKind::Spacecraft &&
@@ -91,6 +100,33 @@ namespace Game
     inline double continuity_time_epsilon_s(const double reference_time_s)
     {
         return std::max(kContinuityMinTimeEpsilonS, std::abs(reference_time_s) * 1.0e-12);
+    }
+
+    inline double request_end_time_s(const OrbitPredictionService::Request &request)
+    {
+        return request.sim_time_s + std::max(0.0, std::isfinite(request.future_window_s) ? request.future_window_s : 0.0);
+    }
+
+    inline double preview_patch_remaining_window_s(const OrbitPredictionService::Request &request)
+    {
+        if (!request_uses_preview_patch(request))
+        {
+            return 0.0;
+        }
+
+        return std::max(0.0, request_end_time_s(request) - request.preview_patch.anchor_time_s);
+    }
+
+    inline double preview_fp0_window_s(const OrbitPredictionService::Request &request)
+    {
+        if (!request_uses_preview_patch(request))
+        {
+            return 0.0;
+        }
+
+        const double chunk_window_s = std::max(0.0, request.preview_patch.patch_window_s);
+        const double fp0_window_s = chunk_window_s > 0.0 ? (chunk_window_s * 2.0) : 0.0;
+        return std::min(preview_patch_remaining_window_s(request), fp0_window_s);
     }
 
     inline bool trajectory_segments_cover_window(const std::vector<orbitsim::TrajectorySegment> &segments,
@@ -413,6 +449,11 @@ namespace Game
     std::vector<orbitsim::TrajectorySegment> split_trajectory_segments_at_known_boundaries(
             const std::vector<orbitsim::TrajectorySegment> &segments,
             const std::vector<PlannedSegmentBoundaryState> &boundaries);
+
+    std::vector<orbitsim::TrajectorySegment> slice_trajectory_segments(
+            const std::vector<orbitsim::TrajectorySegment> &segments,
+            double t0_s,
+            double t1_s);
 
     // ── Sampling helpers (orbit_prediction_service_sampling.cpp) ──────────────
     std::vector<orbitsim::TrajectorySample> resample_segments_uniform(

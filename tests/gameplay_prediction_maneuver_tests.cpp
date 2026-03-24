@@ -66,6 +66,26 @@ namespace
         return segment;
     }
 
+    Game::OrbitChunk make_chunk(const uint32_t chunk_id,
+                                const uint64_t generation_id,
+                                const double t0_s,
+                                const double t1_s,
+                                const double x0_m,
+                                const double x1_m)
+    {
+        Game::OrbitChunk chunk{};
+        chunk.chunk_id = chunk_id;
+        chunk.generation_id = generation_id;
+        chunk.quality_state = Game::OrbitPredictionService::ChunkQualityState::Final;
+        chunk.t0_s = t0_s;
+        chunk.t1_s = t1_s;
+        chunk.frame_samples = {make_sample(t0_s, x0_m), make_sample(t1_s, x1_m)};
+        chunk.frame_segments = {make_segment(t0_s, t1_s, x0_m, x1_m)};
+        chunk.render_curve = Game::OrbitRenderCurve::build(chunk.frame_segments);
+        chunk.valid = true;
+        return chunk;
+    }
+
     Game::OrbitPredictionService::Request make_prediction_request(const double time_s,
                                                                   const double future_window_s = 120.0)
     {
@@ -87,6 +107,30 @@ namespace
         ref.state = orbitsim::make_state(glm::dvec3(0.0), glm::dvec3(0.0));
         request.massive_bodies.push_back(ref);
         return request;
+    }
+
+    std::vector<Game::OrbitPredictionService::Result> run_prediction_results(
+            Game::OrbitPredictionService &service,
+            const uint64_t generation_id,
+            Game::OrbitPredictionService::Request request,
+            const uint64_t request_epoch = 1)
+    {
+        service._completed.clear();
+
+        Game::OrbitPredictionService::PendingJob job{};
+        job.track_id = request.track_id;
+        job.request_epoch = request_epoch;
+        job.generation_id = generation_id;
+        job.request = std::move(request);
+
+        service.compute_prediction(job);
+
+        std::vector<Game::OrbitPredictionService::Result> results;
+        while (auto completed = service.poll_completed())
+        {
+            results.push_back(std::move(*completed));
+        }
+        return results;
     }
 } // namespace
 
@@ -119,8 +163,14 @@ TEST(GameplayPredictionManeuverTests, ClearPredictionRuntimeResetsTrackState)
     EXPECT_TRUE(cleared.cache.trajectory_segments_inertial.empty());
     EXPECT_FALSE(cleared.request_pending);
     EXPECT_FALSE(cleared.derived_request_pending);
+    EXPECT_EQ(cleared.latest_requested_generation_id, 0u);
     EXPECT_FALSE(cleared.dirty);
     EXPECT_FALSE(cleared.invalidated_while_pending);
+    EXPECT_EQ(cleared.preview_state, Game::PredictionPreviewRuntimeState::Idle);
+    EXPECT_FALSE(cleared.preview_anchor.valid);
+    EXPECT_TRUE(std::isnan(cleared.preview_entered_at_s));
+    EXPECT_TRUE(std::isnan(cleared.preview_last_anchor_refresh_at_s));
+    EXPECT_TRUE(std::isnan(cleared.preview_last_request_at_s));
     EXPECT_DOUBLE_EQ(cleared.solver_ms_last, 0.0);
     EXPECT_EQ(cleared.solver_diagnostics.status, Game::OrbitPredictionService::Status::None);
     EXPECT_EQ(cleared.derived_diagnostics.status, Game::PredictionDerivedStatus::None);
@@ -199,6 +249,195 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowCapsLivePreviewToA
     EXPECT_DOUBLE_EQ(required_window_s, 440.0);
 }
 
+TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheSeparatesPatchWindowFromDisplayWindow)
+{
+    Game::GameplayState state{};
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+    state._prediction_draw_future_segment = true;
+    state._prediction_sampling_policy.orbiter_min_window_s = 120.0;
+    state._maneuver_plan_windows.preview_window_s = 180.0;
+    state._maneuver_plan_windows.solve_margin_s = 300.0;
+    state._maneuver_plan_live_preview_active = true;
+    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+
+    Game::GameplayState::ManeuverNode far_node{};
+    far_node.id = 7;
+    far_node.time_s = 50'000.0;
+    state._maneuver_state.selected_node_id = far_node.id;
+    state._maneuver_state.nodes.push_back(far_node);
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+    track.cache.generation_id = 42;
+
+    state.refresh_prediction_preview_anchor(track, 100.0, true);
+
+    ASSERT_TRUE(track.preview_anchor.valid);
+    EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::EnterDrag);
+    EXPECT_EQ(track.preview_anchor.anchor_node_id, far_node.id);
+    EXPECT_DOUBLE_EQ(track.preview_anchor.anchor_time_s, 50'000.0);
+    EXPECT_DOUBLE_EQ(state.prediction_display_window_s(track.key, 100.0, true), 50'200.0);
+    EXPECT_DOUBLE_EQ(state.prediction_preview_patch_window_s(track, 100.0, true), 300.0);
+    EXPECT_DOUBLE_EQ(track.preview_anchor.request_window_s, 50'200.0);
+    EXPECT_DOUBLE_EQ(track.preview_last_anchor_refresh_at_s, 100.0);
+}
+
+TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheTransitionsToAwaitFullRefineAfterDragEnds)
+{
+    Game::GameplayState state{};
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+    state._maneuver_plan_windows.preview_window_s = 180.0;
+    state._maneuver_plan_windows.solve_margin_s = 300.0;
+    state._maneuver_plan_live_preview_active = true;
+    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+
+    Game::GameplayState::ManeuverNode node{};
+    node.id = 3;
+    node.time_s = 240.0;
+    state._maneuver_state.selected_node_id = node.id;
+    state._maneuver_state.nodes.push_back(node);
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+
+    state.refresh_prediction_preview_anchor(track, 100.0, true);
+    ASSERT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::EnterDrag);
+
+    track.preview_state = Game::PredictionPreviewRuntimeState::PreviewStreaming;
+    state._maneuver_plan_live_preview_active = false;
+    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::Idle;
+    state.refresh_prediction_preview_anchor(track, 101.0, true);
+
+    EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::AwaitFullRefine);
+    EXPECT_TRUE(track.preview_anchor.valid);
+    EXPECT_EQ(track.preview_anchor.anchor_node_id, node.id);
+}
+
+TEST(GameplayPredictionManeuverTests, RequestOrbiterPredictionTracksPreviewRequestTimestamp)
+{
+    Game::GameplayState state{};
+    state._orbitsim = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbitsim);
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+    state._maneuver_plan_windows.preview_window_s = 180.0;
+    state._maneuver_plan_windows.solve_margin_s = 300.0;
+    state._maneuver_plan_live_preview_active = true;
+    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+
+    Game::GameplayState::ManeuverNode node{};
+    node.id = 9;
+    node.time_s = 240.0;
+    state._maneuver_state.selected_node_id = node.id;
+    state._maneuver_state.nodes.push_back(node);
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+    state.refresh_prediction_preview_anchor(track, 100.0, true);
+
+    const bool requested = state.request_orbiter_prediction_async(track,
+                                                                  WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                                  glm::dvec3(0.0, 7'500.0, 0.0),
+                                                                  100.0,
+                                                                  false,
+                                                                  true);
+
+    ASSERT_TRUE(requested);
+    EXPECT_TRUE(track.request_pending);
+    EXPECT_EQ(track.pending_solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
+    EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::DragPreviewPending);
+    EXPECT_DOUBLE_EQ(track.preview_last_request_at_s, 100.0);
+    EXPECT_GT(track.latest_requested_generation_id, 0u);
+}
+
+TEST(GameplayPredictionManeuverTests, FastPreviewRequestKeepsUpstreamManeuversBeforeAnchor)
+{
+    Game::GameplayState state{};
+    state._orbitsim = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbitsim);
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+    state._maneuver_plan_windows.preview_window_s = 180.0;
+    state._maneuver_plan_windows.solve_margin_s = 300.0;
+    state._maneuver_plan_live_preview_active = true;
+    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+
+    Game::GameplayState::ManeuverNode first{};
+    first.id = 1;
+    first.time_s = 150.0;
+    state._maneuver_state.nodes.push_back(first);
+
+    Game::GameplayState::ManeuverNode second{};
+    second.id = 2;
+    second.time_s = 240.0;
+    state._maneuver_state.selected_node_id = second.id;
+    state._maneuver_state.nodes.push_back(second);
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+
+    const bool requested = state.request_orbiter_prediction_async(track,
+                                                                  WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                                  glm::dvec3(0.0, 7'500.0, 0.0),
+                                                                  100.0,
+                                                                  false,
+                                                                  true);
+
+    ASSERT_TRUE(requested);
+    ASSERT_EQ(state._prediction_service._pending_jobs.size(), 1u);
+    const auto &queued = state._prediction_service._pending_jobs.front().request;
+    ASSERT_EQ(queued.solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
+    ASSERT_EQ(queued.maneuver_impulses.size(), 2u);
+    EXPECT_EQ(queued.maneuver_impulses[0].node_id, first.id);
+    EXPECT_EQ(queued.maneuver_impulses[1].node_id, second.id);
+}
+
+TEST(GameplayPredictionManeuverTests, FastPreviewRequestKeepsDownstreamManeuversBeyondPatchWindow)
+{
+    Game::GameplayState state{};
+    state._orbitsim = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbitsim);
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+    state._prediction_draw_future_segment = true;
+    state._prediction_sampling_policy.orbiter_min_window_s = 120.0;
+    state._maneuver_plan_windows.preview_window_s = 180.0;
+    state._maneuver_plan_windows.solve_margin_s = 300.0;
+    state._maneuver_plan_live_preview_active = true;
+    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+
+    Game::GameplayState::ManeuverNode anchor{};
+    anchor.id = 1;
+    anchor.time_s = 240.0;
+    state._maneuver_state.selected_node_id = anchor.id;
+    state._maneuver_state.nodes.push_back(anchor);
+
+    Game::GameplayState::ManeuverNode downstream{};
+    downstream.id = 2;
+    downstream.time_s = 700.0; // Outside the local patch window, still inside the full request horizon.
+    state._maneuver_state.nodes.push_back(downstream);
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+
+    const bool requested = state.request_orbiter_prediction_async(track,
+                                                                  WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                                  glm::dvec3(0.0, 7'500.0, 0.0),
+                                                                  100.0,
+                                                                  false,
+                                                                  true);
+
+    ASSERT_TRUE(requested);
+    ASSERT_EQ(state._prediction_service._pending_jobs.size(), 1u);
+    const auto &queued = state._prediction_service._pending_jobs.front().request;
+    ASSERT_EQ(queued.solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
+    ASSERT_EQ(queued.maneuver_impulses.size(), 2u);
+    EXPECT_EQ(queued.maneuver_impulses[0].node_id, anchor.id);
+    EXPECT_EQ(queued.maneuver_impulses[1].node_id, downstream.id);
+}
+
 TEST(GameplayPredictionManeuverTests, ShouldRebuildPredictionTrackWhenCoverageFallsShort)
 {
     Game::GameplayState state{};
@@ -268,7 +507,9 @@ TEST(GameplayPredictionManeuverTests, PredictionServiceBuildsSecondNodePreviewFr
     second.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
     request.maneuver_impulses.push_back(second);
 
-    const Game::OrbitPredictionService::Result result = service.compute_prediction(1, request, 1);
+    std::vector<Game::OrbitPredictionService::Result> results = run_prediction_results(service, 1, std::move(request));
+    ASSERT_EQ(results.size(), 1u);
+    const Game::OrbitPredictionService::Result &result = results.front();
 
     ASSERT_TRUE(result.valid) << "status=" << static_cast<int>(result.diagnostics.status)
                               << " ephemeris_accepted=" << result.diagnostics.ephemeris.accepted_segments
@@ -309,7 +550,9 @@ TEST(GameplayPredictionManeuverTests, PredictionServiceSupportsFarFutureManeuver
     impulse.dv_rtn_mps = glm::dvec3(0.0, 0.0, 25.0);
     request.maneuver_impulses.push_back(impulse);
 
-    const Game::OrbitPredictionService::Result result = service.compute_prediction(1, request, 1);
+    std::vector<Game::OrbitPredictionService::Result> results = run_prediction_results(service, 1, std::move(request));
+    ASSERT_EQ(results.size(), 1u);
+    const Game::OrbitPredictionService::Result &result = results.front();
 
     ASSERT_TRUE(result.valid) << "status=" << static_cast<int>(result.diagnostics.status)
                               << " ephemeris_accepted=" << result.diagnostics.ephemeris.accepted_segments
@@ -341,7 +584,10 @@ TEST(GameplayPredictionManeuverTests, PredictionServiceReusesBaselineForFastMane
     Game::OrbitPredictionService service{};
 
     Game::OrbitPredictionService::Request baseline_request = make_prediction_request(0.0, 120.0);
-    const Game::OrbitPredictionService::Result baseline_result = service.compute_prediction(1, baseline_request, 1);
+    std::vector<Game::OrbitPredictionService::Result> baseline_results =
+            run_prediction_results(service, 1, std::move(baseline_request));
+    ASSERT_EQ(baseline_results.size(), 1u);
+    const Game::OrbitPredictionService::Result &baseline_result = baseline_results.front();
 
     ASSERT_TRUE(baseline_result.valid);
     ASSERT_FALSE(baseline_result.trajectory_inertial.empty());
@@ -360,7 +606,10 @@ TEST(GameplayPredictionManeuverTests, PredictionServiceReusesBaselineForFastMane
     impulse.dv_rtn_mps = glm::dvec3(0.0, 0.0, 10.0);
     preview_request.maneuver_impulses.push_back(impulse);
 
-    const Game::OrbitPredictionService::Result preview_result = service.compute_prediction(2, preview_request, 1);
+    std::vector<Game::OrbitPredictionService::Result> preview_results =
+            run_prediction_results(service, 2, std::move(preview_request));
+    ASSERT_EQ(preview_results.size(), 1u);
+    const Game::OrbitPredictionService::Result &preview_result = preview_results.front();
 
     ASSERT_TRUE(preview_result.valid);
     EXPECT_TRUE(preview_result.diagnostics.trajectory_base.cache_reused);
@@ -419,6 +668,72 @@ TEST(GameplayPredictionManeuverTests, CompletedSolverResultClearsSolverPendingAn
     EXPECT_TRUE(state._prediction_tracks.front().derived_request_pending);
 }
 
+TEST(GameplayPredictionManeuverTests, OlderSolverResultCanStillQueueDerivedWorkWhileNewerRequestIsPending)
+{
+    Game::GameplayState state{};
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.request_pending = true;
+    track.latest_requested_generation_id = 2;
+    state._prediction_tracks.push_back(track);
+
+    Game::OrbitPredictionService::Result result{};
+    result.track_id = state._prediction_tracks.front().key.track_id();
+    result.generation_id = 1;
+    result.valid = true;
+    result.build_time_s = 0.0;
+    result.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(60.0, 7'100'000.0)};
+    result.trajectory_segments_inertial = {make_segment(0.0, 60.0, 7'000'000.0, 7'100'000.0)};
+
+    orbitsim::MassiveBody ref{};
+    ref.id = 1;
+    ref.mass_kg = 5.972e24;
+    ref.radius_m = 6'371'000.0;
+    ref.state = orbitsim::make_state(glm::dvec3(0.0), glm::dvec3(0.0));
+    result.massive_bodies.push_back(ref);
+
+    state.apply_completed_prediction_result(std::move(result));
+
+    ASSERT_EQ(state._prediction_tracks.size(), 1u);
+    EXPECT_TRUE(state._prediction_tracks.front().derived_request_pending);
+}
+
+TEST(GameplayPredictionManeuverTests, StaleDerivedResultDoesNotReplaceNewerDisplayedGeneration)
+{
+    Game::GameplayState state{};
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.cache.valid = true;
+    track.cache.generation_id = 3;
+    track.cache.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(60.0, 7'100'000.0)};
+    track.cache.trajectory_segments_inertial = {make_segment(0.0, 60.0, 7'000'000.0, 7'100'000.0)};
+    track.cache.trajectory_frame = track.cache.trajectory_inertial;
+    track.cache.trajectory_segments_frame = track.cache.trajectory_segments_inertial;
+    track.latest_requested_generation_id = 4;
+    track.derived_request_pending = true;
+    state._prediction_tracks.push_back(track);
+
+    Game::OrbitPredictionDerivedService::Result result{};
+    result.track_id = state._prediction_tracks.front().key.track_id();
+    result.generation_id = 2;
+    result.valid = true;
+    result.cache.valid = true;
+    result.cache.generation_id = 2;
+    result.cache.trajectory_inertial = {make_sample(0.0, 8'000'000.0), make_sample(60.0, 8'100'000.0)};
+    result.cache.trajectory_segments_inertial = {make_segment(0.0, 60.0, 8'000'000.0, 8'100'000.0)};
+    result.cache.trajectory_frame = result.cache.trajectory_inertial;
+    result.cache.trajectory_segments_frame = result.cache.trajectory_segments_inertial;
+
+    state.apply_completed_prediction_derived_result(std::move(result));
+
+    ASSERT_EQ(state._prediction_tracks.size(), 1u);
+    EXPECT_EQ(state._prediction_tracks.front().cache.generation_id, 3u);
+    EXPECT_DOUBLE_EQ(state._prediction_tracks.front().cache.trajectory_frame.front().position_m.x, 7'000'000.0);
+    EXPECT_TRUE(state._prediction_tracks.front().derived_request_pending);
+}
+
 TEST(GameplayPredictionManeuverTests, ReusedBaseFrameDerivedResultPreservesBaseDiagnostics)
 {
     Game::GameplayState state{};
@@ -454,6 +769,105 @@ TEST(GameplayPredictionManeuverTests, ReusedBaseFrameDerivedResultPreservesBaseD
     ASSERT_EQ(state._prediction_tracks.size(), 1u);
     EXPECT_EQ(state._prediction_tracks.front().derived_diagnostics.frame_base.accepted_segments, 11u);
     EXPECT_EQ(state._prediction_tracks.front().derived_diagnostics.status, Game::PredictionDerivedStatus::Success);
+}
+
+TEST(GameplayPredictionManeuverTests, PreviewDerivedResultsAccumulatePlannedChunkAssemblyAcrossStages)
+{
+    Game::GameplayState state{};
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.cache.valid = true;
+    track.cache.generation_id = 4;
+    track.cache.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(30.0, 7'300'000.0)};
+    track.cache.trajectory_segments_inertial = {make_segment(0.0, 30.0, 7'000'000.0, 7'300'000.0)};
+    track.cache.trajectory_frame = track.cache.trajectory_inertial;
+    track.cache.trajectory_segments_frame = track.cache.trajectory_segments_inertial;
+    track.cache.trajectory_inertial_planned = {
+            make_sample(0.0, 7'000'000.0),
+            make_sample(10.0, 7'100'000.0),
+            make_sample(20.0, 7'200'000.0),
+            make_sample(30.0, 7'300'000.0),
+    };
+    track.cache.trajectory_segments_inertial_planned = {
+            make_segment(0.0, 10.0, 7'000'000.0, 7'100'000.0),
+            make_segment(10.0, 20.0, 7'100'000.0, 7'200'000.0),
+            make_segment(20.0, 30.0, 7'200'000.0, 7'300'000.0),
+    };
+    track.cache.trajectory_frame_planned = track.cache.trajectory_inertial_planned;
+    track.cache.trajectory_segments_frame_planned = track.cache.trajectory_segments_inertial_planned;
+    state._prediction_tracks.push_back(track);
+
+    Game::OrbitPredictionDerivedService::Result fp0{};
+    fp0.track_id = state._prediction_tracks.front().key.track_id();
+    fp0.generation_id = 5;
+    fp0.valid = true;
+    fp0.solve_quality = Game::OrbitPredictionService::SolveQuality::FastPreview;
+    fp0.cache.valid = true;
+    fp0.cache.generation_id = 5;
+    fp0.cache.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(30.0, 7'300'000.0)};
+    fp0.cache.trajectory_segments_inertial = {make_segment(0.0, 30.0, 7'000'000.0, 7'300'000.0)};
+    fp0.cache.trajectory_frame = fp0.cache.trajectory_inertial;
+    fp0.cache.trajectory_segments_frame = fp0.cache.trajectory_segments_inertial;
+    fp0.cache.trajectory_inertial_planned = {
+            make_sample(0.0, 7'000'000.0),
+            make_sample(10.0, 7'100'000.0),
+            make_sample(20.0, 7'200'000.0),
+    };
+    fp0.cache.trajectory_segments_inertial_planned = {
+            make_segment(0.0, 10.0, 7'000'000.0, 7'100'000.0),
+            make_segment(10.0, 20.0, 7'100'000.0, 7'200'000.0),
+    };
+    fp0.cache.trajectory_frame_planned = fp0.cache.trajectory_inertial_planned;
+    fp0.cache.trajectory_segments_frame_planned = fp0.cache.trajectory_segments_inertial_planned;
+    fp0.chunk_assembly.valid = true;
+    fp0.chunk_assembly.generation_id = 5;
+    fp0.chunk_assembly.chunks = {
+            make_chunk(0u, 5u, 0.0, 10.0, 7'000'000.0, 7'100'000.0),
+            make_chunk(1u, 5u, 10.0, 20.0, 7'100'000.0, 7'200'000.0),
+    };
+
+    state.apply_completed_prediction_derived_result(std::move(fp0));
+
+    ASSERT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks.size(), 2u);
+    EXPECT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[0].chunk_id, 0u);
+    EXPECT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[1].chunk_id, 1u);
+
+    Game::OrbitPredictionDerivedService::Result fp1{};
+    fp1.track_id = state._prediction_tracks.front().key.track_id();
+    fp1.generation_id = 5;
+    fp1.valid = true;
+    fp1.solve_quality = Game::OrbitPredictionService::SolveQuality::FastPreview;
+    fp1.cache.valid = true;
+    fp1.cache.generation_id = 5;
+    fp1.cache.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(30.0, 7'300'000.0)};
+    fp1.cache.trajectory_segments_inertial = {make_segment(0.0, 30.0, 7'000'000.0, 7'300'000.0)};
+    fp1.cache.trajectory_frame = fp1.cache.trajectory_inertial;
+    fp1.cache.trajectory_segments_frame = fp1.cache.trajectory_segments_inertial;
+    fp1.cache.trajectory_inertial_planned = {
+            make_sample(20.0, 7'200'000.0),
+            make_sample(30.0, 7'300'000.0),
+    };
+    fp1.cache.trajectory_segments_inertial_planned = {
+            make_segment(20.0, 30.0, 7'200'000.0, 7'300'000.0),
+    };
+    fp1.cache.trajectory_frame_planned = fp1.cache.trajectory_inertial_planned;
+    fp1.cache.trajectory_segments_frame_planned = fp1.cache.trajectory_segments_inertial_planned;
+    fp1.chunk_assembly.valid = true;
+    fp1.chunk_assembly.generation_id = 5;
+    fp1.chunk_assembly.chunks = {
+            make_chunk(2u, 5u, 20.0, 30.0, 7'200'000.0, 7'300'000.0),
+    };
+
+    state.apply_completed_prediction_derived_result(std::move(fp1));
+
+    ASSERT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks.size(), 3u);
+    EXPECT_EQ(state._prediction_tracks.front().planned_chunk_assembly.generation_id, 5u);
+    EXPECT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[0].chunk_id, 0u);
+    EXPECT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[1].chunk_id, 1u);
+    EXPECT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[2].chunk_id, 2u);
+    EXPECT_DOUBLE_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[0].t0_s, 0.0);
+    EXPECT_DOUBLE_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[2].t1_s, 30.0);
 }
 
 int main(int argc, char **argv)
