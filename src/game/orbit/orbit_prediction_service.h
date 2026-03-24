@@ -136,6 +136,7 @@ namespace Game
             double t0_s{std::numeric_limits<double>::quiet_NaN()};
             double t1_s{std::numeric_limits<double>::quiet_NaN()};
             bool includes_planned_path{false};
+            bool reused_from_cache{false};
         };
 
         enum class PredictionProfileId : uint8_t
@@ -300,6 +301,29 @@ namespace Game
             std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial{};
         };
 
+        struct PlannedChunkCacheKey
+        {
+            uint64_t track_id{0};
+            uint64_t baseline_generation_id{0};
+            uint64_t upstream_maneuver_hash{0};
+            uint64_t frame_independent_generation{0};
+            double chunk_t0_s{std::numeric_limits<double>::quiet_NaN()};
+            double chunk_t1_s{std::numeric_limits<double>::quiet_NaN()};
+            PredictionProfileId profile_id{PredictionProfileId::NearBody};
+        };
+
+        struct PlannedChunkCacheEntry
+        {
+            PlannedChunkCacheKey key{};
+            orbitsim::State start_state{};
+            orbitsim::State end_state{};
+            AdaptiveStageDiagnostics diagnostics{};
+            std::vector<orbitsim::TrajectorySegment> segments{};
+            std::vector<orbitsim::TrajectorySample> samples{};
+            std::vector<ManeuverNodePreview> previews{};
+            uint64_t last_use_serial{0};
+        };
+
         struct PendingJob
         {
             uint64_t track_id{0};
@@ -344,6 +368,10 @@ namespace Game
 
         mutable std::mutex _baseline_cache_mutex;
         std::unordered_map<uint64_t, ReusableBaselineCacheEntry> _reusable_baseline_by_track{};
+
+        mutable std::mutex _planned_chunk_cache_mutex;
+        std::vector<PlannedChunkCacheEntry> _planned_chunk_cache{};
+        uint64_t _next_planned_chunk_cache_use_serial{1};
 
         std::mutex _ephemeris_mutex;
         std::vector<CachedEphemerisEntry> _ephemeris_cache{};
