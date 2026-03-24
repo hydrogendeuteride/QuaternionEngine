@@ -364,6 +364,7 @@ namespace Game
         bool dirty{true};
         bool request_pending{false};
         bool derived_request_pending{false};
+        uint64_t latest_requested_generation_id{0};
         OrbitPredictionService::SolveQuality pending_solve_quality{OrbitPredictionService::SolveQuality::Full};
         bool invalidated_while_pending{false};
         PredictionPreviewRuntimeState preview_state{PredictionPreviewRuntimeState::Idle};
@@ -385,6 +386,7 @@ namespace Game
             dirty = true;
             request_pending = false;
             derived_request_pending = false;
+            latest_requested_generation_id = 0;
             pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             invalidated_while_pending = false;
             preview_state = PredictionPreviewRuntimeState::Idle;

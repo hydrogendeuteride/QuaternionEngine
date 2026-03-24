@@ -572,6 +572,7 @@ namespace Game
             track.cache.clear();
             track.request_pending = false;
             track.derived_request_pending = false;
+            track.latest_requested_generation_id = 0;
             track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             track.dirty = false;
             track.invalidated_while_pending = false;
@@ -731,6 +732,13 @@ namespace Game
         }
 
         if (!track)
+        {
+            return;
+        }
+
+        const bool stale_derived_result =
+                track->cache.valid && result.generation_id < track->cache.generation_id;
+        if (stale_derived_result)
         {
             return;
         }
@@ -1104,11 +1112,7 @@ namespace Game
         if (with_maneuvers)
         {
             request.maneuver_impulses.reserve(_maneuver_state.nodes.size());
-            const double preview_patch_horizon_end_s =
-                    track.preview_anchor.valid ? (track.preview_anchor.anchor_time_s + track.preview_anchor.patch_window_s) : now_s;
-            const bool use_preview_patch_horizon =
-                    request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
-                    track.preview_anchor.valid;
+            const double request_horizon_end_s = now_s + request.future_window_s;
             for (const ManeuverNode &node : _maneuver_state.nodes)
             {
                 if (!std::isfinite(node.time_s))
@@ -1116,14 +1120,10 @@ namespace Game
                     continue;
                 }
 
-                if (use_preview_patch_horizon &&
-                    node.time_s > preview_patch_horizon_end_s)
-                {
-                    continue;
-                }
-                if (!use_preview_patch_horizon &&
-                    request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
-                    node.time_s > (now_s + request.future_window_s))
+                // FP-0 stays patch-bounded inside the solver. The request still has to carry every
+                // downstream maneuver in the requested horizon so FP-1 can refine the remaining tail.
+                if (request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+                    node.time_s > request_horizon_end_s)
                 {
                     continue;
                 }
@@ -1141,7 +1141,8 @@ namespace Game
             }
         }
 
-        _prediction_service.request(std::move(request));
+        const uint64_t generation_id = _prediction_service.request(std::move(request));
+        track.latest_requested_generation_id = generation_id;
         track.request_pending = true;
         track.derived_request_pending = false;
         track.pending_solve_quality = maneuver_live_preview
@@ -1204,7 +1205,8 @@ namespace Game
         }
 
         // Celestial tracks now flow through the same worker queue as spacecraft tracks.
-        _prediction_service.request(std::move(request));
+        const uint64_t generation_id = _prediction_service.request(std::move(request));
+        track.latest_requested_generation_id = generation_id;
         track.request_pending = true;
         track.derived_request_pending = false;
         track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
