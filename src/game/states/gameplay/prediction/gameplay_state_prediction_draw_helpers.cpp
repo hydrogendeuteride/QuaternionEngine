@@ -36,6 +36,8 @@ namespace Game::PredictionDrawDetail
         perf.pick_segments = 0;
         perf.render_cap_hit_last_frame = false;
         perf.pick_cap_hit_last_frame = false;
+        perf.planned_chunk_count = 0;
+        perf.planned_chunks_drawn = 0;
     }
 
     glm::vec4 scale_line_color(glm::vec4 color, const float line_alpha_scale)
