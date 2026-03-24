@@ -106,6 +106,20 @@ namespace Game::OrbitPredictionTuning
     inline constexpr double kPredictionChunkSpanCruiseS = 30.0 * kSecondsPerDay;
     inline constexpr double kPredictionChunkSpanDeepTailS = 90.0 * kSecondsPerDay;
 
+    // Slice 6 activity probe and seam-retry tuning.
+    inline constexpr double kPredictionActivityProbeHeadingPromoteRad = 0.08;
+    inline constexpr double kPredictionActivityProbeHeadingSplitRad = 0.20;
+    inline constexpr double kPredictionActivityProbeNormalizedJerkPromote = 0.35;
+    inline constexpr double kPredictionActivityProbeNormalizedJerkSplit = 0.90;
+    inline constexpr double kPredictionActivityProbeDominantGravityPromoteRatio = 0.92;
+    inline constexpr double kPredictionActivityProbeDominantGravitySplitRatio = 0.75;
+    inline constexpr double kPredictionActivityProbeMinSplitSpanS = 2.0 * kSecondsPerHour;
+    inline constexpr std::size_t kPredictionSeamRetryMaxAttempts = 3u;
+    inline constexpr double kPredictionSeamPosToleranceFloorM = 25.0;
+    inline constexpr double kPredictionSeamPosToleranceScale = 1.0e-8;
+    inline constexpr double kPredictionSeamVelToleranceFloorMps = 0.05;
+    inline constexpr double kPredictionSeamVelToleranceScale = 1.0e-6;
+
     // While thrusting, shorten the horizon so updates can happen more often.
     inline constexpr double kThrustHorizonMinS = 120.0;
     inline constexpr double kThrustHorizonWindowScale = 1.25;

@@ -195,6 +195,35 @@ namespace Game
             std::vector<PredictionChunkPlan> chunks{};
         };
 
+        struct ChunkActivityProbe
+        {
+            bool valid{false};
+            double heading_change_rad{0.0};
+            double accel_magnitude_mps2{0.0};
+            double jerk_magnitude_mps3{0.0};
+            double dominant_gravity_ratio{1.0};
+            double maneuver_proximity_s{std::numeric_limits<double>::infinity()};
+            orbitsim::BodyId primary_body_id_start{orbitsim::kInvalidBodyId};
+            orbitsim::BodyId primary_body_id_mid{orbitsim::kInvalidBodyId};
+            orbitsim::BodyId primary_body_id_end{orbitsim::kInvalidBodyId};
+            PredictionProfileId recommended_profile_id{PredictionProfileId::NearBody};
+            bool should_split{false};
+        };
+
+        struct ChunkSeamDiagnostics
+        {
+            bool valid{false};
+            bool success{false};
+            double sample_time_s{std::numeric_limits<double>::quiet_NaN()};
+            double time_error_s{0.0};
+            double position_error_m{0.0};
+            double velocity_error_mps{0.0};
+            orbitsim::BodyId previous_primary_body_id{orbitsim::kInvalidBodyId};
+            orbitsim::BodyId current_primary_body_id{orbitsim::kInvalidBodyId};
+            bool primary_flutter{false};
+            uint32_t retry_count{0};
+        };
+
         struct Request
         {
             // The worker handles both spacecraft and celestial prediction jobs.
@@ -319,6 +348,7 @@ namespace Game
             orbitsim::State end_state{};
             AdaptiveStageDiagnostics diagnostics{};
             std::vector<orbitsim::TrajectorySegment> segments{};
+            std::vector<orbitsim::TrajectorySegment> seam_validation_segments{};
             std::vector<orbitsim::TrajectorySample> samples{};
             std::vector<ManeuverNodePreview> previews{};
             uint64_t last_use_serial{0};

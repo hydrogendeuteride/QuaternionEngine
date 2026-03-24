@@ -247,6 +247,183 @@ namespace Game
             return static_cast<uint32_t>(profile_id) + 1u;
         }
 
+        [[nodiscard]] uint32_t profile_rank(const PredictionProfileId profile_id)
+        {
+            return static_cast<uint32_t>(profile_id);
+        }
+
+        [[nodiscard]] double safe_angle_between(const orbitsim::Vec3 &a, const orbitsim::Vec3 &b)
+        {
+            const double len_a = glm::length(glm::dvec3(a));
+            const double len_b = glm::length(glm::dvec3(b));
+            if (!(len_a > 0.0) || !(len_b > 0.0) || !std::isfinite(len_a) || !std::isfinite(len_b))
+            {
+                return 0.0;
+            }
+
+            const double dot_value = glm::dot(glm::dvec3(a), glm::dvec3(b)) / (len_a * len_b);
+            return std::acos(std::clamp(dot_value, -1.0, 1.0));
+        }
+
+        [[nodiscard]] orbitsim::Vec3 body_position_at_time(const OrbitPredictionService::SharedCelestialEphemeris &shared_ephemeris,
+                                                           const std::vector<orbitsim::MassiveBody> &bodies,
+                                                           const std::size_t index,
+                                                           const double time_s)
+        {
+            if (index >= bodies.size())
+            {
+                return orbitsim::Vec3(0.0);
+            }
+
+            if (shared_ephemeris && !shared_ephemeris->empty())
+            {
+                std::size_t eph_index = 0u;
+                if (bodies[index].id != orbitsim::kInvalidBodyId &&
+                    shared_ephemeris->body_index_for_id(bodies[index].id, &eph_index))
+                {
+                    return shared_ephemeris->body_position_at(eph_index, time_s);
+                }
+            }
+
+            return bodies[index].state.position_m;
+        }
+
+        [[nodiscard]] orbitsim::BodyId select_primary_body_id_for_state(
+                const OrbitPredictionService::Request &request,
+                const OrbitPredictionService::SharedCelestialEphemeris &shared_ephemeris,
+                const orbitsim::State &state,
+                const double time_s,
+                const orbitsim::BodyId preferred_body_id)
+        {
+            if (request.massive_bodies.empty() || !finite_state(state))
+            {
+                return orbitsim::kInvalidBodyId;
+            }
+
+            const std::size_t primary_index = select_primary_index_with_hysteresis(
+                    request.massive_bodies,
+                    state.position_m,
+                    [&shared_ephemeris, &request, time_s](const std::size_t i) -> orbitsim::Vec3 {
+                        return body_position_at_time(shared_ephemeris, request.massive_bodies, i, time_s);
+                    },
+                    request.sim_config.softening_length_m,
+                    preferred_body_id);
+            return primary_index < request.massive_bodies.size()
+                           ? request.massive_bodies[primary_index].id
+                           : orbitsim::kInvalidBodyId;
+        }
+
+        [[nodiscard]] double dominant_gravity_ratio_for_state(
+                const OrbitPredictionService::Request &request,
+                const OrbitPredictionService::SharedCelestialEphemeris &shared_ephemeris,
+                const orbitsim::State &state,
+                const double time_s)
+        {
+            if (request.massive_bodies.empty() || !finite_state(state))
+            {
+                return 1.0;
+            }
+
+            const double eps2 = request.sim_config.softening_length_m * request.sim_config.softening_length_m;
+            double total_metric = 0.0;
+            double dominant_metric = 0.0;
+            for (std::size_t i = 0; i < request.massive_bodies.size(); ++i)
+            {
+                const double mass_kg = request.massive_bodies[i].mass_kg;
+                if (!(mass_kg > 0.0) || !std::isfinite(mass_kg))
+                {
+                    continue;
+                }
+
+                const orbitsim::Vec3 dr = body_position_at_time(shared_ephemeris, request.massive_bodies, i, time_s) -
+                                          state.position_m;
+                const double r2 = glm::dot(dr, dr) + eps2;
+                if (!(r2 > 0.0) || !std::isfinite(r2))
+                {
+                    continue;
+                }
+
+                const double metric = mass_kg / r2;
+                total_metric += metric;
+                dominant_metric = std::max(dominant_metric, metric);
+            }
+
+            if (!(total_metric > 0.0))
+            {
+                return 1.0;
+            }
+
+            return std::clamp(dominant_metric / total_metric, 0.0, 1.0);
+        }
+
+        bool eval_activity_segment_state(const orbitsim::TrajectorySegment &segment,
+                                         const double t_s,
+                                         orbitsim::State &out_state)
+        {
+            out_state = segment.start;
+            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s) || !std::isfinite(t_s))
+            {
+                return finite_state(out_state);
+            }
+
+            double u = (t_s - segment.t0_s) / segment.dt_s;
+            if (!std::isfinite(u))
+            {
+                u = 0.0;
+            }
+            u = std::clamp(u, 0.0, 1.0);
+
+            const double u2 = u * u;
+            const double u3 = u2 * u;
+            const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
+            const double h10 = u3 - (2.0 * u2) + u;
+            const double h01 = (-2.0 * u3) + (3.0 * u2);
+            const double h11 = u3 - u2;
+            const double dh00 = (6.0 * u2) - (6.0 * u);
+            const double dh10 = (3.0 * u2) - (4.0 * u) + 1.0;
+            const double dh01 = (-6.0 * u2) + (6.0 * u);
+            const double dh11 = (3.0 * u2) - (2.0 * u);
+
+            const glm::dvec3 p0 = glm::dvec3(segment.start.position_m);
+            const glm::dvec3 p1 = glm::dvec3(segment.end.position_m);
+            const glm::dvec3 m0 = glm::dvec3(segment.start.velocity_mps) * segment.dt_s;
+            const glm::dvec3 m1 = glm::dvec3(segment.end.velocity_mps) * segment.dt_s;
+            const glm::dvec3 pos = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
+            const glm::dvec3 vel = ((dh00 * p0) + (dh10 * m0) + (dh01 * p1) + (dh11 * m1)) / segment.dt_s;
+            if (!finite_vec3(pos) || !finite_vec3(vel))
+            {
+                return false;
+            }
+
+            out_state = orbitsim::make_state(pos, vel);
+            return true;
+        }
+
+        bool sample_activity_segment_state(const std::vector<orbitsim::TrajectorySegment> &segments,
+                                           const double t_s,
+                                           orbitsim::State &out_state)
+        {
+            out_state = {};
+            if (segments.empty() || !std::isfinite(t_s))
+            {
+                return false;
+            }
+
+            auto it = std::lower_bound(segments.begin(),
+                                       segments.end(),
+                                       t_s,
+                                       [](const orbitsim::TrajectorySegment &segment, const double query_t_s) {
+                                           return prediction_segment_end_time(segment) < query_t_s;
+                                       });
+            if (it == segments.end())
+            {
+                return eval_activity_segment_state(segments.back(),
+                                                   prediction_segment_end_time(segments.back()),
+                                                   out_state);
+            }
+            return eval_activity_segment_state(*it, t_s, out_state);
+        }
+
         [[nodiscard]] double scale_dt_value(const double base_value,
                                             const double scale,
                                             const double floor_value)
@@ -581,6 +758,158 @@ namespace Game
 
         plan.valid = !plan.chunks.empty();
         return plan;
+    }
+
+    OrbitPredictionService::PredictionProfileId promote_prediction_profile(
+            OrbitPredictionService::PredictionProfileId profile_id,
+            const uint32_t steps)
+    {
+        if (steps == 0u)
+        {
+            return profile_id;
+        }
+
+        const uint32_t rank = profile_rank(profile_id);
+        const uint32_t promoted_rank = (steps >= rank) ? 0u : (rank - steps);
+        return static_cast<OrbitPredictionService::PredictionProfileId>(promoted_rank);
+    }
+
+    OrbitPredictionService::ChunkActivityProbe classify_chunk_activity(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionChunkPlan &chunk,
+            const std::vector<orbitsim::TrajectorySegment> *baseline_segments,
+            const OrbitPredictionService::SharedCelestialEphemeris &shared_ephemeris)
+    {
+        OrbitPredictionService::ChunkActivityProbe probe{};
+        probe.recommended_profile_id = chunk.profile_id;
+        if (!baseline_segments || baseline_segments->empty() || !(chunk.t1_s > chunk.t0_s))
+        {
+            return probe;
+        }
+
+        const double mid_t_s = chunk.t0_s + (chunk.t1_s - chunk.t0_s) * 0.5;
+        orbitsim::State start_state{};
+        orbitsim::State mid_state{};
+        orbitsim::State end_state{};
+        if (!sample_activity_segment_state(*baseline_segments, chunk.t0_s, start_state) ||
+            !sample_activity_segment_state(*baseline_segments, mid_t_s, mid_state) ||
+            !sample_activity_segment_state(*baseline_segments, chunk.t1_s, end_state))
+        {
+            return probe;
+        }
+
+        const double dt0_s = std::max(kContinuityMinTimeEpsilonS, mid_t_s - chunk.t0_s);
+        const double dt1_s = std::max(kContinuityMinTimeEpsilonS, chunk.t1_s - mid_t_s);
+        const orbitsim::Vec3 accel0_mps2 = (mid_state.velocity_mps - start_state.velocity_mps) / dt0_s;
+        const orbitsim::Vec3 accel1_mps2 = (end_state.velocity_mps - mid_state.velocity_mps) / dt1_s;
+        const double avg_dt_s = std::max(kContinuityMinTimeEpsilonS, (dt0_s + dt1_s) * 0.5);
+        const double accel_mag_mps2 =
+                std::max(glm::length(glm::dvec3(accel0_mps2)), glm::length(glm::dvec3(accel1_mps2)));
+        const double jerk_mag_mps3 = glm::length(glm::dvec3(accel1_mps2 - accel0_mps2)) / avg_dt_s;
+        const double speed_scale_mps = std::max(
+                {1.0,
+                 glm::length(glm::dvec3(start_state.velocity_mps)),
+                 glm::length(glm::dvec3(mid_state.velocity_mps)),
+                 glm::length(glm::dvec3(end_state.velocity_mps))});
+        const double accel_scale_mps2 = std::max(1.0e-6, accel_mag_mps2);
+        const double normalized_jerk = (jerk_mag_mps3 * avg_dt_s) / accel_scale_mps2;
+
+        probe.valid = true;
+        probe.heading_change_rad = safe_angle_between(start_state.velocity_mps, mid_state.velocity_mps) +
+                                   safe_angle_between(mid_state.velocity_mps, end_state.velocity_mps);
+        probe.accel_magnitude_mps2 = accel_mag_mps2;
+        probe.jerk_magnitude_mps3 = jerk_mag_mps3;
+        probe.dominant_gravity_ratio =
+                dominant_gravity_ratio_for_state(request, shared_ephemeris, mid_state, mid_t_s);
+
+        probe.primary_body_id_start = select_primary_body_id_for_state(
+                request,
+                shared_ephemeris,
+                start_state,
+                chunk.t0_s,
+                request.preferred_primary_body_id);
+        probe.primary_body_id_mid = select_primary_body_id_for_state(
+                request,
+                shared_ephemeris,
+                mid_state,
+                mid_t_s,
+                probe.primary_body_id_start);
+        probe.primary_body_id_end = select_primary_body_id_for_state(
+                request,
+                shared_ephemeris,
+                end_state,
+                chunk.t1_s,
+                probe.primary_body_id_mid);
+
+        if (chunk.profile_id == PredictionProfileId::InteractiveExact ||
+            chunk.profile_id == PredictionProfileId::NearBody)
+        {
+            return probe;
+        }
+
+        for (const OrbitPredictionService::ManeuverImpulse &impulse : request.maneuver_impulses)
+        {
+            if (!std::isfinite(impulse.t_s))
+            {
+                continue;
+            }
+
+            const double distance_s = std::min(std::abs(impulse.t_s - chunk.t0_s), std::abs(impulse.t_s - chunk.t1_s));
+            probe.maneuver_proximity_s = std::min(probe.maneuver_proximity_s, distance_s);
+        }
+
+        uint32_t promote_steps = 0u;
+        if (probe.heading_change_rad >= OrbitPredictionTuning::kPredictionActivityProbeHeadingPromoteRad)
+        {
+            promote_steps = std::max(promote_steps, 1u);
+        }
+        if (probe.heading_change_rad >= OrbitPredictionTuning::kPredictionActivityProbeHeadingSplitRad)
+        {
+            promote_steps = std::max(promote_steps, 2u);
+            probe.should_split = true;
+        }
+
+        if (normalized_jerk >= OrbitPredictionTuning::kPredictionActivityProbeNormalizedJerkPromote)
+        {
+            promote_steps = std::max(promote_steps, 1u);
+        }
+        if (normalized_jerk >= OrbitPredictionTuning::kPredictionActivityProbeNormalizedJerkSplit)
+        {
+            promote_steps = std::max(promote_steps, 2u);
+            probe.should_split = true;
+        }
+
+        if (probe.dominant_gravity_ratio <= OrbitPredictionTuning::kPredictionActivityProbeDominantGravityPromoteRatio)
+        {
+            promote_steps = std::max(promote_steps, 1u);
+        }
+        if (probe.dominant_gravity_ratio <= OrbitPredictionTuning::kPredictionActivityProbeDominantGravitySplitRatio)
+        {
+            promote_steps = std::max(promote_steps, 2u);
+            probe.should_split = true;
+        }
+
+        if (probe.primary_body_id_start != orbitsim::kInvalidBodyId &&
+            ((probe.primary_body_id_start != probe.primary_body_id_mid) ||
+             (probe.primary_body_id_mid != probe.primary_body_id_end)))
+        {
+            promote_steps = std::max(promote_steps, 2u);
+            probe.should_split = true;
+        }
+
+        if (std::isfinite(probe.maneuver_proximity_s) &&
+            probe.maneuver_proximity_s <= OrbitPredictionTuning::kPredictionChunkSpanNearS)
+        {
+            promote_steps = std::max(promote_steps, 1u);
+        }
+
+        if (speed_scale_mps <= 1.0 && accel_mag_mps2 <= 1.0e-9)
+        {
+            probe.should_split = false;
+        }
+
+        probe.recommended_profile_id = promote_prediction_profile(chunk.profile_id, promote_steps);
+        return probe;
     }
 
     OrbitPredictionService::PredictionProfileDefinition resolve_prediction_profile_definition(
