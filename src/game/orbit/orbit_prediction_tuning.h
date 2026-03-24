@@ -4,6 +4,11 @@
 
 namespace Game::OrbitPredictionTuning
 {
+    inline constexpr double kSecondsPerMinute = 60.0;
+    inline constexpr double kSecondsPerHour = 3'600.0;
+    inline constexpr double kSecondsPerDay = 86'400.0;
+    inline constexpr double kSecondsPerYear = 365.0 * kSecondsPerDay;
+
     // Scale applied to the estimated orbital period when selecting the default prediction horizon.
     // 2.0 means "about two periods" for closed orbits (unless clamped by other limits).
     inline constexpr double kBaseHorizonFromPeriodScale = 2.0;
@@ -88,6 +93,32 @@ namespace Game::OrbitPredictionTuning
     inline constexpr std::size_t kFastPreviewAdaptiveEphemerisSoftMaxSegments = 1'500;
     inline constexpr double kFastPreviewAdaptiveEphemerisToleranceScale = 4.0;
     inline constexpr std::size_t kFastPreviewTrajectorySampleCap = 1'200;
+
+    // Multi-profile chunk planner bands. The last band continues with the final cadence past 20 years.
+    inline constexpr double kPredictionChunkBandNearEndS = 3.0 * kSecondsPerDay;
+    inline constexpr double kPredictionChunkBandTransferEndS = 30.0 * kSecondsPerDay;
+    inline constexpr double kPredictionChunkBandCruiseFineEndS = 180.0 * kSecondsPerDay;
+    inline constexpr double kPredictionChunkBandCruiseEndS = 2.0 * kSecondsPerYear;
+    inline constexpr double kPredictionChunkBandDeepTailEndS = 20.0 * kSecondsPerYear;
+    inline constexpr double kPredictionChunkSpanNearS = 6.0 * kSecondsPerHour;
+    inline constexpr double kPredictionChunkSpanTransferS = 1.0 * kSecondsPerDay;
+    inline constexpr double kPredictionChunkSpanCruiseFineS = 5.0 * kSecondsPerDay;
+    inline constexpr double kPredictionChunkSpanCruiseS = 30.0 * kSecondsPerDay;
+    inline constexpr double kPredictionChunkSpanDeepTailS = 90.0 * kSecondsPerDay;
+
+    // Slice 6 activity probe and seam-retry tuning.
+    inline constexpr double kPredictionActivityProbeHeadingPromoteRad = 0.08;
+    inline constexpr double kPredictionActivityProbeHeadingSplitRad = 0.20;
+    inline constexpr double kPredictionActivityProbeNormalizedJerkPromote = 0.35;
+    inline constexpr double kPredictionActivityProbeNormalizedJerkSplit = 0.90;
+    inline constexpr double kPredictionActivityProbeDominantGravityPromoteRatio = 0.92;
+    inline constexpr double kPredictionActivityProbeDominantGravitySplitRatio = 0.75;
+    inline constexpr double kPredictionActivityProbeMinSplitSpanS = 2.0 * kSecondsPerHour;
+    inline constexpr std::size_t kPredictionSeamRetryMaxAttempts = 3u;
+    inline constexpr double kPredictionSeamPosToleranceFloorM = 25.0;
+    inline constexpr double kPredictionSeamPosToleranceScale = 1.0e-8;
+    inline constexpr double kPredictionSeamVelToleranceFloorMps = 0.05;
+    inline constexpr double kPredictionSeamVelToleranceScale = 1.0e-6;
 
     // While thrusting, shorten the horizon so updates can happen more often.
     inline constexpr double kThrustHorizonMinS = 120.0;

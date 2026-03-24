@@ -72,6 +72,419 @@ namespace Game
 
     namespace
     {
+        using PredictionChunkBoundaryFlags = OrbitPredictionService::PredictionChunkBoundaryFlags;
+        using PredictionChunkPlan = OrbitPredictionService::PredictionChunkPlan;
+        using PredictionProfileId = OrbitPredictionService::PredictionProfileId;
+        using PredictionSolvePlan = OrbitPredictionService::PredictionSolvePlan;
+
+        struct PlannerBoundaryPoint
+        {
+            double time_s{0.0};
+            uint32_t flags{0u};
+        };
+
+        [[nodiscard]] uint32_t planner_boundary_flag_bits(const PredictionChunkBoundaryFlags flag)
+        {
+            return static_cast<uint32_t>(flag);
+        }
+
+        [[nodiscard]] bool planner_boundary_has_flag(const uint32_t flags, const PredictionChunkBoundaryFlags flag)
+        {
+            return (flags & planner_boundary_flag_bits(flag)) != 0u;
+        }
+
+        void append_planner_boundary(std::vector<PlannerBoundaryPoint> &boundaries,
+                                     const double request_t0_s,
+                                     const double request_t1_s,
+                                     const double time_s,
+                                     const PredictionChunkBoundaryFlags flag)
+        {
+            if (!std::isfinite(time_s) || !std::isfinite(request_t0_s) || !std::isfinite(request_t1_s))
+            {
+                return;
+            }
+
+            const double time_epsilon_s = continuity_time_epsilon_s(time_s);
+            if (time_s < (request_t0_s - time_epsilon_s) || time_s > (request_t1_s + time_epsilon_s))
+            {
+                return;
+            }
+
+            boundaries.push_back(PlannerBoundaryPoint{
+                    .time_s = std::clamp(time_s, request_t0_s, request_t1_s),
+                    .flags = planner_boundary_flag_bits(flag),
+            });
+        }
+
+        void append_time_band_boundaries(std::vector<PlannerBoundaryPoint> &boundaries,
+                                         const double request_t0_s,
+                                         const double request_t1_s,
+                                         const double band_begin_offset_s,
+                                         const double band_end_offset_s,
+                                         const double chunk_span_s)
+        {
+            if (!(chunk_span_s > 0.0) || !(band_end_offset_s > band_begin_offset_s))
+            {
+                return;
+            }
+
+            const double band_t0_s = request_t0_s + std::max(0.0, band_begin_offset_s);
+            const double band_t1_s = request_t0_s + std::max(0.0, band_end_offset_s);
+            if (!(band_t1_s > band_t0_s))
+            {
+                return;
+            }
+
+            const double clamped_band_t0_s = std::clamp(band_t0_s, request_t0_s, request_t1_s);
+            const double clamped_band_t1_s = std::clamp(band_t1_s, request_t0_s, request_t1_s);
+            if (!(clamped_band_t1_s > clamped_band_t0_s))
+            {
+                return;
+            }
+
+            append_planner_boundary(boundaries,
+                                    request_t0_s,
+                                    request_t1_s,
+                                    clamped_band_t0_s,
+                                    PredictionChunkBoundaryFlags::TimeBand);
+            append_planner_boundary(boundaries,
+                                    request_t0_s,
+                                    request_t1_s,
+                                    clamped_band_t1_s,
+                                    PredictionChunkBoundaryFlags::TimeBand);
+
+            for (double boundary_s = band_t0_s + chunk_span_s; boundary_s < band_t1_s; boundary_s += chunk_span_s)
+            {
+                append_planner_boundary(boundaries,
+                                        request_t0_s,
+                                        request_t1_s,
+                                        boundary_s,
+                                        PredictionChunkBoundaryFlags::TimeBand);
+            }
+        }
+
+        [[nodiscard]] std::vector<PlannerBoundaryPoint> merge_planner_boundaries(std::vector<PlannerBoundaryPoint> boundaries)
+        {
+            if (boundaries.empty())
+            {
+                return boundaries;
+            }
+
+            std::sort(boundaries.begin(),
+                      boundaries.end(),
+                      [](const PlannerBoundaryPoint &a, const PlannerBoundaryPoint &b) { return a.time_s < b.time_s; });
+
+            std::vector<PlannerBoundaryPoint> merged;
+            merged.reserve(boundaries.size());
+            for (const PlannerBoundaryPoint &boundary : boundaries)
+            {
+                if (!std::isfinite(boundary.time_s))
+                {
+                    continue;
+                }
+
+                if (!merged.empty())
+                {
+                    const double merge_epsilon_s = continuity_time_epsilon_s(boundary.time_s);
+                    if (std::abs(boundary.time_s - merged.back().time_s) <= merge_epsilon_s)
+                    {
+                        merged.back().flags |= boundary.flags;
+                        continue;
+                    }
+                }
+
+                merged.push_back(boundary);
+            }
+
+            return merged;
+        }
+
+        [[nodiscard]] PredictionProfileId resolve_chunk_profile_id(const OrbitPredictionService::Request &request,
+                                                                   const double chunk_t0_s,
+                                                                   const double chunk_t1_s)
+        {
+            if (request_uses_preview_patch(request))
+            {
+                const double preview_t0_s = request.preview_patch.anchor_time_s;
+                const double preview_t1_s = preview_t0_s + preview_fp0_window_s(request);
+                if (preview_t1_s > preview_t0_s &&
+                    chunk_t0_s < preview_t1_s &&
+                    chunk_t1_s > preview_t0_s)
+                {
+                    return PredictionProfileId::InteractiveExact;
+                }
+            }
+
+            const double elapsed_s = std::max(0.0, chunk_t0_s - request.sim_time_s);
+            if (elapsed_s < OrbitPredictionTuning::kPredictionChunkBandNearEndS)
+            {
+                return PredictionProfileId::NearBody;
+            }
+            if (elapsed_s < OrbitPredictionTuning::kPredictionChunkBandTransferEndS)
+            {
+                return PredictionProfileId::Transfer;
+            }
+            if (elapsed_s < OrbitPredictionTuning::kPredictionChunkBandCruiseEndS)
+            {
+                return PredictionProfileId::Cruise;
+            }
+            return PredictionProfileId::DeepTail;
+        }
+
+        [[nodiscard]] uint32_t resolve_chunk_priority(const PredictionProfileId profile_id,
+                                                      const uint32_t boundary_flags)
+        {
+            if (profile_id == PredictionProfileId::InteractiveExact)
+            {
+                return 0u;
+            }
+            if (planner_boundary_has_flag(boundary_flags, PredictionChunkBoundaryFlags::Maneuver) ||
+                planner_boundary_has_flag(boundary_flags, PredictionChunkBoundaryFlags::PreviewAnchor) ||
+                planner_boundary_has_flag(boundary_flags, PredictionChunkBoundaryFlags::PreviewChunk))
+            {
+                return 1u;
+            }
+            return static_cast<uint32_t>(profile_id) + 1u;
+        }
+
+        [[nodiscard]] uint32_t profile_rank(const PredictionProfileId profile_id)
+        {
+            return static_cast<uint32_t>(profile_id);
+        }
+
+        [[nodiscard]] double safe_angle_between(const orbitsim::Vec3 &a, const orbitsim::Vec3 &b)
+        {
+            const double len_a = glm::length(glm::dvec3(a));
+            const double len_b = glm::length(glm::dvec3(b));
+            if (!(len_a > 0.0) || !(len_b > 0.0) || !std::isfinite(len_a) || !std::isfinite(len_b))
+            {
+                return 0.0;
+            }
+
+            const double dot_value = glm::dot(glm::dvec3(a), glm::dvec3(b)) / (len_a * len_b);
+            return std::acos(std::clamp(dot_value, -1.0, 1.0));
+        }
+
+        [[nodiscard]] orbitsim::Vec3 body_position_at_time(const OrbitPredictionService::SharedCelestialEphemeris &shared_ephemeris,
+                                                           const std::vector<orbitsim::MassiveBody> &bodies,
+                                                           const std::size_t index,
+                                                           const double time_s)
+        {
+            if (index >= bodies.size())
+            {
+                return orbitsim::Vec3(0.0);
+            }
+
+            if (shared_ephemeris && !shared_ephemeris->empty())
+            {
+                std::size_t eph_index = 0u;
+                if (bodies[index].id != orbitsim::kInvalidBodyId &&
+                    shared_ephemeris->body_index_for_id(bodies[index].id, &eph_index))
+                {
+                    return shared_ephemeris->body_position_at(eph_index, time_s);
+                }
+            }
+
+            return bodies[index].state.position_m;
+        }
+
+        [[nodiscard]] orbitsim::BodyId select_primary_body_id_for_state(
+                const OrbitPredictionService::Request &request,
+                const OrbitPredictionService::SharedCelestialEphemeris &shared_ephemeris,
+                const orbitsim::State &state,
+                const double time_s,
+                const orbitsim::BodyId preferred_body_id)
+        {
+            if (request.massive_bodies.empty() || !finite_state(state))
+            {
+                return orbitsim::kInvalidBodyId;
+            }
+
+            const std::size_t primary_index = select_primary_index_with_hysteresis(
+                    request.massive_bodies,
+                    state.position_m,
+                    [&shared_ephemeris, &request, time_s](const std::size_t i) -> orbitsim::Vec3 {
+                        return body_position_at_time(shared_ephemeris, request.massive_bodies, i, time_s);
+                    },
+                    request.sim_config.softening_length_m,
+                    preferred_body_id);
+            return primary_index < request.massive_bodies.size()
+                           ? request.massive_bodies[primary_index].id
+                           : orbitsim::kInvalidBodyId;
+        }
+
+        [[nodiscard]] double dominant_gravity_ratio_for_state(
+                const OrbitPredictionService::Request &request,
+                const OrbitPredictionService::SharedCelestialEphemeris &shared_ephemeris,
+                const orbitsim::State &state,
+                const double time_s)
+        {
+            if (request.massive_bodies.empty() || !finite_state(state))
+            {
+                return 1.0;
+            }
+
+            const double eps2 = request.sim_config.softening_length_m * request.sim_config.softening_length_m;
+            double total_metric = 0.0;
+            double dominant_metric = 0.0;
+            for (std::size_t i = 0; i < request.massive_bodies.size(); ++i)
+            {
+                const double mass_kg = request.massive_bodies[i].mass_kg;
+                if (!(mass_kg > 0.0) || !std::isfinite(mass_kg))
+                {
+                    continue;
+                }
+
+                const orbitsim::Vec3 dr = body_position_at_time(shared_ephemeris, request.massive_bodies, i, time_s) -
+                                          state.position_m;
+                const double r2 = glm::dot(dr, dr) + eps2;
+                if (!(r2 > 0.0) || !std::isfinite(r2))
+                {
+                    continue;
+                }
+
+                const double metric = mass_kg / r2;
+                total_metric += metric;
+                dominant_metric = std::max(dominant_metric, metric);
+            }
+
+            if (!(total_metric > 0.0))
+            {
+                return 1.0;
+            }
+
+            return std::clamp(dominant_metric / total_metric, 0.0, 1.0);
+        }
+
+        bool eval_activity_segment_state(const orbitsim::TrajectorySegment &segment,
+                                         const double t_s,
+                                         orbitsim::State &out_state)
+        {
+            out_state = segment.start;
+            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s) || !std::isfinite(t_s))
+            {
+                return finite_state(out_state);
+            }
+
+            double u = (t_s - segment.t0_s) / segment.dt_s;
+            if (!std::isfinite(u))
+            {
+                u = 0.0;
+            }
+            u = std::clamp(u, 0.0, 1.0);
+
+            const double u2 = u * u;
+            const double u3 = u2 * u;
+            const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
+            const double h10 = u3 - (2.0 * u2) + u;
+            const double h01 = (-2.0 * u3) + (3.0 * u2);
+            const double h11 = u3 - u2;
+            const double dh00 = (6.0 * u2) - (6.0 * u);
+            const double dh10 = (3.0 * u2) - (4.0 * u) + 1.0;
+            const double dh01 = (-6.0 * u2) + (6.0 * u);
+            const double dh11 = (3.0 * u2) - (2.0 * u);
+
+            const glm::dvec3 p0 = glm::dvec3(segment.start.position_m);
+            const glm::dvec3 p1 = glm::dvec3(segment.end.position_m);
+            const glm::dvec3 m0 = glm::dvec3(segment.start.velocity_mps) * segment.dt_s;
+            const glm::dvec3 m1 = glm::dvec3(segment.end.velocity_mps) * segment.dt_s;
+            const glm::dvec3 pos = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
+            const glm::dvec3 vel = ((dh00 * p0) + (dh10 * m0) + (dh01 * p1) + (dh11 * m1)) / segment.dt_s;
+            if (!finite_vec3(pos) || !finite_vec3(vel))
+            {
+                return false;
+            }
+
+            out_state = orbitsim::make_state(pos, vel);
+            return true;
+        }
+
+        bool sample_activity_segment_state(const std::vector<orbitsim::TrajectorySegment> &segments,
+                                           const double t_s,
+                                           orbitsim::State &out_state)
+        {
+            out_state = {};
+            if (segments.empty() || !std::isfinite(t_s))
+            {
+                return false;
+            }
+
+            auto it = std::lower_bound(segments.begin(),
+                                       segments.end(),
+                                       t_s,
+                                       [](const orbitsim::TrajectorySegment &segment, const double query_t_s) {
+                                           return prediction_segment_end_time(segment) < query_t_s;
+                                       });
+            if (it == segments.end())
+            {
+                return eval_activity_segment_state(segments.back(),
+                                                   prediction_segment_end_time(segments.back()),
+                                                   out_state);
+            }
+            return eval_activity_segment_state(*it, t_s, out_state);
+        }
+
+        [[nodiscard]] double scale_dt_value(const double base_value,
+                                            const double scale,
+                                            const double floor_value)
+        {
+            if (!(base_value > 0.0))
+            {
+                return std::max(0.0, floor_value);
+            }
+
+            const double safe_scale = std::isfinite(scale) ? std::max(scale, 1.0e-6) : 1.0;
+            const double scaled = base_value * safe_scale;
+            return std::max(std::max(0.0, floor_value), scaled);
+        }
+
+        [[nodiscard]] std::size_t scale_segment_cap(const std::size_t base_value,
+                                                    const double scale,
+                                                    const std::size_t floor_value)
+        {
+            if (base_value == 0u)
+            {
+                return floor_value;
+            }
+
+            const double safe_scale = std::isfinite(scale) ? std::max(scale, 1.0e-6) : 1.0;
+            const double scaled = std::ceil(static_cast<double>(base_value) * safe_scale);
+            return std::max<std::size_t>(floor_value,
+                                         static_cast<std::size_t>(std::max(1.0, scaled)));
+        }
+
+        [[nodiscard]] orbitsim::AdaptiveToleranceRamp scale_tolerance_ramp(
+                orbitsim::AdaptiveToleranceRamp ramp,
+                const double scale)
+        {
+            const double safe_scale = std::isfinite(scale) ? std::max(scale, 1.0e-6) : 1.0;
+            ramp.pos_near_m *= safe_scale;
+            ramp.pos_far_m *= safe_scale;
+            ramp.vel_near_mps *= safe_scale;
+            ramp.vel_far_mps *= safe_scale;
+            return ramp;
+        }
+
+        [[nodiscard]] double chunk_duration_s(const PredictionChunkPlan &chunk)
+        {
+            return (std::isfinite(chunk.t0_s) && std::isfinite(chunk.t1_s) && chunk.t1_s > chunk.t0_s)
+                           ? (chunk.t1_s - chunk.t0_s)
+                           : 0.0;
+        }
+
+        [[nodiscard]] bool chunk_has_any_boundary(const PredictionChunkPlan &chunk,
+                                                  const std::initializer_list<PredictionChunkBoundaryFlags> flags)
+        {
+            for (const PredictionChunkBoundaryFlags flag : flags)
+            {
+                if (planner_boundary_has_flag(chunk.boundary_flags, flag))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         orbitsim::AdaptiveToleranceRamp make_segment_tolerance_ramp(const OrbitPredictionService::Request &request)
         {
             orbitsim::AdaptiveToleranceRamp ramp{};
@@ -216,6 +629,475 @@ namespace Game
         }
     } // namespace
 
+    PredictionSolvePlan build_prediction_solve_plan(const OrbitPredictionService::Request &request)
+    {
+        PredictionSolvePlan plan{};
+        if (!std::isfinite(request.sim_time_s))
+        {
+            return plan;
+        }
+
+        const double request_t0_s = request.sim_time_s;
+        const double request_t1_s = request_end_time_s(request);
+        const double requested_window_s =
+                std::max(0.0, std::isfinite(request.future_window_s) ? request.future_window_s : 0.0);
+        if (!(request_t1_s > request_t0_s))
+        {
+            return plan;
+        }
+
+        std::vector<PlannerBoundaryPoint> boundaries;
+        boundaries.reserve(request.maneuver_impulses.size() + 16u);
+        append_planner_boundary(boundaries,
+                                request_t0_s,
+                                request_t1_s,
+                                request_t0_s,
+                                PredictionChunkBoundaryFlags::RequestStart);
+        append_planner_boundary(boundaries,
+                                request_t0_s,
+                                request_t1_s,
+                                request_t1_s,
+                                PredictionChunkBoundaryFlags::RequestEnd);
+
+        for (const OrbitPredictionService::ManeuverImpulse &impulse : request.maneuver_impulses)
+        {
+            append_planner_boundary(boundaries,
+                                    request_t0_s,
+                                    request_t1_s,
+                                    impulse.t_s,
+                                    PredictionChunkBoundaryFlags::Maneuver);
+        }
+
+        if (request_uses_preview_patch(request))
+        {
+            append_planner_boundary(boundaries,
+                                    request_t0_s,
+                                    request_t1_s,
+                                    request.preview_patch.anchor_time_s,
+                                    PredictionChunkBoundaryFlags::PreviewAnchor);
+
+            const double preview_chunk_span_s = std::max(0.0, request.preview_patch.patch_window_s);
+            if (preview_chunk_span_s > 0.0)
+            {
+                append_planner_boundary(boundaries,
+                                        request_t0_s,
+                                        request_t1_s,
+                                        request.preview_patch.anchor_time_s + preview_chunk_span_s,
+                                        PredictionChunkBoundaryFlags::PreviewChunk);
+                append_planner_boundary(boundaries,
+                                        request_t0_s,
+                                        request_t1_s,
+                                        request.preview_patch.anchor_time_s + preview_chunk_span_s * 2.0,
+                                        PredictionChunkBoundaryFlags::PreviewChunk);
+            }
+        }
+
+        append_time_band_boundaries(boundaries,
+                                    request_t0_s,
+                                    request_t1_s,
+                                    0.0,
+                                    OrbitPredictionTuning::kPredictionChunkBandNearEndS,
+                                    OrbitPredictionTuning::kPredictionChunkSpanNearS);
+        append_time_band_boundaries(boundaries,
+                                    request_t0_s,
+                                    request_t1_s,
+                                    OrbitPredictionTuning::kPredictionChunkBandNearEndS,
+                                    OrbitPredictionTuning::kPredictionChunkBandTransferEndS,
+                                    OrbitPredictionTuning::kPredictionChunkSpanTransferS);
+        append_time_band_boundaries(boundaries,
+                                    request_t0_s,
+                                    request_t1_s,
+                                    OrbitPredictionTuning::kPredictionChunkBandTransferEndS,
+                                    OrbitPredictionTuning::kPredictionChunkBandCruiseFineEndS,
+                                    OrbitPredictionTuning::kPredictionChunkSpanCruiseFineS);
+        append_time_band_boundaries(boundaries,
+                                    request_t0_s,
+                                    request_t1_s,
+                                    OrbitPredictionTuning::kPredictionChunkBandCruiseFineEndS,
+                                    OrbitPredictionTuning::kPredictionChunkBandCruiseEndS,
+                                    OrbitPredictionTuning::kPredictionChunkSpanCruiseS);
+        append_time_band_boundaries(boundaries,
+                                    request_t0_s,
+                                    request_t1_s,
+                                    OrbitPredictionTuning::kPredictionChunkBandCruiseEndS,
+                                    std::max(requested_window_s,
+                                             OrbitPredictionTuning::kPredictionChunkBandDeepTailEndS),
+                                    OrbitPredictionTuning::kPredictionChunkSpanDeepTailS);
+
+        const std::vector<PlannerBoundaryPoint> merged_boundaries = merge_planner_boundaries(std::move(boundaries));
+        if (merged_boundaries.size() < 2)
+        {
+            return plan;
+        }
+
+        plan.t0_s = request_t0_s;
+        plan.t1_s = request_t1_s;
+        plan.chunks.reserve(merged_boundaries.size() - 1u);
+        for (std::size_t i = 0; (i + 1u) < merged_boundaries.size(); ++i)
+        {
+            const double chunk_t0_s = merged_boundaries[i].time_s;
+            const double chunk_t1_s = merged_boundaries[i + 1u].time_s;
+            if (!(chunk_t1_s > chunk_t0_s))
+            {
+                continue;
+            }
+
+            const uint32_t boundary_flags = merged_boundaries[i].flags | merged_boundaries[i + 1u].flags;
+            const PredictionProfileId profile_id = resolve_chunk_profile_id(request, chunk_t0_s, chunk_t1_s);
+            plan.chunks.push_back(PredictionChunkPlan{
+                    .chunk_id = static_cast<uint32_t>(plan.chunks.size()),
+                    .t0_s = chunk_t0_s,
+                    .t1_s = chunk_t1_s,
+                    .profile_id = profile_id,
+                    .boundary_flags = boundary_flags,
+                    .priority = resolve_chunk_priority(profile_id, boundary_flags),
+                    .allow_reuse = profile_id != PredictionProfileId::InteractiveExact,
+                    .requires_seam_validation = !plan.chunks.empty(),
+            });
+        }
+
+        plan.valid = !plan.chunks.empty();
+        return plan;
+    }
+
+    OrbitPredictionService::PredictionProfileId promote_prediction_profile(
+            OrbitPredictionService::PredictionProfileId profile_id,
+            const uint32_t steps)
+    {
+        if (steps == 0u)
+        {
+            return profile_id;
+        }
+
+        const uint32_t rank = profile_rank(profile_id);
+        const uint32_t promoted_rank = (steps >= rank) ? 0u : (rank - steps);
+        return static_cast<OrbitPredictionService::PredictionProfileId>(promoted_rank);
+    }
+
+    OrbitPredictionService::ChunkActivityProbe classify_chunk_activity(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionChunkPlan &chunk,
+            const std::vector<orbitsim::TrajectorySegment> *baseline_segments,
+            const OrbitPredictionService::SharedCelestialEphemeris &shared_ephemeris)
+    {
+        OrbitPredictionService::ChunkActivityProbe probe{};
+        probe.recommended_profile_id = chunk.profile_id;
+        if (!baseline_segments || baseline_segments->empty() || !(chunk.t1_s > chunk.t0_s))
+        {
+            return probe;
+        }
+
+        const double mid_t_s = chunk.t0_s + (chunk.t1_s - chunk.t0_s) * 0.5;
+        orbitsim::State start_state{};
+        orbitsim::State mid_state{};
+        orbitsim::State end_state{};
+        if (!sample_activity_segment_state(*baseline_segments, chunk.t0_s, start_state) ||
+            !sample_activity_segment_state(*baseline_segments, mid_t_s, mid_state) ||
+            !sample_activity_segment_state(*baseline_segments, chunk.t1_s, end_state))
+        {
+            return probe;
+        }
+
+        const double dt0_s = std::max(kContinuityMinTimeEpsilonS, mid_t_s - chunk.t0_s);
+        const double dt1_s = std::max(kContinuityMinTimeEpsilonS, chunk.t1_s - mid_t_s);
+        const orbitsim::Vec3 accel0_mps2 = (mid_state.velocity_mps - start_state.velocity_mps) / dt0_s;
+        const orbitsim::Vec3 accel1_mps2 = (end_state.velocity_mps - mid_state.velocity_mps) / dt1_s;
+        const double avg_dt_s = std::max(kContinuityMinTimeEpsilonS, (dt0_s + dt1_s) * 0.5);
+        const double accel_mag_mps2 =
+                std::max(glm::length(glm::dvec3(accel0_mps2)), glm::length(glm::dvec3(accel1_mps2)));
+        const double jerk_mag_mps3 = glm::length(glm::dvec3(accel1_mps2 - accel0_mps2)) / avg_dt_s;
+        const double speed_scale_mps = std::max(
+                {1.0,
+                 glm::length(glm::dvec3(start_state.velocity_mps)),
+                 glm::length(glm::dvec3(mid_state.velocity_mps)),
+                 glm::length(glm::dvec3(end_state.velocity_mps))});
+        const double accel_scale_mps2 = std::max(1.0e-6, accel_mag_mps2);
+        const double normalized_jerk = (jerk_mag_mps3 * avg_dt_s) / accel_scale_mps2;
+
+        probe.valid = true;
+        probe.heading_change_rad = safe_angle_between(start_state.velocity_mps, mid_state.velocity_mps) +
+                                   safe_angle_between(mid_state.velocity_mps, end_state.velocity_mps);
+        probe.accel_magnitude_mps2 = accel_mag_mps2;
+        probe.jerk_magnitude_mps3 = jerk_mag_mps3;
+        probe.dominant_gravity_ratio =
+                dominant_gravity_ratio_for_state(request, shared_ephemeris, mid_state, mid_t_s);
+
+        probe.primary_body_id_start = select_primary_body_id_for_state(
+                request,
+                shared_ephemeris,
+                start_state,
+                chunk.t0_s,
+                request.preferred_primary_body_id);
+        probe.primary_body_id_mid = select_primary_body_id_for_state(
+                request,
+                shared_ephemeris,
+                mid_state,
+                mid_t_s,
+                probe.primary_body_id_start);
+        probe.primary_body_id_end = select_primary_body_id_for_state(
+                request,
+                shared_ephemeris,
+                end_state,
+                chunk.t1_s,
+                probe.primary_body_id_mid);
+
+        if (chunk.profile_id == PredictionProfileId::InteractiveExact ||
+            chunk.profile_id == PredictionProfileId::NearBody)
+        {
+            return probe;
+        }
+
+        for (const OrbitPredictionService::ManeuverImpulse &impulse : request.maneuver_impulses)
+        {
+            if (!std::isfinite(impulse.t_s))
+            {
+                continue;
+            }
+
+            const double distance_s = std::min(std::abs(impulse.t_s - chunk.t0_s), std::abs(impulse.t_s - chunk.t1_s));
+            probe.maneuver_proximity_s = std::min(probe.maneuver_proximity_s, distance_s);
+        }
+
+        uint32_t promote_steps = 0u;
+        if (probe.heading_change_rad >= OrbitPredictionTuning::kPredictionActivityProbeHeadingPromoteRad)
+        {
+            promote_steps = std::max(promote_steps, 1u);
+        }
+        if (probe.heading_change_rad >= OrbitPredictionTuning::kPredictionActivityProbeHeadingSplitRad)
+        {
+            promote_steps = std::max(promote_steps, 2u);
+            probe.should_split = true;
+        }
+
+        if (normalized_jerk >= OrbitPredictionTuning::kPredictionActivityProbeNormalizedJerkPromote)
+        {
+            promote_steps = std::max(promote_steps, 1u);
+        }
+        if (normalized_jerk >= OrbitPredictionTuning::kPredictionActivityProbeNormalizedJerkSplit)
+        {
+            promote_steps = std::max(promote_steps, 2u);
+            probe.should_split = true;
+        }
+
+        if (probe.dominant_gravity_ratio <= OrbitPredictionTuning::kPredictionActivityProbeDominantGravityPromoteRatio)
+        {
+            promote_steps = std::max(promote_steps, 1u);
+        }
+        if (probe.dominant_gravity_ratio <= OrbitPredictionTuning::kPredictionActivityProbeDominantGravitySplitRatio)
+        {
+            promote_steps = std::max(promote_steps, 2u);
+            probe.should_split = true;
+        }
+
+        if (probe.primary_body_id_start != orbitsim::kInvalidBodyId &&
+            ((probe.primary_body_id_start != probe.primary_body_id_mid) ||
+             (probe.primary_body_id_mid != probe.primary_body_id_end)))
+        {
+            promote_steps = std::max(promote_steps, 2u);
+            probe.should_split = true;
+        }
+
+        if (std::isfinite(probe.maneuver_proximity_s) &&
+            probe.maneuver_proximity_s <= OrbitPredictionTuning::kPredictionChunkSpanNearS)
+        {
+            promote_steps = std::max(promote_steps, 1u);
+        }
+
+        if (speed_scale_mps <= 1.0 && accel_mag_mps2 <= 1.0e-9)
+        {
+            probe.should_split = false;
+        }
+
+        probe.recommended_profile_id = promote_prediction_profile(chunk.profile_id, promote_steps);
+        return probe;
+    }
+
+    OrbitPredictionService::PredictionProfileDefinition resolve_prediction_profile_definition(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionChunkPlan &chunk)
+    {
+        OrbitPredictionService::PredictionProfileDefinition def{};
+        def.profile_id = chunk.profile_id;
+
+        const bool fast_preview = request_uses_fast_preview(request);
+        const bool preview_sensitive =
+                chunk.profile_id == PredictionProfileId::InteractiveExact ||
+                chunk_has_any_boundary(chunk,
+                                       {PredictionChunkBoundaryFlags::PreviewAnchor,
+                                        PredictionChunkBoundaryFlags::PreviewChunk});
+        const bool maneuver_sensitive =
+                chunk_has_any_boundary(chunk, {PredictionChunkBoundaryFlags::Maneuver});
+        const bool control_sensitive =
+                request_needs_control_sensitive_prediction(request) || preview_sensitive || maneuver_sensitive;
+
+        const double base_segment_min_dt_s = control_sensitive
+                                                     ? (fast_preview
+                                                                ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentMinDtS
+                                                                : OrbitPredictionTuning::kAdaptiveSegmentMinDtControlledS)
+                                                     : OrbitPredictionTuning::kAdaptiveSegmentMinDtS;
+        double base_segment_max_dt_s = OrbitPredictionTuning::kAdaptiveSegmentMaxDtS;
+        if (control_sensitive)
+        {
+            base_segment_max_dt_s = std::min(base_segment_max_dt_s,
+                                             fast_preview
+                                                     ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentMaxDtS
+                                                     : OrbitPredictionTuning::kAdaptiveSegmentMaxDtControlledS);
+        }
+        const double base_lookup_max_dt_s = control_sensitive
+                                                    ? (fast_preview
+                                                               ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentLookupMaxDtS
+                                                               : OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtControlledS)
+                                                    : OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtS;
+        const std::size_t base_segment_soft_cap =
+                fast_preview
+                        ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentSoftMaxSegments
+                        : OrbitPredictionTuning::kAdaptiveSegmentSoftMaxSegmentsNormal;
+
+        const double base_ephemeris_min_dt_s = control_sensitive
+                                                       ? (fast_preview
+                                                                  ? OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisMinDtS
+                                                                  : OrbitPredictionTuning::kAdaptiveEphemerisMinDtControlledS)
+                                                       : OrbitPredictionTuning::kAdaptiveEphemerisMinDtS;
+        double base_ephemeris_max_dt_s = OrbitPredictionTuning::kAdaptiveEphemerisMaxDtS;
+        if (control_sensitive)
+        {
+            base_ephemeris_max_dt_s = std::min(base_ephemeris_max_dt_s,
+                                               fast_preview
+                                                       ? OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisMaxDtS
+                                                       : OrbitPredictionTuning::kAdaptiveEphemerisMaxDtControlledS);
+        }
+        if (request.lagrange_sensitive)
+        {
+            base_ephemeris_max_dt_s = std::min(base_ephemeris_max_dt_s,
+                                               OrbitPredictionTuning::kLagrangeEphemerisMaxDtS);
+        }
+        const std::size_t base_ephemeris_soft_cap =
+                fast_preview
+                        ? OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisSoftMaxSegments
+                        : OrbitPredictionTuning::kAdaptiveEphemerisSoftMaxSegments;
+
+        double segment_dt_scale = 1.0;
+        double lookup_dt_scale = 1.0;
+        double segment_soft_cap_scale = 1.0;
+        double ephemeris_dt_scale = 1.0;
+        double ephemeris_soft_cap_scale = 1.0;
+        double tolerance_scale = 1.0;
+        double output_sample_density_scale = 1.0;
+        double seam_overlap_s = 0.0;
+
+        switch (chunk.profile_id)
+        {
+        case PredictionProfileId::InteractiveExact:
+            segment_dt_scale = 0.25;
+            lookup_dt_scale = 0.25;
+            segment_soft_cap_scale = 1.75;
+            ephemeris_dt_scale = 0.25;
+            ephemeris_soft_cap_scale = 1.5;
+            tolerance_scale = 0.25;
+            output_sample_density_scale = 2.0;
+            seam_overlap_s = 2.0 * OrbitPredictionTuning::kSecondsPerMinute;
+            break;
+        case PredictionProfileId::NearBody:
+            segment_dt_scale = 0.75;
+            lookup_dt_scale = 0.75;
+            segment_soft_cap_scale = 1.15;
+            ephemeris_dt_scale = 0.75;
+            ephemeris_soft_cap_scale = 1.1;
+            tolerance_scale = 0.75;
+            output_sample_density_scale = 1.0;
+            seam_overlap_s = 5.0 * OrbitPredictionTuning::kSecondsPerMinute;
+            break;
+        case PredictionProfileId::Transfer:
+            segment_dt_scale = 1.0;
+            lookup_dt_scale = 1.0;
+            segment_soft_cap_scale = 0.85;
+            ephemeris_dt_scale = 1.0;
+            ephemeris_soft_cap_scale = 0.85;
+            tolerance_scale = 1.0;
+            output_sample_density_scale = 0.7;
+            seam_overlap_s = 30.0 * OrbitPredictionTuning::kSecondsPerMinute;
+            break;
+        case PredictionProfileId::Cruise:
+            segment_dt_scale = 1.5;
+            lookup_dt_scale = 1.5;
+            segment_soft_cap_scale = 0.55;
+            ephemeris_dt_scale = 1.5;
+            ephemeris_soft_cap_scale = 0.6;
+            tolerance_scale = 1.5;
+            output_sample_density_scale = 0.4;
+            seam_overlap_s = 6.0 * OrbitPredictionTuning::kSecondsPerHour;
+            break;
+        case PredictionProfileId::DeepTail:
+            segment_dt_scale = 2.5;
+            lookup_dt_scale = 2.5;
+            segment_soft_cap_scale = 0.3;
+            ephemeris_dt_scale = 2.5;
+            ephemeris_soft_cap_scale = 0.35;
+            tolerance_scale = 2.5;
+            output_sample_density_scale = 0.2;
+            seam_overlap_s = 1.0 * OrbitPredictionTuning::kSecondsPerDay;
+            break;
+        }
+
+        if (maneuver_sensitive)
+        {
+            segment_dt_scale = std::min(segment_dt_scale, 0.75);
+            lookup_dt_scale = std::min(lookup_dt_scale, 0.75);
+            ephemeris_dt_scale = std::min(ephemeris_dt_scale, 0.75);
+            tolerance_scale = std::min(tolerance_scale, 0.75);
+            segment_soft_cap_scale = std::max(segment_soft_cap_scale, 1.0);
+            ephemeris_soft_cap_scale = std::max(ephemeris_soft_cap_scale, 1.0);
+            output_sample_density_scale = std::max(output_sample_density_scale, 1.0);
+        }
+
+        if (preview_sensitive)
+        {
+            segment_dt_scale = std::min(segment_dt_scale, 0.5);
+            lookup_dt_scale = std::min(lookup_dt_scale, 0.5);
+            ephemeris_dt_scale = std::min(ephemeris_dt_scale, 0.5);
+            tolerance_scale = std::min(tolerance_scale, 0.5);
+            segment_soft_cap_scale = std::max(segment_soft_cap_scale, 1.5);
+            ephemeris_soft_cap_scale = std::max(ephemeris_soft_cap_scale, 1.25);
+            output_sample_density_scale = std::max(output_sample_density_scale, 1.5);
+            seam_overlap_s = std::max(seam_overlap_s, 60.0);
+        }
+
+        def.integrator_tolerance_multiplier = tolerance_scale;
+        def.min_dt_s = scale_dt_value(base_segment_min_dt_s, std::min(segment_dt_scale, 1.0), 1.0e-3);
+        def.max_dt_s = scale_dt_value(base_segment_max_dt_s, segment_dt_scale, def.min_dt_s);
+        def.lookup_max_dt_s = std::clamp(scale_dt_value(base_lookup_max_dt_s,
+                                                        lookup_dt_scale,
+                                                        def.min_dt_s),
+                                         def.min_dt_s,
+                                         def.max_dt_s);
+        def.soft_max_segments = scale_segment_cap(base_segment_soft_cap, segment_soft_cap_scale, 32u);
+        def.ephemeris_min_dt_s =
+                scale_dt_value(base_ephemeris_min_dt_s, std::min(ephemeris_dt_scale, 1.0), 1.0e-3);
+        def.ephemeris_max_dt_s =
+                scale_dt_value(base_ephemeris_max_dt_s, ephemeris_dt_scale, def.ephemeris_min_dt_s);
+        def.ephemeris_soft_max_segments =
+                scale_segment_cap(base_ephemeris_soft_cap, ephemeris_soft_cap_scale, 32u);
+        def.output_sample_density_scale = output_sample_density_scale;
+        def.seam_overlap_s = seam_overlap_s;
+        return def;
+    }
+
+    std::size_t prediction_sample_budget_for_chunk(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionChunkPlan &chunk,
+            const std::size_t segment_count)
+    {
+        const OrbitPredictionService::PredictionProfileDefinition def =
+                resolve_prediction_profile_definition(request, chunk);
+        const std::size_t base_budget = prediction_sample_budget(request, segment_count);
+        const double scaled_budget =
+                std::ceil(static_cast<double>(base_budget) * std::max(0.05, def.output_sample_density_scale));
+        const std::size_t max_budget = request_uses_fast_preview(request)
+                                               ? OrbitPredictionTuning::kFastPreviewTrajectorySampleCap
+                                               : 4'000u;
+        return std::clamp<std::size_t>(static_cast<std::size_t>(std::max(2.0, scaled_budget)), 2u, max_budget);
+    }
+
     orbitsim::AdaptiveSegmentOptions build_spacecraft_adaptive_segment_options(
             const OrbitPredictionService::Request &request,
             const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec,
@@ -277,6 +1159,40 @@ namespace Game
         return out;
     }
 
+    orbitsim::AdaptiveSegmentOptions build_spacecraft_adaptive_segment_options_for_chunk(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionChunkPlan &chunk,
+            const CancelCheck &cancel_requested)
+    {
+        const double duration_s = chunk_duration_s(chunk);
+        if (!(duration_s > 0.0))
+        {
+            return {};
+        }
+
+        const OrbitPredictionService::EphemerisSamplingSpec sampling_spec{
+                .valid = true,
+                .horizon_s = duration_s,
+        };
+        orbitsim::AdaptiveSegmentOptions out =
+                build_spacecraft_adaptive_segment_options(request, sampling_spec, cancel_requested);
+        if (!(out.duration_s > 0.0))
+        {
+            return out;
+        }
+
+        const OrbitPredictionService::PredictionProfileDefinition def =
+                resolve_prediction_profile_definition(request, chunk);
+        out.duration_s = duration_s;
+        out.min_dt_s = def.min_dt_s;
+        out.max_dt_s = std::max(out.min_dt_s, def.max_dt_s);
+        out.lookup_max_dt_s = std::clamp(def.lookup_max_dt_s, out.min_dt_s, out.max_dt_s);
+        out.soft_max_segments = def.soft_max_segments;
+        out.hard_max_segments = std::max(out.hard_max_segments, out.soft_max_segments);
+        out.tolerance = scale_tolerance_ramp(out.tolerance, def.integrator_tolerance_multiplier);
+        return out;
+    }
+
     orbitsim::AdaptiveEphemerisOptions build_adaptive_ephemeris_options(
             const OrbitPredictionService::Request &request,
             const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec,
@@ -329,6 +1245,39 @@ namespace Game
         out.hard_max_segments = hard_cap;
         out.tolerance = make_ephemeris_tolerance_ramp(request);
         out.cancel_requested = cancel_requested;
+        return out;
+    }
+
+    orbitsim::AdaptiveEphemerisOptions build_adaptive_ephemeris_options_for_chunk(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionChunkPlan &chunk,
+            const CancelCheck &cancel_requested)
+    {
+        const double duration_s = chunk_duration_s(chunk);
+        if (!(duration_s > 0.0))
+        {
+            return {};
+        }
+
+        const OrbitPredictionService::EphemerisSamplingSpec sampling_spec{
+                .valid = true,
+                .horizon_s = duration_s,
+        };
+        orbitsim::AdaptiveEphemerisOptions out =
+                build_adaptive_ephemeris_options(request, sampling_spec, cancel_requested);
+        if (!(out.duration_s > 0.0))
+        {
+            return out;
+        }
+
+        const OrbitPredictionService::PredictionProfileDefinition def =
+                resolve_prediction_profile_definition(request, chunk);
+        out.duration_s = duration_s;
+        out.min_dt_s = def.ephemeris_min_dt_s;
+        out.max_dt_s = std::max(out.min_dt_s, def.ephemeris_max_dt_s);
+        out.soft_max_segments = def.ephemeris_soft_max_segments;
+        out.hard_max_segments = std::max(out.hard_max_segments, out.soft_max_segments);
+        out.tolerance = scale_tolerance_ramp(out.tolerance, def.integrator_tolerance_multiplier);
         return out;
     }
 
