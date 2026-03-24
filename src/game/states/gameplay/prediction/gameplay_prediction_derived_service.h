@@ -9,6 +9,7 @@
 #include <optional>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Game
@@ -65,7 +66,9 @@ namespace Game
         };
 
         Result build_cache(PendingJob job) const;
-        static bool should_publish_result(const PendingJob &job,
+        static bool should_publish_result(uint64_t track_id,
+                                          uint64_t generation_id,
+                                          uint64_t request_epoch,
                                           uint64_t current_request_epoch,
                                           const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track);
         bool should_continue_job(uint64_t track_id, uint64_t generation_id, uint64_t request_epoch) const;
@@ -81,5 +84,6 @@ namespace Game
 
         uint64_t _request_epoch{1};
         std::unordered_map<uint64_t, uint64_t> _latest_requested_generation_by_track{};
+        std::unordered_set<uint64_t> _tracks_in_flight{};
     };
 } // namespace Game

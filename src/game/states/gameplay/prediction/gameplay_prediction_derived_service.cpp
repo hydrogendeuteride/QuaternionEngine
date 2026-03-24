@@ -41,26 +41,40 @@ namespace Game
             std::lock_guard<std::mutex> lock(_mutex);
             _latest_requested_generation_by_track[request.track_id] = request.generation_id;
 
-            auto existing = std::find_if(_pending_jobs.begin(),
-                                         _pending_jobs.end(),
-                                         [track_id = request.track_id](const PendingJob &job) {
-                                             return job.track_id == track_id;
-                                         });
-            if (existing != _pending_jobs.end())
+            auto it = _pending_jobs.begin();
+            while (it != _pending_jobs.end())
             {
-                existing->request_epoch = _request_epoch;
-                existing->generation_id = request.generation_id;
-                existing->request = std::move(request);
+                if (it->track_id != request.track_id)
+                {
+                    ++it;
+                    continue;
+                }
+
+                if (it->generation_id < request.generation_id)
+                {
+                    it = _pending_jobs.erase(it);
+                    continue;
+                }
+
+                if (it->generation_id == request.generation_id &&
+                    it->request.solver_result.publish_stage == request.solver_result.publish_stage)
+                {
+                    it->request_epoch = _request_epoch;
+                    it->generation_id = request.generation_id;
+                    it->request = std::move(request);
+                    _cv.notify_one();
+                    return;
+                }
+
+                ++it;
             }
-            else
-            {
-                PendingJob job{};
-                job.track_id = request.track_id;
-                job.request_epoch = _request_epoch;
-                job.generation_id = request.generation_id;
-                job.request = std::move(request);
-                _pending_jobs.push_back(std::move(job));
-            }
+
+            PendingJob job{};
+            job.track_id = request.track_id;
+            job.request_epoch = _request_epoch;
+            job.generation_id = request.generation_id;
+            job.request = std::move(request);
+            _pending_jobs.push_back(std::move(job));
         }
         _cv.notify_one();
     }
@@ -85,21 +99,24 @@ namespace Game
         _pending_jobs.clear();
         _completed.clear();
         _latest_requested_generation_by_track.clear();
+        _tracks_in_flight.clear();
     }
 
     bool OrbitPredictionDerivedService::should_publish_result(
-            const PendingJob &job,
+            const uint64_t track_id,
+            const uint64_t generation_id,
+            const uint64_t request_epoch,
             const uint64_t current_request_epoch,
             const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track)
     {
-        if (job.request_epoch != current_request_epoch)
+        if (request_epoch != current_request_epoch)
         {
             return false;
         }
 
-        const auto latest_it = latest_requested_generation_by_track.find(job.track_id);
+        const auto latest_it = latest_requested_generation_by_track.find(track_id);
         return latest_it == latest_requested_generation_by_track.end() ||
-               job.generation_id >= latest_it->second;
+               generation_id >= latest_it->second;
     }
 
     bool OrbitPredictionDerivedService::should_continue_job(const uint64_t track_id,
@@ -244,7 +261,16 @@ namespace Game
             {
                 std::unique_lock<std::mutex> lock(_mutex);
                 _cv.wait(lock, [this]() {
-                    return !_running || !_pending_jobs.empty();
+                    if (!_running)
+                    {
+                        return true;
+                    }
+
+                    return std::any_of(_pending_jobs.begin(),
+                                       _pending_jobs.end(),
+                                       [this](const PendingJob &pending) {
+                                           return !_tracks_in_flight.contains(pending.track_id);
+                                       });
                 });
 
                 if (!_running && _pending_jobs.empty())
@@ -252,36 +278,56 @@ namespace Game
                     return;
                 }
 
-                if (_pending_jobs.empty())
+                auto job_it = std::find_if(_pending_jobs.begin(),
+                                           _pending_jobs.end(),
+                                           [this](const PendingJob &pending) {
+                                               return !_tracks_in_flight.contains(pending.track_id);
+                                           });
+                if (job_it == _pending_jobs.end())
                 {
                     continue;
                 }
 
-                job = std::move(_pending_jobs.front());
-                _pending_jobs.pop_front();
+                job = std::move(*job_it);
+                _pending_jobs.erase(job_it);
+                _tracks_in_flight.insert(job.track_id);
             }
 
             if (!should_continue_job(job.track_id, job.generation_id, job.request_epoch))
             {
+                {
+                    std::lock_guard<std::mutex> lock(_mutex);
+                    _tracks_in_flight.erase(job.track_id);
+                }
+                _cv.notify_all();
                 continue;
             }
 
+            const uint64_t completed_track_id = job.track_id;
+            const uint64_t completed_generation_id = job.generation_id;
+            const uint64_t completed_request_epoch = job.request_epoch;
             Result result = build_cache(std::move(job));
 
+            bool should_enqueue_result = false;
             {
                 std::lock_guard<std::mutex> lock(_mutex);
+                _tracks_in_flight.erase(completed_track_id);
                 if (!_running)
                 {
-                    return;
+                    break;
                 }
 
-                if (!should_publish_result(job, _request_epoch, _latest_requested_generation_by_track))
+                should_enqueue_result = should_publish_result(completed_track_id,
+                                                             completed_generation_id,
+                                                             completed_request_epoch,
+                                                             _request_epoch,
+                                                             _latest_requested_generation_by_track);
+                if (should_enqueue_result)
                 {
-                    continue;
+                    _completed.push_back(std::move(result));
                 }
-
-                _completed.push_back(std::move(result));
             }
+            _cv.notify_all();
         }
     }
 } // namespace Game
