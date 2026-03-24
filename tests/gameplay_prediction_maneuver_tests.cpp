@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 
 namespace
@@ -685,6 +686,10 @@ TEST(GameplayPredictionManeuverTests, PredictionServicePublishesPreviewPatchAndT
     EXPECT_GE(fp1_result.trajectory_segments_inertial_planned.back().t0_s +
                       fp1_result.trajectory_segments_inertial_planned.back().dt_s,
               60.0);
+    const orbitsim::State &fp0_end_state = fp0_result.trajectory_segments_inertial_planned.back().end;
+    const orbitsim::State &fp1_start_state = fp1_result.trajectory_segments_inertial_planned.front().start;
+    EXPECT_LT(glm::length(glm::dvec3(fp0_end_state.position_m - fp1_start_state.position_m)), 1.0e-3);
+    EXPECT_LT(glm::length(glm::dvec3(fp0_end_state.velocity_mps - fp1_start_state.velocity_mps)), 1.0e-6);
     ASSERT_EQ(fp1_result.maneuver_previews.size(), 1u);
     EXPECT_EQ(fp1_result.maneuver_previews.front().node_id, 2);
 }
@@ -785,6 +790,47 @@ TEST(GameplayPredictionManeuverTests, PredictionServiceInvalidatesOnlyChunksDown
 
     EXPECT_TRUE(saw_reused_upstream);
     EXPECT_TRUE(saw_resolved_downstream);
+}
+
+TEST(GameplayPredictionManeuverTests, PredictionServiceBuildsChunkScopedEphemeridesForPlannedSolve)
+{
+    Game::OrbitPredictionService service{};
+    Game::OrbitPredictionService::Request request =
+            make_prediction_request(0.0, 5.0 * Game::OrbitPredictionTuning::kSecondsPerDay);
+
+    Game::OrbitPredictionService::ManeuverImpulse maneuver{};
+    maneuver.node_id = 1;
+    maneuver.t_s = 2.0 * Game::OrbitPredictionTuning::kSecondsPerHour;
+    maneuver.primary_body_id = 1;
+    maneuver.dv_rtn_mps = glm::dvec3(0.0, 0.0, 5.0);
+    request.maneuver_impulses.push_back(maneuver);
+
+    const std::vector<Game::OrbitPredictionService::Result> results =
+            run_prediction_results(service, 1, request, 1);
+    ASSERT_EQ(results.size(), 1u);
+    ASSERT_TRUE(results.front().valid);
+
+    std::lock_guard<std::mutex> lock(service._ephemeris_mutex);
+    ASSERT_FALSE(service._ephemeris_cache.empty());
+
+    bool saw_full_window_ephemeris = false;
+    bool saw_chunk_scoped_ephemeris = false;
+    for (const Game::OrbitPredictionService::CachedEphemerisEntry &entry : service._ephemeris_cache)
+    {
+        if (std::abs(entry.sim_time_s - request.sim_time_s) <= 1.0e-9 &&
+            std::abs(entry.duration_s - request.future_window_s) <= 1.0e-6)
+        {
+            saw_full_window_ephemeris = true;
+        }
+        if (entry.sim_time_s > (request.sim_time_s + 1.0e-6) &&
+            entry.duration_s < (request.future_window_s - 1.0e-6))
+        {
+            saw_chunk_scoped_ephemeris = true;
+        }
+    }
+
+    EXPECT_TRUE(saw_full_window_ephemeris);
+    EXPECT_TRUE(saw_chunk_scoped_ephemeris);
 }
 
 TEST(GameplayPredictionManeuverTests, PredictionServiceRejectsResultsFromPreviousResetEpoch)
