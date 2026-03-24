@@ -535,6 +535,8 @@ namespace Game
     void apply_prediction_integrator_profile(orbitsim::GameSimulation::Config &sim_config,
                                              const OrbitPredictionService::Request &request,
                                              double resolved_horizon_s);
+    OrbitPredictionService::PredictionSolvePlan build_prediction_solve_plan(
+            const OrbitPredictionService::Request &request);
     orbitsim::AdaptiveSegmentOptions build_spacecraft_adaptive_segment_options(
             const OrbitPredictionService::Request &request,
             const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec,
