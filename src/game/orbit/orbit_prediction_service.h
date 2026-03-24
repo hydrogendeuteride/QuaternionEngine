@@ -138,6 +138,62 @@ namespace Game
             bool includes_planned_path{false};
         };
 
+        enum class PredictionProfileId : uint8_t
+        {
+            InteractiveExact = 0,
+            NearBody,
+            Transfer,
+            Cruise,
+            DeepTail,
+        };
+
+        enum class PredictionChunkBoundaryFlags : uint32_t
+        {
+            None = 0u,
+            RequestStart = 1u << 0u,
+            RequestEnd = 1u << 1u,
+            Maneuver = 1u << 2u,
+            PreviewAnchor = 1u << 3u,
+            PreviewChunk = 1u << 4u,
+            KnownDiscontinuity = 1u << 5u,
+            TimeBand = 1u << 6u,
+        };
+
+        struct PredictionProfileDefinition
+        {
+            PredictionProfileId profile_id{PredictionProfileId::NearBody};
+            double integrator_tolerance_multiplier{1.0};
+            double min_dt_s{0.0};
+            double max_dt_s{0.0};
+            double lookup_max_dt_s{0.0};
+            std::size_t soft_max_segments{0};
+            double ephemeris_min_dt_s{0.0};
+            double ephemeris_max_dt_s{0.0};
+            std::size_t ephemeris_soft_max_segments{0};
+            double output_sample_density_scale{1.0};
+            double seam_overlap_s{0.0};
+        };
+
+        struct PredictionChunkPlan
+        {
+            uint32_t chunk_id{0};
+            double t0_s{std::numeric_limits<double>::quiet_NaN()};
+            double t1_s{std::numeric_limits<double>::quiet_NaN()};
+            PredictionProfileId profile_id{PredictionProfileId::NearBody};
+            uint32_t boundary_flags{0u};
+            uint32_t priority{0u};
+            bool allow_reuse{true};
+            bool requires_seam_validation{false};
+        };
+
+        struct PredictionSolvePlan
+        {
+            bool valid{false};
+            double t0_s{std::numeric_limits<double>::quiet_NaN()};
+            double t1_s{std::numeric_limits<double>::quiet_NaN()};
+            std::vector<PredictionChunkPlan> chunks{};
+        };
+
         struct Request
         {
             // The worker handles both spacecraft and celestial prediction jobs.

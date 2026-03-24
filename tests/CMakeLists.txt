@@ -62,6 +62,29 @@ target_link_libraries(orbit_helpers_tests PRIVATE
 
 add_test(NAME orbit_helpers_tests COMMAND orbit_helpers_tests)
 
+add_executable(orbit_prediction_planner_tests
+  orbit_prediction_planner_tests.cpp
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_math.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_policy.cpp"
+)
+
+set_property(TARGET orbit_prediction_planner_tests PROPERTY CXX_STANDARD 20)
+
+target_include_directories(orbit_prediction_planner_tests PRIVATE
+  "${PROJECT_SOURCE_DIR}/src"
+  "${PROJECT_SOURCE_DIR}/third_party/vma"
+  "${PROJECT_SOURCE_DIR}/third_party/taskflow/3rd-party"
+)
+
+target_link_libraries(orbit_prediction_planner_tests PRIVATE
+  gtest
+  fmt::fmt
+  glm
+  orbitsim
+)
+
+add_test(NAME orbit_prediction_planner_tests COMMAND orbit_prediction_planner_tests)
+
 add_executable(orbit_render_curve_tests
   orbit_render_curve_tests.cpp
   "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve.cpp"
