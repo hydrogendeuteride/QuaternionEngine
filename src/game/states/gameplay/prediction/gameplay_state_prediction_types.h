@@ -512,5 +512,9 @@ namespace Game
         double planned_window_anchor_s{0.0};
         double planned_window_t_start{0.0};
         double planned_window_t_end{0.0};
+
+        // Chunk assembly draw stats.
+        uint32_t planned_chunk_count{0};
+        uint32_t planned_chunks_drawn{0};
     };
 } // namespace Game
