@@ -459,6 +459,128 @@ namespace Game::PredictionCacheInternal
         return true;
     }
 
+    inline bool rebuild_prediction_planned_frame_cache(
+            OrbitPredictionCache &cache,
+            const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
+            const std::vector<orbitsim::TrajectorySegment> &player_lookup_segments_inertial,
+            const CancelCheck &cancel_requested = {},
+            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr)
+    {
+        if (diagnostics)
+        {
+            *diagnostics = {};
+        }
+
+        cache.trajectory_frame_planned.clear();
+        cache.trajectory_segments_frame_planned.clear();
+        cache.gpu_roots_frame_planned.reset();
+        cache.render_curve_frame_planned.clear();
+        cache.resolved_frame_spec = {};
+        cache.resolved_frame_spec_valid = false;
+
+        if (cache.trajectory_segments_inertial_planned.empty())
+        {
+            cache.resolved_frame_spec = resolved_frame_spec;
+            cache.resolved_frame_spec_valid = true;
+            update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::Success);
+            return true;
+        }
+
+        const std::size_t base_sample_budget = std::max<std::size_t>(cache.trajectory_inertial.size(), 2);
+        const std::size_t planned_sample_budget =
+                cache.trajectory_inertial_planned.size() >= 2 ? cache.trajectory_inertial_planned.size()
+                                                              : base_sample_budget;
+        const std::vector<double> node_times = collect_maneuver_node_times(cache);
+
+        if (resolved_frame_spec.type == orbitsim::TrajectoryFrameType::Inertial)
+        {
+            cache.trajectory_segments_frame_planned = cache.trajectory_segments_inertial_planned;
+            if (!validate_trajectory_segment_continuity(cache.trajectory_segments_frame_planned))
+            {
+                update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::ContinuityFailed);
+                return false;
+            }
+
+            cache.trajectory_frame_planned =
+                    cache.trajectory_inertial_planned.size() >= 2
+                            ? cache.trajectory_inertial_planned
+                            : sample_prediction_segments(cache.trajectory_segments_frame_planned,
+                                                         planned_sample_budget,
+                                                         node_times);
+            if (diagnostics)
+            {
+                diagnostics->frame_planned = make_stage_diagnostics_from_segments(
+                        cache.trajectory_segments_frame_planned,
+                        prediction_segment_span_s(cache.trajectory_segments_inertial_planned));
+            }
+        }
+        else
+        {
+            if (!cache.shared_ephemeris || cache.shared_ephemeris->empty())
+            {
+                update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::MissingEphemeris);
+                return false;
+            }
+
+            const auto player_lookup = build_player_lookup(player_lookup_segments_inertial);
+            const orbitsim::FrameSegmentTransformOptions planned_opt =
+                    build_frame_segment_transform_options(
+                            resolved_frame_spec,
+                            cache.trajectory_segments_inertial_planned,
+                            cancel_requested);
+            orbitsim::FrameSegmentTransformDiagnostics planned_frame_diag{};
+            cache.trajectory_segments_frame_planned = orbitsim::transform_trajectory_segments_to_frame_spec(
+                    cache.trajectory_segments_inertial_planned,
+                    *cache.shared_ephemeris,
+                    cache.massive_bodies,
+                    resolved_frame_spec,
+                    planned_opt,
+                    player_lookup,
+                    &planned_frame_diag);
+            if (cancel_requested && cancel_requested())
+            {
+                update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::Cancelled);
+                return false;
+            }
+            if (cache.trajectory_segments_frame_planned.empty())
+            {
+                update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::FrameTransformFailed);
+                return false;
+            }
+
+            if (!cache.trajectory_segments_frame_planned.empty())
+            {
+                if (!validate_trajectory_segment_continuity(cache.trajectory_segments_frame_planned))
+                {
+                    update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::ContinuityFailed);
+                    return false;
+                }
+                if (diagnostics)
+                {
+                    diagnostics->frame_planned = make_stage_diagnostics_from_adaptive(
+                            planned_frame_diag,
+                            prediction_segment_span_s(cache.trajectory_segments_inertial_planned));
+                    diagnostics->frame_planned.accepted_segments = cache.trajectory_segments_frame_planned.size();
+                    diagnostics->frame_planned.covered_duration_s =
+                            prediction_segment_span_s(cache.trajectory_segments_frame_planned);
+                    diagnostics->frame_planned.frame_resegmentation_count = planned_frame_diag.frame_resegmentation_count;
+                }
+                cache.trajectory_frame_planned = sample_prediction_segments(
+                        cache.trajectory_segments_frame_planned,
+                        planned_sample_budget,
+                        node_times);
+            }
+        }
+
+        cache.render_curve_frame_planned = cache.trajectory_segments_frame_planned.empty()
+                                                  ? OrbitRenderCurve{}
+                                                  : OrbitRenderCurve::build(cache.trajectory_segments_frame_planned);
+        cache.resolved_frame_spec = resolved_frame_spec;
+        cache.resolved_frame_spec_valid = true;
+        update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::Success);
+        return true;
+    }
+
     inline void clear_prediction_metrics(OrbitPredictionCache &cache, const orbitsim::BodyId analysis_body_id)
     {
         cache.altitude_km.clear();

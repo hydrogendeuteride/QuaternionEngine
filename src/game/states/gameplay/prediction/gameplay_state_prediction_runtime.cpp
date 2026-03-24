@@ -69,6 +69,108 @@ namespace Game
             }
             return first_future;
         }
+
+        bool frame_specs_match(const orbitsim::TrajectoryFrameSpec &a,
+                               const orbitsim::TrajectoryFrameSpec &b)
+        {
+            return a.type == b.type &&
+                   a.primary_body_id == b.primary_body_id &&
+                   a.secondary_body_id == b.secondary_body_id &&
+                   a.target_spacecraft_id == b.target_spacecraft_id;
+        }
+
+        bool frame_supports_live_base_frame_reuse(const orbitsim::TrajectoryFrameSpec &spec)
+        {
+            return spec.type != orbitsim::TrajectoryFrameType::Inertial &&
+                   spec.type != orbitsim::TrajectoryFrameType::LVLH;
+        }
+
+        bool base_trajectory_signature_matches(const OrbitPredictionCache &cache,
+                                              const OrbitPredictionService::Result &result)
+        {
+            if (cache.trajectory_segments_inertial.empty() || result.trajectory_segments_inertial.empty() ||
+                cache.trajectory_inertial.size() < 2 || result.trajectory_inertial.size() < 2)
+            {
+                return false;
+            }
+
+            if (cache.trajectory_segments_inertial.size() != result.trajectory_segments_inertial.size() ||
+                cache.trajectory_inertial.size() != result.trajectory_inertial.size())
+            {
+                return false;
+            }
+
+            const orbitsim::TrajectorySegment &cache_seg0 = cache.trajectory_segments_inertial.front();
+            const orbitsim::TrajectorySegment &cache_seg1 = cache.trajectory_segments_inertial.back();
+            const orbitsim::TrajectorySegment &result_seg0 = result.trajectory_segments_inertial.front();
+            const orbitsim::TrajectorySegment &result_seg1 = result.trajectory_segments_inertial.back();
+            if (cache_seg0.t0_s != result_seg0.t0_s ||
+                cache_seg0.dt_s != result_seg0.dt_s ||
+                cache_seg1.t0_s != result_seg1.t0_s ||
+                cache_seg1.dt_s != result_seg1.dt_s)
+            {
+                return false;
+            }
+
+            const orbitsim::TrajectorySample &cache_sample0 = cache.trajectory_inertial.front();
+            const orbitsim::TrajectorySample &cache_sample1 = cache.trajectory_inertial.back();
+            const orbitsim::TrajectorySample &result_sample0 = result.trajectory_inertial.front();
+            const orbitsim::TrajectorySample &result_sample1 = result.trajectory_inertial.back();
+            return cache_sample0.t_s == result_sample0.t_s &&
+                   cache_sample1.t_s == result_sample1.t_s;
+        }
+
+        bool can_reuse_existing_base_frame_cache(const PredictionTrackState &track,
+                                                 const OrbitPredictionService::Result &result,
+                                                 const orbitsim::TrajectoryFrameSpec &resolved_frame_spec)
+        {
+            return result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+                   result.baseline_reused &&
+                   track.cache.valid &&
+                   track.cache.resolved_frame_spec_valid &&
+                   frame_supports_live_base_frame_reuse(resolved_frame_spec) &&
+                   frame_specs_match(track.cache.resolved_frame_spec, resolved_frame_spec) &&
+                   track.cache.shared_ephemeris == result.shared_ephemeris &&
+                   track.cache.trajectory_frame.size() >= 2 &&
+                   !track.cache.trajectory_segments_frame.empty() &&
+                   base_trajectory_signature_matches(track.cache, result);
+        }
+
+        OrbitPredictionCache merge_reused_base_frame_cache(const OrbitPredictionCache &base_cache,
+                                                           OrbitPredictionCache preview_cache)
+        {
+            preview_cache.trajectory_frame = base_cache.trajectory_frame;
+            preview_cache.trajectory_segments_frame = base_cache.trajectory_segments_frame;
+            preview_cache.gpu_roots_frame = base_cache.gpu_roots_frame;
+            preview_cache.render_curve_frame = base_cache.render_curve_frame;
+            if (base_cache.analysis_cache_valid &&
+                base_cache.analysis_cache_body_id != orbitsim::kInvalidBodyId &&
+                preview_cache.analysis_cache_body_id == base_cache.analysis_cache_body_id)
+            {
+                preview_cache.trajectory_analysis_bci = base_cache.trajectory_analysis_bci;
+                preview_cache.trajectory_segments_analysis_bci = base_cache.trajectory_segments_analysis_bci;
+                preview_cache.analysis_cache_body_id = base_cache.analysis_cache_body_id;
+                preview_cache.analysis_cache_valid = base_cache.analysis_cache_valid;
+            }
+            if (base_cache.metrics_valid &&
+                base_cache.metrics_body_id != orbitsim::kInvalidBodyId &&
+                preview_cache.metrics_body_id == base_cache.metrics_body_id)
+            {
+                preview_cache.altitude_km = base_cache.altitude_km;
+                preview_cache.speed_kmps = base_cache.speed_kmps;
+                preview_cache.semi_major_axis_m = base_cache.semi_major_axis_m;
+                preview_cache.eccentricity = base_cache.eccentricity;
+                preview_cache.orbital_period_s = base_cache.orbital_period_s;
+                preview_cache.periapsis_alt_km = base_cache.periapsis_alt_km;
+                preview_cache.apoapsis_alt_km = base_cache.apoapsis_alt_km;
+                preview_cache.metrics_body_id = base_cache.metrics_body_id;
+                preview_cache.metrics_valid = base_cache.metrics_valid;
+            }
+            preview_cache.valid = preview_cache.trajectory_inertial.size() >= 2 &&
+                                  preview_cache.trajectory_frame.size() >= 2 &&
+                                  !preview_cache.trajectory_segments_frame.empty();
+            return preview_cache;
+        }
     } // namespace
 
     void GameplayState::sync_prediction_dirty_flag()
@@ -193,6 +295,8 @@ namespace Game
             return;
         }
 
+        const OrbitPredictionService::AdaptiveStageDiagnostics previous_frame_base_diagnostics =
+                track->derived_diagnostics.frame_base;
         track->solver_ms_last = std::max(0.0, result.compute_time_ms);
         track->solver_diagnostics = result.diagnostics;
         track->derived_diagnostics = {};
@@ -259,6 +363,11 @@ namespace Game
         derived_request.track_id = result.track_id;
         derived_request.generation_id = result.generation_id;
         derived_request.solver_result = std::move(result);
+        derived_request.reuse_existing_base_frame =
+                can_reuse_existing_base_frame_cache(*track,
+                                                   derived_request.solver_result,
+                                                   resolved_frame_spec);
+        derived_request.reused_base_frame_diagnostics = previous_frame_base_diagnostics;
         derived_request.build_pos_world = build_pos_world;
         derived_request.build_vel_world = build_vel_world;
         derived_request.sim_config = _orbitsim ? _orbitsim->sim.config() : orbitsim::GameSimulation::Config{};
@@ -299,17 +408,50 @@ namespace Game
         track->derived_request_pending = false;
         // Do NOT clear request_pending here — a newer solver request may already be in-flight.
         // Only the solver completion path and request submission paths manage that flag.
-        track->derived_diagnostics = result.diagnostics;
         const bool keep_dirty_for_followup = track->invalidated_while_pending;
         track->invalidated_while_pending = false;
 
-        if (!result.valid || !result.cache.valid || result.cache.trajectory_frame.size() < 2)
+        OrbitPredictionCache cache_to_publish{};
+        OrbitPredictionDerivedDiagnostics diagnostics_to_publish = result.diagnostics;
+        bool have_cache_to_publish = false;
+        if (result.valid && result.cache.valid)
         {
+            if (result.base_frame_reused)
+            {
+                const bool reusable_base_still_available =
+                        track->cache.valid &&
+                        track->cache.resolved_frame_spec_valid &&
+                        result.cache.resolved_frame_spec_valid &&
+                        frame_specs_match(track->cache.resolved_frame_spec, result.cache.resolved_frame_spec) &&
+                        track->cache.shared_ephemeris == result.cache.shared_ephemeris &&
+                        track->cache.trajectory_frame.size() >= 2 &&
+                        !track->cache.trajectory_segments_frame.empty();
+                if (reusable_base_still_available)
+                {
+                    cache_to_publish = merge_reused_base_frame_cache(track->cache, std::move(result.cache));
+                    diagnostics_to_publish.frame_segment_count = cache_to_publish.trajectory_segments_frame.size();
+                    diagnostics_to_publish.frame_sample_count = cache_to_publish.trajectory_frame.size();
+                    diagnostics_to_publish.status = PredictionDerivedStatus::Success;
+                    have_cache_to_publish = cache_to_publish.valid;
+                }
+            }
+            else if (result.cache.trajectory_frame.size() >= 2)
+            {
+                cache_to_publish = std::move(result.cache);
+                have_cache_to_publish = cache_to_publish.valid;
+            }
+        }
+
+        track->derived_diagnostics = diagnostics_to_publish;
+
+        if (!have_cache_to_publish)
+        {
+            track->derived_diagnostics.status = PredictionDerivedStatus::MissingSolverData;
             track->dirty = true;
             return;
         }
 
-        track->cache = std::move(result.cache);
+        track->cache = std::move(cache_to_publish);
         track->pick_cache.clear();
         const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
         const bool maneuver_preview_subject =
@@ -347,12 +489,12 @@ namespace Game
                                                        const double now_s,
                                                        const bool with_maneuvers) const
     {
-        double required_ahead_s =
+        const double plotted_ahead_s =
                 std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(key) : 0.0);
 
         if (!with_maneuvers)
         {
-            return required_ahead_s;
+            return plotted_ahead_s;
         }
 
         const bool maneuver_live_preview =
@@ -361,13 +503,20 @@ namespace Game
         if (maneuver_live_preview)
         {
             const ManeuverNode *anchor_node = select_preview_anchor_node(_maneuver_state, now_s);
+            if (!anchor_node || !std::isfinite(anchor_node->time_s))
+            {
+                return plotted_ahead_s;
+            }
+
+            // Keep drag-time solves local to the edited node so long-horizon baseline plots do not
+            // force an equally long interactive preview request every mouse move.
             const double anchor_time_s =
                     (anchor_node && std::isfinite(anchor_node->time_s)) ? std::max(now_s, anchor_node->time_s) : now_s;
             const double preview_window_s = std::max(maneuver_plan_preview_window_s(), maneuver_post_node_coverage_s());
-            required_ahead_s = std::max(required_ahead_s, (anchor_time_s - now_s) + preview_window_s);
-            return required_ahead_s;
+            return std::max(0.0, (anchor_time_s - now_s) + preview_window_s);
         }
 
+        double required_ahead_s = plotted_ahead_s;
         double max_node_time_s = now_s;
         for (const ManeuverNode &node : _maneuver_state.nodes)
         {

@@ -154,14 +154,35 @@ namespace Game
         cache.valid = true;
 
         const orbitsim::TrajectoryFrameSpec &resolved_frame_spec = request.resolved_frame_spec;
-        if (!PredictionCacheInternal::rebuild_prediction_frame_cache(
-                    cache,
-                    resolved_frame_spec,
-                    request.player_lookup_segments_inertial,
-                    cancel_requested,
-                    &out.diagnostics))
+        const bool reuse_existing_base_frame =
+                request.reuse_existing_base_frame &&
+                solver.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
+        if (reuse_existing_base_frame)
+        {
+            cache.analysis_cache_body_id = request.analysis_body_id;
+            cache.metrics_body_id = request.analysis_body_id;
+        }
+        const bool frame_cache_built = reuse_existing_base_frame
+                                               ? PredictionCacheInternal::rebuild_prediction_planned_frame_cache(
+                                                         cache,
+                                                         resolved_frame_spec,
+                                                         request.player_lookup_segments_inertial,
+                                                         cancel_requested,
+                                                         &out.diagnostics)
+                                               : PredictionCacheInternal::rebuild_prediction_frame_cache(
+                                                         cache,
+                                                         resolved_frame_spec,
+                                                         request.player_lookup_segments_inertial,
+                                                         cancel_requested,
+                                                         &out.diagnostics);
+        if (!frame_cache_built)
         {
             return out;
+        }
+        out.base_frame_reused = reuse_existing_base_frame;
+        if (reuse_existing_base_frame)
+        {
+            out.diagnostics.frame_base = request.reused_base_frame_diagnostics;
         }
 
         if (solver.solve_quality != OrbitPredictionService::SolveQuality::FastPreview)
