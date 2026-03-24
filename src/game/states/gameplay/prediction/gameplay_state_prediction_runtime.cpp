@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <limits>
 #include <utility>
 
 namespace Game
@@ -68,6 +70,48 @@ namespace Game
                 }
             }
             return first_future;
+        }
+
+        template<typename T>
+        void hash_combine(uint64_t &seed, const T &value)
+        {
+            seed ^= static_cast<uint64_t>(std::hash<T>{}(value)) + 0x9e3779b97f4a7c15ULL + (seed << 6u) + (seed >> 2u);
+        }
+
+        uint64_t hash_upstream_maneuvers(const ManeuverPlanState &plan,
+                                         const int anchor_node_id,
+                                         const double anchor_time_s)
+        {
+            uint64_t seed = 0xcbf29ce484222325ULL;
+            for (const ManeuverNode &node : plan.nodes)
+            {
+                if (!std::isfinite(node.time_s) ||
+                    node.id == anchor_node_id ||
+                    node.time_s > anchor_time_s)
+                {
+                    continue;
+                }
+
+                hash_combine(seed, node.id);
+                hash_combine(seed, node.time_s);
+                hash_combine(seed, node.primary_body_id);
+                hash_combine(seed, node.primary_body_auto);
+                hash_combine(seed, node.dv_rtn_mps.x);
+                hash_combine(seed, node.dv_rtn_mps.y);
+                hash_combine(seed, node.dv_rtn_mps.z);
+            }
+            return seed;
+        }
+
+        glm::dmat3 snapshot_gizmo_basis(const ManeuverGizmoInteraction &interaction)
+        {
+            if (interaction.state == ManeuverGizmoInteraction::State::DragAxis)
+            {
+                return glm::dmat3(interaction.drag_basis_r_world,
+                                  interaction.drag_basis_t_world,
+                                  interaction.drag_basis_n_world);
+            }
+            return glm::dmat3(1.0);
         }
 
         bool frame_specs_match(const orbitsim::TrajectoryFrameSpec &a,
@@ -171,6 +215,248 @@ namespace Game
                                   !preview_cache.trajectory_segments_frame.empty();
             return preview_cache;
         }
+
+        template<typename SampleT>
+        std::vector<SampleT> merge_planned_sample_prefix(const std::vector<SampleT> &previous_samples,
+                                                         const std::vector<SampleT> &patch_samples,
+                                                         const double patch_t0_s)
+        {
+            if (previous_samples.empty() || patch_samples.empty() || !std::isfinite(patch_t0_s))
+            {
+                return patch_samples;
+            }
+
+            constexpr double kTimeEpsilonS = 1.0e-6;
+            std::vector<SampleT> merged;
+            merged.reserve(previous_samples.size() + patch_samples.size());
+            for (const SampleT &sample : previous_samples)
+            {
+                if (!std::isfinite(sample.t_s) || sample.t_s >= (patch_t0_s - kTimeEpsilonS))
+                {
+                    break;
+                }
+                merged.push_back(sample);
+            }
+            merged.insert(merged.end(), patch_samples.begin(), patch_samples.end());
+            return merged;
+        }
+
+        std::vector<orbitsim::TrajectorySegment> merge_planned_segment_prefix(
+                const std::vector<orbitsim::TrajectorySegment> &previous_segments,
+                const std::vector<orbitsim::TrajectorySegment> &patch_segments,
+                const double patch_t0_s)
+        {
+            if (previous_segments.empty() || patch_segments.empty() || !std::isfinite(patch_t0_s))
+            {
+                return patch_segments;
+            }
+
+            constexpr double kTimeEpsilonS = 1.0e-6;
+            std::vector<orbitsim::TrajectorySegment> merged;
+            merged.reserve(previous_segments.size() + patch_segments.size());
+            for (const orbitsim::TrajectorySegment &segment : previous_segments)
+            {
+                const double segment_t1_s = segment.t0_s + segment.dt_s;
+                if (!std::isfinite(segment.t0_s) || !std::isfinite(segment_t1_s) || !(segment.dt_s > 0.0))
+                {
+                    continue;
+                }
+                if (segment_t1_s > (patch_t0_s + kTimeEpsilonS))
+                {
+                    break;
+                }
+                merged.push_back(segment);
+            }
+            merged.insert(merged.end(), patch_segments.begin(), patch_segments.end());
+            return merged;
+        }
+
+        std::vector<OrbitPredictionCache::ManeuverNodePreview> merge_maneuver_previews(
+                const std::vector<OrbitPredictionCache::ManeuverNodePreview> &previous_previews,
+                const std::vector<OrbitPredictionCache::ManeuverNodePreview> &patch_previews)
+        {
+            std::vector<OrbitPredictionCache::ManeuverNodePreview> merged = previous_previews;
+            for (const OrbitPredictionCache::ManeuverNodePreview &patch_preview : patch_previews)
+            {
+                const auto existing_it = std::find_if(
+                        merged.begin(),
+                        merged.end(),
+                        [&patch_preview](const OrbitPredictionCache::ManeuverNodePreview &candidate) {
+                            return candidate.node_id == patch_preview.node_id;
+                        });
+                if (existing_it != merged.end())
+                {
+                    *existing_it = patch_preview;
+                }
+                else
+                {
+                    merged.push_back(patch_preview);
+                }
+            }
+
+            std::stable_sort(
+                    merged.begin(),
+                    merged.end(),
+                    [](const OrbitPredictionCache::ManeuverNodePreview &a, const OrbitPredictionCache::ManeuverNodePreview &b) {
+                        if (a.t_s == b.t_s)
+                        {
+                            return a.node_id < b.node_id;
+                        }
+                        return a.t_s < b.t_s;
+                    });
+            return merged;
+        }
+
+        OrbitPredictionCache merge_preview_planned_prefix_cache(const OrbitPredictionCache &previous_cache,
+                                                                OrbitPredictionCache preview_cache)
+        {
+            if (!previous_cache.valid)
+            {
+                return preview_cache;
+            }
+
+            double inertial_patch_t0_s = std::numeric_limits<double>::quiet_NaN();
+            if (!preview_cache.trajectory_segments_inertial_planned.empty())
+            {
+                inertial_patch_t0_s = preview_cache.trajectory_segments_inertial_planned.front().t0_s;
+            }
+            else if (!preview_cache.trajectory_inertial_planned.empty())
+            {
+                inertial_patch_t0_s = preview_cache.trajectory_inertial_planned.front().t_s;
+            }
+
+            if (std::isfinite(inertial_patch_t0_s))
+            {
+                preview_cache.trajectory_inertial_planned = merge_planned_sample_prefix(
+                        previous_cache.trajectory_inertial_planned,
+                        preview_cache.trajectory_inertial_planned,
+                        inertial_patch_t0_s);
+                preview_cache.trajectory_segments_inertial_planned = merge_planned_segment_prefix(
+                        previous_cache.trajectory_segments_inertial_planned,
+                        preview_cache.trajectory_segments_inertial_planned,
+                        inertial_patch_t0_s);
+            }
+
+            double frame_patch_t0_s = std::numeric_limits<double>::quiet_NaN();
+            if (!preview_cache.trajectory_segments_frame_planned.empty())
+            {
+                frame_patch_t0_s = preview_cache.trajectory_segments_frame_planned.front().t0_s;
+            }
+            else if (!preview_cache.trajectory_frame_planned.empty())
+            {
+                frame_patch_t0_s = preview_cache.trajectory_frame_planned.front().t_s;
+            }
+
+            if (std::isfinite(frame_patch_t0_s))
+            {
+                preview_cache.trajectory_frame_planned = merge_planned_sample_prefix(
+                        previous_cache.trajectory_frame_planned,
+                        preview_cache.trajectory_frame_planned,
+                        frame_patch_t0_s);
+                preview_cache.trajectory_segments_frame_planned = merge_planned_segment_prefix(
+                        previous_cache.trajectory_segments_frame_planned,
+                        preview_cache.trajectory_segments_frame_planned,
+                        frame_patch_t0_s);
+            }
+
+            preview_cache.maneuver_previews = merge_maneuver_previews(
+                    previous_cache.maneuver_previews,
+                    preview_cache.maneuver_previews);
+
+            preview_cache.gpu_roots_frame_planned.reset();
+            preview_cache.render_curve_frame_planned = preview_cache.trajectory_segments_frame_planned.empty()
+                                                              ? OrbitRenderCurve{}
+                                                              : OrbitRenderCurve::build(
+                                                                        preview_cache.trajectory_segments_frame_planned);
+            preview_cache.valid = preview_cache.trajectory_inertial.size() >= 2 &&
+                                  preview_cache.trajectory_frame.size() >= 2 &&
+                                  !preview_cache.trajectory_segments_frame.empty();
+            return preview_cache;
+        }
+
+        PredictionChunkAssembly merge_planned_chunk_assembly(const PredictionChunkAssembly &previous_assembly,
+                                                             PredictionChunkAssembly incoming_assembly)
+        {
+            if (!incoming_assembly.valid || incoming_assembly.chunks.empty())
+            {
+                return previous_assembly;
+            }
+
+            auto sort_and_validate = [](PredictionChunkAssembly &assembly) {
+                std::sort(assembly.chunks.begin(),
+                          assembly.chunks.end(),
+                          [](const OrbitChunk &a, const OrbitChunk &b) {
+                              if (a.t0_s == b.t0_s)
+                              {
+                                  return a.chunk_id < b.chunk_id;
+                              }
+                              return a.t0_s < b.t0_s;
+                          });
+
+                constexpr double kTimeEpsilonS = 1.0e-6;
+                bool ordered = true;
+                for (std::size_t i = 1; i < assembly.chunks.size(); ++i)
+                {
+                    const OrbitChunk &prev = assembly.chunks[i - 1];
+                    const OrbitChunk &cur = assembly.chunks[i];
+                    if (!(cur.t0_s + kTimeEpsilonS >= prev.t1_s))
+                    {
+                        ordered = false;
+                        break;
+                    }
+                }
+                assembly.valid = ordered && !assembly.chunks.empty();
+            };
+
+            if (!previous_assembly.valid ||
+                previous_assembly.generation_id != incoming_assembly.generation_id)
+            {
+                sort_and_validate(incoming_assembly);
+                return incoming_assembly;
+            }
+
+            constexpr double kTimeEpsilonS = 1.0e-6;
+            PredictionChunkAssembly merged = previous_assembly;
+            for (OrbitChunk &incoming_chunk : incoming_assembly.chunks)
+            {
+                merged.chunks.erase(
+                        std::remove_if(
+                                merged.chunks.begin(),
+                                merged.chunks.end(),
+                                [&incoming_chunk, kTimeEpsilonS](const OrbitChunk &existing_chunk) {
+                                    if (existing_chunk.chunk_id == incoming_chunk.chunk_id)
+                                    {
+                                        return true;
+                                    }
+                                    const bool overlaps_in_time =
+                                            incoming_chunk.t0_s < (existing_chunk.t1_s - kTimeEpsilonS) &&
+                                            existing_chunk.t0_s < (incoming_chunk.t1_s - kTimeEpsilonS);
+                                    return overlaps_in_time;
+                                }),
+                        merged.chunks.end());
+                merged.chunks.push_back(std::move(incoming_chunk));
+            }
+
+            merged.generation_id = incoming_assembly.generation_id;
+            sort_and_validate(merged);
+            return merged;
+        }
+
+        bool preview_anchor_matches(const PreviewAnchorCache &a, const PreviewAnchorCache &b)
+        {
+            return a.valid == b.valid &&
+                   a.anchor_node_id == b.anchor_node_id &&
+                   a.anchor_time_s == b.anchor_time_s &&
+                   a.baseline_generation_id == b.baseline_generation_id &&
+                   a.upstream_maneuver_hash == b.upstream_maneuver_hash &&
+                   a.display_frame_snapshot.type == b.display_frame_snapshot.type &&
+                   a.display_frame_snapshot.primary_body_id == b.display_frame_snapshot.primary_body_id &&
+                   a.display_frame_snapshot.secondary_body_id == b.display_frame_snapshot.secondary_body_id &&
+                   a.display_frame_snapshot.target_spacecraft_id == b.display_frame_snapshot.target_spacecraft_id &&
+                   a.patch_window_s == b.patch_window_s &&
+                   a.request_window_s == b.request_window_s &&
+                   a.downstream_maneuver_node_ids == b.downstream_maneuver_node_ids;
+        }
     } // namespace
 
     void GameplayState::sync_prediction_dirty_flag()
@@ -222,6 +508,109 @@ namespace Game
         mark_prediction_dirty();
     }
 
+    void GameplayState::refresh_prediction_preview_anchor(PredictionTrackState &track,
+                                                          const double now_s,
+                                                          const bool with_maneuvers)
+    {
+        const bool preview_track =
+                with_maneuvers &&
+                track.key == _prediction_selection.active_subject;
+        const bool preview_live =
+                preview_track &&
+                (_maneuver_plan_live_preview_active ||
+                 _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis);
+
+        if (!preview_track)
+        {
+            track.preview_state = PredictionPreviewRuntimeState::Idle;
+            track.preview_anchor.clear();
+            return;
+        }
+
+        if (!preview_live)
+        {
+            if (track.preview_state == PredictionPreviewRuntimeState::EnterDrag ||
+                track.preview_state == PredictionPreviewRuntimeState::DragPreviewPending ||
+                track.preview_state == PredictionPreviewRuntimeState::PreviewStreaming)
+            {
+                track.preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
+            }
+            return;
+        }
+
+        const ManeuverNode *anchor_node = select_preview_anchor_node(_maneuver_state, now_s);
+        if (!anchor_node || !std::isfinite(anchor_node->time_s))
+        {
+            track.preview_state = PredictionPreviewRuntimeState::Idle;
+            track.preview_anchor.clear();
+            return;
+        }
+
+        PreviewAnchorCache refreshed{};
+        refreshed.valid = true;
+        refreshed.anchor_node_id = anchor_node->id;
+        refreshed.anchor_time_s = std::max(now_s, anchor_node->time_s);
+        refreshed.baseline_generation_id = track.cache.generation_id;
+        refreshed.upstream_maneuver_hash = hash_upstream_maneuvers(_maneuver_state,
+                                                                   refreshed.anchor_node_id,
+                                                                   refreshed.anchor_time_s);
+        refreshed.gizmo_basis_snapshot = snapshot_gizmo_basis(_maneuver_gizmo_interaction);
+        refreshed.display_frame_snapshot =
+                track.cache.resolved_frame_spec_valid ? track.cache.resolved_frame_spec : _prediction_frame_selection.spec;
+        refreshed.patch_window_s = std::max(maneuver_plan_preview_window_s(), maneuver_post_node_coverage_s());
+        refreshed.request_window_s = std::max(0.0, (refreshed.anchor_time_s - now_s) + refreshed.patch_window_s);
+        refreshed.downstream_maneuver_node_ids.reserve(_maneuver_state.nodes.size());
+        const double patch_end_s = refreshed.anchor_time_s + refreshed.patch_window_s;
+        for (const ManeuverNode &node : _maneuver_state.nodes)
+        {
+            if (!std::isfinite(node.time_s) ||
+                node.time_s < refreshed.anchor_time_s ||
+                node.time_s > patch_end_s)
+            {
+                continue;
+            }
+            refreshed.downstream_maneuver_node_ids.push_back(node.id);
+        }
+
+        if (!track.cache.trajectory_inertial.empty())
+        {
+            orbitsim::State anchor_state{};
+            if (sample_prediction_inertial_state(track.cache.trajectory_inertial, refreshed.anchor_time_s, anchor_state))
+            {
+                refreshed.anchor_state_inertial = anchor_state;
+            }
+        }
+
+        const bool anchor_changed = !preview_anchor_matches(track.preview_anchor, refreshed);
+        track.preview_anchor = std::move(refreshed);
+        if (anchor_changed)
+        {
+            track.preview_last_anchor_refresh_at_s = now_s;
+            if (!std::isfinite(track.preview_entered_at_s))
+            {
+                track.preview_entered_at_s = now_s;
+            }
+
+            if (track.preview_state == PredictionPreviewRuntimeState::DragPreviewPending ||
+                track.preview_state == PredictionPreviewRuntimeState::PreviewStreaming)
+            {
+                track.invalidated_while_pending = track.request_pending || track.derived_request_pending;
+            }
+            track.preview_state = PredictionPreviewRuntimeState::EnterDrag;
+            return;
+        }
+
+        if (track.preview_state == PredictionPreviewRuntimeState::Idle ||
+            track.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine)
+        {
+            if (!std::isfinite(track.preview_entered_at_s))
+            {
+                track.preview_entered_at_s = now_s;
+            }
+            track.preview_state = PredictionPreviewRuntimeState::EnterDrag;
+        }
+    }
+
     void GameplayState::poll_completed_prediction_results()
     {
         bool applied_result = false;
@@ -251,9 +640,15 @@ namespace Game
             track.cache.clear();
             track.request_pending = false;
             track.derived_request_pending = false;
+            track.latest_requested_generation_id = 0;
             track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             track.dirty = false;
             track.invalidated_while_pending = false;
+            track.preview_state = PredictionPreviewRuntimeState::Idle;
+            track.preview_anchor.clear();
+            track.preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
+            track.preview_last_anchor_refresh_at_s = std::numeric_limits<double>::quiet_NaN();
+            track.preview_last_request_at_s = std::numeric_limits<double>::quiet_NaN();
             track.auto_primary_body_id = orbitsim::kInvalidBodyId;
             track.solver_ms_last = 0.0;
             track.solver_diagnostics = {};
@@ -303,9 +698,11 @@ namespace Game
 
         if (!result.valid || result.trajectory_inertial.size() < 2)
         {
-            track->request_pending = false;
+            track->request_pending = !result.generation_complete;
             track->derived_request_pending = false;
-            track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+            track->pending_solve_quality = result.generation_complete
+                                                   ? OrbitPredictionService::SolveQuality::Full
+                                                   : result.solve_quality;
             track->dirty = true;
             return;
         }
@@ -375,8 +772,8 @@ namespace Game
         derived_request.analysis_body_id = analysis_body_id;
         derived_request.player_lookup_segments_inertial = std::move(player_lookup_segments);
         _prediction_derived_service.request(std::move(derived_request));
-        // Let the solver queue accept a fresher generation while derived work finishes in parallel.
-        track->request_pending = false;
+        // Keep request_pending set until the solver publishes the final staged preview result for this generation.
+        track->request_pending = !result.generation_complete;
         track->derived_request_pending = true;
         // If the input changed while this solve was in-flight, promote straight to dirty so the
         // next update tick can submit a fresh solver request without waiting for derived to finish.
@@ -385,7 +782,9 @@ namespace Game
             track->dirty = true;
             track->invalidated_while_pending = false;
         }
-        track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+        track->pending_solve_quality = result.generation_complete
+                                               ? OrbitPredictionService::SolveQuality::Full
+                                               : result.solve_quality;
     }
 
     void GameplayState::apply_completed_prediction_derived_result(OrbitPredictionDerivedService::Result result)
@@ -401,6 +800,13 @@ namespace Game
         }
 
         if (!track)
+        {
+            return;
+        }
+
+        const bool stale_derived_result =
+                track->cache.valid && result.generation_id < track->cache.generation_id;
+        if (stale_derived_result)
         {
             return;
         }
@@ -440,6 +846,13 @@ namespace Game
                 cache_to_publish = std::move(result.cache);
                 have_cache_to_publish = cache_to_publish.valid;
             }
+
+            if (have_cache_to_publish &&
+                result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview)
+            {
+                cache_to_publish = merge_preview_planned_prefix_cache(track->cache, std::move(cache_to_publish));
+                have_cache_to_publish = cache_to_publish.valid;
+            }
         }
 
         track->derived_diagnostics = diagnostics_to_publish;
@@ -453,7 +866,26 @@ namespace Game
 
         track->cache = std::move(cache_to_publish);
         track->pick_cache.clear();
+        if (result.chunk_assembly.valid)
+        {
+            track->planned_chunk_assembly = merge_planned_chunk_assembly(track->planned_chunk_assembly,
+                                                                         std::move(result.chunk_assembly));
+        }
+        else if (result.solve_quality != OrbitPredictionService::SolveQuality::FastPreview)
+        {
+            track->planned_chunk_assembly.clear();
+        }
         const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
+        if (preview_result)
+        {
+            track->preview_state = PredictionPreviewRuntimeState::PreviewStreaming;
+        }
+        else if (track->preview_state != PredictionPreviewRuntimeState::Idle)
+        {
+            track->preview_state = PredictionPreviewRuntimeState::Idle;
+            track->preview_anchor.clear();
+            track->preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
+        }
         const bool maneuver_preview_subject =
                 prediction_subject_supports_maneuvers(track->key) &&
                 _maneuver_nodes_enabled &&
@@ -462,6 +894,7 @@ namespace Game
                 _maneuver_gizmo_interaction.state != ManeuverGizmoInteraction::State::DragAxis;
         const bool schedule_full_refine =
                 preview_result &&
+                result.generation_complete &&
                 maneuver_preview_subject &&
                 _maneuver_plan_live_preview_active &&
                 interaction_idle &&
@@ -477,17 +910,21 @@ namespace Game
         if (schedule_full_refine)
         {
             // Publish a cheap preview first, then immediately fall through to a full rebuild.
+            track->preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
             _maneuver_plan_live_preview_active = false;
         }
         if (freeze_maneuver_plan)
         {
+            track->preview_state = PredictionPreviewRuntimeState::Idle;
+            track->preview_anchor.clear();
+            track->preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
             _maneuver_plan_live_preview_active = false;
         }
     }
 
-    double GameplayState::prediction_required_window_s(const PredictionSubjectKey key,
-                                                       const double now_s,
-                                                       const bool with_maneuvers) const
+    double GameplayState::prediction_display_window_s(const PredictionSubjectKey key,
+                                                      const double now_s,
+                                                      const bool with_maneuvers) const
     {
         const double plotted_ahead_s =
                 std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(key) : 0.0);
@@ -497,42 +934,93 @@ namespace Game
             return plotted_ahead_s;
         }
 
-        const bool maneuver_live_preview =
-                _maneuver_plan_live_preview_active ||
-                _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
-        if (maneuver_live_preview)
-        {
-            const ManeuverNode *anchor_node = select_preview_anchor_node(_maneuver_state, now_s);
-            if (!anchor_node || !std::isfinite(anchor_node->time_s))
-            {
-                return plotted_ahead_s;
-            }
-
-            // Keep drag-time solves local to the edited node so long-horizon baseline plots do not
-            // force an equally long interactive preview request every mouse move.
-            const double anchor_time_s =
-                    (anchor_node && std::isfinite(anchor_node->time_s)) ? std::max(now_s, anchor_node->time_s) : now_s;
-            const double preview_window_s = std::max(maneuver_plan_preview_window_s(), maneuver_post_node_coverage_s());
-            return std::max(0.0, (anchor_time_s - now_s) + preview_window_s);
-        }
-
         double required_ahead_s = plotted_ahead_s;
         double max_node_time_s = now_s;
         for (const ManeuverNode &node : _maneuver_state.nodes)
         {
-            if (std::isfinite(node.time_s))
+            if (!std::isfinite(node.time_s))
             {
-                max_node_time_s = std::max(max_node_time_s, node.time_s);
+                continue;
             }
+            max_node_time_s = std::max(max_node_time_s, node.time_s);
         }
 
         if (max_node_time_s > now_s)
         {
-            const double post_node_window_s = maneuver_post_node_coverage_s();
-            required_ahead_s = std::max(required_ahead_s, (max_node_time_s - now_s) + post_node_window_s);
+            required_ahead_s = std::max(required_ahead_s, (max_node_time_s - now_s) + maneuver_post_node_coverage_s());
         }
 
         return required_ahead_s;
+    }
+
+    double GameplayState::prediction_preview_patch_window_s(const PredictionTrackState &track,
+                                                            const double now_s,
+                                                            const bool with_maneuvers) const
+    {
+        (void) now_s;
+        const bool preview_live =
+                with_maneuvers &&
+                track.key == _prediction_selection.active_subject &&
+                (_maneuver_plan_live_preview_active ||
+                 _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis);
+        if (!preview_live || !track.preview_anchor.valid)
+        {
+            return 0.0;
+        }
+        return std::max(0.0, track.preview_anchor.patch_window_s);
+    }
+
+    double GameplayState::prediction_required_window_s(const PredictionTrackState &track,
+                                                       const double now_s,
+                                                       const bool with_maneuvers) const
+    {
+        const double display_window_s = prediction_display_window_s(track.key, now_s, with_maneuvers);
+        const bool preview_live =
+                with_maneuvers &&
+                track.key == _prediction_selection.active_subject &&
+                (_maneuver_plan_live_preview_active ||
+                 _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis);
+        if (!preview_live || !track.preview_anchor.valid)
+        {
+            return display_window_s;
+        }
+
+        // Slice 1 keeps the legacy full-horizon request path alive, but now tracks the local patch
+        // window separately so follow-up slices can swap the solver over without changing runtime state.
+        return std::max(display_window_s, std::max(0.0, track.preview_anchor.request_window_s));
+    }
+
+    double GameplayState::prediction_required_window_s(const PredictionSubjectKey key,
+                                                       const double now_s,
+                                                       const bool with_maneuvers) const
+    {
+        if (const PredictionTrackState *track = find_prediction_track(key))
+        {
+            return prediction_required_window_s(*track, now_s, with_maneuvers);
+        }
+
+        const double display_window_s = prediction_display_window_s(key, now_s, with_maneuvers);
+        const bool preview_subject_matches =
+                !_prediction_selection.active_subject.valid() ||
+                key == _prediction_selection.active_subject;
+        const bool maneuver_live_preview =
+                with_maneuvers &&
+                preview_subject_matches &&
+                (_maneuver_plan_live_preview_active ||
+                 _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis);
+        if (!maneuver_live_preview)
+        {
+            return display_window_s;
+        }
+
+        const ManeuverNode *anchor_node = select_preview_anchor_node(_maneuver_state, now_s);
+        if (!anchor_node || !std::isfinite(anchor_node->time_s))
+        {
+            return display_window_s;
+        }
+
+        const double preview_window_s = std::max(maneuver_plan_preview_window_s(), maneuver_post_node_coverage_s());
+        return std::max(0.0, (std::max(now_s, anchor_node->time_s) - now_s) + preview_window_s);
     }
 
     bool GameplayState::should_rebuild_prediction_track(const PredictionTrackState &track,
@@ -547,6 +1035,10 @@ namespace Game
                 (_maneuver_plan_live_preview_active ||
                  _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis);
         bool rebuild = track.dirty || !track.cache.valid;
+        if (!rebuild && track.preview_state == PredictionPreviewRuntimeState::EnterDrag)
+        {
+            rebuild = true;
+        }
         if (!rebuild &&
             track.request_pending &&
             maneuver_live_preview &&
@@ -603,7 +1095,7 @@ namespace Game
             }
         }
 
-        const double required_ahead_s = prediction_required_window_s(track.key, now_s, with_maneuvers);
+        const double required_ahead_s = prediction_required_window_s(track, now_s, with_maneuvers);
 
         // Add a small epsilon so tiny fixed-step jitter does not trigger rebuild churn.
         const double coverage_epsilon_s =
@@ -619,6 +1111,7 @@ namespace Game
                                                          const bool with_maneuvers)
     {
         // Package the current spacecraft state into a worker request.
+        refresh_prediction_preview_anchor(track, now_s, with_maneuvers);
         if (!_orbitsim)
         {
             return false;
@@ -663,7 +1156,19 @@ namespace Game
                 track.key,
                 track.is_celestial,
                 interactive_request);
-        request.future_window_s = prediction_required_window_s(track.key, now_s, with_maneuvers);
+        request.future_window_s = prediction_required_window_s(track, now_s, with_maneuvers);
+        if (request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+            track.preview_anchor.valid &&
+            finite_vec3(track.preview_anchor.anchor_state_inertial.position_m) &&
+            finite_vec3(track.preview_anchor.anchor_state_inertial.velocity_mps))
+        {
+            request.preview_patch.active = true;
+            request.preview_patch.anchor_state_valid = true;
+            request.preview_patch.baseline_generation_id = track.preview_anchor.baseline_generation_id;
+            request.preview_patch.anchor_time_s = track.preview_anchor.anchor_time_s;
+            request.preview_patch.patch_window_s = std::max(0.0, track.preview_anchor.patch_window_s);
+            request.preview_patch.anchor_state_inertial = track.preview_anchor.anchor_state_inertial;
+        }
         const orbitsim::TrajectoryFrameSpec display_frame_spec =
                 track.cache.resolved_frame_spec_valid ? track.cache.resolved_frame_spec : _prediction_frame_selection.spec;
         request.lagrange_sensitive = prediction_frame_is_lagrange_sensitive(display_frame_spec);
@@ -684,7 +1189,7 @@ namespace Game
         if (with_maneuvers)
         {
             request.maneuver_impulses.reserve(_maneuver_state.nodes.size());
-            const double preview_horizon_end_s = now_s + request.future_window_s;
+            const double request_horizon_end_s = now_s + request.future_window_s;
             for (const ManeuverNode &node : _maneuver_state.nodes)
             {
                 if (!std::isfinite(node.time_s))
@@ -692,8 +1197,10 @@ namespace Game
                     continue;
                 }
 
+                // FP-0 stays patch-bounded inside the solver. The request still has to carry every
+                // downstream maneuver in the requested horizon so FP-1 can refine the remaining tail.
                 if (request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
-                    node.time_s > preview_horizon_end_s)
+                    node.time_s > request_horizon_end_s)
                 {
                     continue;
                 }
@@ -711,13 +1218,27 @@ namespace Game
             }
         }
 
-        _prediction_service.request(std::move(request));
+        const uint64_t generation_id = _prediction_service.request(std::move(request));
+        track.latest_requested_generation_id = generation_id;
         track.request_pending = true;
         track.derived_request_pending = false;
         track.pending_solve_quality = maneuver_live_preview
                                               ? OrbitPredictionService::SolveQuality::FastPreview
                                               : OrbitPredictionService::SolveQuality::Full;
         track.invalidated_while_pending = false;
+        track.preview_last_request_at_s = now_s;
+        if (maneuver_live_preview)
+        {
+            track.preview_state = PredictionPreviewRuntimeState::DragPreviewPending;
+            if (!std::isfinite(track.preview_entered_at_s))
+            {
+                track.preview_entered_at_s = now_s;
+            }
+        }
+        else if (track.preview_state != PredictionPreviewRuntimeState::Idle)
+        {
+            track.preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
+        }
         return true;
     }
 
@@ -761,7 +1282,8 @@ namespace Game
         }
 
         // Celestial tracks now flow through the same worker queue as spacecraft tracks.
-        _prediction_service.request(std::move(request));
+        const uint64_t generation_id = _prediction_service.request(std::move(request));
+        track.latest_requested_generation_id = generation_id;
         track.request_pending = true;
         track.derived_request_pending = false;
         track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
@@ -784,6 +1306,8 @@ namespace Game
             track.dirty = true;
             track.request_pending = false;
             track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+            track.preview_state = PredictionPreviewRuntimeState::Idle;
+            track.preview_anchor.clear();
             return;
         }
 
@@ -809,6 +1333,8 @@ namespace Game
             track.cache.clear();
             track.request_pending = false;
             track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+            track.preview_state = PredictionPreviewRuntimeState::Idle;
+            track.preview_anchor.clear();
         }
     }
 
@@ -891,6 +1417,7 @@ namespace Game
                     _maneuver_nodes_enabled &&
                     !_maneuver_state.nodes.empty();
             const bool thrusting = prediction_subject_thrust_applied_this_tick(track.key);
+            refresh_prediction_preview_anchor(track, now_s, with_maneuvers);
             const bool rebuild = should_rebuild_prediction_track(track, now_s, fixed_dt, thrusting, with_maneuvers);
             if (!rebuild)
             {

@@ -21,6 +21,14 @@ namespace Game
         constexpr double kPickMatrixRebuildEpsilon = 1.0e-6;
         constexpr double kPickScalarRebuildEpsilon = 1.0e-6;
         constexpr float kPickViewprojRebuildEpsilon = 1.0e-5f;
+        constexpr uint32_t kMaxPlannedChunkGpuRootBuildsPerFrame = 2u;
+
+        struct ChunkAssemblyDrawResult
+        {
+            uint32_t chunks_drawn{0};
+            uint32_t chunks_built{0};
+            std::vector<std::pair<double, double>> covered_ranges{};
+        };
 
         bool same_matrix(const glm::dmat3 &a, const glm::dmat3 &b, const double epsilon)
         {
@@ -101,6 +109,141 @@ namespace Game
                                            overlay_color,
                                            dashed,
                                            OrbitPlotDepth::AlwaysOnTop);
+        }
+
+        // Draw planned path by iterating chunk assembly, enqueuing per-chunk
+        // GPU root batches.  Returns the number of chunks actually drawn.
+        // Chunks whose gpu_roots are not yet built are constructed on-demand
+        // from their frame_segments (lazy fallback identical to the flat path).
+        ChunkAssemblyDrawResult enqueue_chunk_assembly_planned(
+                OrbitPlotSystem *orbit_plot,
+                PredictionChunkAssembly &assembly,
+                const WorldVec3 &ref_body_world,
+                const glm::dmat3 &frame_to_world,
+                const WorldVec3 &align_delta,
+                const double t_start_s,
+                const double t_end_s,
+                const glm::vec4 &color,
+                const bool dashed,
+                const float line_overlay_boost,
+                const uint32_t max_chunk_builds)
+        {
+            ChunkAssemblyDrawResult result{};
+            if (!orbit_plot || !assembly.valid || assembly.chunks.empty() || !(t_end_s > t_start_s))
+            {
+                return result;
+            }
+
+            for (OrbitChunk &chunk : assembly.chunks)
+            {
+                if (!chunk.valid || chunk.frame_segments.empty())
+                {
+                    continue;
+                }
+
+                // Skip chunks entirely outside the visible window.
+                if (chunk.t1_s <= t_start_s || chunk.t0_s >= t_end_s)
+                {
+                    continue;
+                }
+
+                // Clamp chunk time bounds to the draw window.
+                const double draw_t0 = std::max(chunk.t0_s, t_start_s);
+                const double draw_t1 = std::min(chunk.t1_s, t_end_s);
+                if (!(draw_t1 > draw_t0))
+                {
+                    continue;
+                }
+
+                // Ensure gpu_roots exist (lazy build from frame segments).
+                if (!chunk.gpu_roots || chunk.gpu_roots->empty())
+                {
+                    if (result.chunks_built >= max_chunk_builds)
+                    {
+                        continue;
+                    }
+                    chunk.gpu_roots = PredictionCacheInternal::build_gpu_root_cache(chunk.frame_segments);
+                    ++result.chunks_built;
+                }
+
+                if (!chunk.gpu_roots || chunk.gpu_roots->empty())
+                {
+                    continue;
+                }
+
+                enqueue_cached_orbit_window(orbit_plot,
+                                            chunk.gpu_roots,
+                                            ref_body_world,
+                                            frame_to_world,
+                                            align_delta,
+                                            draw_t0,
+                                            draw_t1,
+                                            color,
+                                            dashed,
+                                            line_overlay_boost);
+                ++result.chunks_drawn;
+                result.covered_ranges.emplace_back(draw_t0, draw_t1);
+            }
+
+            return result;
+        }
+
+        std::vector<std::pair<double, double>> compute_uncovered_ranges(
+                const double t_start_s,
+                const double t_end_s,
+                std::vector<std::pair<double, double>> covered_ranges)
+        {
+            std::vector<std::pair<double, double>> uncovered_ranges;
+            if (!(t_end_s > t_start_s))
+            {
+                return uncovered_ranges;
+            }
+
+            if (covered_ranges.empty())
+            {
+                uncovered_ranges.emplace_back(t_start_s, t_end_s);
+                return uncovered_ranges;
+            }
+
+            std::sort(covered_ranges.begin(),
+                      covered_ranges.end(),
+                      [](const auto &a, const auto &b) {
+                          if (a.first == b.first)
+                          {
+                              return a.second < b.second;
+                          }
+                          return a.first < b.first;
+                      });
+
+            constexpr double kTimeEpsilonS = 1.0e-6;
+            double cursor_t_s = t_start_s;
+            for (const auto &[covered_t0_s, covered_t1_s] : covered_ranges)
+            {
+                if (!(covered_t1_s > covered_t0_s))
+                {
+                    continue;
+                }
+
+                const double clamped_t0_s = std::max(covered_t0_s, t_start_s);
+                const double clamped_t1_s = std::min(covered_t1_s, t_end_s);
+                if (!(clamped_t1_s > clamped_t0_s))
+                {
+                    continue;
+                }
+
+                if (clamped_t0_s > (cursor_t_s + kTimeEpsilonS))
+                {
+                    uncovered_ranges.emplace_back(cursor_t_s, clamped_t0_s);
+                }
+                cursor_t_s = std::max(cursor_t_s, clamped_t1_s);
+            }
+
+            if (t_end_s > (cursor_t_s + kTimeEpsilonS))
+            {
+                uncovered_ranges.emplace_back(cursor_t_s, t_end_s);
+            }
+
+            return uncovered_ranges;
         }
 
         bool should_rebuild_pick_cache(const PredictionLinePickCache &cache,
@@ -729,6 +872,18 @@ namespace Game
             }
             if (planned_pick_window.valid)
             {
+                const bool has_chunk_assembly =
+                        track->planned_chunk_assembly.valid &&
+                        !track->planned_chunk_assembly.chunks.empty();
+
+                if (active_player_track)
+                {
+                    _orbit_plot_perf.planned_chunk_count =
+                            has_chunk_assembly
+                                    ? static_cast<uint32_t>(track->planned_chunk_assembly.chunks.size())
+                                    : 0;
+                }
+
                 if (direct_world_polyline)
                 {
                     Draw::draw_polyline_window(draw_ctx,
@@ -738,6 +893,84 @@ namespace Game
                                                planned_pick_window.t1_s,
                                                track_color_plan,
                                                _prediction_draw_config.draw_planned_as_dashed);
+                }
+                else if (use_persistent_gpu_roots && has_chunk_assembly)
+                {
+                    // Chunk assembly path: enqueue per-chunk GPU root batches
+                    // so that newly arrived preview chunks render immediately.
+                    const ChunkAssemblyDrawResult chunk_draw_result = enqueue_chunk_assembly_planned(
+                            orbit_plot,
+                            track->planned_chunk_assembly,
+                            ref_body_world,
+                            frame_to_world,
+                            align_delta,
+                            planned_pick_window.t0_s,
+                            planned_pick_window.t1_s,
+                            track_color_plan,
+                            _prediction_draw_config.draw_planned_as_dashed,
+                            draw_ctx.line_overlay_boost,
+                            kMaxPlannedChunkGpuRootBuildsPerFrame);
+
+                    if (active_player_track)
+                    {
+                        _orbit_plot_perf.planned_chunks_drawn = chunk_draw_result.chunks_drawn;
+                    }
+
+                    const auto fallback_ranges = compute_uncovered_ranges(
+                            planned_pick_window.t0_s,
+                            planned_pick_window.t1_s,
+                            chunk_draw_result.covered_ranges);
+                    if (!fallback_ranges.empty())
+                    {
+                        const auto draw_fallback_range = [&](const double fallback_t0_s, const double fallback_t1_s) {
+                            if (!(fallback_t1_s > fallback_t0_s))
+                            {
+                                return;
+                            }
+
+                            if (track->cache.gpu_roots_frame_planned && !track->cache.gpu_roots_frame_planned->empty())
+                            {
+                                enqueue_cached_orbit_window(orbit_plot,
+                                                            track->cache.gpu_roots_frame_planned,
+                                                            ref_body_world,
+                                                            frame_to_world,
+                                                            align_delta,
+                                                            fallback_t0_s,
+                                                            fallback_t1_s,
+                                                            track_color_plan,
+                                                            _prediction_draw_config.draw_planned_as_dashed,
+                                                            draw_ctx.line_overlay_boost);
+                            }
+                            else if (use_planned_adaptive_curve)
+                            {
+                                Draw::draw_adaptive_curve_window(draw_ctx,
+                                                                 _prediction_draw_config,
+                                                                 _orbit_plot_perf,
+                                                                 track->cache.render_curve_frame_planned,
+                                                                 fallback_t0_s,
+                                                                 fallback_t1_s,
+                                                                 track_color_plan,
+                                                                 _prediction_draw_config.draw_planned_as_dashed);
+                            }
+                            else
+                            {
+                                Draw::draw_orbit_window(identity_frame_transform ? draw_ctx : world_basis_draw_ctx,
+                                                        _prediction_draw_config,
+                                                        _orbit_plot_perf,
+                                                        identity_frame_transform ? *traj_planned_segments
+                                                                                 : get_planned_segments_world_basis(),
+                                                        fallback_t0_s,
+                                                        fallback_t1_s,
+                                                        track_color_plan,
+                                                        _prediction_draw_config.draw_planned_as_dashed);
+                            }
+                        };
+
+                        for (const auto &[fallback_t0_s, fallback_t1_s] : fallback_ranges)
+                        {
+                            draw_fallback_range(fallback_t0_s, fallback_t1_s);
+                        }
+                    }
                 }
                 else if (use_persistent_gpu_roots && track->cache.gpu_roots_frame_planned &&
                          !track->cache.gpu_roots_frame_planned->empty())
