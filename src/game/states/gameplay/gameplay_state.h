@@ -146,9 +146,21 @@ namespace Game
         double prediction_future_window_s(PredictionSubjectKey key) const;
         double maneuver_plan_preview_window_s() const;
         double maneuver_post_node_coverage_s() const;
+        double prediction_display_window_s(PredictionSubjectKey key,
+                                           double now_s,
+                                           bool with_maneuvers) const;
+        double prediction_preview_patch_window_s(const PredictionTrackState &track,
+                                                 double now_s,
+                                                 bool with_maneuvers) const;
+        double prediction_required_window_s(const PredictionTrackState &track,
+                                            double now_s,
+                                            bool with_maneuvers) const;
         double prediction_required_window_s(PredictionSubjectKey key,
                                             double now_s,
                                             bool with_maneuvers) const;
+        void refresh_prediction_preview_anchor(PredictionTrackState &track,
+                                               double now_s,
+                                               bool with_maneuvers);
         PredictionTrackState *find_prediction_track(PredictionSubjectKey key);
         const PredictionTrackState *find_prediction_track(PredictionSubjectKey key) const;
         PredictionTrackState *active_prediction_track();

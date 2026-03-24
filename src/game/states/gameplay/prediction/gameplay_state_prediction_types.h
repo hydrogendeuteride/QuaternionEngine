@@ -316,6 +316,45 @@ namespace Game
         }
     };
 
+    enum class PredictionPreviewRuntimeState : uint8_t
+    {
+        Idle = 0,
+        EnterDrag,
+        DragPreviewPending,
+        PreviewStreaming,
+        AwaitFullRefine,
+    };
+
+    struct PreviewAnchorCache
+    {
+        bool valid{false};
+        int anchor_node_id{-1};
+        double anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
+        uint64_t baseline_generation_id{0};
+        uint64_t upstream_maneuver_hash{0};
+        orbitsim::State anchor_state_inertial{};
+        glm::dmat3 gizmo_basis_snapshot{1.0};
+        orbitsim::TrajectoryFrameSpec display_frame_snapshot{};
+        std::vector<int> downstream_maneuver_node_ids{};
+        double patch_window_s{0.0};
+        double request_window_s{0.0};
+
+        void clear()
+        {
+            valid = false;
+            anchor_node_id = -1;
+            anchor_time_s = std::numeric_limits<double>::quiet_NaN();
+            baseline_generation_id = 0;
+            upstream_maneuver_hash = 0;
+            anchor_state_inertial = {};
+            gizmo_basis_snapshot = glm::dmat3(1.0);
+            display_frame_snapshot = {};
+            downstream_maneuver_node_ids.clear();
+            patch_window_s = 0.0;
+            request_window_s = 0.0;
+        }
+    };
+
     struct PredictionTrackState
     {
         PredictionSubjectKey key{};
@@ -327,6 +366,11 @@ namespace Game
         bool derived_request_pending{false};
         OrbitPredictionService::SolveQuality pending_solve_quality{OrbitPredictionService::SolveQuality::Full};
         bool invalidated_while_pending{false};
+        PredictionPreviewRuntimeState preview_state{PredictionPreviewRuntimeState::Idle};
+        PreviewAnchorCache preview_anchor{};
+        double preview_entered_at_s{std::numeric_limits<double>::quiet_NaN()};
+        double preview_last_anchor_refresh_at_s{std::numeric_limits<double>::quiet_NaN()};
+        double preview_last_request_at_s{std::numeric_limits<double>::quiet_NaN()};
         bool supports_maneuvers{false};
         bool is_celestial{false};
         orbitsim::BodyId auto_primary_body_id{orbitsim::kInvalidBodyId};
@@ -343,6 +387,11 @@ namespace Game
             derived_request_pending = false;
             pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             invalidated_while_pending = false;
+            preview_state = PredictionPreviewRuntimeState::Idle;
+            preview_anchor.clear();
+            preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
+            preview_last_anchor_refresh_at_s = std::numeric_limits<double>::quiet_NaN();
+            preview_last_request_at_s = std::numeric_limits<double>::quiet_NaN();
             auto_primary_body_id = orbitsim::kInvalidBodyId;
             solver_ms_last = 0.0;
             solver_diagnostics = {};
