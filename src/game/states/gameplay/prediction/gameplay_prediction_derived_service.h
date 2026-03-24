@@ -37,7 +37,9 @@ namespace Game
             uint64_t generation_id{0};
             bool valid{false};
             bool base_frame_reused{false};
+            bool generation_complete{true};
             OrbitPredictionService::SolveQuality solve_quality{OrbitPredictionService::SolveQuality::Full};
+            OrbitPredictionService::PublishStage publish_stage{OrbitPredictionService::PublishStage::Full};
             OrbitPredictionDerivedDiagnostics diagnostics{};
             OrbitPredictionCache cache{};
         };

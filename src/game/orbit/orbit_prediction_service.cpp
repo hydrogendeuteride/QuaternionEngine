@@ -16,6 +16,24 @@
 
 namespace Game
 {
+    namespace
+    {
+        OrbitPredictionService::PublishedChunk make_published_chunk(const uint32_t chunk_id,
+                                                                    const OrbitPredictionService::ChunkQualityState quality_state,
+                                                                    const double t0_s,
+                                                                    const double t1_s,
+                                                                    const bool includes_planned_path)
+        {
+            OrbitPredictionService::PublishedChunk chunk{};
+            chunk.chunk_id = chunk_id;
+            chunk.quality_state = quality_state;
+            chunk.t0_s = t0_s;
+            chunk.t1_s = t1_s;
+            chunk.includes_planned_path = includes_planned_path;
+            return chunk;
+        }
+    } // namespace
+
     OrbitPredictionService::OrbitPredictionService()
     {
         // Use a small worker pool so independent visible tracks can solve in parallel.
@@ -371,6 +389,23 @@ namespace Game
                generation_id >= latest_it->second;
     }
 
+    bool OrbitPredictionService::publish_completed_result(const PendingJob &job, Result result)
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        if (!_running)
+        {
+            return false;
+        }
+
+        if (!should_publish_result(job, _request_epoch, _latest_requested_generation_by_track))
+        {
+            return false;
+        }
+
+        _completed.push_back(std::move(result));
+        return true;
+    }
+
     void OrbitPredictionService::worker_loop()
     {
         while (true)
@@ -402,48 +437,18 @@ namespace Game
             }
 
             // Run the expensive simulation outside the lock so request() stays responsive.
-            Result result = compute_prediction(job.generation_id, job.request, job.request_epoch);
-
-            {
-                std::lock_guard<std::mutex> lock(_mutex);
-                if (!_running)
-                {
-                    return;
-                }
-
-                if (!should_publish_result(job, _request_epoch, _latest_requested_generation_by_track))
-                {
-                    continue;
-                }
-
-                _completed.push_back(std::move(result));
-            }
+            compute_prediction(job);
         }
     }
 
-    OrbitPredictionService::Result OrbitPredictionService::compute_prediction(const uint64_t generation_id,
-                                                                              const Request &request,
-                                                                              const uint64_t request_epoch)
+    void OrbitPredictionService::compute_prediction(const PendingJob &job)
     {
-        Result out{};
-        struct ScopedComputeTimer
-        {
-            Result *result{nullptr};
-            std::chrono::steady_clock::time_point start{};
-            ~ScopedComputeTimer()
-            {
-                if (!result)
-                {
-                    return;
-                }
-                result->compute_time_ms =
-                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-            }
-        };
-        ScopedComputeTimer timer{};
-        timer.result = &out;
-        timer.start = std::chrono::steady_clock::now();
+        const uint64_t generation_id = job.generation_id;
+        const Request &request = job.request;
+        const uint64_t request_epoch = job.request_epoch;
 
+        const std::chrono::steady_clock::time_point compute_start = std::chrono::steady_clock::now();
+        Result out{};
         out.generation_id = generation_id;
         out.track_id = request.track_id;
         out.build_time_s = request.sim_time_s;
@@ -454,14 +459,23 @@ namespace Game
                                        request_epoch]() {
             return !should_continue_job(track_id, generation_id, request_epoch);
         };
-        const auto fail = [&out](const Status status) -> Result {
-            out.diagnostics.status = status;
-            return out;
+        const auto elapsed_ms = [&compute_start]() {
+            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compute_start).count();
         };
-        const auto cancel = [&out]() -> Result {
+        const auto publish = [this, &job, &elapsed_ms](Result result) {
+            result.compute_time_ms = elapsed_ms();
+            return publish_completed_result(job, std::move(result));
+        };
+        const auto fail = [&out, &publish](const Status status) {
+            out.diagnostics.status = status;
+            publish(out);
+            return;
+        };
+        const auto cancel = [&out, &publish]() {
             out.diagnostics.cancelled = true;
             out.diagnostics.status = Status::Cancelled;
-            return out;
+            publish(out);
+            return;
         };
         const auto sync_stage_counts = [&out]() {
             out.diagnostics.ephemeris_segment_count = out.diagnostics.ephemeris.accepted_segments;
@@ -472,7 +486,8 @@ namespace Game
         // Invalid inputs produce an invalid result rather than throwing on the worker thread.
         if (!std::isfinite(request.sim_time_s))
         {
-            return fail(Status::InvalidInput);
+            fail(Status::InvalidInput);
+            return;
         }
 
         std::optional<EphemerisSamplingSpec> spacecraft_sampling_spec{};
@@ -481,7 +496,8 @@ namespace Game
             spacecraft_sampling_spec = build_ephemeris_sampling_spec(request);
             if (!spacecraft_sampling_spec->valid)
             {
-                return fail(Status::InvalidSamplingSpec);
+                fail(Status::InvalidSamplingSpec);
+                return;
             }
         }
 
@@ -501,12 +517,14 @@ namespace Game
         orbitsim::GameSimulation sim(sim_config);
         if (!sim.set_time_s(request.sim_time_s))
         {
-            return fail(Status::InvalidInput);
+            fail(Status::InvalidInput);
+            return;
         }
 
         if (cancel_requested())
         {
-            return cancel();
+            cancel();
+            return;
         }
 
         for (const orbitsim::MassiveBody &body : request.massive_bodies)
@@ -517,13 +535,15 @@ namespace Game
                         : sim.create_body(body);
             if (!body_handle.valid())
             {
-                return fail(Status::InvalidSubject);
+                fail(Status::InvalidSubject);
+                return;
             }
         }
 
         if (cancel_requested())
         {
-            return cancel();
+            cancel();
+            return;
         }
 
         out.massive_bodies = sim.massive_bodies();
@@ -533,20 +553,23 @@ namespace Game
         {
             if (request.subject_body_id == orbitsim::kInvalidBodyId)
             {
-                return fail(Status::InvalidSubject);
+                fail(Status::InvalidSubject);
+                return;
             }
 
             const orbitsim::MassiveBody *subject_sim = sim.body_by_id(request.subject_body_id);
             if (!subject_sim)
             {
-                return fail(Status::InvalidSubject);
+                fail(Status::InvalidSubject);
+                return;
             }
 
             const CelestialPredictionSamplingSpec sampling_spec =
                     build_celestial_prediction_sampling_spec(request, *subject_sim);
             if (!sampling_spec.valid)
             {
-                return fail(Status::InvalidSamplingSpec);
+                fail(Status::InvalidSamplingSpec);
+                return;
             }
 
             SharedCelestialEphemeris shared_ephemeris = request.shared_ephemeris;
@@ -567,18 +590,21 @@ namespace Game
             }
             if (!shared_ephemeris || shared_ephemeris->empty())
             {
-                return fail(Status::EphemerisUnavailable);
+                fail(Status::EphemerisUnavailable);
+                return;
             }
             if (!validate_ephemeris_continuity(*shared_ephemeris))
             {
-                return fail(Status::ContinuityFailed);
+                fail(Status::ContinuityFailed);
+                return;
             }
             out.diagnostics.ephemeris = ephemeris_diag;
             sync_stage_counts();
 
             if (cancel_requested())
             {
-                return cancel();
+                cancel();
+                return;
             }
 
             constexpr std::size_t kCelestialUISampleCount = 2'000;
@@ -590,18 +616,21 @@ namespace Game
                                               celestial_sample_count);
             if (traj_inertial.size() < 2)
             {
-                return fail(Status::TrajectorySamplesUnavailable);
+                fail(Status::TrajectorySamplesUnavailable);
+                return;
             }
 
             std::vector<orbitsim::TrajectorySegment> traj_segments_inertial =
                     trajectory_segments_from_body_ephemeris(*shared_ephemeris, subject_sim->id);
             if (traj_segments_inertial.empty())
             {
-                return fail(Status::TrajectorySegmentsUnavailable);
+                fail(Status::TrajectorySegmentsUnavailable);
+                return;
             }
             if (!validate_trajectory_segment_continuity(traj_segments_inertial))
             {
-                return fail(Status::ContinuityFailed);
+                fail(Status::ContinuityFailed);
+                return;
             }
 
             out.shared_ephemeris = shared_ephemeris;
@@ -613,7 +642,8 @@ namespace Game
             out.trajectory_segments_inertial = std::move(traj_segments_inertial);
             out.valid = true;
             out.diagnostics.status = Status::Success;
-            return out;
+            publish(std::move(out));
+            return;
         }
 
         // Spacecraft route: build a transient ship state, then predict inertial baseline and planned trajectories.
@@ -621,7 +651,8 @@ namespace Game
         const glm::dvec3 ship_bary_vel_mps = request.ship_bary_velocity_mps;
         if (!finite_vec3(ship_bary_pos_m) || !finite_vec3(ship_bary_vel_mps))
         {
-            return fail(Status::InvalidInput);
+            fail(Status::InvalidInput);
+            return;
         }
 
         const EphemerisSamplingSpec sampling_spec = *spacecraft_sampling_spec;
@@ -633,7 +664,8 @@ namespace Game
         const auto ship_h = sim.create_spacecraft(ship_sc);
         if (!ship_h.valid())
         {
-            return fail(Status::InvalidSubject);
+            fail(Status::InvalidSubject);
+            return;
         }
 
         sim.maneuver_plan() = orbitsim::ManeuverPlan{};
@@ -656,18 +688,21 @@ namespace Game
         }
         if (!shared_ephemeris || shared_ephemeris->empty())
         {
-            return fail(Status::EphemerisUnavailable);
+            fail(Status::EphemerisUnavailable);
+            return;
         }
         if (!validate_ephemeris_continuity(*shared_ephemeris))
         {
-            return fail(Status::ContinuityFailed);
+            fail(Status::ContinuityFailed);
+            return;
         }
         out.diagnostics.ephemeris = ephemeris_diag;
         sync_stage_counts();
 
         if (cancel_requested())
         {
-            return cancel();
+            cancel();
+            return;
         }
         const orbitsim::CelestialEphemeris &eph = *shared_ephemeris;
         const std::optional<ReusableBaselineCacheEntry> reusable_baseline =
@@ -703,11 +738,13 @@ namespace Game
                     orbitsim::predict_spacecraft_trajectory_segments_adaptive(sim, eph, ship_h.id, segment_opt, &base_diag);
             if (traj_segments_inertial_baseline.empty())
             {
-                return fail(Status::TrajectorySegmentsUnavailable);
+                fail(Status::TrajectorySegmentsUnavailable);
+                return;
             }
             if (!validate_trajectory_segment_continuity(traj_segments_inertial_baseline))
             {
-                return fail(Status::ContinuityFailed);
+                fail(Status::ContinuityFailed);
+                return;
             }
             out.diagnostics.trajectory_base = make_stage_diagnostics_from_adaptive(base_diag, horizon_s);
             out.diagnostics.trajectory_base.accepted_segments = traj_segments_inertial_baseline.size();
@@ -716,7 +753,8 @@ namespace Game
 
             if (cancel_requested())
             {
-                return cancel();
+                cancel();
+                return;
             }
 
             const std::size_t baseline_sample_count =
@@ -725,14 +763,16 @@ namespace Game
                     resample_segments_uniform(traj_segments_inertial_baseline, baseline_sample_count);
             if (traj_inertial_baseline.size() < 2)
             {
-                return fail(Status::TrajectorySamplesUnavailable);
+                fail(Status::TrajectorySamplesUnavailable);
+                return;
             }
             out.diagnostics.trajectory_sample_count = traj_inertial_baseline.size();
             sync_stage_counts();
 
             if (cancel_requested())
             {
-                return cancel();
+                cancel();
+                return;
             }
 
             out.shared_ephemeris = shared_ephemeris;
@@ -746,6 +786,454 @@ namespace Game
             std::stable_sort(maneuver_impulses.begin(),
                              maneuver_impulses.end(),
                              [](const ManeuverImpulse &a, const ManeuverImpulse &b) { return a.t_s < b.t_s; });
+
+            const auto apply_maneuver_impulse_to_spacecraft = [&](orbitsim::Spacecraft &spacecraft,
+                                                                  const ManeuverImpulse &src,
+                                                                  std::vector<ManeuverNodePreview> *out_previews,
+                                                                  std::vector<PlannedSegmentBoundaryState> *out_boundaries)
+                    -> bool {
+                if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rtn_mps))
+                {
+                    return true;
+                }
+
+                ManeuverNodePreview preview{};
+                preview.node_id = src.node_id;
+                preview.t_s = src.t_s;
+
+                const orbitsim::State pre_burn_state = spacecraft.state;
+                const bool have_preview = build_maneuver_preview(spacecraft.state, src.t_s, preview);
+                if (have_preview && out_previews)
+                {
+                    out_previews->push_back(preview);
+                }
+
+                if (have_preview)
+                {
+                    std::optional<std::size_t> primary_index = orbitsim::body_index_for_id(out.massive_bodies, src.primary_body_id);
+                    if (!primary_index.has_value())
+                    {
+                        primary_index = orbitsim::auto_select_primary_index(
+                                out.massive_bodies,
+                                preview.inertial_position_m,
+                                [&eph, time_s = src.t_s](const std::size_t i) -> orbitsim::Vec3 {
+                                    return eph.body_position_at(i, time_s);
+                                },
+                                sim.config().softening_length_m);
+                    }
+
+                    if (primary_index.has_value() && *primary_index < out.massive_bodies.size())
+                    {
+                        const orbitsim::Vec3 dv_inertial_mps = orbitsim::rtn_vector_to_inertial(
+                                eph,
+                                out.massive_bodies,
+                                *primary_index,
+                                src.t_s,
+                                preview.inertial_position_m,
+                                preview.inertial_velocity_mps,
+                                src.dv_rtn_mps);
+                        if (finite_vec3(dv_inertial_mps))
+                        {
+                            spacecraft.state.velocity_mps += dv_inertial_mps;
+                        }
+                    }
+                }
+
+                if (out_boundaries)
+                {
+                    append_or_merge_planned_boundary_state(
+                            *out_boundaries,
+                            src.t_s,
+                            pre_burn_state,
+                            spacecraft.state);
+                }
+                return true;
+            };
+
+            struct PlannedSolveOutput
+            {
+                std::vector<orbitsim::TrajectorySegment> segments{};
+                std::vector<orbitsim::TrajectorySample> samples{};
+                std::vector<ManeuverNodePreview> previews{};
+                AdaptiveStageDiagnostics diagnostics{};
+                Status status{Status::Success};
+            };
+
+            const auto resolve_preview_patch_anchor_state = [&](const std::vector<ManeuverImpulse> &source_impulses,
+                                                                orbitsim::State &out_anchor_state) -> bool {
+                out_anchor_state = request.preview_patch.anchor_state_inertial;
+                if (!request_uses_preview_patch(request))
+                {
+                    return finite_state(out_anchor_state);
+                }
+
+                orbitsim::Spacecraft preview_spacecraft = ship_sc;
+                preview_spacecraft.id = ship_h.id;
+                double preview_time_s = request.sim_time_s;
+                const double anchor_time_s = request.preview_patch.anchor_time_s;
+                const orbitsim::SpacecraftStateLookup empty_lookup{};
+                constexpr double kAnchorTimeEpsilonS = 1.0e-9;
+
+                for (const ManeuverImpulse &src : source_impulses)
+                {
+                    if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rtn_mps))
+                    {
+                        continue;
+                    }
+
+                    if ((src.t_s + kAnchorTimeEpsilonS) >= anchor_time_s)
+                    {
+                        break;
+                    }
+
+                    if (src.t_s > preview_time_s)
+                    {
+                        preview_spacecraft = orbitsim::detail::propagate_spacecraft_in_ephemeris(
+                                preview_spacecraft,
+                                out.massive_bodies,
+                                eph,
+                                orbitsim::ManeuverPlan{},
+                                sim.config().gravitational_constant,
+                                sim.config().softening_length_m,
+                                sim.config().spacecraft_integrator,
+                                preview_time_s,
+                                src.t_s - preview_time_s,
+                                empty_lookup);
+                        preview_time_s = src.t_s;
+                    }
+
+                    if (!apply_maneuver_impulse_to_spacecraft(preview_spacecraft, src, nullptr, nullptr))
+                    {
+                        return false;
+                    }
+                }
+
+                if (anchor_time_s > preview_time_s)
+                {
+                    preview_spacecraft = orbitsim::detail::propagate_spacecraft_in_ephemeris(
+                            preview_spacecraft,
+                            out.massive_bodies,
+                            eph,
+                            orbitsim::ManeuverPlan{},
+                            sim.config().gravitational_constant,
+                            sim.config().softening_length_m,
+                            sim.config().spacecraft_integrator,
+                            preview_time_s,
+                            anchor_time_s - preview_time_s,
+                            empty_lookup);
+                }
+
+                out_anchor_state = preview_spacecraft.state;
+                return finite_state(out_anchor_state);
+            };
+
+            const auto solve_planned_window = [&](const double start_time_s,
+                                                  const orbitsim::State &start_state,
+                                                  const double duration_s,
+                                                  const std::vector<ManeuverImpulse> &source_impulses)
+                    -> PlannedSolveOutput {
+                PlannedSolveOutput planned{};
+                if (!(duration_s > 0.0) || !std::isfinite(start_time_s) || !finite_state(start_state))
+                {
+                    planned.status = Status::InvalidInput;
+                    return planned;
+                }
+
+                std::vector<ManeuverImpulse> stage_impulses;
+                stage_impulses.reserve(source_impulses.size());
+                const double stage_end_s = start_time_s + duration_s;
+                for (const ManeuverImpulse &impulse : source_impulses)
+                {
+                    if (!std::isfinite(impulse.t_s) || !finite_vec3(impulse.dv_rtn_mps))
+                    {
+                        continue;
+                    }
+                    if (impulse.t_s < start_time_s || impulse.t_s > stage_end_s)
+                    {
+                        continue;
+                    }
+                    stage_impulses.push_back(impulse);
+                }
+
+                OrbitPredictionService::Request stage_request = request;
+                stage_request.sim_time_s = start_time_s;
+                stage_request.future_window_s = duration_s;
+                stage_request.preview_patch = {};
+                stage_request.maneuver_impulses = stage_impulses;
+
+                const OrbitPredictionService::EphemerisSamplingSpec stage_sampling_spec{
+                        .valid = true,
+                        .horizon_s = duration_s,
+                };
+                const orbitsim::AdaptiveSegmentOptions stage_segment_opt =
+                        build_spacecraft_adaptive_segment_options(stage_request, stage_sampling_spec, cancel_requested);
+
+                orbitsim::GameSimulation planned_sim(sim_config);
+                if (!planned_sim.set_time_s(start_time_s))
+                {
+                    planned.status = Status::InvalidInput;
+                    return planned;
+                }
+
+                for (const orbitsim::MassiveBody &body : out.massive_bodies)
+                {
+                    orbitsim::MassiveBody body_at_start = body;
+                    std::size_t eph_body_index = 0;
+                    if (body.id != orbitsim::kInvalidBodyId && eph.body_index_for_id(body.id, &eph_body_index))
+                    {
+                        body_at_start.state = eph.body_state_at(eph_body_index, start_time_s);
+                    }
+
+                    const auto body_handle =
+                            (body_at_start.id != orbitsim::kInvalidBodyId)
+                                ? planned_sim.create_body_with_id(body_at_start.id, body_at_start)
+                                : planned_sim.create_body(body_at_start);
+                    if (!body_handle.valid())
+                    {
+                        planned.status = Status::InvalidSubject;
+                        return planned;
+                    }
+                }
+
+                orbitsim::Spacecraft planned_ship{};
+                planned_ship.state = start_state;
+                planned_ship.dry_mass_kg = 1.0;
+                const auto planned_ship_h = planned_sim.create_spacecraft(planned_ship);
+                if (!planned_ship_h.valid())
+                {
+                    planned.status = Status::InvalidSubject;
+                    return planned;
+                }
+
+                orbitsim::ManeuverPlan plan{};
+                plan.impulses.reserve(stage_impulses.size());
+                planned.previews.reserve(stage_impulses.size());
+                std::vector<PlannedSegmentBoundaryState> planned_boundary_states;
+                planned_boundary_states.reserve(stage_impulses.size());
+                orbitsim::Spacecraft preview_spacecraft = planned_ship;
+                preview_spacecraft.id = planned_ship_h.id;
+                double preview_time_s = start_time_s;
+                const orbitsim::SpacecraftStateLookup empty_lookup{};
+
+                for (const ManeuverImpulse &src : stage_impulses)
+                {
+                    if (cancel_requested())
+                    {
+                        planned.status = Status::Cancelled;
+                        return planned;
+                    }
+
+                    if (src.t_s > preview_time_s)
+                    {
+                        preview_spacecraft = orbitsim::detail::propagate_spacecraft_in_ephemeris(
+                                preview_spacecraft,
+                                planned_sim.massive_bodies(),
+                                eph,
+                                orbitsim::ManeuverPlan{},
+                                planned_sim.config().gravitational_constant,
+                                planned_sim.config().softening_length_m,
+                                planned_sim.config().spacecraft_integrator,
+                                preview_time_s,
+                                src.t_s - preview_time_s,
+                                empty_lookup);
+                        preview_time_s = src.t_s;
+                    }
+
+                    orbitsim::ImpulseSegment impulse{};
+                    impulse.t_s = src.t_s;
+                    impulse.primary_body_id = src.primary_body_id;
+                    impulse.dv_rtn_mps = src.dv_rtn_mps;
+                    impulse.spacecraft_id = planned_ship_h.id;
+                    plan.impulses.push_back(impulse);
+
+                    if (!apply_maneuver_impulse_to_spacecraft(
+                                preview_spacecraft,
+                                src,
+                                &planned.previews,
+                                &planned_boundary_states))
+                    {
+                        planned.status = Status::InvalidInput;
+                        return planned;
+                    }
+                }
+
+                orbitsim::sort_impulses_by_time(plan);
+                planned_sim.maneuver_plan() = std::move(plan);
+
+                orbitsim::AdaptiveSegmentDiagnostics planned_diag{};
+                planned.segments = orbitsim::predict_spacecraft_trajectory_segments_adaptive(
+                        planned_sim,
+                        eph,
+                        planned_ship_h.id,
+                        stage_segment_opt,
+                        &planned_diag);
+                if (!planned_boundary_states.empty())
+                {
+                    std::vector<orbitsim::TrajectorySegment> split_planned =
+                            split_trajectory_segments_at_known_boundaries(planned.segments, planned_boundary_states);
+                    if (!split_planned.empty() && validate_trajectory_segment_continuity(split_planned))
+                    {
+                        planned.segments = std::move(split_planned);
+                    }
+                }
+
+                if (planned.segments.empty())
+                {
+                    planned.status = Status::TrajectorySegmentsUnavailable;
+                    return planned;
+                }
+                if (!validate_trajectory_segment_continuity(planned.segments))
+                {
+                    planned.status = Status::ContinuityFailed;
+                    return planned;
+                }
+
+                planned.diagnostics = make_stage_diagnostics_from_adaptive(planned_diag, duration_s);
+                planned.diagnostics.accepted_segments = planned.segments.size();
+                planned.diagnostics.covered_duration_s = prediction_segment_span_s(planned.segments);
+
+                const std::size_t planned_sample_count = prediction_sample_budget(stage_request, planned.segments.size());
+                planned.samples = resample_segments_uniform(planned.segments, planned_sample_count);
+                if (planned.samples.size() < 2)
+                {
+                    planned.status = Status::TrajectorySamplesUnavailable;
+                    return planned;
+                }
+
+                return planned;
+            };
+
+            const bool use_preview_patch = request_uses_preview_patch(request);
+            if (use_preview_patch)
+            {
+                const double full_window_s = preview_patch_remaining_window_s(request);
+                const double fp0_window_s = preview_fp0_window_s(request);
+                if (full_window_s > 0.0)
+                {
+                    orbitsim::State preview_patch_anchor_state = request.preview_patch.anchor_state_inertial;
+                    if (!resolve_preview_patch_anchor_state(maneuver_impulses, preview_patch_anchor_state))
+                    {
+                        fail(Status::InvalidInput);
+                        return;
+                    }
+
+                    std::vector<ManeuverImpulse> patch_maneuver_impulses;
+                    patch_maneuver_impulses.reserve(maneuver_impulses.size());
+                    constexpr double kPatchAnchorTimeEpsilonS = 1.0e-9;
+                    for (const ManeuverImpulse &src : maneuver_impulses)
+                    {
+                        if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rtn_mps))
+                        {
+                            continue;
+                        }
+                        if ((src.t_s + kPatchAnchorTimeEpsilonS) < request.preview_patch.anchor_time_s)
+                        {
+                            continue;
+                        }
+                        patch_maneuver_impulses.push_back(src);
+                    }
+
+                    const PlannedSolveOutput fp0_planned =
+                            solve_planned_window(request.preview_patch.anchor_time_s,
+                                                 preview_patch_anchor_state,
+                                                 fp0_window_s > 0.0 ? fp0_window_s : full_window_s,
+                                                 patch_maneuver_impulses);
+                    if (fp0_planned.status != Status::Success)
+                    {
+                        fail(fp0_planned.status);
+                        return;
+                    }
+
+                    Result fp0_result = out;
+                    fp0_result.generation_complete = full_window_s <= (fp0_window_s + kContinuityMinTimeEpsilonS);
+                    fp0_result.publish_stage = fp0_result.generation_complete ? PublishStage::FastPreviewFP1
+                                                                              : PublishStage::FastPreviewFP0;
+                    fp0_result.diagnostics.trajectory_planned = fp0_planned.diagnostics;
+                    fp0_result.diagnostics.trajectory_sample_count_planned = fp0_planned.samples.size();
+                    fp0_result.trajectory_segments_inertial_planned = fp0_planned.segments;
+                    fp0_result.trajectory_inertial_planned = fp0_planned.samples;
+                    fp0_result.maneuver_previews = fp0_planned.previews;
+                    fp0_result.published_chunks.clear();
+
+                    const double chunk_window_s = std::max(0.0, request.preview_patch.patch_window_s);
+                    const double chunk0_t0_s = request.preview_patch.anchor_time_s;
+                    const double chunk0_t1_s = std::min(request_end_time_s(request), chunk0_t0_s + chunk_window_s);
+                    if (chunk0_t1_s > chunk0_t0_s)
+                    {
+                        fp0_result.published_chunks.push_back(
+                                make_published_chunk(0u,
+                                                     ChunkQualityState::PreviewPatch,
+                                                     chunk0_t0_s,
+                                                     chunk0_t1_s,
+                                                     true));
+                    }
+
+                    const double chunk1_t0_s = chunk0_t1_s;
+                    const double chunk1_t1_s = std::min(request_end_time_s(request), chunk1_t0_s + chunk_window_s);
+                    if (chunk1_t1_s > chunk1_t0_s)
+                    {
+                        fp0_result.published_chunks.push_back(
+                                make_published_chunk(1u,
+                                                     fp0_result.generation_complete
+                                                             ? ChunkQualityState::Final
+                                                             : ChunkQualityState::PreviewPatch,
+                                                     chunk1_t0_s,
+                                                     chunk1_t1_s,
+                                                     true));
+                    }
+
+                    fp0_result.valid = true;
+                    fp0_result.diagnostics.status = Status::Success;
+                    fp0_result.diagnostics.trajectory_segment_count_planned =
+                            fp0_result.diagnostics.trajectory_planned.accepted_segments;
+                    if (!publish(std::move(fp0_result)))
+                    {
+                        return;
+                    }
+
+                    if (cancel_requested() || full_window_s <= (fp0_window_s + kContinuityMinTimeEpsilonS))
+                    {
+                        return;
+                    }
+
+                    const PlannedSolveOutput final_planned =
+                            solve_planned_window(request.preview_patch.anchor_time_s,
+                                                 preview_patch_anchor_state,
+                                                 full_window_s,
+                                                 patch_maneuver_impulses);
+                    if (final_planned.status != Status::Success)
+                    {
+                        fail(final_planned.status);
+                        return;
+                    }
+
+                    out.generation_complete = true;
+                    out.publish_stage = PublishStage::FastPreviewFP1;
+                    out.diagnostics.trajectory_planned = final_planned.diagnostics;
+                    out.diagnostics.trajectory_sample_count_planned = final_planned.samples.size();
+                    out.trajectory_segments_inertial_planned = final_planned.segments;
+                    out.trajectory_inertial_planned = final_planned.samples;
+                    out.maneuver_previews = final_planned.previews;
+                    out.published_chunks.clear();
+                    const double tail_t0_s =
+                            request.preview_patch.anchor_time_s + std::max(0.0, request.preview_patch.patch_window_s) * 2.0;
+                    const double tail_t1_s = request_end_time_s(request);
+                    if (tail_t1_s > tail_t0_s)
+                    {
+                        out.published_chunks.push_back(
+                                make_published_chunk(2u,
+                                                     ChunkQualityState::Final,
+                                                     tail_t0_s,
+                                                     tail_t1_s,
+                                                     true));
+                    }
+                    out.diagnostics.trajectory_segment_count_planned = out.diagnostics.trajectory_planned.accepted_segments;
+                    out.valid = true;
+                    out.diagnostics.status = Status::Success;
+                    publish(std::move(out));
+                    return;
+                }
+            }
 
             orbitsim::ManeuverPlan plan{};
             plan.impulses.reserve(maneuver_impulses.size());
@@ -762,7 +1250,8 @@ namespace Game
             {
                 if (cancel_requested())
                 {
-                    return cancel();
+                    cancel();
+                    return;
                 }
 
                 if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rtn_mps))
@@ -861,12 +1350,14 @@ namespace Game
             {
                 if (cancel_requested())
                 {
-                    return cancel();
+                    cancel();
+                    return;
                 }
 
                 if (!validate_trajectory_segment_continuity(traj_segments_inertial_planned))
                 {
-                    return fail(Status::ContinuityFailed);
+                    fail(Status::ContinuityFailed);
+                    return;
                 }
                 out.diagnostics.trajectory_planned = make_stage_diagnostics_from_adaptive(planned_diag, horizon_s);
                 out.diagnostics.trajectory_planned.accepted_segments = traj_segments_inertial_planned.size();
@@ -896,6 +1387,7 @@ namespace Game
                                 out.trajectory_segments_inertial);
         out.valid = true;
         out.diagnostics.status = Status::Success;
-        return out;
+        publish(std::move(out));
+        return;
     }
 } // namespace Game

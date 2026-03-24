@@ -58,6 +58,19 @@ namespace Game
             Cancelled,
         };
 
+        enum class PublishStage : uint8_t
+        {
+            Full = 0,
+            FastPreviewFP0,
+            FastPreviewFP1,
+        };
+
+        enum class ChunkQualityState : uint8_t
+        {
+            Final = 0,
+            PreviewPatch,
+        };
+
         struct AdaptiveStageDiagnostics
         {
             double requested_duration_s{0.0};
@@ -106,6 +119,25 @@ namespace Game
             orbitsim::Vec3 dv_rtn_mps{0.0, 0.0, 0.0};
         };
 
+        struct PreviewPatchRequest
+        {
+            bool active{false};
+            bool anchor_state_valid{false};
+            uint64_t baseline_generation_id{0};
+            double anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
+            double patch_window_s{0.0};
+            orbitsim::State anchor_state_inertial{};
+        };
+
+        struct PublishedChunk
+        {
+            uint32_t chunk_id{0};
+            ChunkQualityState quality_state{ChunkQualityState::Final};
+            double t0_s{std::numeric_limits<double>::quiet_NaN()};
+            double t1_s{std::numeric_limits<double>::quiet_NaN()};
+            bool includes_planned_path{false};
+        };
+
         struct Request
         {
             // The worker handles both spacecraft and celestial prediction jobs.
@@ -129,6 +161,7 @@ namespace Game
             double future_window_s{600.0};
             double celestial_ephemeris_dt_s{0.0};
             orbitsim::BodyId preferred_primary_body_id{orbitsim::kInvalidBodyId};
+            PreviewPatchRequest preview_patch{};
             std::vector<ManeuverImpulse> maneuver_impulses;
         };
 
@@ -138,9 +171,12 @@ namespace Game
             uint64_t generation_id{0};
             bool valid{false};
             bool baseline_reused{false};
+            bool generation_complete{true};
             SolveQuality solve_quality{SolveQuality::Full};
+            PublishStage publish_stage{PublishStage::Full};
             double compute_time_ms{0.0};
             Diagnostics diagnostics{};
+            std::vector<PublishedChunk> published_chunks{};
 
             double build_time_s{0.0};
             SharedCelestialEphemeris shared_ephemeris{};
@@ -215,8 +251,8 @@ namespace Game
             Request request{};
         };
 
-        // Execute a single queued prediction request on the worker.
-        Result compute_prediction(uint64_t generation_id, const Request &request, uint64_t request_epoch);
+        // Execute a single queued prediction request on the worker and publish zero or more staged results.
+        void compute_prediction(const PendingJob &job);
         std::optional<ReusableBaselineCacheEntry> find_reusable_baseline(uint64_t track_id, uint64_t request_epoch) const;
         void store_reusable_baseline(uint64_t track_id,
                                      uint64_t generation_id,
@@ -224,6 +260,7 @@ namespace Game
                                      SharedCelestialEphemeris shared_ephemeris,
                                      std::vector<orbitsim::TrajectorySample> trajectory_inertial,
                                      std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial);
+        bool publish_completed_result(const PendingJob &job, Result result);
         // Drop stale results after reset() or when a newer request supersedes the same track.
         static bool should_publish_result(const PendingJob &job,
                                           uint64_t current_request_epoch,
