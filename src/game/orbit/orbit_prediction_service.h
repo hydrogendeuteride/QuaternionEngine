@@ -137,6 +137,7 @@ namespace Game
             uint64_t track_id{0};
             uint64_t generation_id{0};
             bool valid{false};
+            bool baseline_reused{false};
             SolveQuality solve_quality{SolveQuality::Full};
             double compute_time_ms{0.0};
             Diagnostics diagnostics{};

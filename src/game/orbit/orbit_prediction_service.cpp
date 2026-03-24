@@ -693,6 +693,7 @@ namespace Game
             out.trajectory_segments_inertial = reusable_baseline->trajectory_segments_inertial;
             out.trajectory_inertial = reusable_baseline->trajectory_inertial;
             reused_baseline = true;
+            out.baseline_reused = true;
         }
 
         if (!reused_baseline)
