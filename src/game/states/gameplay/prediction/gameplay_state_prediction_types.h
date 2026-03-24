@@ -316,6 +316,71 @@ namespace Game
         }
     };
 
+    // A single chunk of frame-derived planned-path data.  Produced by the
+    // derived service when processing a preview patch publish so that the
+    // renderer (Slice 4) can display individual chunks as they arrive.
+    struct OrbitChunk
+    {
+        uint32_t chunk_id{0};
+        uint64_t generation_id{0};
+        OrbitPredictionService::ChunkQualityState quality_state{OrbitPredictionService::ChunkQualityState::Final};
+        double t0_s{std::numeric_limits<double>::quiet_NaN()};
+        double t1_s{std::numeric_limits<double>::quiet_NaN()};
+
+        // Frame-derived data (built by derived service from inertial segments).
+        std::vector<orbitsim::TrajectorySample> frame_samples;
+        std::vector<orbitsim::TrajectorySegment> frame_segments;
+
+        // Per-chunk render data.
+        OrbitRenderCurve render_curve;
+        std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> gpu_roots;
+
+        bool valid{false};
+
+        void clear()
+        {
+            chunk_id = 0;
+            generation_id = 0;
+            quality_state = OrbitPredictionService::ChunkQualityState::Final;
+            t0_s = std::numeric_limits<double>::quiet_NaN();
+            t1_s = std::numeric_limits<double>::quiet_NaN();
+            frame_samples.clear();
+            frame_segments.clear();
+            render_curve.clear();
+            gpu_roots.reset();
+            valid = false;
+        }
+    };
+
+    // Ordered collection of OrbitChunks covering the planned path.
+    // Chunks are sorted by t0_s and must not overlap.
+    struct PredictionChunkAssembly
+    {
+        uint64_t generation_id{0};
+        std::vector<OrbitChunk> chunks;
+        bool valid{false};
+
+        [[nodiscard]] bool empty() const { return chunks.empty(); }
+        [[nodiscard]] std::size_t size() const { return chunks.size(); }
+
+        [[nodiscard]] double start_time_s() const
+        {
+            return chunks.empty() ? std::numeric_limits<double>::quiet_NaN() : chunks.front().t0_s;
+        }
+
+        [[nodiscard]] double end_time_s() const
+        {
+            return chunks.empty() ? std::numeric_limits<double>::quiet_NaN() : chunks.back().t1_s;
+        }
+
+        void clear()
+        {
+            generation_id = 0;
+            chunks.clear();
+            valid = false;
+        }
+    };
+
     enum class PredictionPreviewRuntimeState : uint8_t
     {
         Idle = 0,
@@ -372,6 +437,7 @@ namespace Game
         double preview_entered_at_s{std::numeric_limits<double>::quiet_NaN()};
         double preview_last_anchor_refresh_at_s{std::numeric_limits<double>::quiet_NaN()};
         double preview_last_request_at_s{std::numeric_limits<double>::quiet_NaN()};
+        PredictionChunkAssembly planned_chunk_assembly{};
         bool supports_maneuvers{false};
         bool is_celestial{false};
         orbitsim::BodyId auto_primary_body_id{orbitsim::kInvalidBodyId};
@@ -394,6 +460,7 @@ namespace Game
             preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
             preview_last_anchor_refresh_at_s = std::numeric_limits<double>::quiet_NaN();
             preview_last_request_at_s = std::numeric_limits<double>::quiet_NaN();
+            planned_chunk_assembly.clear();
             auto_primary_body_id = orbitsim::kInvalidBodyId;
             solver_ms_last = 0.0;
             solver_diagnostics = {};

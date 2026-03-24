@@ -164,19 +164,48 @@ namespace Game
             cache.analysis_cache_body_id = request.analysis_body_id;
             cache.metrics_body_id = request.analysis_body_id;
         }
-        const bool frame_cache_built = reuse_existing_base_frame
-                                               ? PredictionCacheInternal::rebuild_prediction_planned_frame_cache(
-                                                         cache,
-                                                         resolved_frame_spec,
-                                                         request.player_lookup_segments_inertial,
-                                                         cancel_requested,
-                                                         &out.diagnostics)
-                                               : PredictionCacheInternal::rebuild_prediction_frame_cache(
-                                                         cache,
-                                                         resolved_frame_spec,
-                                                         request.player_lookup_segments_inertial,
-                                                         cancel_requested,
-                                                         &out.diagnostics);
+
+        const bool use_chunk_path =
+                reuse_existing_base_frame && !solver.published_chunks.empty();
+        bool frame_cache_built = false;
+        if (use_chunk_path)
+        {
+            frame_cache_built = PredictionCacheInternal::rebuild_prediction_patch_chunks(
+                    out.chunk_assembly,
+                    cache,
+                    solver.published_chunks,
+                    job.generation_id,
+                    resolved_frame_spec,
+                    request.player_lookup_segments_inertial,
+                    cancel_requested,
+                    &out.diagnostics);
+            if (frame_cache_built)
+            {
+                PredictionCacheInternal::flatten_chunk_assembly_to_cache(cache, out.chunk_assembly);
+                cache.resolved_frame_spec = resolved_frame_spec;
+                cache.resolved_frame_spec_valid = true;
+                out.diagnostics.status = PredictionDerivedStatus::Success;
+            }
+        }
+        else if (reuse_existing_base_frame)
+        {
+            frame_cache_built = PredictionCacheInternal::rebuild_prediction_planned_frame_cache(
+                    cache,
+                    resolved_frame_spec,
+                    request.player_lookup_segments_inertial,
+                    cancel_requested,
+                    &out.diagnostics);
+        }
+        else
+        {
+            frame_cache_built = PredictionCacheInternal::rebuild_prediction_frame_cache(
+                    cache,
+                    resolved_frame_spec,
+                    request.player_lookup_segments_inertial,
+                    cancel_requested,
+                    &out.diagnostics);
+        }
+
         if (!frame_cache_built)
         {
             return out;

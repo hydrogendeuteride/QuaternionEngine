@@ -42,6 +42,7 @@ namespace Game
             OrbitPredictionService::PublishStage publish_stage{OrbitPredictionService::PublishStage::Full};
             OrbitPredictionDerivedDiagnostics diagnostics{};
             OrbitPredictionCache cache{};
+            PredictionChunkAssembly chunk_assembly{};
         };
 
         OrbitPredictionDerivedService();
