@@ -66,6 +66,26 @@ namespace
         return segment;
     }
 
+    Game::OrbitChunk make_chunk(const uint32_t chunk_id,
+                                const uint64_t generation_id,
+                                const double t0_s,
+                                const double t1_s,
+                                const double x0_m,
+                                const double x1_m)
+    {
+        Game::OrbitChunk chunk{};
+        chunk.chunk_id = chunk_id;
+        chunk.generation_id = generation_id;
+        chunk.quality_state = Game::OrbitPredictionService::ChunkQualityState::Final;
+        chunk.t0_s = t0_s;
+        chunk.t1_s = t1_s;
+        chunk.frame_samples = {make_sample(t0_s, x0_m), make_sample(t1_s, x1_m)};
+        chunk.frame_segments = {make_segment(t0_s, t1_s, x0_m, x1_m)};
+        chunk.render_curve = Game::OrbitRenderCurve::build(chunk.frame_segments);
+        chunk.valid = true;
+        return chunk;
+    }
+
     Game::OrbitPredictionService::Request make_prediction_request(const double time_s,
                                                                   const double future_window_s = 120.0)
     {
@@ -749,6 +769,105 @@ TEST(GameplayPredictionManeuverTests, ReusedBaseFrameDerivedResultPreservesBaseD
     ASSERT_EQ(state._prediction_tracks.size(), 1u);
     EXPECT_EQ(state._prediction_tracks.front().derived_diagnostics.frame_base.accepted_segments, 11u);
     EXPECT_EQ(state._prediction_tracks.front().derived_diagnostics.status, Game::PredictionDerivedStatus::Success);
+}
+
+TEST(GameplayPredictionManeuverTests, PreviewDerivedResultsAccumulatePlannedChunkAssemblyAcrossStages)
+{
+    Game::GameplayState state{};
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.cache.valid = true;
+    track.cache.generation_id = 4;
+    track.cache.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(30.0, 7'300'000.0)};
+    track.cache.trajectory_segments_inertial = {make_segment(0.0, 30.0, 7'000'000.0, 7'300'000.0)};
+    track.cache.trajectory_frame = track.cache.trajectory_inertial;
+    track.cache.trajectory_segments_frame = track.cache.trajectory_segments_inertial;
+    track.cache.trajectory_inertial_planned = {
+            make_sample(0.0, 7'000'000.0),
+            make_sample(10.0, 7'100'000.0),
+            make_sample(20.0, 7'200'000.0),
+            make_sample(30.0, 7'300'000.0),
+    };
+    track.cache.trajectory_segments_inertial_planned = {
+            make_segment(0.0, 10.0, 7'000'000.0, 7'100'000.0),
+            make_segment(10.0, 20.0, 7'100'000.0, 7'200'000.0),
+            make_segment(20.0, 30.0, 7'200'000.0, 7'300'000.0),
+    };
+    track.cache.trajectory_frame_planned = track.cache.trajectory_inertial_planned;
+    track.cache.trajectory_segments_frame_planned = track.cache.trajectory_segments_inertial_planned;
+    state._prediction_tracks.push_back(track);
+
+    Game::OrbitPredictionDerivedService::Result fp0{};
+    fp0.track_id = state._prediction_tracks.front().key.track_id();
+    fp0.generation_id = 5;
+    fp0.valid = true;
+    fp0.solve_quality = Game::OrbitPredictionService::SolveQuality::FastPreview;
+    fp0.cache.valid = true;
+    fp0.cache.generation_id = 5;
+    fp0.cache.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(30.0, 7'300'000.0)};
+    fp0.cache.trajectory_segments_inertial = {make_segment(0.0, 30.0, 7'000'000.0, 7'300'000.0)};
+    fp0.cache.trajectory_frame = fp0.cache.trajectory_inertial;
+    fp0.cache.trajectory_segments_frame = fp0.cache.trajectory_segments_inertial;
+    fp0.cache.trajectory_inertial_planned = {
+            make_sample(0.0, 7'000'000.0),
+            make_sample(10.0, 7'100'000.0),
+            make_sample(20.0, 7'200'000.0),
+    };
+    fp0.cache.trajectory_segments_inertial_planned = {
+            make_segment(0.0, 10.0, 7'000'000.0, 7'100'000.0),
+            make_segment(10.0, 20.0, 7'100'000.0, 7'200'000.0),
+    };
+    fp0.cache.trajectory_frame_planned = fp0.cache.trajectory_inertial_planned;
+    fp0.cache.trajectory_segments_frame_planned = fp0.cache.trajectory_segments_inertial_planned;
+    fp0.chunk_assembly.valid = true;
+    fp0.chunk_assembly.generation_id = 5;
+    fp0.chunk_assembly.chunks = {
+            make_chunk(0u, 5u, 0.0, 10.0, 7'000'000.0, 7'100'000.0),
+            make_chunk(1u, 5u, 10.0, 20.0, 7'100'000.0, 7'200'000.0),
+    };
+
+    state.apply_completed_prediction_derived_result(std::move(fp0));
+
+    ASSERT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks.size(), 2u);
+    EXPECT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[0].chunk_id, 0u);
+    EXPECT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[1].chunk_id, 1u);
+
+    Game::OrbitPredictionDerivedService::Result fp1{};
+    fp1.track_id = state._prediction_tracks.front().key.track_id();
+    fp1.generation_id = 5;
+    fp1.valid = true;
+    fp1.solve_quality = Game::OrbitPredictionService::SolveQuality::FastPreview;
+    fp1.cache.valid = true;
+    fp1.cache.generation_id = 5;
+    fp1.cache.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(30.0, 7'300'000.0)};
+    fp1.cache.trajectory_segments_inertial = {make_segment(0.0, 30.0, 7'000'000.0, 7'300'000.0)};
+    fp1.cache.trajectory_frame = fp1.cache.trajectory_inertial;
+    fp1.cache.trajectory_segments_frame = fp1.cache.trajectory_segments_inertial;
+    fp1.cache.trajectory_inertial_planned = {
+            make_sample(20.0, 7'200'000.0),
+            make_sample(30.0, 7'300'000.0),
+    };
+    fp1.cache.trajectory_segments_inertial_planned = {
+            make_segment(20.0, 30.0, 7'200'000.0, 7'300'000.0),
+    };
+    fp1.cache.trajectory_frame_planned = fp1.cache.trajectory_inertial_planned;
+    fp1.cache.trajectory_segments_frame_planned = fp1.cache.trajectory_segments_inertial_planned;
+    fp1.chunk_assembly.valid = true;
+    fp1.chunk_assembly.generation_id = 5;
+    fp1.chunk_assembly.chunks = {
+            make_chunk(2u, 5u, 20.0, 30.0, 7'200'000.0, 7'300'000.0),
+    };
+
+    state.apply_completed_prediction_derived_result(std::move(fp1));
+
+    ASSERT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks.size(), 3u);
+    EXPECT_EQ(state._prediction_tracks.front().planned_chunk_assembly.generation_id, 5u);
+    EXPECT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[0].chunk_id, 0u);
+    EXPECT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[1].chunk_id, 1u);
+    EXPECT_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[2].chunk_id, 2u);
+    EXPECT_DOUBLE_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[0].t0_s, 0.0);
+    EXPECT_DOUBLE_EQ(state._prediction_tracks.front().planned_chunk_assembly.chunks[2].t1_s, 30.0);
 }
 
 int main(int argc, char **argv)

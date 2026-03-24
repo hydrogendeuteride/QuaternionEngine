@@ -175,6 +175,65 @@ TEST(PredictionCacheInternalTests, RebuildFrameCacheRejectsDiscontinuousSegments
     EXPECT_EQ(diagnostics.status, Game::PredictionDerivedStatus::ContinuityFailed);
 }
 
+TEST(PredictionCacheInternalTests, RebuildPredictionPatchChunksClipsStraddlingSegmentsAtChunkBoundaries)
+{
+    Game::OrbitPredictionCache cache{};
+    cache.valid = true;
+    cache.trajectory_segments_inertial_planned = {
+            orbitsim::TrajectorySegment{
+                    .t0_s = 0.0,
+                    .dt_s = 20.0,
+                    .start = orbitsim::make_state(orbitsim::Vec3{0.0, 0.0, 0.0}, orbitsim::Vec3{1.0, 0.0, 0.0}),
+                    .end = orbitsim::make_state(orbitsim::Vec3{20.0, 0.0, 0.0}, orbitsim::Vec3{1.0, 0.0, 0.0}),
+                    .flags = 0u,
+            },
+    };
+
+    const std::vector<Game::OrbitPredictionService::PublishedChunk> published_chunks = {
+            Game::OrbitPredictionService::PublishedChunk{
+                    .chunk_id = 0u,
+                    .quality_state = Game::OrbitPredictionService::ChunkQualityState::PreviewPatch,
+                    .t0_s = 0.0,
+                    .t1_s = 10.0,
+                    .includes_planned_path = true,
+            },
+            Game::OrbitPredictionService::PublishedChunk{
+                    .chunk_id = 1u,
+                    .quality_state = Game::OrbitPredictionService::ChunkQualityState::Final,
+                    .t0_s = 10.0,
+                    .t1_s = 20.0,
+                    .includes_planned_path = true,
+            },
+    };
+
+    Game::PredictionChunkAssembly assembly{};
+    Game::OrbitPredictionDerivedDiagnostics diagnostics{};
+    ASSERT_TRUE(Game::PredictionCacheInternal::rebuild_prediction_patch_chunks(
+            assembly,
+            cache,
+            published_chunks,
+            7u,
+            orbitsim::TrajectoryFrameSpec::inertial(),
+            {},
+            {},
+            &diagnostics));
+
+    ASSERT_TRUE(assembly.valid);
+    ASSERT_EQ(assembly.chunks.size(), 2u);
+    EXPECT_DOUBLE_EQ(assembly.chunks[0].frame_segments.front().t0_s, 0.0);
+    EXPECT_DOUBLE_EQ(assembly.chunks[0].frame_segments.front().dt_s, 10.0);
+    EXPECT_DOUBLE_EQ(assembly.chunks[1].frame_segments.front().t0_s, 10.0);
+    EXPECT_DOUBLE_EQ(assembly.chunks[1].frame_segments.front().dt_s, 10.0);
+
+    Game::PredictionCacheInternal::flatten_chunk_assembly_to_cache(cache, assembly);
+    ASSERT_EQ(cache.trajectory_segments_frame_planned.size(), 2u);
+    EXPECT_DOUBLE_EQ(cache.trajectory_segments_frame_planned[0].t0_s, 0.0);
+    EXPECT_DOUBLE_EQ(cache.trajectory_segments_frame_planned[0].dt_s, 10.0);
+    EXPECT_DOUBLE_EQ(cache.trajectory_segments_frame_planned[1].t0_s, 10.0);
+    EXPECT_DOUBLE_EQ(cache.trajectory_segments_frame_planned[1].dt_s, 10.0);
+    EXPECT_EQ(diagnostics.status, Game::PredictionDerivedStatus::Success);
+}
+
 int main(int argc, char **argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
