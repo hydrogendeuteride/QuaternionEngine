@@ -223,7 +223,8 @@ namespace Game
         OrbitPredictionService &operator=(const OrbitPredictionService &) = delete;
 
         // Queue or replace the latest prediction job for a track; work runs on the background thread.
-        void request(Request request);
+        // Returns the assigned generation so runtime can track request ordering.
+        uint64_t request(Request request);
         // Non-blocking poll for the next completed prediction result.
         std::optional<Result> poll_completed();
         // Invalidate queued/in-flight work and clear cached ephemerides.

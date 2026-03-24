@@ -68,11 +68,12 @@ namespace Game
         }
     }
 
-    void OrbitPredictionService::request(Request request)
+    uint64_t OrbitPredictionService::request(Request request)
     {
+        uint64_t generation_id = 0;
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            const uint64_t generation_id = _next_generation_id++;
+            generation_id = _next_generation_id++;
             const uint64_t track_id = request.track_id;
             const uint64_t request_epoch = _request_epoch;
             _latest_requested_generation_by_track[track_id] = generation_id;
@@ -103,6 +104,7 @@ namespace Game
             _pending_jobs.insert(insert_it, std::move(job));
         }
         _cv.notify_one();
+        return generation_id;
     }
 
     std::optional<OrbitPredictionService::Result> OrbitPredictionService::poll_completed()
