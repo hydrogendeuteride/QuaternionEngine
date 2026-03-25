@@ -4,6 +4,17 @@ add_library(vma INTERFACE)
 
 add_library(stb_image INTERFACE)
 
+# Keep fastgltf on the vendored-compatible simdjson path and avoid configure-time downloads.
+set(SIMDJSON_DEVELOPER_MODE OFF CACHE BOOL "Disable simdjson developer targets in the engine build" FORCE)
+set(SIMDJSON_BUILD_STATIC_LIB OFF CACHE BOOL "Build only the primary simdjson target in the engine build" FORCE)
+add_subdirectory(simdjson EXCLUDE_FROM_ALL)
+
+set(FASTGLTF_DOWNLOAD_SIMDJSON OFF CACHE BOOL "Use the engine's simdjson submodule for fastgltf" FORCE)
+set(FASTGLTF_ENABLE_TESTS OFF CACHE BOOL "Disable fastgltf tests in the engine build" FORCE)
+set(FASTGLTF_ENABLE_EXAMPLES OFF CACHE BOOL "Disable fastgltf examples in the engine build" FORCE)
+set(FASTGLTF_ENABLE_DOCS OFF CACHE BOOL "Disable fastgltf docs in the engine build" FORCE)
+set(FASTGLTF_ENABLE_GLTF_RS OFF CACHE BOOL "Disable fastgltf gltf-rs benchmarks in the engine build" FORCE)
+set(FASTGLTF_ENABLE_ASSIMP OFF CACHE BOOL "Disable fastgltf assimp benchmarks in the engine build" FORCE)
 add_subdirectory(fastgltf)
 add_subdirectory(fmt EXCLUDE_FROM_ALL)
 add_subdirectory(SDL EXCLUDE_FROM_ALL)

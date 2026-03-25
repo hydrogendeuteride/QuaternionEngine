@@ -17,3 +17,12 @@
 [submodule "third_party/miniaudio"]
 	path = third_party/miniaudio
 	url = https://github.com/mackron/miniaudio.git
+[submodule "third_party/fmt"]
+	path = third_party/fmt
+	url = https://github.com/fmtlib/fmt.git
+[submodule "third_party/simdjson"]
+	path = third_party/simdjson
+	url = https://github.com/simdjson/simdjson.git
+[submodule "third_party/fastgltf"]
+	path = third_party/fastgltf
+	url = https://github.com/spnda/fastgltf.git
