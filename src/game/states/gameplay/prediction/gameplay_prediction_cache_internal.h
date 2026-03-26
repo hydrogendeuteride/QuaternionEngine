@@ -676,12 +676,16 @@ namespace Game::PredictionCacheInternal
             const std::vector<OrbitPredictionService::PublishedChunk> &published_chunks,
             const uint64_t generation_id,
             const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
+            const uint64_t display_frame_key,
+            const uint64_t display_frame_revision,
             const std::vector<orbitsim::TrajectorySegment> &player_lookup_segments_inertial,
             const CancelCheck &cancel_requested = {},
             OrbitPredictionDerivedDiagnostics *diagnostics = nullptr)
     {
         assembly.clear();
         assembly.generation_id = generation_id;
+        assembly.display_frame_key = display_frame_key;
+        assembly.display_frame_revision = display_frame_revision;
 
         if (published_chunks.empty() || cache.trajectory_segments_inertial_planned.empty())
         {
@@ -708,6 +712,8 @@ namespace Game::PredictionCacheInternal
             OrbitChunk chunk{};
             chunk.chunk_id = pc.chunk_id;
             chunk.generation_id = generation_id;
+            chunk.display_frame_key = display_frame_key;
+            chunk.display_frame_revision = display_frame_revision;
             chunk.quality_state = pc.quality_state;
             chunk.t0_s = pc.t0_s;
             chunk.t1_s = pc.t1_s;

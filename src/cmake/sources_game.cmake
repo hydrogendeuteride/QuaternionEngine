@@ -66,10 +66,19 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/prediction/gameplay_prediction_derived_service.cpp
   game/states/gameplay/prediction/gameplay_state_prediction.cpp
   game/states/gameplay/prediction/gameplay_state_prediction_frames.cpp
-  game/states/gameplay/prediction/gameplay_state_prediction_runtime.cpp
-  game/states/gameplay/prediction/gameplay_state_prediction_draw_internal.h
-  game/states/gameplay/prediction/gameplay_state_prediction_draw.cpp
-  game/states/gameplay/prediction/gameplay_state_prediction_draw_helpers.cpp
+  game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h
+  game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime.cpp
+  game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_solver.cpp
+  game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_requests.cpp
+  game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_results.cpp
+  game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h
+  game/states/gameplay/prediction/draw/gameplay_state_prediction_draw.cpp
+  game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_helpers.cpp
+  game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_prepare.cpp
+  game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_render_helpers.cpp
+  game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_shared.cpp
+  game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_track.cpp
+  game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_pick.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_colors.h
   game/states/gameplay/maneuver/gameplay_state_maneuver_types.h
   game/states/gameplay/maneuver/gameplay_state_maneuver_util.h

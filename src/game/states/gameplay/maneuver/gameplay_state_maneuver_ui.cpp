@@ -221,6 +221,7 @@ namespace Game
         int hovered_handle_idx = -1;
         int hovered_hub_idx = -1;
         find_maneuver_gizmo_hover(hubs, handles, mouse_pos, hub_hit_px2, axis_hit_px2, hovered_hub_idx, hovered_handle_idx);
+        bool refresh_after_interaction = false;
 
         const bool ui_item_active = ImGui::IsAnyItemActive();
         const bool ui_item_hovered = ImGui::IsAnyItemHovered();
@@ -245,11 +246,13 @@ namespace Game
             if (hovered_handle_idx >= 0)
             {
                 _maneuver_state.selected_node_id = handles[hovered_handle_idx].node_id;
-                (void) begin_maneuver_axis_drag(ctx, handles[hovered_handle_idx].node_id, handles[hovered_handle_idx].axis);
+                refresh_after_interaction =
+                        begin_maneuver_axis_drag(ctx, handles[hovered_handle_idx].node_id, handles[hovered_handle_idx].axis);
             }
             else if (hovered_hub_idx >= 0)
             {
                 _maneuver_state.selected_node_id = hubs[hovered_hub_idx].node_id;
+                refresh_after_interaction = true;
             }
         }
 
@@ -258,11 +261,23 @@ namespace Game
             ManeuverNode *node = _maneuver_state.find_node(_maneuver_gizmo_interaction.node_id);
             if (!node || !node->gizmo_valid)
             {
+                if (PredictionTrackState *track = active_prediction_track())
+                {
+                    PredictionDragDebugTelemetry &debug = track->drag_debug;
+                    debug.drag_active = false;
+                    debug.last_drag_end_tp = PredictionDragDebugTelemetry::Clock::now();
+                }
                 _maneuver_gizmo_interaction = {};
             }
             else if (!ctx.input->mouse_down(MouseButton::Left))
             {
                 const bool changed = _maneuver_gizmo_interaction.applied_delta;
+                if (PredictionTrackState *track = active_prediction_track())
+                {
+                    PredictionDragDebugTelemetry &debug = track->drag_debug;
+                    debug.drag_active = false;
+                    debug.last_drag_end_tp = PredictionDragDebugTelemetry::Clock::now();
+                }
                 if (hovered_handle_idx >= 0)
                 {
                     _maneuver_gizmo_interaction.state = ManeuverGizmoInteraction::State::HoverAxis;
@@ -279,11 +294,22 @@ namespace Game
                 {
                     mark_maneuver_plan_dirty();
                 }
+                refresh_after_interaction = true;
             }
             else
             {
                 apply_maneuver_axis_drag(ctx, *node, mouse_pos);
+                refresh_after_interaction = true;
             }
+        }
+
+        if (refresh_after_interaction)
+        {
+            refresh_maneuver_node_runtime_cache(ctx);
+            build_maneuver_gizmo_markers(view, overlay_size_px, hubs, handles);
+            hovered_handle_idx = -1;
+            hovered_hub_idx = -1;
+            find_maneuver_gizmo_hover(hubs, handles, mouse_pos, hub_hit_px2, axis_hit_px2, hovered_hub_idx, hovered_handle_idx);
         }
 
         ImDrawList *dl = ImGui::GetForegroundDrawList();
