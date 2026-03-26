@@ -232,8 +232,8 @@ namespace Game
             return covered_ranges;
         };
 
-        const auto build_planned_pick_window_from_chunk_assembly = [&](const double now_s,
-                                                                       const double future_window_s) {
+        const auto build_planned_window_from_chunk_assembly = [&](const double now_s,
+                                                                  const double future_window_s) {
             Draw::PickWindow planned_window{};
             if (!planned_chunk_assembly || !planned_chunk_assembly->valid || planned_chunk_assembly->chunks.empty() ||
                 _maneuver_state.nodes.empty())
@@ -308,6 +308,23 @@ namespace Game
         };
 
         track_ctx.base_pick_window = {};
+        track_ctx.planned_draw_window =
+                (track_ctx.active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
+                        ? (!track_ctx.planned_window_segments->empty()
+                                   ? Draw::build_planned_pick_window(*track_ctx.planned_window_segments,
+                                                                     _prediction_draw_config,
+                                                                     _maneuver_state.nodes,
+                                                                     track_ctx.now_s,
+                                                                     track_ctx.planned_visual_window_s,
+                                                                     _prediction_draw_future_segment,
+                                                                     _prediction_draw_full_orbit,
+                                                                     stable_cache.orbital_period_s)
+                                   : (track_ctx.has_preview_planned_overlay && track_ctx.has_chunk_planned_overlay
+                                                      ? build_planned_window_from_chunk_assembly(
+                                                                track_ctx.now_s,
+                                                                track_ctx.planned_visual_window_s)
+                                                      : Draw::PickWindow{}))
+                        : Draw::PickWindow{};
         track_ctx.planned_pick_window =
                 (track_ctx.active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
                         ? (!track_ctx.planned_window_segments->empty()
@@ -315,14 +332,14 @@ namespace Game
                                                                      _prediction_draw_config,
                                                                      _maneuver_state.nodes,
                                                                      track_ctx.now_s,
-                                                                     track_ctx.planned_future_window_s,
+                                                                     track_ctx.planned_pick_window_s,
                                                                      _prediction_draw_future_segment,
                                                                      _prediction_draw_full_orbit,
                                                                      stable_cache.orbital_period_s)
                                    : (track_ctx.has_preview_planned_overlay && track_ctx.has_chunk_planned_overlay
-                                                      ? build_planned_pick_window_from_chunk_assembly(
+                                                      ? build_planned_window_from_chunk_assembly(
                                                                 track_ctx.now_s,
-                                                                track_ctx.planned_future_window_s)
+                                                                track_ctx.planned_pick_window_s)
                                                       : Draw::PickWindow{}))
                         : Draw::PickWindow{};
 
@@ -465,11 +482,11 @@ namespace Game
 
         if (track_ctx.active_player_track)
         {
-            _orbit_plot_perf.planned_window_valid = track_ctx.planned_pick_window.valid;
+            _orbit_plot_perf.planned_window_valid = track_ctx.planned_draw_window.valid;
             _orbit_plot_perf.planned_window_now_s = track_ctx.now_s;
-            _orbit_plot_perf.planned_window_anchor_s = track_ctx.planned_pick_window.anchor_time_s;
-            _orbit_plot_perf.planned_window_t_start = track_ctx.planned_pick_window.t0_s;
-            _orbit_plot_perf.planned_window_t_end = track_ctx.planned_pick_window.t1_s;
+            _orbit_plot_perf.planned_window_anchor_s = track_ctx.planned_draw_window.anchor_time_s;
+            _orbit_plot_perf.planned_window_t_start = track_ctx.planned_draw_window.t0_s;
+            _orbit_plot_perf.planned_window_t_end = track_ctx.planned_draw_window.t1_s;
             if (track_ctx.traj_planned_segments && !track_ctx.traj_planned_segments->empty())
             {
                 _orbit_plot_perf.planned_window_t0p = track_ctx.traj_planned_segments->front().t0_s;
@@ -494,7 +511,7 @@ namespace Game
             return Draw::compute_uncovered_ranges(window_t0_s, prefix_t1_s, std::move(covered_ranges));
         };
 
-        if (!track_ctx.planned_pick_window.valid)
+        if (!track_ctx.planned_draw_window.valid)
         {
             return;
         }
@@ -513,8 +530,8 @@ namespace Game
                             : nullptr;
             const auto fallback_ranges =
                     (stable_planned_prefix_cache != nullptr)
-                            ? compute_drag_prefix_fallback_ranges(track_ctx.planned_pick_window.t0_s,
-                                                                  track_ctx.planned_pick_window.t1_s)
+                            ? compute_drag_prefix_fallback_ranges(track_ctx.planned_draw_window.t0_s,
+                                                                  track_ctx.planned_draw_window.t1_s)
                             : std::vector<std::pair<double, double>>{};
             if (track_ctx.active_player_track)
             {
@@ -559,8 +576,8 @@ namespace Game
                                                       _prediction_draw_config,
                                                       _orbit_plot_perf,
                                                       *planned_chunk_assembly,
-                                                      track_ctx.planned_pick_window.t0_s,
-                                                      track_ctx.planned_pick_window.t1_s,
+                                                      track_ctx.planned_draw_window.t0_s,
+                                                      track_ctx.planned_draw_window.t1_s,
                                                       track_ctx.track_color_plan,
                                                       _prediction_draw_config.draw_planned_as_dashed,
                                                       track_ctx.use_persistent_gpu_roots,
@@ -579,11 +596,11 @@ namespace Game
 
             const auto fallback_ranges =
                     track_ctx.maneuver_drag_active
-                            ? compute_drag_prefix_fallback_ranges(track_ctx.planned_pick_window.t0_s,
-                                                                  track_ctx.planned_pick_window.t1_s,
+                            ? compute_drag_prefix_fallback_ranges(track_ctx.planned_draw_window.t0_s,
+                                                                  track_ctx.planned_draw_window.t1_s,
                                                                   chunk_draw_result.covered_ranges)
-                            : Draw::compute_uncovered_ranges(track_ctx.planned_pick_window.t0_s,
-                                                             track_ctx.planned_pick_window.t1_s,
+                            : Draw::compute_uncovered_ranges(track_ctx.planned_draw_window.t0_s,
+                                                             track_ctx.planned_draw_window.t1_s,
                                                              chunk_draw_result.covered_ranges);
             if (track_ctx.active_player_track)
             {
@@ -612,28 +629,28 @@ namespace Game
         if (!track_ctx.has_preview_planned_overlay)
         {
             draw_planned_window_from_cache(planned_cache,
-                                           track_ctx.planned_pick_window.t0_s,
-                                           track_ctx.planned_pick_window.t1_s,
+                                           track_ctx.planned_draw_window.t0_s,
+                                           track_ctx.planned_draw_window.t1_s,
                                            track_ctx.track_color_plan);
             return;
         }
 
         draw_planned_window_from_cache(planned_cache,
-                                       track_ctx.planned_pick_window.t0_s,
-                                       track_ctx.planned_pick_window.t1_s,
+                                       track_ctx.planned_draw_window.t0_s,
+                                       track_ctx.planned_draw_window.t1_s,
                                        track_ctx.track_color_plan);
 
         const auto covered_ranges = collect_planned_cache_covered_ranges(planned_cache,
-                                                                         track_ctx.planned_pick_window.t0_s,
-                                                                         track_ctx.planned_pick_window.t1_s);
+                                                                         track_ctx.planned_draw_window.t0_s,
+                                                                         track_ctx.planned_draw_window.t1_s);
         const auto fallback_ranges =
                 (fallback_planned_cache != &planned_cache)
                         ? (track_ctx.maneuver_drag_active
-                                   ? compute_drag_prefix_fallback_ranges(track_ctx.planned_pick_window.t0_s,
-                                                                         track_ctx.planned_pick_window.t1_s,
+                                   ? compute_drag_prefix_fallback_ranges(track_ctx.planned_draw_window.t0_s,
+                                                                         track_ctx.planned_draw_window.t1_s,
                                                                          covered_ranges)
-                                   : Draw::compute_uncovered_ranges(track_ctx.planned_pick_window.t0_s,
-                                                                    track_ctx.planned_pick_window.t1_s,
+                                   : Draw::compute_uncovered_ranges(track_ctx.planned_draw_window.t0_s,
+                                                                    track_ctx.planned_draw_window.t1_s,
                                                                     covered_ranges))
                         : std::vector<std::pair<double, double>>{};
         if (track_ctx.active_player_track)

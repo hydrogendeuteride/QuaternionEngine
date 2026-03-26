@@ -30,6 +30,12 @@ struct ImDrawList;
 
 namespace Game
 {
+    namespace PredictionDrawDetail
+    {
+        struct PredictionGlobalDrawContext;
+        struct PredictionTrackDrawContext;
+    }
+
     // ============================================================================
     // GameplayState: Main gameplay — orbital mechanics, combat, ship control
     //
@@ -149,7 +155,7 @@ namespace Game
         double prediction_display_window_s(PredictionSubjectKey key,
                                            double now_s,
                                            bool with_maneuvers) const;
-        double prediction_preview_patch_window_s(const PredictionTrackState &track,
+        double prediction_preview_exact_window_s(const PredictionTrackState &track,
                                                  double now_s,
                                                  bool with_maneuvers) const;
         double prediction_required_window_s(const PredictionTrackState &track,
@@ -222,6 +228,17 @@ namespace Game
         void refresh_prediction_derived_cache(PredictionTrackState &track,
                                               double display_time_s = std::numeric_limits<double>::quiet_NaN());
         void refresh_all_prediction_derived_caches();
+        bool build_orbit_prediction_global_draw_context(
+                GameStateContext &ctx,
+                PredictionDrawDetail::PredictionGlobalDrawContext &out);
+        bool build_orbit_prediction_track_draw_context(
+                PredictionTrackState &track,
+                const PredictionDrawDetail::PredictionGlobalDrawContext &global_ctx,
+                PredictionDrawDetail::PredictionTrackDrawContext &out);
+        void draw_orbit_prediction_track_windows(PredictionDrawDetail::PredictionTrackDrawContext &track_ctx);
+        void emit_orbit_prediction_track_picks(
+                const PredictionDrawDetail::PredictionGlobalDrawContext &global_ctx,
+                PredictionDrawDetail::PredictionTrackDrawContext &track_ctx);
 
         void emit_orbit_prediction_debug(GameStateContext &ctx);
         void emit_maneuver_node_debug_overlay(GameStateContext &ctx);
@@ -337,6 +354,7 @@ namespace Game
         std::vector<PredictionGroup> _prediction_groups{};
         PredictionSelectionState _prediction_selection{};
         PredictionFrameSelectionState _prediction_frame_selection{};
+        uint64_t _prediction_display_frame_revision{1};
         PredictionAnalysisSelectionState _prediction_analysis_selection{};
 
         bool build_maneuver_gizmo_view_context(const GameStateContext &ctx, ManeuverGizmoViewContext &out_view) const;

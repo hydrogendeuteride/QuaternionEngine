@@ -1098,10 +1098,14 @@ namespace Game
         }
         if (active_track->preview_anchor.valid)
         {
-            ImGui::Text("Preview anchor node/time/window: %d / %.3f s / %.3f s",
+            ImGui::Text("Preview anchor node/time: %d / %.3f s",
                         active_track->preview_anchor.anchor_node_id,
-                        active_track->preview_anchor.anchor_time_s,
-                        active_track->preview_anchor.patch_window_s);
+                        active_track->preview_anchor.anchor_time_s);
+            ImGui::Text("Preview windows visual/exact/pick/request: %.3f / %.3f / %.3f / %.3f s",
+                        active_track->preview_anchor.visual_window_s,
+                        active_track->preview_anchor.exact_window_s,
+                        active_track->preview_anchor.pick_window_s,
+                        active_track->preview_anchor.request_window_s);
         }
         if (have_build_time)
         {

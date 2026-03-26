@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -21,6 +22,22 @@
 
 namespace Game
 {
+    template<typename T>
+    inline void prediction_hash_combine(uint64_t &seed, const T &value)
+    {
+        seed ^= static_cast<uint64_t>(std::hash<T>{}(value)) + 0x9e3779b97f4a7c15ULL + (seed << 6u) + (seed >> 2u);
+    }
+
+    inline uint64_t prediction_display_frame_key(const orbitsim::TrajectoryFrameSpec &spec)
+    {
+        uint64_t seed = 0xcbf29ce484222325ULL;
+        prediction_hash_combine(seed, static_cast<uint32_t>(spec.type));
+        prediction_hash_combine(seed, static_cast<uint32_t>(spec.primary_body_id));
+        prediction_hash_combine(seed, static_cast<uint32_t>(spec.secondary_body_id));
+        prediction_hash_combine(seed, static_cast<uint32_t>(spec.target_spacecraft_id));
+        return seed;
+    }
+
     enum class PredictionSubjectKind : uint8_t
     {
         None = 0,
@@ -152,6 +169,8 @@ namespace Game
         OrbitRenderCurve render_curve_frame;
         OrbitRenderCurve render_curve_frame_planned;
         orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
         bool resolved_frame_spec_valid{false};
         orbitsim::BodyId analysis_cache_body_id{orbitsim::kInvalidBodyId};
         bool analysis_cache_valid{false};
@@ -194,6 +213,8 @@ namespace Game
             render_curve_frame.clear();
             render_curve_frame_planned.clear();
             resolved_frame_spec = {};
+            display_frame_key = 0;
+            display_frame_revision = 0;
             resolved_frame_spec_valid = false;
             analysis_cache_body_id = orbitsim::kInvalidBodyId;
             analysis_cache_valid = false;
@@ -213,6 +234,8 @@ namespace Game
     struct PredictionLinePickCache
     {
         uint64_t generation_id{0};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
         bool base_valid{false};
         bool planned_valid{false};
         WorldVec3 ref_body_world{0.0, 0.0, 0.0};
@@ -291,6 +314,8 @@ namespace Game
         void clear()
         {
             generation_id = 0;
+            display_frame_key = 0;
+            display_frame_revision = 0;
             base_valid = false;
             planned_valid = false;
             ref_body_world = WorldVec3(0.0, 0.0, 0.0);
@@ -379,6 +404,8 @@ namespace Game
     {
         uint32_t chunk_id{0};
         uint64_t generation_id{0};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
         OrbitPredictionService::ChunkQualityState quality_state{OrbitPredictionService::ChunkQualityState::Final};
         double t0_s{std::numeric_limits<double>::quiet_NaN()};
         double t1_s{std::numeric_limits<double>::quiet_NaN()};
@@ -397,6 +424,8 @@ namespace Game
         {
             chunk_id = 0;
             generation_id = 0;
+            display_frame_key = 0;
+            display_frame_revision = 0;
             quality_state = OrbitPredictionService::ChunkQualityState::Final;
             t0_s = std::numeric_limits<double>::quiet_NaN();
             t1_s = std::numeric_limits<double>::quiet_NaN();
@@ -413,6 +442,8 @@ namespace Game
     struct PredictionChunkAssembly
     {
         uint64_t generation_id{0};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
         std::vector<OrbitChunk> chunks;
         bool valid{false};
 
@@ -432,6 +463,8 @@ namespace Game
         void clear()
         {
             generation_id = 0;
+            display_frame_key = 0;
+            display_frame_revision = 0;
             chunks.clear();
             valid = false;
         }
@@ -483,8 +516,12 @@ namespace Game
         orbitsim::State anchor_state_inertial{};
         glm::dmat3 gizmo_basis_snapshot{1.0};
         orbitsim::TrajectoryFrameSpec display_frame_snapshot{};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
         std::vector<int> downstream_maneuver_node_ids{};
-        double patch_window_s{0.0};
+        double visual_window_s{0.0};
+        double exact_window_s{0.0};
+        double pick_window_s{0.0};
         double request_window_s{0.0};
 
         void clear()
@@ -497,8 +534,12 @@ namespace Game
             anchor_state_inertial = {};
             gizmo_basis_snapshot = glm::dmat3(1.0);
             display_frame_snapshot = {};
+            display_frame_key = 0;
+            display_frame_revision = 0;
             downstream_maneuver_node_ids.clear();
-            patch_window_s = 0.0;
+            visual_window_s = 0.0;
+            exact_window_s = 0.0;
+            pick_window_s = 0.0;
             request_window_s = 0.0;
         }
     };

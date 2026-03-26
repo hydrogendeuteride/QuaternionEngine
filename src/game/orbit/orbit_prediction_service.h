@@ -125,7 +125,9 @@ namespace Game
             bool anchor_state_valid{false};
             uint64_t baseline_generation_id{0};
             double anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
-            double patch_window_s{0.0};
+            double visual_window_s{0.0};
+            double exact_window_s{0.0};
+            double pick_window_s{0.0};
             orbitsim::State anchor_state_inertial{};
         };
 

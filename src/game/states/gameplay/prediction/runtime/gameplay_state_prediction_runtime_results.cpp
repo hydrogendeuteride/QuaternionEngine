@@ -20,6 +20,28 @@ namespace Game
                    a.target_spacecraft_id == b.target_spacecraft_id;
         }
 
+        bool cache_frame_version_matches(const OrbitPredictionCache &cache,
+                                         const uint64_t display_frame_key,
+                                         const uint64_t display_frame_revision)
+        {
+            return cache.display_frame_key == display_frame_key &&
+                   cache.display_frame_revision == display_frame_revision;
+        }
+
+        bool cache_frame_version_matches(const OrbitPredictionCache &a,
+                                         const OrbitPredictionCache &b)
+        {
+            return cache_frame_version_matches(a, b.display_frame_key, b.display_frame_revision);
+        }
+
+        bool chunk_assembly_frame_version_matches(const PredictionChunkAssembly &assembly,
+                                                  const uint64_t display_frame_key,
+                                                  const uint64_t display_frame_revision)
+        {
+            return assembly.display_frame_key == display_frame_key &&
+                   assembly.display_frame_revision == display_frame_revision;
+        }
+
         OrbitPredictionCache merge_reused_base_frame_cache(const OrbitPredictionCache &base_cache,
                                                            OrbitPredictionCache preview_cache)
         {
@@ -249,7 +271,10 @@ namespace Game
             };
 
             if (!previous_assembly.valid ||
-                previous_assembly.generation_id != incoming_assembly.generation_id)
+                previous_assembly.generation_id != incoming_assembly.generation_id ||
+                !chunk_assembly_frame_version_matches(previous_assembly,
+                                                     incoming_assembly.display_frame_key,
+                                                     incoming_assembly.display_frame_revision))
             {
                 sort_and_validate(incoming_assembly);
                 return incoming_assembly;
@@ -278,6 +303,8 @@ namespace Game
             }
 
             merged.generation_id = incoming_assembly.generation_id;
+            merged.display_frame_key = incoming_assembly.display_frame_key;
+            merged.display_frame_revision = incoming_assembly.display_frame_revision;
             sort_and_validate(merged);
             return merged;
         }
@@ -433,11 +460,18 @@ namespace Game
             if (have_cache_to_publish &&
                 result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview)
             {
+                const OrbitPredictionCache empty_preview_merge_base{};
+                const bool can_merge_with_overlay =
+                        track->preview_overlay.cache.valid &&
+                        track->preview_overlay.cache.generation_id == result.generation_id &&
+                        cache_frame_version_matches(track->preview_overlay.cache, cache_to_publish);
+                const bool can_merge_with_stable =
+                        track->cache.valid &&
+                        cache_frame_version_matches(track->cache, cache_to_publish);
                 const OrbitPredictionCache &preview_merge_base =
-                        (track->preview_overlay.cache.valid &&
-                         track->preview_overlay.cache.generation_id == result.generation_id)
+                        can_merge_with_overlay
                                 ? track->preview_overlay.cache
-                                : track->cache;
+                                : (can_merge_with_stable ? track->cache : empty_preview_merge_base);
                 const auto preview_merge_start_tp = PredictionDragDebugTelemetry::Clock::now();
                 cache_to_publish = merge_preview_planned_prefix_cache(preview_merge_base, std::move(cache_to_publish));
                 preview_merge_ms = PredictionRuntimeDetail::elapsed_ms(
@@ -473,6 +507,11 @@ namespace Game
         double chunk_merge_ms = 0.0;
         if (preview_result && result.chunk_assembly.valid)
         {
+            const bool chunk_frame_changed =
+                    track->preview_overlay.chunk_assembly.valid &&
+                    !chunk_assembly_frame_version_matches(track->preview_overlay.chunk_assembly,
+                                                          result.chunk_assembly.display_frame_key,
+                                                          result.chunk_assembly.display_frame_revision);
             const auto chunk_merge_start_tp = PredictionDragDebugTelemetry::Clock::now();
             track->preview_overlay.chunk_assembly = merge_planned_chunk_assembly(
                     track->preview_overlay.chunk_assembly,
@@ -480,6 +519,10 @@ namespace Game
             chunk_merge_ms = PredictionRuntimeDetail::elapsed_ms(
                     chunk_merge_start_tp,
                     PredictionDragDebugTelemetry::Clock::now());
+            if (chunk_frame_changed)
+            {
+                track->preview_pick_cache.clear();
+            }
         }
         else
         {

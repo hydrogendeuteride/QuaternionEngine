@@ -160,7 +160,17 @@ namespace Game
         out.world_basis_draw_ctx.line_overlay_boost = out.draw_ctx.line_overlay_boost;
 
         out.future_window_s = prediction_future_window_s(track.key);
-        out.planned_future_window_s = maneuver_plan_preview_window_s();
+        if (out.active_player_track && track.preview_anchor.valid)
+        {
+            out.planned_visual_window_s = std::max(0.0, track.preview_anchor.visual_window_s);
+            out.planned_pick_window_s = std::max(0.0, track.preview_anchor.pick_window_s);
+        }
+        else
+        {
+            const double default_planned_window_s = maneuver_plan_preview_window_s();
+            out.planned_visual_window_s = default_planned_window_s;
+            out.planned_pick_window_s = default_planned_window_s;
+        }
         return true;
     }
 } // namespace Game

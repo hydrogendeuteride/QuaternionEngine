@@ -177,6 +177,8 @@ namespace Game
         cache.valid = true;
 
         const orbitsim::TrajectoryFrameSpec &resolved_frame_spec = request.resolved_frame_spec;
+        cache.display_frame_key = request.display_frame_key;
+        cache.display_frame_revision = request.display_frame_revision;
         const bool reuse_existing_base_frame =
                 request.reuse_existing_base_frame &&
                 solver.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
@@ -198,6 +200,8 @@ namespace Game
                     solver.published_chunks,
                     job.generation_id,
                     resolved_frame_spec,
+                    request.display_frame_key,
+                    request.display_frame_revision,
                     request.player_lookup_segments_inertial,
                     cancel_requested,
                     &out.diagnostics);

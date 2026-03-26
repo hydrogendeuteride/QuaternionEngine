@@ -141,7 +141,9 @@ namespace Game
             request.preview_patch.anchor_state_valid = true;
             request.preview_patch.baseline_generation_id = track.preview_anchor.baseline_generation_id;
             request.preview_patch.anchor_time_s = track.preview_anchor.anchor_time_s;
-            request.preview_patch.patch_window_s = std::max(0.0, track.preview_anchor.patch_window_s);
+            request.preview_patch.visual_window_s = std::max(0.0, track.preview_anchor.visual_window_s);
+            request.preview_patch.exact_window_s = std::max(0.0, track.preview_anchor.exact_window_s);
+            request.preview_patch.pick_window_s = std::max(0.0, track.preview_anchor.pick_window_s);
             request.preview_patch.anchor_state_inertial = track.preview_anchor.anchor_state_inertial;
         }
 

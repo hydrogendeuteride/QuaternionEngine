@@ -117,6 +117,26 @@ namespace Game
         return std::max(0.0, request_end_time_s(request) - request.preview_patch.anchor_time_s);
     }
 
+    inline double preview_visual_window_s(const OrbitPredictionService::Request &request)
+    {
+        if (!request_uses_preview_patch(request))
+        {
+            return 0.0;
+        }
+
+        return std::max(0.0, request.preview_patch.visual_window_s);
+    }
+
+    inline double preview_exact_window_s(const OrbitPredictionService::Request &request)
+    {
+        if (!request_uses_preview_patch(request))
+        {
+            return 0.0;
+        }
+
+        return std::max(0.0, request.preview_patch.exact_window_s);
+    }
+
     inline double preview_fp0_window_s(const OrbitPredictionService::Request &request)
     {
         if (!request_uses_preview_patch(request))
@@ -124,7 +144,7 @@ namespace Game
             return 0.0;
         }
 
-        const double chunk_window_s = std::max(0.0, request.preview_patch.patch_window_s);
+        const double chunk_window_s = preview_exact_window_s(request);
         const double fp0_window_s = chunk_window_s > 0.0 ? (chunk_window_s * 2.0) : 0.0;
         return std::min(preview_patch_remaining_window_s(request), fp0_window_s);
     }

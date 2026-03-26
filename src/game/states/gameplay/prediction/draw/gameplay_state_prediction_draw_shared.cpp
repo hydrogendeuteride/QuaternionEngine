@@ -300,6 +300,8 @@ namespace Game::PredictionDrawDetail
 
     bool should_rebuild_pick_cache(const PredictionLinePickCache &cache,
                                    const uint64_t generation_id,
+                                   const uint64_t display_frame_key,
+                                   const uint64_t display_frame_revision,
                                    const WorldVec3 &ref_body_world,
                                    const glm::dmat3 &frame_to_world,
                                    const WorldVec3 &align_delta,
@@ -320,7 +322,10 @@ namespace Game::PredictionDrawDetail
         const double cached_t1_s = planned ? cache.planned_t1_s : cache.base_t1_s;
         const std::size_t cached_max_segments = planned ? cache.planned_max_segments : cache.base_max_segments;
         const bool cached_use_adaptive_curve = planned ? cache.planned_use_adaptive_curve : cache.base_use_adaptive_curve;
-        if (!valid || cache.generation_id != generation_id || cached_max_segments != max_segments)
+        if (!valid || cache.generation_id != generation_id ||
+            cache.display_frame_key != display_frame_key ||
+            cache.display_frame_revision != display_frame_revision ||
+            cached_max_segments != max_segments)
         {
             return true;
         }
@@ -366,6 +371,8 @@ namespace Game::PredictionDrawDetail
 
     void mark_pick_cache_valid(PredictionLinePickCache &cache,
                                const uint64_t generation_id,
+                               const uint64_t display_frame_key,
+                               const uint64_t display_frame_revision,
                                const WorldVec3 &ref_body_world,
                                const glm::dmat3 &frame_to_world,
                                const WorldVec3 &align_delta,
@@ -382,6 +389,8 @@ namespace Game::PredictionDrawDetail
                                const bool planned)
     {
         cache.generation_id = generation_id;
+        cache.display_frame_key = display_frame_key;
+        cache.display_frame_revision = display_frame_revision;
         cache.ref_body_world = ref_body_world;
         cache.frame_to_world = frame_to_world;
         cache.align_delta_world = align_delta;
