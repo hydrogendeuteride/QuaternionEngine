@@ -127,4 +127,5 @@ namespace Game::OrbitPredictionTuning
 
     // Maneuver-gizmo drag rebuild cap.
     inline constexpr double kDragRebuildMinIntervalS = 0.03; // ~33 Hz
+    inline constexpr double kDragInteractivePreviewWindowMaxS = 43'200.0; // 12 hours
 }

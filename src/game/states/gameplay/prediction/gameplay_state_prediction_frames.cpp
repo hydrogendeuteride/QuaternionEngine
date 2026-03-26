@@ -202,13 +202,7 @@ namespace Game
         const OrbitPredictionCache *position_cache = cache;
         if (!position_cache)
         {
-            if (const PredictionTrackState *player_track = player_prediction_track())
-            {
-                if (player_track->cache.valid)
-                {
-                    position_cache = &player_track->cache;
-                }
-            }
+            position_cache = effective_prediction_cache(player_prediction_track());
         }
 
         const orbitsim::MassiveBody *body = nullptr;
@@ -275,20 +269,20 @@ namespace Game
 
     orbitsim::SpacecraftStateLookup GameplayState::build_prediction_player_lookup() const
     {
-        const PredictionTrackState *player_track = player_prediction_track();
-        if (!player_track || !player_track->cache.valid)
+        const OrbitPredictionCache *player_cache = effective_prediction_cache(player_prediction_track());
+        if (!player_cache)
         {
             return nullptr;
         }
 
         const std::vector<orbitsim::TrajectorySegment> *trajectory_segments = nullptr;
-        if (!player_track->cache.trajectory_segments_inertial_planned.empty())
+        if (!player_cache->trajectory_segments_inertial_planned.empty())
         {
-            trajectory_segments = &player_track->cache.trajectory_segments_inertial_planned;
+            trajectory_segments = &player_cache->trajectory_segments_inertial_planned;
         }
-        else if (!player_track->cache.trajectory_segments_inertial.empty())
+        else if (!player_cache->trajectory_segments_inertial.empty())
         {
-            trajectory_segments = &player_track->cache.trajectory_segments_inertial;
+            trajectory_segments = &player_cache->trajectory_segments_inertial;
         }
         if (!trajectory_segments)
         {
@@ -427,6 +421,7 @@ namespace Game
         }
 
         _prediction_frame_selection.spec = spec;
+        ++_prediction_display_frame_revision;
         refresh_all_prediction_derived_caches();
         sync_prediction_dirty_flag();
         return true;
@@ -860,6 +855,34 @@ namespace Game
 
         const orbitsim::TrajectoryFrameSpec resolved_frame_spec =
                 resolve_prediction_display_frame_spec(track.cache, display_time_s);
+        const uint64_t display_frame_key = prediction_display_frame_key(resolved_frame_spec);
+        const uint64_t display_frame_revision = _prediction_display_frame_revision;
+        const auto cache_frame_matches = [&](const OrbitPredictionCache &cache) {
+            return cache.display_frame_key == display_frame_key &&
+                   cache.display_frame_revision == display_frame_revision;
+        };
+        const auto chunk_frame_matches = [&](const PredictionChunkAssembly &assembly) {
+            return assembly.display_frame_key == display_frame_key &&
+                   assembly.display_frame_revision == display_frame_revision;
+        };
+        if ((track.preview_overlay.cache.valid && !cache_frame_matches(track.preview_overlay.cache)) ||
+            (track.preview_overlay.chunk_assembly.valid && !chunk_frame_matches(track.preview_overlay.chunk_assembly)))
+        {
+            track.preview_overlay.clear();
+            track.pick_cache.clear();
+            track.preview_pick_cache.clear();
+        }
+        if ((track.pick_cache.generation_id != 0u || track.pick_cache.base_valid || track.pick_cache.planned_valid) &&
+            !cache_frame_matches(track.cache))
+        {
+            track.pick_cache.clear();
+        }
+        if ((track.preview_pick_cache.generation_id != 0u || track.preview_pick_cache.preview_chunk_cache_valid) &&
+            (track.preview_pick_cache.display_frame_key != display_frame_key ||
+             track.preview_pick_cache.display_frame_revision != display_frame_revision))
+        {
+            track.preview_pick_cache.clear();
+        }
         const bool rebuild_frame_cache =
                 !track.cache.resolved_frame_spec_valid ||
                 !same_frame_spec(track.cache.resolved_frame_spec, resolved_frame_spec) ||
@@ -868,15 +891,15 @@ namespace Game
         if (rebuild_frame_cache)
         {
             std::vector<orbitsim::TrajectorySegment> player_lookup_segments;
-            if (const PredictionTrackState *player_track = player_prediction_track())
+            if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_prediction_track()))
             {
-                if (!player_track->cache.trajectory_segments_inertial_planned.empty())
+                if (!player_cache->trajectory_segments_inertial_planned.empty())
                 {
-                    player_lookup_segments = player_track->cache.trajectory_segments_inertial_planned;
+                    player_lookup_segments = player_cache->trajectory_segments_inertial_planned;
                 }
-                else if (!player_track->cache.trajectory_segments_inertial.empty())
+                else if (!player_cache->trajectory_segments_inertial.empty())
                 {
-                    player_lookup_segments = player_track->cache.trajectory_segments_inertial;
+                    player_lookup_segments = player_cache->trajectory_segments_inertial;
                 }
             }
 
@@ -889,10 +912,20 @@ namespace Game
             {
                 track.cache.valid = false;
                 track.cache.resolved_frame_spec_valid = false;
+                track.cache.display_frame_key = 0;
+                track.cache.display_frame_revision = 0;
                 track.cache.metrics_valid = false;
+                track.preview_overlay.clear();
+                track.pick_cache.clear();
+                track.preview_pick_cache.clear();
                 return;
             }
         }
+
+        track.cache.resolved_frame_spec = resolved_frame_spec;
+        track.cache.resolved_frame_spec_valid = true;
+        track.cache.display_frame_key = display_frame_key;
+        track.cache.display_frame_revision = display_frame_revision;
 
         double analysis_time_s = display_time_s;
         if (!std::isfinite(analysis_time_s))

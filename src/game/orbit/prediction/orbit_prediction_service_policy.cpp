@@ -676,7 +676,17 @@ namespace Game
                                     request.preview_patch.anchor_time_s,
                                     PredictionChunkBoundaryFlags::PreviewAnchor);
 
-            const double preview_chunk_span_s = std::max(0.0, request.preview_patch.patch_window_s);
+            const double preview_exact_span_s = preview_exact_window_s(request);
+            const double preview_visual_span_s = preview_visual_window_s(request);
+            if (preview_visual_span_s > 0.0)
+            {
+                append_planner_boundary(boundaries,
+                                        request_t0_s,
+                                        request_t1_s,
+                                        request.preview_patch.anchor_time_s + preview_visual_span_s,
+                                        PredictionChunkBoundaryFlags::PreviewChunk);
+            }
+            const double preview_chunk_span_s = preview_exact_span_s;
             if (preview_chunk_span_s > 0.0)
             {
                 append_planner_boundary(boundaries,

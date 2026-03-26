@@ -10,15 +10,34 @@
 #include <glm/glm.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Game
 {
+    template<typename T>
+    inline void prediction_hash_combine(uint64_t &seed, const T &value)
+    {
+        seed ^= static_cast<uint64_t>(std::hash<T>{}(value)) + 0x9e3779b97f4a7c15ULL + (seed << 6u) + (seed >> 2u);
+    }
+
+    inline uint64_t prediction_display_frame_key(const orbitsim::TrajectoryFrameSpec &spec)
+    {
+        uint64_t seed = 0xcbf29ce484222325ULL;
+        prediction_hash_combine(seed, static_cast<uint32_t>(spec.type));
+        prediction_hash_combine(seed, static_cast<uint32_t>(spec.primary_body_id));
+        prediction_hash_combine(seed, static_cast<uint32_t>(spec.secondary_body_id));
+        prediction_hash_combine(seed, static_cast<uint32_t>(spec.target_spacecraft_id));
+        return seed;
+    }
+
     enum class PredictionSubjectKind : uint8_t
     {
         None = 0,
@@ -150,6 +169,8 @@ namespace Game
         OrbitRenderCurve render_curve_frame;
         OrbitRenderCurve render_curve_frame_planned;
         orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
         bool resolved_frame_spec_valid{false};
         orbitsim::BodyId analysis_cache_body_id{orbitsim::kInvalidBodyId};
         bool analysis_cache_valid{false};
@@ -192,6 +213,8 @@ namespace Game
             render_curve_frame.clear();
             render_curve_frame_planned.clear();
             resolved_frame_spec = {};
+            display_frame_key = 0;
+            display_frame_revision = 0;
             resolved_frame_spec_valid = false;
             analysis_cache_body_id = orbitsim::kInvalidBodyId;
             analysis_cache_valid = false;
@@ -211,6 +234,8 @@ namespace Game
     struct PredictionLinePickCache
     {
         uint64_t generation_id{0};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
         bool base_valid{false};
         bool planned_valid{false};
         WorldVec3 ref_body_world{0.0, 0.0, 0.0};
@@ -234,10 +259,63 @@ namespace Game
         bool planned_use_adaptive_curve{false};
         std::vector<PickingSystem::LinePickSegmentData> base_segments;
         std::vector<PickingSystem::LinePickSegmentData> planned_segments;
+        struct PreviewChunkEntry
+        {
+            uint32_t chunk_id{0};
+            uint64_t generation_id{0};
+            OrbitPredictionService::ChunkQualityState quality_state{
+                    OrbitPredictionService::ChunkQualityState::Final};
+            double t0_s{std::numeric_limits<double>::quiet_NaN()};
+            double t1_s{std::numeric_limits<double>::quiet_NaN()};
+            std::size_t max_segments{0};
+            bool use_adaptive_curve{false};
+            bool cap_hit{false};
+            std::vector<PickingSystem::LinePickSegmentData> segments;
+
+            void clear()
+            {
+                chunk_id = 0;
+                generation_id = 0;
+                quality_state = OrbitPredictionService::ChunkQualityState::Final;
+                t0_s = std::numeric_limits<double>::quiet_NaN();
+                t1_s = std::numeric_limits<double>::quiet_NaN();
+                max_segments = 0;
+                use_adaptive_curve = false;
+                cap_hit = false;
+                segments.clear();
+            }
+        };
+
+        struct PreviewFallbackCache
+        {
+            uint64_t source_generation_id{0};
+            std::size_t max_segments{0};
+            bool use_adaptive_curve{false};
+            bool cap_hit{false};
+            bool valid{false};
+            std::vector<std::pair<double, double>> uncovered_ranges;
+            std::vector<PickingSystem::LinePickSegmentData> segments;
+
+            void clear()
+            {
+                source_generation_id = 0;
+                max_segments = 0;
+                use_adaptive_curve = false;
+                cap_hit = false;
+                valid = false;
+                uncovered_ranges.clear();
+                segments.clear();
+            }
+        };
+        bool preview_chunk_cache_valid{false};
+        std::vector<PreviewChunkEntry> preview_chunk_entries;
+        PreviewFallbackCache preview_fallback{};
 
         void clear()
         {
             generation_id = 0;
+            display_frame_key = 0;
+            display_frame_revision = 0;
             base_valid = false;
             planned_valid = false;
             ref_body_world = WorldVec3(0.0, 0.0, 0.0);
@@ -261,6 +339,9 @@ namespace Game
             planned_use_adaptive_curve = false;
             base_segments.clear();
             planned_segments.clear();
+            preview_chunk_cache_valid = false;
+            preview_chunk_entries.clear();
+            preview_fallback.clear();
         }
     };
 
@@ -323,6 +404,8 @@ namespace Game
     {
         uint32_t chunk_id{0};
         uint64_t generation_id{0};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
         OrbitPredictionService::ChunkQualityState quality_state{OrbitPredictionService::ChunkQualityState::Final};
         double t0_s{std::numeric_limits<double>::quiet_NaN()};
         double t1_s{std::numeric_limits<double>::quiet_NaN()};
@@ -341,6 +424,8 @@ namespace Game
         {
             chunk_id = 0;
             generation_id = 0;
+            display_frame_key = 0;
+            display_frame_revision = 0;
             quality_state = OrbitPredictionService::ChunkQualityState::Final;
             t0_s = std::numeric_limits<double>::quiet_NaN();
             t1_s = std::numeric_limits<double>::quiet_NaN();
@@ -357,6 +442,8 @@ namespace Game
     struct PredictionChunkAssembly
     {
         uint64_t generation_id{0};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
         std::vector<OrbitChunk> chunks;
         bool valid{false};
 
@@ -376,8 +463,37 @@ namespace Game
         void clear()
         {
             generation_id = 0;
+            display_frame_key = 0;
+            display_frame_revision = 0;
             chunks.clear();
             valid = false;
+        }
+    };
+
+    struct PredictionPreviewOverlay
+    {
+        OrbitPredictionCache cache{};
+        PredictionChunkAssembly chunk_assembly{};
+
+        [[nodiscard]] bool has_cache() const
+        {
+            return cache.valid;
+        }
+
+        [[nodiscard]] bool has_chunks() const
+        {
+            return chunk_assembly.valid && !chunk_assembly.chunks.empty();
+        }
+
+        [[nodiscard]] bool valid() const
+        {
+            return has_cache() || has_chunks();
+        }
+
+        void clear()
+        {
+            cache.clear();
+            chunk_assembly.clear();
         }
     };
 
@@ -400,8 +516,12 @@ namespace Game
         orbitsim::State anchor_state_inertial{};
         glm::dmat3 gizmo_basis_snapshot{1.0};
         orbitsim::TrajectoryFrameSpec display_frame_snapshot{};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
         std::vector<int> downstream_maneuver_node_ids{};
-        double patch_window_s{0.0};
+        double visual_window_s{0.0};
+        double exact_window_s{0.0};
+        double pick_window_s{0.0};
         double request_window_s{0.0};
 
         void clear()
@@ -414,9 +534,81 @@ namespace Game
             anchor_state_inertial = {};
             gizmo_basis_snapshot = glm::dmat3(1.0);
             display_frame_snapshot = {};
+            display_frame_key = 0;
+            display_frame_revision = 0;
             downstream_maneuver_node_ids.clear();
-            patch_window_s = 0.0;
+            visual_window_s = 0.0;
+            exact_window_s = 0.0;
+            pick_window_s = 0.0;
             request_window_s = 0.0;
+        }
+    };
+
+    struct PredictionDragDebugTelemetry
+    {
+        using Clock = std::chrono::steady_clock;
+        using TimePoint = Clock::time_point;
+
+        uint64_t drag_session_id{0};
+        uint64_t drag_update_count{0};
+        uint64_t preview_request_count{0};
+        uint64_t solver_result_count{0};
+        uint64_t derived_result_count{0};
+        uint64_t preview_publish_count{0};
+        uint64_t full_publish_count{0};
+        uint64_t last_preview_request_generation_id{0};
+        uint64_t last_solver_result_generation_id{0};
+        uint64_t last_derived_result_generation_id{0};
+
+        TimePoint drag_started_tp{};
+        TimePoint last_drag_update_tp{};
+        TimePoint last_drag_end_tp{};
+        TimePoint last_preview_request_tp{};
+        TimePoint last_solver_result_tp{};
+        TimePoint last_derived_result_tp{};
+        TimePoint last_preview_publish_tp{};
+        TimePoint last_full_publish_tp{};
+
+        double drag_to_request_ms_last{0.0};
+        double drag_to_request_ms_peak{0.0};
+        double drag_apply_ms_last{0.0};
+        double drag_apply_ms_peak{0.0};
+        double request_to_solver_ms_last{0.0};
+        double request_to_solver_ms_peak{0.0};
+        double request_to_derived_ms_last{0.0};
+        double request_to_derived_ms_peak{0.0};
+        double solver_to_derived_ms_last{0.0};
+        double solver_to_derived_ms_peak{0.0};
+        double derived_worker_ms_last{0.0};
+        double derived_worker_ms_peak{0.0};
+        double derived_frame_build_ms_last{0.0};
+        double derived_flatten_ms_last{0.0};
+        double preview_merge_ms_last{0.0};
+        double preview_merge_ms_peak{0.0};
+        double chunk_merge_ms_last{0.0};
+        double chunk_merge_ms_peak{0.0};
+        double derived_apply_ms_last{0.0};
+        double derived_apply_ms_peak{0.0};
+
+        std::size_t planned_segments_after_preview_merge{0};
+        std::size_t flattened_planned_segments_last{0};
+        std::size_t flattened_planned_samples_last{0};
+        uint32_t incoming_chunk_count_last{0};
+        uint32_t merged_chunk_count_last{0};
+
+        OrbitPredictionService::SolveQuality last_result_solve_quality{OrbitPredictionService::SolveQuality::Full};
+        OrbitPredictionService::PublishStage last_publish_stage{OrbitPredictionService::PublishStage::Full};
+        bool last_generation_complete{true};
+        bool drag_active{false};
+
+        static bool has_time(const TimePoint &tp)
+        {
+            return tp.time_since_epoch() != Clock::duration::zero();
+        }
+
+        void clear()
+        {
+            *this = {};
         }
     };
 
@@ -426,6 +618,7 @@ namespace Game
         std::string label{};
         OrbitPredictionCache cache{};
         PredictionLinePickCache pick_cache{};
+        PredictionLinePickCache preview_pick_cache{};
         bool dirty{true};
         bool request_pending{false};
         bool derived_request_pending{false};
@@ -437,7 +630,8 @@ namespace Game
         double preview_entered_at_s{std::numeric_limits<double>::quiet_NaN()};
         double preview_last_anchor_refresh_at_s{std::numeric_limits<double>::quiet_NaN()};
         double preview_last_request_at_s{std::numeric_limits<double>::quiet_NaN()};
-        PredictionChunkAssembly planned_chunk_assembly{};
+        PredictionPreviewOverlay preview_overlay{};
+        PredictionDragDebugTelemetry drag_debug{};
         bool supports_maneuvers{false};
         bool is_celestial{false};
         orbitsim::BodyId auto_primary_body_id{orbitsim::kInvalidBodyId};
@@ -449,6 +643,7 @@ namespace Game
         {
             cache.clear();
             pick_cache.clear();
+            preview_pick_cache.clear();
             dirty = true;
             request_pending = false;
             derived_request_pending = false;
@@ -460,7 +655,8 @@ namespace Game
             preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
             preview_last_anchor_refresh_at_s = std::numeric_limits<double>::quiet_NaN();
             preview_last_request_at_s = std::numeric_limits<double>::quiet_NaN();
-            planned_chunk_assembly.clear();
+            preview_overlay.clear();
+            drag_debug.clear();
             auto_primary_body_id = orbitsim::kInvalidBodyId;
             solver_ms_last = 0.0;
             solver_diagnostics = {};
@@ -516,5 +712,10 @@ namespace Game
         // Chunk assembly draw stats.
         uint32_t planned_chunk_count{0};
         uint32_t planned_chunks_drawn{0};
+        uint32_t planned_chunk_builds{0};
+        uint32_t planned_fallback_range_count{0};
+        double planned_chunk_enqueue_ms_last{0.0};
+        double planned_chunk_gpu_build_ms_last{0.0};
+        double planned_fallback_draw_ms_last{0.0};
     };
 } // namespace Game
