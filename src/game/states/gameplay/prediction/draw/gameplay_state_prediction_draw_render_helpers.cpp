@@ -1,272 +1,14 @@
-#include "game/states/gameplay/prediction/gameplay_state_prediction_draw_internal.h"
+#include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 
-#include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/orbit/orbit_plot_util.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <iterator>
 
 namespace Game::PredictionDrawDetail
 {
-    void reset_orbit_plot_state(PickingSystem *picking,
-                                OrbitPlotSystem *orbit_plot,
-                                OrbitPlotPerfStats &perf,
-                                const bool prediction_enabled)
-    {
-        if (picking)
-        {
-            // Orbit plot is emitted per-frame, so refresh pickable segments the same way.
-            picking->clear_line_picks();
-            picking->settings().enable_line_hover = prediction_enabled;
-        }
-
-        if (orbit_plot)
-        {
-            orbit_plot->clear_pending();
-        }
-
-        perf.render_lod_ms_last = 0.0;
-        perf.pick_lod_ms_last = 0.0;
-        perf.solver_segments_base = 0;
-        perf.solver_segments_planned = 0;
-        perf.pick_segments_before_cull = 0;
-        perf.pick_segments = 0;
-        perf.render_cap_hit_last_frame = false;
-        perf.pick_cap_hit_last_frame = false;
-        perf.planned_chunk_count = 0;
-        perf.planned_chunks_drawn = 0;
-        perf.planned_chunk_builds = 0;
-        perf.planned_fallback_range_count = 0;
-        perf.planned_chunk_enqueue_ms_last = 0.0;
-        perf.planned_chunk_gpu_build_ms_last = 0.0;
-        perf.planned_fallback_draw_ms_last = 0.0;
-    }
-
-    glm::vec4 scale_line_color(glm::vec4 color, const float line_alpha_scale)
-    {
-        color.a = std::clamp(color.a * line_alpha_scale, 0.0f, 1.0f);
-        return color;
-    }
-
-    double compute_prediction_display_time_s(const double sim_time_s,
-                                             const double last_sim_step_dt_s,
-                                             const float fixed_delta_time,
-                                             const float alpha_f)
-    {
-        const double interp_dt_s =
-                (last_sim_step_dt_s > 0.0) ? last_sim_step_dt_s : static_cast<double>(fixed_delta_time);
-
-        double now_s = sim_time_s;
-
-        // Match render interpolation: entities are rendered between prev/curr using `alpha_f`,
-        // so treat "now" as within the previous->current fixed step interval.
-        if (std::isfinite(interp_dt_s) && interp_dt_s > 0.0)
-        {
-            now_s -= (1.0 - static_cast<double>(alpha_f)) * interp_dt_s;
-        }
-
-        if (!std::isfinite(now_s))
-        {
-            return std::numeric_limits<double>::quiet_NaN();
-        }
-
-        return now_s;
-    }
-
-    double compute_prediction_now_s(const double display_time_s,
-                                    const double t0,
-                                    const double t1)
-    {
-        if (!std::isfinite(display_time_s))
-        {
-            return std::numeric_limits<double>::quiet_NaN();
-        }
-
-        return std::clamp(display_time_s, t0, t1);
-    }
-
-    double meters_per_px_at_world(const OrbitDrawWindowContext &ctx, const WorldVec3 &p_world)
-    {
-        return OrbitPlotUtil::meters_per_px_at_world(ctx.camera_world, ctx.tan_half_fov, ctx.viewport_height_px, p_world);
-    }
-
-    double snap_time_past_straddling_segment(const std::vector<orbitsim::TrajectorySegment> &traj_segments, double t_s)
-    {
-        double snapped_t_s = t_s;
-        for (const orbitsim::TrajectorySegment &segment : traj_segments)
-        {
-            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
-            {
-                continue;
-            }
-
-            const double seg_t0_s = segment.t0_s;
-            const double seg_t1_s = seg_t0_s + segment.dt_s;
-            if (!std::isfinite(seg_t0_s) || !std::isfinite(seg_t1_s))
-            {
-                continue;
-            }
-
-            if (seg_t0_s < t_s && t_s < seg_t1_s)
-            {
-                snapped_t_s = seg_t1_s;
-                break;
-            }
-        }
-
-        return snapped_t_s;
-    }
-
-    std::vector<double> collect_maneuver_node_times(const std::vector<ManeuverNode> &nodes)
-    {
-        std::vector<double> node_times_s;
-        node_times_s.reserve(nodes.size());
-
-        for (const ManeuverNode &node : nodes)
-        {
-            if (std::isfinite(node.time_s))
-            {
-                node_times_s.push_back(node.time_s);
-            }
-        }
-
-        std::sort(node_times_s.begin(), node_times_s.end());
-        node_times_s.erase(std::unique(node_times_s.begin(), node_times_s.end()), node_times_s.end());
-        return node_times_s;
-    }
-
-    std::size_t lower_bound_sample_index(const std::vector<orbitsim::TrajectorySample> &traj, const double t_s)
-    {
-        const auto it = std::lower_bound(traj.cbegin(),
-                                         traj.cend(),
-                                         t_s,
-                                         [](const orbitsim::TrajectorySample &sample, const double t) {
-                                             return sample.t_s < t;
-                                         });
-        return static_cast<std::size_t>(std::distance(traj.cbegin(), it));
-    }
-
-    WorldVec3 sample_polyline_world(const WorldVec3 &frame_origin_world,
-                                    const glm::dmat3 &frame_to_world,
-                                    const std::vector<orbitsim::TrajectorySample> &traj,
-                                    const std::size_t i_lo,
-                                    const std::size_t i_hi,
-                                    const double t_s)
-    {
-        if (i_lo >= traj.size())
-        {
-            return WorldVec3(0.0);
-        }
-
-        const auto transform_local = [&](const glm::dvec3 &local) -> WorldVec3 {
-            return frame_origin_world + WorldVec3(frame_to_world * local);
-        };
-
-        if (i_hi >= traj.size() || i_lo == i_hi)
-        {
-            return transform_local(glm::dvec3(traj[i_lo].position_m));
-        }
-
-        const orbitsim::TrajectorySample &a = traj[i_lo];
-        const orbitsim::TrajectorySample &b = traj[i_hi];
-        const double h = b.t_s - a.t_s;
-        if (!(h > 0.0) || !std::isfinite(h))
-        {
-            return transform_local(glm::dvec3(a.position_m));
-        }
-
-        double u = (t_s - a.t_s) / h;
-        if (!std::isfinite(u))
-        {
-            u = 0.0;
-        }
-        u = std::clamp(u, 0.0, 1.0);
-
-        const double u2 = u * u;
-        const double u3 = u2 * u;
-        const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-        const double h10 = u3 - (2.0 * u2) + u;
-        const double h01 = (-2.0 * u3) + (3.0 * u2);
-        const double h11 = u3 - u2;
-
-        const glm::dvec3 p0 = glm::dvec3(a.position_m);
-        const glm::dvec3 p1 = glm::dvec3(b.position_m);
-        const glm::dvec3 m0 = glm::dvec3(a.velocity_mps) * h;
-        const glm::dvec3 m1 = glm::dvec3(b.velocity_mps) * h;
-        const glm::dvec3 local = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-        return transform_local(local);
-    }
-
-    WorldVec3 compute_align_delta(const std::vector<orbitsim::TrajectorySample> &traj_base,
-                                  const std::size_t i_hi,
-                                  const WorldVec3 &ship_pos_world,
-                                  const double now_s,
-                                  const WorldVec3 &frame_origin_world,
-                                  const glm::dmat3 &frame_to_world)
-    {
-        WorldVec3 predicted_now_world{0.0, 0.0, 0.0};
-        if (i_hi > 0)
-        {
-            predicted_now_world = sample_polyline_world(frame_origin_world, frame_to_world, traj_base, i_hi - 1, i_hi, now_s);
-        }
-        else if (i_hi < traj_base.size())
-        {
-            predicted_now_world = sample_polyline_world(frame_origin_world, frame_to_world, traj_base, i_hi, i_hi, now_s);
-        }
-
-        const WorldVec3 align_delta = ship_pos_world - predicted_now_world;
-        const double align_len = glm::length(glm::dvec3(align_delta));
-        if (!std::isfinite(align_len) || align_len > 10'000.0)
-        {
-            return WorldVec3(0.0, 0.0, 0.0);
-        }
-
-        return align_delta;
-    }
-
-    bool frame_transform_is_identity(const glm::dmat3 &frame_to_world)
-    {
-        constexpr double kIdentityEpsilon = 1.0e-12;
-
-        for (int col = 0; col < 3; ++col)
-        {
-            for (int row = 0; row < 3; ++row)
-            {
-                const double expected = (col == row) ? 1.0 : 0.0;
-                const double value = frame_to_world[col][row];
-                if (!std::isfinite(value) || std::abs(value - expected) > kIdentityEpsilon)
-                {
-                    return false;
-                }
-            }
-        }
-
-        return true;
-    }
-
-    std::vector<orbitsim::TrajectorySegment> transform_segments_to_world_basis(
-            const std::vector<orbitsim::TrajectorySegment> &traj_segments,
-            const glm::dmat3 &frame_to_world)
-    {
-        std::vector<orbitsim::TrajectorySegment> transformed_segments{};
-        transformed_segments.reserve(traj_segments.size());
-
-        for (const orbitsim::TrajectorySegment &segment : traj_segments)
-        {
-            orbitsim::TrajectorySegment transformed = segment;
-            transformed.start.position_m = frame_to_world * glm::dvec3(segment.start.position_m);
-            transformed.start.velocity_mps = frame_to_world * glm::dvec3(segment.start.velocity_mps);
-            transformed.end.position_m = frame_to_world * glm::dvec3(segment.end.position_m);
-            transformed.end.velocity_mps = frame_to_world * glm::dvec3(segment.end.velocity_mps);
-            transformed_segments.push_back(transformed);
-        }
-
-        return transformed_segments;
-    }
-
     namespace
     {
         WorldVec3 eval_segment_world_pos(const OrbitDrawWindowContext &ctx,
@@ -348,14 +90,14 @@ namespace Game::PredictionDrawDetail
 
             ctx.orbit_plot->add_gpu_root_batch(
                     std::make_shared<const std::vector<OrbitPlotSystem::GpuRootSegment>>(std::move(roots)),
-                                               t_start_s,
-                                               t_end_s,
-                                               ctx.ref_body_world,
-                                               ctx.align_delta,
-                                               ctx.frame_to_world,
-                                               color,
-                                               dashed,
-                                               depth);
+                    t_start_s,
+                    t_end_s,
+                    ctx.ref_body_world,
+                    ctx.align_delta,
+                    ctx.frame_to_world,
+                    color,
+                    dashed,
+                    depth);
         }
 
         void emit_render_lod_segments(const OrbitDrawWindowContext &ctx,
@@ -417,7 +159,8 @@ namespace Game::PredictionDrawDetail
                        dash_chunks < draw_config.dash_max_chunks_per_segment)
                 {
                     const bool phase_on = dash_phase_px < dash_on_px;
-                    double phase_remaining_px = phase_on ? (dash_on_px - dash_phase_px) : (dash_period_px - dash_phase_px);
+                    double phase_remaining_px =
+                            phase_on ? (dash_on_px - dash_phase_px) : (dash_period_px - dash_phase_px);
                     if (!std::isfinite(phase_remaining_px) || !(phase_remaining_px > 1.0e-6))
                     {
                         phase_remaining_px = 1.0;
@@ -483,7 +226,6 @@ namespace Game::PredictionDrawDetail
                             .count();
             emit_render_lod_segments(ctx, draw_config, perf, lod, color, dashed);
         }
-
     } // namespace
 
     void draw_orbit_window(const OrbitDrawWindowContext &ctx,
@@ -636,10 +378,6 @@ namespace Game::PredictionDrawDetail
         double t_plan_start = t0p;
         if (has_future_node)
         {
-            // When the solver output is split at the node time, start exactly on the node so the
-            // visible preview length matches the authored preview window. Fall back to the old
-            // "snap past the containing segment" behavior only if the node still lands inside
-            // a straddling segment.
             t_plan_start = std::clamp(anchor_time_s, t0p, t1p);
             const double snapped_t_plan_start =
                     std::clamp(snap_time_past_straddling_segment(traj_planned_segments, t_plan_start), t0p, t1p);
@@ -650,8 +388,6 @@ namespace Game::PredictionDrawDetail
         }
         else if (has_relevant_node)
         {
-            // Once every authored node is in the past, keep the planned plot anchored to the ship's
-            // current predicted state instead of the original node placement time.
             t_plan_start = std::clamp(now_s, t0p, t1p);
         }
 
@@ -665,8 +401,9 @@ namespace Game::PredictionDrawDetail
             double t_full_end = t1p;
             if (orbital_period_s > 0.0 && std::isfinite(orbital_period_s))
             {
-                // Measure the full-orbit extent from the node (plan start), not from the trajectory data start.
-                t_full_end = std::min(t_plan_start + (orbital_period_s * OrbitPredictionTuning::kFullOrbitDrawPeriodScale), t1p);
+                t_full_end = std::min(
+                        t_plan_start + (orbital_period_s * OrbitPredictionTuning::kFullOrbitDrawPeriodScale),
+                        t1p);
             }
             t_plan_end = t_full_end;
         }
