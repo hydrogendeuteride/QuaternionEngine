@@ -503,7 +503,11 @@ namespace Game
             OrbitPredictionCache *const planned_cache = preview_planned_cache ? preview_planned_cache : stable_cache;
             PredictionChunkAssembly *const planned_chunk_assembly =
                     track->preview_overlay.chunk_assembly.valid ? &track->preview_overlay.chunk_assembly : nullptr;
-            const bool has_preview_planned_overlay = preview_planned_cache != nullptr;
+            const bool has_preview_planned_overlay = track->preview_overlay.valid();
+            const bool has_chunk_planned_overlay =
+                    planned_chunk_assembly &&
+                    planned_chunk_assembly->valid &&
+                    !planned_chunk_assembly->chunks.empty();
 
             const auto &traj_base = stable_cache->trajectory_frame;
             const auto &traj_planned = planned_cache->trajectory_frame_planned;
@@ -567,6 +571,20 @@ namespace Game
 
             const bool is_active = track->key == _prediction_selection.active_subject;
             const bool active_player_track = is_active && prediction_subject_is_player(track->key);
+            const bool maneuver_drag_active =
+                    active_player_track &&
+                    _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
+            const bool suppress_stale_planned_preview =
+                    maneuver_drag_active &&
+                    (track->preview_state == PredictionPreviewRuntimeState::EnterDrag ||
+                     track->preview_state == PredictionPreviewRuntimeState::DragPreviewPending);
+            const bool drag_anchor_valid =
+                    maneuver_drag_active &&
+                    track->preview_anchor.valid &&
+                    std::isfinite(track->preview_anchor.anchor_time_s);
+            const double drag_anchor_time_s =
+                    drag_anchor_valid ? track->preview_anchor.anchor_time_s
+                                      : std::numeric_limits<double>::quiet_NaN();
             if (is_active)
             {
                 _orbit_plot_perf.solver_segments_base = static_cast<uint32_t>(traj_base_segments->size());
@@ -870,30 +888,6 @@ namespace Game
                 return covered_ranges;
             };
 
-            const auto compute_preview_prefix_fallback_ranges =
-                    [&](const double window_t0_s,
-                        const double window_t1_s,
-                        const PredictionChunkAssembly *assembly) {
-                std::vector<std::pair<double, double>> fallback_ranges;
-                if (!assembly || !assembly->valid || assembly->chunks.empty() || !(window_t1_s > window_t0_s))
-                {
-                    return fallback_ranges;
-                }
-
-                const double preview_start_s = assembly->start_time_s();
-                if (!std::isfinite(preview_start_s))
-                {
-                    return fallback_ranges;
-                }
-
-                const double fallback_t1_s = std::min(window_t1_s, preview_start_s);
-                if (fallback_t1_s > window_t0_s)
-                {
-                    fallback_ranges.emplace_back(window_t0_s, fallback_t1_s);
-                }
-                return fallback_ranges;
-            };
-
             const auto build_planned_pick_window_from_chunk_assembly =
                     [&](const PredictionChunkAssembly &assembly,
                         const double now_s_local,
@@ -1148,35 +1142,83 @@ namespace Game
                     _orbit_plot_perf.planned_window_t0p = traj_planned_segments->front().t0_s;
                 }
             }
+            const auto compute_drag_prefix_fallback_ranges =
+                    [&](const double window_t0_s,
+                        const double window_t1_s,
+                        std::vector<std::pair<double, double>> covered_ranges = {}) {
+                std::vector<std::pair<double, double>> fallback_ranges;
+                if (!drag_anchor_valid || !(window_t1_s > window_t0_s))
+                {
+                    return fallback_ranges;
+                }
+
+                const double prefix_t1_s = std::min(window_t1_s, drag_anchor_time_s);
+                if (!(prefix_t1_s > window_t0_s))
+                {
+                    return fallback_ranges;
+                }
+
+                return compute_uncovered_ranges(window_t0_s, prefix_t1_s, std::move(covered_ranges));
+            };
             if (planned_pick_window.valid)
             {
-                const bool has_chunk_assembly =
-                        planned_chunk_assembly &&
-                        planned_chunk_assembly->valid &&
-                        !planned_chunk_assembly->chunks.empty();
-
-                if (active_player_track)
+                if (suppress_stale_planned_preview)
                 {
-                    _orbit_plot_perf.planned_chunk_count =
-                            has_chunk_assembly
-                                    ? static_cast<uint32_t>(planned_chunk_assembly->chunks.size())
-                                    : 0;
+                    if (active_player_track)
+                    {
+                        _orbit_plot_perf.planned_chunk_count = 0;
+                    }
+
+                    OrbitPredictionCache *const stable_planned_prefix_cache =
+                            (!stable_cache->trajectory_segments_frame_planned.empty() ||
+                             !stable_cache->trajectory_frame_planned.empty())
+                                    ? stable_cache
+                                    : nullptr;
+                    const auto fallback_ranges = (stable_planned_prefix_cache != nullptr)
+                                                         ? compute_drag_prefix_fallback_ranges(planned_pick_window.t0_s,
+                                                                                              planned_pick_window.t1_s)
+                                                         : std::vector<std::pair<double, double>>{};
+                    if (active_player_track)
+                    {
+                        _orbit_plot_perf.planned_fallback_range_count =
+                                static_cast<uint32_t>(fallback_ranges.size());
+                    }
+                    if (!fallback_ranges.empty())
+                    {
+                        const auto fallback_draw_start_tp = std::chrono::steady_clock::now();
+                        for (const auto &[fallback_t0_s, fallback_t1_s] : fallback_ranges)
+                        {
+                            draw_planned_window_from_cache(*stable_planned_prefix_cache,
+                                                           fallback_t0_s,
+                                                           fallback_t1_s,
+                                                           track_color_plan);
+                        }
+                        if (active_player_track)
+                        {
+                            _orbit_plot_perf.planned_fallback_draw_ms_last =
+                                    std::chrono::duration<double, std::milli>(
+                                            std::chrono::steady_clock::now() - fallback_draw_start_tp)
+                                            .count();
+                        }
+                    }
                 }
-
-                OrbitPredictionCache *const fallback_planned_cache =
-                        (!stable_cache->trajectory_segments_frame_planned.empty() ||
-                         !stable_cache->trajectory_frame_planned.empty())
-                                ? stable_cache
-                                : planned_cache;
-
-                if (!has_preview_planned_overlay)
+                else
                 {
-                    draw_planned_window_from_cache(*planned_cache,
-                                                   planned_pick_window.t0_s,
-                                                   planned_pick_window.t1_s,
-                                                   track_color_plan);
-                }
-                else if (has_chunk_assembly)
+                    if (active_player_track)
+                    {
+                        _orbit_plot_perf.planned_chunk_count =
+                                has_chunk_planned_overlay
+                                        ? static_cast<uint32_t>(planned_chunk_assembly->chunks.size())
+                                        : 0;
+                    }
+
+                    OrbitPredictionCache *const fallback_planned_cache =
+                            (!stable_cache->trajectory_segments_frame_planned.empty() ||
+                             !stable_cache->trajectory_frame_planned.empty())
+                                    ? stable_cache
+                                    : planned_cache;
+
+                if (has_chunk_planned_overlay)
                 {
                     // Chunk assembly path: draw preview chunks directly without
                     // rebuilding a flat planned cache first.
@@ -1204,10 +1246,14 @@ namespace Game
                         _orbit_plot_perf.planned_chunk_gpu_build_ms_last = chunk_draw_result.gpu_root_build_ms;
                     }
 
-                    const auto fallback_ranges = compute_preview_prefix_fallback_ranges(
-                            planned_pick_window.t0_s,
-                            planned_pick_window.t1_s,
-                            planned_chunk_assembly);
+                    const auto fallback_ranges =
+                            maneuver_drag_active
+                                    ? compute_drag_prefix_fallback_ranges(planned_pick_window.t0_s,
+                                                                          planned_pick_window.t1_s,
+                                                                          chunk_draw_result.covered_ranges)
+                                    : compute_uncovered_ranges(planned_pick_window.t0_s,
+                                                               planned_pick_window.t1_s,
+                                                               chunk_draw_result.covered_ranges);
                     if (active_player_track)
                     {
                         _orbit_plot_perf.planned_fallback_range_count =
@@ -1232,6 +1278,13 @@ namespace Game
                         }
                     }
                 }
+                else if (!has_preview_planned_overlay)
+                {
+                    draw_planned_window_from_cache(*planned_cache,
+                                                   planned_pick_window.t0_s,
+                                                   planned_pick_window.t1_s,
+                                                   track_color_plan);
+                }
                 else
                 {
                     draw_planned_window_from_cache(*planned_cache,
@@ -1243,9 +1296,15 @@ namespace Game
                                                                                      planned_pick_window.t0_s,
                                                                                      planned_pick_window.t1_s);
                     const auto fallback_ranges = (fallback_planned_cache != planned_cache)
-                                                         ? compute_uncovered_ranges(planned_pick_window.t0_s,
-                                                                                    planned_pick_window.t1_s,
-                                                                                    covered_ranges)
+                                                         ? (maneuver_drag_active
+                                                                    ? compute_drag_prefix_fallback_ranges(
+                                                                              planned_pick_window.t0_s,
+                                                                              planned_pick_window.t1_s,
+                                                                              covered_ranges)
+                                                                    : compute_uncovered_ranges(
+                                                                              planned_pick_window.t0_s,
+                                                                              planned_pick_window.t1_s,
+                                                                              covered_ranges))
                                                          : std::vector<std::pair<double, double>>{};
                     if (active_player_track)
                     {
@@ -1271,6 +1330,7 @@ namespace Game
                                             .count();
                         }
                     }
+                }
                 }
             }
 
@@ -1545,14 +1605,20 @@ namespace Game
                 if (allow_planned_pick &&
                     planned_pick_window.valid &&
                     pick_group_planned != Draw::kInvalidPickGroup &&
-                    remaining_pick_budget > 0)
+                    remaining_pick_budget > 0 &&
+                    !suppress_stale_planned_preview)
                 {
                     const bool has_chunk_planned_pick =
                             planned_chunk_assembly &&
                             planned_chunk_assembly->valid &&
                             !planned_chunk_assembly->chunks.empty();
+                    PredictionLinePickCache &planned_pick_cache =
+                            has_chunk_planned_pick ? track->preview_pick_cache : track->pick_cache;
                     OrbitPredictionCache *const stable_planned_pick_cache =
-                            !stable_cache->trajectory_segments_frame_planned.empty() ? stable_cache : nullptr;
+                            (!maneuver_drag_active &&
+                             !stable_cache->trajectory_segments_frame_planned.empty())
+                                    ? stable_cache
+                                    : nullptr;
 
                     if (direct_world_polyline && stable_planned_pick_cache &&
                         !stable_planned_pick_cache->trajectory_frame_planned.empty())
@@ -1570,7 +1636,7 @@ namespace Game
                     {
                         pick_settings.max_segments = std::max<std::size_t>(1, remaining_pick_budget);
                         bool rebuilt_pick_cache = false;
-                        if (should_rebuild_pick_cache(track->pick_cache,
+                        if (should_rebuild_pick_cache(planned_pick_cache,
                                                       has_chunk_planned_pick
                                                               ? planned_chunk_assembly->generation_id
                                                               : (stable_planned_pick_cache
@@ -1594,7 +1660,7 @@ namespace Game
                                                       true))
                         {
                             rebuilt_pick_cache = true;
-                            track->pick_cache.planned_segments.clear();
+                            planned_pick_cache.planned_segments.clear();
                             if (has_chunk_planned_pick)
                             {
                                 std::vector<std::pair<double, double>> covered_ranges;
@@ -1602,19 +1668,19 @@ namespace Game
                                                                          planned_pick_window.t0_s,
                                                                          planned_pick_window.t1_s,
                                                                          remaining_pick_budget,
-                                                                         track->pick_cache.planned_segments,
+                                                                         planned_pick_cache.planned_segments,
                                                                          covered_ranges);
                                 if (stable_planned_pick_cache &&
-                                    track->pick_cache.planned_segments.size() < remaining_pick_budget)
+                                    planned_pick_cache.planned_segments.size() < remaining_pick_budget)
                                 {
-                                    const auto fallback_ranges = compute_preview_prefix_fallback_ranges(
+                                    const auto fallback_ranges = compute_uncovered_ranges(
                                             planned_pick_window.t0_s,
                                             planned_pick_window.t1_s,
-                                            planned_chunk_assembly);
+                                            covered_ranges);
                                     for (const auto &[fallback_t0_s, fallback_t1_s] : fallback_ranges)
                                     {
                                         const std::size_t remaining_budget =
-                                                remaining_pick_budget - track->pick_cache.planned_segments.size();
+                                                remaining_pick_budget - planned_pick_cache.planned_segments.size();
                                         if (remaining_budget == 0)
                                         {
                                             break;
@@ -1651,7 +1717,7 @@ namespace Game
                                                                            cap_hit,
                                                                            _orbit_plot_perf);
                                         }
-                                        track->pick_cache.planned_segments.insert(track->pick_cache.planned_segments.end(),
+                                        planned_pick_cache.planned_segments.insert(planned_pick_cache.planned_segments.end(),
                                                                                   fallback_segments.begin(),
                                                                                   fallback_segments.end());
                                     }
@@ -1665,7 +1731,7 @@ namespace Game
                                     build_pick_curve_cache(stable_planned_pick_cache->render_curve_frame_planned,
                                                            planned_pick_window.t0_s,
                                                            planned_pick_window.t1_s,
-                                                           track->pick_cache.planned_segments,
+                                                           planned_pick_cache.planned_segments,
                                                            cap_hit);
                                 }
                                 else
@@ -1684,14 +1750,14 @@ namespace Game
                                                                    planned_pick_window.t1_s,
                                                                    pick_anchor_times_span,
                                                                    !identity_frame_transform,
-                                                                   track->pick_cache.planned_segments,
+                                                                   planned_pick_cache.planned_segments,
                                                                    cap_hit,
                                                                    _orbit_plot_perf);
                                 }
                             }
-                            if (!track->pick_cache.planned_segments.empty())
+                            if (!planned_pick_cache.planned_segments.empty())
                             {
-                                mark_pick_cache_valid(track->pick_cache,
+                                mark_pick_cache_valid(planned_pick_cache,
                                                       has_chunk_planned_pick
                                                               ? planned_chunk_assembly->generation_id
                                                               : (stable_planned_pick_cache
@@ -1716,25 +1782,25 @@ namespace Game
                             }
                             else
                             {
-                                track->pick_cache.planned_valid = false;
-                                track->pick_cache.planned_segments.clear();
+                                planned_pick_cache.planned_valid = false;
+                                planned_pick_cache.planned_segments.clear();
                             }
                         }
 
-                        if (track->pick_cache.planned_valid && !track->pick_cache.planned_segments.empty())
+                        if (planned_pick_cache.planned_valid && !planned_pick_cache.planned_segments.empty())
                         {
                             if (!rebuilt_pick_cache)
                             {
                                 _orbit_plot_perf.pick_segments_before_cull +=
-                                        static_cast<uint32_t>(track->pick_cache.planned_segments.size());
+                                        static_cast<uint32_t>(planned_pick_cache.planned_segments.size());
                                 _orbit_plot_perf.pick_segments +=
-                                        static_cast<uint32_t>(track->pick_cache.planned_segments.size());
+                                        static_cast<uint32_t>(planned_pick_cache.planned_segments.size());
                             }
                             picking->add_line_pick_segments(
                                     pick_group_planned,
                                     std::span<const PickingSystem::LinePickSegmentData>(
-                                            track->pick_cache.planned_segments.data(),
-                                            track->pick_cache.planned_segments.size()));
+                                            planned_pick_cache.planned_segments.data(),
+                                            planned_pick_cache.planned_segments.size()));
                         }
                     }
                 }

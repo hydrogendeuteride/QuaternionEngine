@@ -672,6 +672,9 @@ namespace Game
         for (PredictionTrackState &track : _prediction_tracks)
         {
             track.cache.clear();
+            track.preview_overlay.clear();
+            track.pick_cache.clear();
+            track.preview_pick_cache.clear();
             track.request_pending = false;
             track.derived_request_pending = false;
             track.latest_requested_generation_id = 0;
@@ -988,13 +991,15 @@ namespace Game
         if (preview_result)
         {
             track->preview_overlay.cache = std::move(cache_to_publish);
+            track->preview_pick_cache.clear();
         }
         else
         {
             track->cache = std::move(cache_to_publish);
             track->preview_overlay.clear();
+            track->pick_cache.clear();
+            track->preview_pick_cache.clear();
         }
-        track->pick_cache.clear();
         double chunk_merge_ms = 0.0;
         if (preview_result && result.chunk_assembly.valid)
         {
@@ -1006,6 +1011,7 @@ namespace Game
         else
         {
             track->preview_overlay.chunk_assembly.clear();
+            track->preview_pick_cache.clear();
         }
         update_last_and_peak(debug.preview_merge_ms_last, debug.preview_merge_ms_peak, preview_merge_ms);
         update_last_and_peak(debug.chunk_merge_ms_last, debug.chunk_merge_ms_peak, chunk_merge_ms);
@@ -1505,6 +1511,9 @@ namespace Game
         if (!get_prediction_subject_world_state(track.key, subject_pos_world, subject_vel_world, subject_vel_local))
         {
             track.cache.clear();
+            track.preview_overlay.clear();
+            track.pick_cache.clear();
+            track.preview_pick_cache.clear();
             track.dirty = true;
             track.request_pending = false;
             track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
@@ -1533,6 +1542,9 @@ namespace Game
         if (!requested)
         {
             track.cache.clear();
+            track.preview_overlay.clear();
+            track.pick_cache.clear();
+            track.preview_pick_cache.clear();
             track.request_pending = false;
             track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             track.preview_state = PredictionPreviewRuntimeState::Idle;
@@ -1546,6 +1558,9 @@ namespace Game
         if (!_orbitsim)
         {
             track.cache.clear();
+            track.preview_overlay.clear();
+            track.pick_cache.clear();
+            track.preview_pick_cache.clear();
             track.dirty = true;
             track.request_pending = false;
             track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
@@ -1563,6 +1578,9 @@ namespace Game
         if (!requested)
         {
             track.cache.clear();
+            track.preview_overlay.clear();
+            track.pick_cache.clear();
+            track.preview_pick_cache.clear();
             track.request_pending = false;
             track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
         }

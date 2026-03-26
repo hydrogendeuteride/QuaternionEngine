@@ -860,6 +860,7 @@ namespace Game
         {
             track.preview_overlay.clear();
             track.pick_cache.clear();
+            track.preview_pick_cache.clear();
         }
         const bool rebuild_frame_cache =
                 !track.cache.resolved_frame_spec_valid ||
@@ -893,6 +894,7 @@ namespace Game
                 track.cache.metrics_valid = false;
                 track.preview_overlay.clear();
                 track.pick_cache.clear();
+                track.preview_pick_cache.clear();
                 return;
             }
         }

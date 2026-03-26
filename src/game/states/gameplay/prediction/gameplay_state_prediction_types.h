@@ -522,6 +522,7 @@ namespace Game
         std::string label{};
         OrbitPredictionCache cache{};
         PredictionLinePickCache pick_cache{};
+        PredictionLinePickCache preview_pick_cache{};
         bool dirty{true};
         bool request_pending{false};
         bool derived_request_pending{false};
@@ -546,6 +547,7 @@ namespace Game
         {
             cache.clear();
             pick_cache.clear();
+            preview_pick_cache.clear();
             dirty = true;
             request_pending = false;
             derived_request_pending = false;
