@@ -525,6 +525,14 @@ namespace Game
         _maneuver_gizmo_interaction.applied_delta = false;
         if (PredictionTrackState *track = active_prediction_track())
         {
+            track->preview_state = PredictionPreviewRuntimeState::EnterDrag;
+            track->preview_anchor.clear();
+            track->invalidated_while_pending = track->request_pending || track->derived_request_pending;
+            if (!std::isfinite(track->preview_entered_at_s))
+            {
+                track->preview_entered_at_s = drag_display_reference_time_s;
+            }
+
             PredictionDragDebugTelemetry &debug = track->drag_debug;
             const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
             const uint64_t next_drag_session_id = debug.drag_session_id + 1;
@@ -557,8 +565,24 @@ namespace Game
             return;
         }
 
+        const auto find_drag_snapshot = [&](const int node_id) -> const ManeuverNodeDisplaySnapshot * {
+            for (const ManeuverNodeDisplaySnapshot &snapshot : _maneuver_gizmo_interaction.drag_display_snapshots)
+            {
+                if (snapshot.node_id == node_id)
+                {
+                    return &snapshot;
+                }
+            }
+            return nullptr;
+        };
+
         double current_t = 0.0;
-        const glm::dvec3 axis_origin_local = glm::dvec3(node.position_world - ray.camera_world);
+        WorldVec3 axis_origin_world = node.position_world;
+        if (const ManeuverNodeDisplaySnapshot *drag_snapshot = find_drag_snapshot(node.id))
+        {
+            axis_origin_world = drag_snapshot->position_world;
+        }
+        const glm::dvec3 axis_origin_local = glm::dvec3(axis_origin_world - ray.camera_world);
         if (!closest_param_ray_line(ray.ray_origin_local, ray.ray_dir_local, axis_origin_local, axis_dir_world, current_t))
         {
             return;
@@ -607,6 +631,17 @@ namespace Game
             node.total_dv_mps = safe_length(node.dv_rtn_mps);
             _maneuver_gizmo_interaction.applied_delta = true;
             mark_maneuver_plan_dirty();
+
+            if (PredictionTrackState *track = active_prediction_track())
+            {
+                const orbitsim::TrajectoryFrameSpec display_frame_spec =
+                        track->cache.resolved_frame_spec_valid ? track->cache.resolved_frame_spec
+                                                               : _prediction_frame_selection.spec;
+                if (prediction_frame_is_lagrange_sensitive(display_frame_spec))
+                {
+                    track->preview_state = PredictionPreviewRuntimeState::EnterDrag;
+                }
+            }
         }
 
         if (PredictionTrackState *track = active_prediction_track())
