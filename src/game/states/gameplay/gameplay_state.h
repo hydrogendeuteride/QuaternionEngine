@@ -375,6 +375,7 @@ namespace Game
         void update_maneuver_ui_config(GameStateContext &ctx);
         void draw_maneuver_nodes_panel(GameStateContext &ctx);
         void draw_maneuver_imgui_gizmo(GameStateContext &ctx);
+        void draw_orbit_drag_debug_window(GameStateContext &ctx);
         void refresh_maneuver_node_runtime_cache(GameStateContext &ctx);
         void clear_maneuver_gizmo_instances(GameStateContext &ctx);
         void update_maneuver_nodes_time_warp(GameStateContext &ctx, float fixed_dt);

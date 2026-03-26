@@ -1,5 +1,6 @@
 #include "gameplay_state.h"
 #include "orbit_helpers.h"
+#include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/gameplay_settings.h"
 #include "game/states/gameplay/scenario/scenario_loader.h"
 #include "game/component/ship_controller.h"
@@ -11,6 +12,7 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 
@@ -72,6 +74,75 @@ namespace Game
             }
 
             return "Unknown";
+        }
+
+        const char *prediction_preview_state_label(const PredictionPreviewRuntimeState state)
+        {
+            switch (state)
+            {
+                case PredictionPreviewRuntimeState::Idle:
+                    return "Idle";
+                case PredictionPreviewRuntimeState::EnterDrag:
+                    return "EnterDrag";
+                case PredictionPreviewRuntimeState::DragPreviewPending:
+                    return "DragPreviewPending";
+                case PredictionPreviewRuntimeState::PreviewStreaming:
+                    return "PreviewStreaming";
+                case PredictionPreviewRuntimeState::AwaitFullRefine:
+                    return "AwaitFullRefine";
+            }
+
+            return "Unknown";
+        }
+
+        const char *prediction_solve_quality_label(const OrbitPredictionService::SolveQuality quality)
+        {
+            switch (quality)
+            {
+                case OrbitPredictionService::SolveQuality::Full:
+                    return "Full";
+                case OrbitPredictionService::SolveQuality::FastPreview:
+                    return "FastPreview";
+            }
+
+            return "Unknown";
+        }
+
+        const char *prediction_publish_stage_label(const OrbitPredictionService::PublishStage stage)
+        {
+            switch (stage)
+            {
+                case OrbitPredictionService::PublishStage::Full:
+                    return "Full";
+                case OrbitPredictionService::PublishStage::FastPreviewFP0:
+                    return "FastPreviewFP0";
+                case OrbitPredictionService::PublishStage::FastPreviewFP1:
+                    return "FastPreviewFP1";
+            }
+
+            return "Unknown";
+        }
+
+        double timestamp_age_ms(const PredictionDragDebugTelemetry::TimePoint &tp,
+                                const PredictionDragDebugTelemetry::TimePoint &now_tp)
+        {
+            if (!PredictionDragDebugTelemetry::has_time(tp))
+            {
+                return -1.0;
+            }
+
+            return std::chrono::duration<double, std::milli>(now_tp - tp).count();
+        }
+
+        void draw_age_text(const char *label, const double age_ms)
+        {
+            if (age_ms < 0.0)
+            {
+                ImGui::Text("%s: n/a", label);
+                return;
+            }
+
+            ImGui::Text("%s: %.1f ms ago", label, age_ms);
         }
 
         void draw_prediction_stage_diag(const char *label,
@@ -917,6 +988,192 @@ namespace Game
 
         draw_maneuver_nodes_panel(ctx);
         draw_maneuver_imgui_gizmo(ctx);
+        draw_orbit_drag_debug_window(ctx);
         _frame_monitor.draw_ui();
+    }
+
+    void GameplayState::draw_orbit_drag_debug_window(GameStateContext &ctx)
+    {
+        if (!_maneuver_nodes_enabled)
+        {
+            return;
+        }
+
+        const ImGuiViewport *viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(
+                ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - 440.0f, viewport->WorkPos.y + 16.0f),
+                ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_FirstUseEver);
+
+        if (!ImGui::Begin("Orbit Drag Debug"))
+        {
+            ImGui::End();
+            return;
+        }
+
+        const PredictionTrackState *active_track = active_prediction_track();
+        if (!active_track)
+        {
+            ImGui::TextUnformatted("No active prediction track.");
+            ImGui::End();
+            return;
+        }
+
+        const PredictionDragDebugTelemetry &debug = active_track->drag_debug;
+        const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
+        const std::string subject_label = prediction_subject_label(active_track->key);
+        const char *gizmo_state = "Idle";
+        switch (_maneuver_gizmo_interaction.state)
+        {
+            case ManeuverGizmoInteraction::State::Idle:
+                gizmo_state = "Idle";
+                break;
+            case ManeuverGizmoInteraction::State::HoverAxis:
+                gizmo_state = "HoverAxis";
+                break;
+            case ManeuverGizmoInteraction::State::DragAxis:
+                gizmo_state = "DragAxis";
+                break;
+        }
+
+        OrbitPlotSystem *orbit_plot =
+                (ctx.renderer && ctx.renderer->_context) ? ctx.renderer->_context->orbit_plot : nullptr;
+        const OrbitPlotSystem::Stats *plot_stats = orbit_plot ? &orbit_plot->stats() : nullptr;
+
+        const orbitsim::TrajectoryFrameSpec frame_spec =
+                active_track->cache.resolved_frame_spec_valid
+                        ? active_track->cache.resolved_frame_spec
+                        : _prediction_frame_selection.spec;
+        const bool live_chunk_path_supported =
+                frame_spec.type != orbitsim::TrajectoryFrameType::Inertial &&
+                frame_spec.type != orbitsim::TrajectoryFrameType::LVLH;
+
+        const bool have_sim_now = _orbitsim != nullptr;
+        const double sim_now_s = have_sim_now ? _orbitsim->sim.time_s() : 0.0;
+        const bool have_build_time = active_track->cache.valid && have_sim_now;
+        const double sim_since_build_s = have_build_time ? std::max(0.0, sim_now_s - active_track->cache.build_time_s) : 0.0;
+        const double drag_gate_remaining_ms =
+                PredictionDragDebugTelemetry::has_time(debug.last_preview_request_tp)
+                        ? std::max(0.0,
+                                   OrbitPredictionTuning::kDragRebuildMinIntervalS -
+                                           std::chrono::duration<double>(now_tp - debug.last_preview_request_tp).count()) *
+                                  1000.0
+                        : 0.0;
+
+        ImGui::Text("Subject: %s", subject_label.c_str());
+        ImGui::Text("Preview state: %s", prediction_preview_state_label(active_track->preview_state));
+        ImGui::Text("Result quality/stage: %s / %s",
+                    prediction_solve_quality_label(debug.last_result_solve_quality),
+                    prediction_publish_stage_label(debug.last_publish_stage));
+        ImGui::Text("Pending solver/derived/dirty/live: %s / %s / %s / %s",
+                    active_track->request_pending ? "yes" : "no",
+                    active_track->derived_request_pending ? "yes" : "no",
+                    active_track->dirty ? "yes" : "no",
+                    _maneuver_plan_live_preview_active ? "yes" : "no");
+        ImGui::Text("Gizmo state: %s", gizmo_state);
+        if (_maneuver_gizmo_interaction.node_id >= 0)
+        {
+            ImGui::Text("Gizmo node/axis: %d / %s",
+                        _maneuver_gizmo_interaction.node_id,
+                        maneuver_axis_label(_maneuver_gizmo_interaction.axis));
+        }
+
+        ImGui::SeparatorText("Cadence");
+        ImGui::Text("Drag session / updates / preview requests: %llu / %llu / %llu",
+                    static_cast<unsigned long long>(debug.drag_session_id),
+                    static_cast<unsigned long long>(debug.drag_update_count),
+                    static_cast<unsigned long long>(debug.preview_request_count));
+        ImGui::Text("Solver results / derived results / preview publishes: %llu / %llu / %llu",
+                    static_cast<unsigned long long>(debug.solver_result_count),
+                    static_cast<unsigned long long>(debug.derived_result_count),
+                    static_cast<unsigned long long>(debug.preview_publish_count));
+        draw_age_text("Drag start", timestamp_age_ms(debug.drag_started_tp, now_tp));
+        draw_age_text("Last drag update", timestamp_age_ms(debug.last_drag_update_tp, now_tp));
+        draw_age_text("Last preview request", timestamp_age_ms(debug.last_preview_request_tp, now_tp));
+        draw_age_text("Last solver result", timestamp_age_ms(debug.last_solver_result_tp, now_tp));
+        draw_age_text("Last derived apply", timestamp_age_ms(debug.last_derived_result_tp, now_tp));
+        if (PredictionDragDebugTelemetry::has_time(debug.last_drag_end_tp))
+        {
+            draw_age_text("Last drag end", timestamp_age_ms(debug.last_drag_end_tp, now_tp));
+        }
+        if (active_track->preview_anchor.valid)
+        {
+            ImGui::Text("Preview anchor node/time/window: %d / %.3f s / %.3f s",
+                        active_track->preview_anchor.anchor_node_id,
+                        active_track->preview_anchor.anchor_time_s,
+                        active_track->preview_anchor.patch_window_s);
+        }
+        if (have_build_time)
+        {
+            ImGui::Text("Sim since cache build: %.3f s", sim_since_build_s);
+            ImGui::Text("Drag rebuild gate remaining: %.1f ms", drag_gate_remaining_ms);
+        }
+
+        ImGui::SeparatorText("Latency");
+        ImGui::Text("Drag -> request: %.3f ms (peak %.3f)", debug.drag_to_request_ms_last, debug.drag_to_request_ms_peak);
+        ImGui::Text("Request -> solver: %.3f ms (peak %.3f)", debug.request_to_solver_ms_last, debug.request_to_solver_ms_peak);
+        ImGui::Text("Request -> derived: %.3f ms (peak %.3f)", debug.request_to_derived_ms_last, debug.request_to_derived_ms_peak);
+        ImGui::Text("Solver -> derived: %.3f ms (peak %.3f)", debug.solver_to_derived_ms_last, debug.solver_to_derived_ms_peak);
+
+        ImGui::SeparatorText("Costs");
+        ImGui::Text("Drag apply: %.3f ms (peak %.3f)", debug.drag_apply_ms_last, debug.drag_apply_ms_peak);
+        ImGui::Text("Solver worker: %.3f ms", active_track->solver_ms_last);
+        ImGui::Text("Derived worker total/frame/flatten: %.3f / %.3f / %.3f",
+                    debug.derived_worker_ms_last,
+                    debug.derived_frame_build_ms_last,
+                    debug.derived_flatten_ms_last);
+        ImGui::Text("Preview merge/chunk merge/apply: %.3f / %.3f / %.3f",
+                    debug.preview_merge_ms_last,
+                    debug.chunk_merge_ms_last,
+                    debug.derived_apply_ms_last);
+        ImGui::Text("Render LOD/chunk enqueue/fallback/pick: %.3f / %.3f / %.3f / %.3f",
+                    _orbit_plot_perf.render_lod_ms_last,
+                    _orbit_plot_perf.planned_chunk_enqueue_ms_last,
+                    _orbit_plot_perf.planned_fallback_draw_ms_last,
+                    _orbit_plot_perf.pick_lod_ms_last);
+        ImGui::Text("Chunk GPU root build: %.3f ms", _orbit_plot_perf.planned_chunk_gpu_build_ms_last);
+        if (plot_stats)
+        {
+            ImGui::Text("Orbit upload last/peak: %.3f / %.3f ms",
+                        plot_stats->upload_ms_last_frame,
+                        plot_stats->upload_ms_peak);
+        }
+
+        ImGui::SeparatorText("Scale");
+        ImGui::Text("Flattened planned seg/samples: %zu / %zu",
+                    debug.flattened_planned_segments_last,
+                    debug.flattened_planned_samples_last);
+        ImGui::Text("Merged planned segs after preview merge: %zu", debug.planned_segments_after_preview_merge);
+        ImGui::Text("Incoming/merged/drawn/built chunks: %u / %u / %u / %u",
+                    debug.incoming_chunk_count_last,
+                    debug.merged_chunk_count_last,
+                    _orbit_plot_perf.planned_chunks_drawn,
+                    _orbit_plot_perf.planned_chunk_builds);
+        ImGui::Text("Fallback ranges / pick segs before-after: %u / %u -> %u",
+                    _orbit_plot_perf.planned_fallback_range_count,
+                    _orbit_plot_perf.pick_segments_before_cull,
+                    _orbit_plot_perf.pick_segments);
+
+        ImGui::Separator();
+        if (debug.derived_flatten_ms_last > 0.0 || debug.preview_merge_ms_last > 0.0)
+        {
+            ImGui::TextWrapped(
+                    "Hot path: FastPreview still flattens chunk output into a flat planned cache and re-merges the full planned curve "
+                    "(flattened %zu segs, merged %zu segs).",
+                    debug.flattened_planned_segments_last,
+                    debug.planned_segments_after_preview_merge);
+        }
+        if (drag_gate_remaining_ms > 0.0)
+        {
+            ImGui::TextWrapped(
+                    "Throttle note: drag rebuild cadence is currently limited by wall-time since the last preview request.");
+        }
+        if (!live_chunk_path_supported)
+        {
+            ImGui::TextWrapped(
+                    "Chunk preview reuse is disabled in the current display frame, so live preview falls back to the heavier flat frame-cache path.");
+        }
+
+        ImGui::End();
     }
 } // namespace Game

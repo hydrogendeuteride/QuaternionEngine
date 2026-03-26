@@ -10,6 +10,7 @@
 #include <glm/glm.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -420,6 +421,74 @@ namespace Game
         }
     };
 
+    struct PredictionDragDebugTelemetry
+    {
+        using Clock = std::chrono::steady_clock;
+        using TimePoint = Clock::time_point;
+
+        uint64_t drag_session_id{0};
+        uint64_t drag_update_count{0};
+        uint64_t preview_request_count{0};
+        uint64_t solver_result_count{0};
+        uint64_t derived_result_count{0};
+        uint64_t preview_publish_count{0};
+        uint64_t full_publish_count{0};
+        uint64_t last_preview_request_generation_id{0};
+        uint64_t last_solver_result_generation_id{0};
+        uint64_t last_derived_result_generation_id{0};
+
+        TimePoint drag_started_tp{};
+        TimePoint last_drag_update_tp{};
+        TimePoint last_drag_end_tp{};
+        TimePoint last_preview_request_tp{};
+        TimePoint last_solver_result_tp{};
+        TimePoint last_derived_result_tp{};
+        TimePoint last_preview_publish_tp{};
+        TimePoint last_full_publish_tp{};
+
+        double drag_to_request_ms_last{0.0};
+        double drag_to_request_ms_peak{0.0};
+        double drag_apply_ms_last{0.0};
+        double drag_apply_ms_peak{0.0};
+        double request_to_solver_ms_last{0.0};
+        double request_to_solver_ms_peak{0.0};
+        double request_to_derived_ms_last{0.0};
+        double request_to_derived_ms_peak{0.0};
+        double solver_to_derived_ms_last{0.0};
+        double solver_to_derived_ms_peak{0.0};
+        double derived_worker_ms_last{0.0};
+        double derived_worker_ms_peak{0.0};
+        double derived_frame_build_ms_last{0.0};
+        double derived_flatten_ms_last{0.0};
+        double preview_merge_ms_last{0.0};
+        double preview_merge_ms_peak{0.0};
+        double chunk_merge_ms_last{0.0};
+        double chunk_merge_ms_peak{0.0};
+        double derived_apply_ms_last{0.0};
+        double derived_apply_ms_peak{0.0};
+
+        std::size_t planned_segments_after_preview_merge{0};
+        std::size_t flattened_planned_segments_last{0};
+        std::size_t flattened_planned_samples_last{0};
+        uint32_t incoming_chunk_count_last{0};
+        uint32_t merged_chunk_count_last{0};
+
+        OrbitPredictionService::SolveQuality last_result_solve_quality{OrbitPredictionService::SolveQuality::Full};
+        OrbitPredictionService::PublishStage last_publish_stage{OrbitPredictionService::PublishStage::Full};
+        bool last_generation_complete{true};
+        bool drag_active{false};
+
+        static bool has_time(const TimePoint &tp)
+        {
+            return tp.time_since_epoch() != Clock::duration::zero();
+        }
+
+        void clear()
+        {
+            *this = {};
+        }
+    };
+
     struct PredictionTrackState
     {
         PredictionSubjectKey key{};
@@ -438,6 +507,7 @@ namespace Game
         double preview_last_anchor_refresh_at_s{std::numeric_limits<double>::quiet_NaN()};
         double preview_last_request_at_s{std::numeric_limits<double>::quiet_NaN()};
         PredictionChunkAssembly planned_chunk_assembly{};
+        PredictionDragDebugTelemetry drag_debug{};
         bool supports_maneuvers{false};
         bool is_celestial{false};
         orbitsim::BodyId auto_primary_body_id{orbitsim::kInvalidBodyId};
@@ -461,6 +531,7 @@ namespace Game
             preview_last_anchor_refresh_at_s = std::numeric_limits<double>::quiet_NaN();
             preview_last_request_at_s = std::numeric_limits<double>::quiet_NaN();
             planned_chunk_assembly.clear();
+            drag_debug.clear();
             auto_primary_body_id = orbitsim::kInvalidBodyId;
             solver_ms_last = 0.0;
             solver_diagnostics = {};
@@ -516,5 +587,10 @@ namespace Game
         // Chunk assembly draw stats.
         uint32_t planned_chunk_count{0};
         uint32_t planned_chunks_drawn{0};
+        uint32_t planned_chunk_builds{0};
+        uint32_t planned_fallback_range_count{0};
+        double planned_chunk_enqueue_ms_last{0.0};
+        double planned_chunk_gpu_build_ms_last{0.0};
+        double planned_fallback_draw_ms_last{0.0};
     };
 } // namespace Game

@@ -27,6 +27,7 @@ namespace Game
         {
             uint32_t chunks_drawn{0};
             uint32_t chunks_built{0};
+            double gpu_root_build_ms{0.0};
             std::vector<std::pair<double, double>> covered_ranges{};
         };
 
@@ -162,7 +163,11 @@ namespace Game
                     {
                         continue;
                     }
+                    const auto build_start_tp = std::chrono::steady_clock::now();
                     chunk.gpu_roots = PredictionCacheInternal::build_gpu_root_cache(chunk.frame_segments);
+                    result.gpu_root_build_ms +=
+                            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - build_start_tp)
+                                    .count();
                     ++result.chunks_built;
                 }
 
@@ -898,6 +903,7 @@ namespace Game
                 {
                     // Chunk assembly path: enqueue per-chunk GPU root batches
                     // so that newly arrived preview chunks render immediately.
+                    const auto chunk_draw_start_tp = std::chrono::steady_clock::now();
                     const ChunkAssemblyDrawResult chunk_draw_result = enqueue_chunk_assembly_planned(
                             orbit_plot,
                             track->planned_chunk_assembly,
@@ -910,18 +916,30 @@ namespace Game
                             _prediction_draw_config.draw_planned_as_dashed,
                             draw_ctx.line_overlay_boost,
                             kMaxPlannedChunkGpuRootBuildsPerFrame);
+                    const double chunk_draw_ms =
+                            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - chunk_draw_start_tp)
+                                    .count();
 
                     if (active_player_track)
                     {
                         _orbit_plot_perf.planned_chunks_drawn = chunk_draw_result.chunks_drawn;
+                        _orbit_plot_perf.planned_chunk_builds = chunk_draw_result.chunks_built;
+                        _orbit_plot_perf.planned_chunk_enqueue_ms_last = chunk_draw_ms;
+                        _orbit_plot_perf.planned_chunk_gpu_build_ms_last = chunk_draw_result.gpu_root_build_ms;
                     }
 
                     const auto fallback_ranges = compute_uncovered_ranges(
                             planned_pick_window.t0_s,
                             planned_pick_window.t1_s,
                             chunk_draw_result.covered_ranges);
+                    if (active_player_track)
+                    {
+                        _orbit_plot_perf.planned_fallback_range_count =
+                                static_cast<uint32_t>(fallback_ranges.size());
+                    }
                     if (!fallback_ranges.empty())
                     {
+                        const auto fallback_draw_start_tp = std::chrono::steady_clock::now();
                         const auto draw_fallback_range = [&](const double fallback_t0_s, const double fallback_t1_s) {
                             if (!(fallback_t1_s > fallback_t0_s))
                             {
@@ -969,6 +987,13 @@ namespace Game
                         for (const auto &[fallback_t0_s, fallback_t1_s] : fallback_ranges)
                         {
                             draw_fallback_range(fallback_t0_s, fallback_t1_s);
+                        }
+                        if (active_player_track)
+                        {
+                            _orbit_plot_perf.planned_fallback_draw_ms_last =
+                                    std::chrono::duration<double, std::milli>(
+                                            std::chrono::steady_clock::now() - fallback_draw_start_tp)
+                                            .count();
                         }
                     }
                 }

@@ -3,6 +3,7 @@
 #include "game/orbit/orbit_prediction_tuning.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -18,6 +19,18 @@ namespace Game
         bool contains_key(const std::vector<T> &items, const T &needle)
         {
             return std::find(items.begin(), items.end(), needle) != items.end();
+        }
+
+        double elapsed_ms(const PredictionDragDebugTelemetry::TimePoint &start_tp,
+                          const PredictionDragDebugTelemetry::TimePoint &end_tp)
+        {
+            return std::chrono::duration<double, std::milli>(end_tp - start_tp).count();
+        }
+
+        void update_last_and_peak(double &last_value, double &peak_value, const double sample)
+        {
+            last_value = std::max(0.0, sample);
+            peak_value = std::max(peak_value, last_value);
         }
 
         OrbitPredictionService::RequestPriority classify_prediction_request_priority(
@@ -519,6 +532,8 @@ namespace Game
                 preview_track &&
                 (_maneuver_plan_live_preview_active ||
                  _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis);
+        const bool drag_active =
+                _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
 
         if (!preview_track)
         {
@@ -558,6 +573,11 @@ namespace Game
         refreshed.display_frame_snapshot =
                 track.cache.resolved_frame_spec_valid ? track.cache.resolved_frame_spec : _prediction_frame_selection.spec;
         refreshed.patch_window_s = std::max(maneuver_plan_preview_window_s(), maneuver_post_node_coverage_s());
+        if (drag_active)
+        {
+            refreshed.patch_window_s =
+                    std::min(refreshed.patch_window_s, OrbitPredictionTuning::kDragInteractivePreviewWindowMaxS);
+        }
         refreshed.request_window_s = std::max(0.0, (refreshed.anchor_time_s - now_s) + refreshed.patch_window_s);
         refreshed.downstream_maneuver_node_ids.reserve(_maneuver_state.nodes.size());
         const double patch_end_s = refreshed.anchor_time_s + refreshed.patch_window_s;
@@ -649,6 +669,7 @@ namespace Game
             track.preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
             track.preview_last_anchor_refresh_at_s = std::numeric_limits<double>::quiet_NaN();
             track.preview_last_request_at_s = std::numeric_limits<double>::quiet_NaN();
+            track.drag_debug.clear();
             track.auto_primary_body_id = orbitsim::kInvalidBodyId;
             track.solver_ms_last = 0.0;
             track.solver_diagnostics = {};
@@ -675,6 +696,7 @@ namespace Game
     void GameplayState::apply_completed_prediction_result(OrbitPredictionService::Result result)
     {
         // Queue heavy frame/metrics derivation off-thread, then swap the completed cache on the main thread.
+        const auto solver_result_tp = PredictionDragDebugTelemetry::Clock::now();
         PredictionTrackState *track = nullptr;
         for (PredictionTrackState &candidate : _prediction_tracks)
         {
@@ -695,6 +717,22 @@ namespace Game
         track->solver_ms_last = std::max(0.0, result.compute_time_ms);
         track->solver_diagnostics = result.diagnostics;
         track->derived_diagnostics = {};
+        {
+            PredictionDragDebugTelemetry &debug = track->drag_debug;
+            debug.last_result_solve_quality = result.solve_quality;
+            debug.last_publish_stage = result.publish_stage;
+            debug.last_generation_complete = result.generation_complete;
+            debug.last_solver_result_tp = solver_result_tp;
+            debug.last_solver_result_generation_id = result.generation_id;
+            ++debug.solver_result_count;
+            if (debug.last_preview_request_generation_id == result.generation_id &&
+                PredictionDragDebugTelemetry::has_time(debug.last_preview_request_tp))
+            {
+                update_last_and_peak(debug.request_to_solver_ms_last,
+                                     debug.request_to_solver_ms_peak,
+                                     elapsed_ms(debug.last_preview_request_tp, solver_result_tp));
+            }
+        }
 
         if (!result.valid || result.trajectory_inertial.size() < 2)
         {
@@ -789,6 +827,7 @@ namespace Game
 
     void GameplayState::apply_completed_prediction_derived_result(OrbitPredictionDerivedService::Result result)
     {
+        const auto derived_apply_start_tp = PredictionDragDebugTelemetry::Clock::now();
         PredictionTrackState *track = nullptr;
         for (PredictionTrackState &candidate : _prediction_tracks)
         {
@@ -811,6 +850,19 @@ namespace Game
             return;
         }
 
+        PredictionDragDebugTelemetry &debug = track->drag_debug;
+        debug.last_result_solve_quality = result.solve_quality;
+        debug.last_publish_stage = result.publish_stage;
+        debug.last_generation_complete = result.generation_complete;
+        update_last_and_peak(debug.derived_worker_ms_last, debug.derived_worker_ms_peak, result.timings.total_ms);
+        debug.derived_frame_build_ms_last = std::max(0.0, result.timings.frame_build_ms);
+        debug.derived_flatten_ms_last = std::max(0.0, result.timings.flatten_ms);
+        debug.flattened_planned_segments_last = result.cache.trajectory_segments_frame_planned.size();
+        debug.flattened_planned_samples_last = result.cache.trajectory_frame_planned.size();
+        debug.incoming_chunk_count_last = result.chunk_assembly.valid
+                                                  ? static_cast<uint32_t>(result.chunk_assembly.chunks.size())
+                                                  : 0u;
+
         track->derived_request_pending = false;
         // Do NOT clear request_pending here — a newer solver request may already be in-flight.
         // Only the solver completion path and request submission paths manage that flag.
@@ -820,6 +872,7 @@ namespace Game
         OrbitPredictionCache cache_to_publish{};
         OrbitPredictionDerivedDiagnostics diagnostics_to_publish = result.diagnostics;
         bool have_cache_to_publish = false;
+        double preview_merge_ms = 0.0;
         if (result.valid && result.cache.valid)
         {
             if (result.base_frame_reused)
@@ -850,7 +903,9 @@ namespace Game
             if (have_cache_to_publish &&
                 result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview)
             {
+                const auto preview_merge_start_tp = PredictionDragDebugTelemetry::Clock::now();
                 cache_to_publish = merge_preview_planned_prefix_cache(track->cache, std::move(cache_to_publish));
+                preview_merge_ms = elapsed_ms(preview_merge_start_tp, PredictionDragDebugTelemetry::Clock::now());
                 have_cache_to_publish = cache_to_publish.valid;
             }
         }
@@ -861,20 +916,50 @@ namespace Game
         {
             track->derived_diagnostics.status = PredictionDerivedStatus::MissingSolverData;
             track->dirty = true;
+            const auto derived_apply_end_tp = PredictionDragDebugTelemetry::Clock::now();
+            debug.last_derived_result_tp = derived_apply_end_tp;
+            debug.last_derived_result_generation_id = result.generation_id;
+            ++debug.derived_result_count;
+            update_last_and_peak(debug.derived_apply_ms_last,
+                                 debug.derived_apply_ms_peak,
+                                 elapsed_ms(derived_apply_start_tp, derived_apply_end_tp));
+            if (debug.last_preview_request_generation_id == result.generation_id &&
+                PredictionDragDebugTelemetry::has_time(debug.last_preview_request_tp))
+            {
+                update_last_and_peak(debug.request_to_derived_ms_last,
+                                     debug.request_to_derived_ms_peak,
+                                     elapsed_ms(debug.last_preview_request_tp, derived_apply_end_tp));
+            }
+            if (debug.last_solver_result_generation_id == result.generation_id &&
+                PredictionDragDebugTelemetry::has_time(debug.last_solver_result_tp))
+            {
+                update_last_and_peak(debug.solver_to_derived_ms_last,
+                                     debug.solver_to_derived_ms_peak,
+                                     elapsed_ms(debug.last_solver_result_tp, derived_apply_end_tp));
+            }
             return;
         }
 
         track->cache = std::move(cache_to_publish);
         track->pick_cache.clear();
+        double chunk_merge_ms = 0.0;
         if (result.chunk_assembly.valid)
         {
+            const auto chunk_merge_start_tp = PredictionDragDebugTelemetry::Clock::now();
             track->planned_chunk_assembly = merge_planned_chunk_assembly(track->planned_chunk_assembly,
                                                                          std::move(result.chunk_assembly));
+            chunk_merge_ms = elapsed_ms(chunk_merge_start_tp, PredictionDragDebugTelemetry::Clock::now());
         }
         else if (result.solve_quality != OrbitPredictionService::SolveQuality::FastPreview)
         {
             track->planned_chunk_assembly.clear();
         }
+        update_last_and_peak(debug.preview_merge_ms_last, debug.preview_merge_ms_peak, preview_merge_ms);
+        update_last_and_peak(debug.chunk_merge_ms_last, debug.chunk_merge_ms_peak, chunk_merge_ms);
+        debug.planned_segments_after_preview_merge = track->cache.trajectory_segments_frame_planned.size();
+        debug.merged_chunk_count_last = track->planned_chunk_assembly.valid
+                                                ? static_cast<uint32_t>(track->planned_chunk_assembly.chunks.size())
+                                                : 0u;
         const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
         if (preview_result)
         {
@@ -919,6 +1004,38 @@ namespace Game
             track->preview_anchor.clear();
             track->preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
             _maneuver_plan_live_preview_active = false;
+        }
+
+        const auto derived_apply_end_tp = PredictionDragDebugTelemetry::Clock::now();
+        debug.last_derived_result_tp = derived_apply_end_tp;
+        debug.last_derived_result_generation_id = result.generation_id;
+        ++debug.derived_result_count;
+        update_last_and_peak(debug.derived_apply_ms_last,
+                             debug.derived_apply_ms_peak,
+                             elapsed_ms(derived_apply_start_tp, derived_apply_end_tp));
+        if (debug.last_preview_request_generation_id == result.generation_id &&
+            PredictionDragDebugTelemetry::has_time(debug.last_preview_request_tp))
+        {
+            update_last_and_peak(debug.request_to_derived_ms_last,
+                                 debug.request_to_derived_ms_peak,
+                                 elapsed_ms(debug.last_preview_request_tp, derived_apply_end_tp));
+        }
+        if (debug.last_solver_result_generation_id == result.generation_id &&
+            PredictionDragDebugTelemetry::has_time(debug.last_solver_result_tp))
+        {
+            update_last_and_peak(debug.solver_to_derived_ms_last,
+                                 debug.solver_to_derived_ms_peak,
+                                 elapsed_ms(debug.last_solver_result_tp, derived_apply_end_tp));
+        }
+        if (preview_result)
+        {
+            debug.last_preview_publish_tp = derived_apply_end_tp;
+            ++debug.preview_publish_count;
+        }
+        else
+        {
+            debug.last_full_publish_tp = derived_apply_end_tp;
+            ++debug.full_publish_count;
         }
     }
 
@@ -985,8 +1102,13 @@ namespace Game
             return display_window_s;
         }
 
-        // Slice 1 keeps the legacy full-horizon request path alive, but now tracks the local patch
-        // window separately so follow-up slices can swap the solver over without changing runtime state.
+        const bool drag_active =
+                _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
+        if (drag_active)
+        {
+            return std::max(prediction_future_window_s(track.key), std::max(0.0, track.preview_anchor.request_window_s));
+        }
+
         return std::max(display_window_s, std::max(0.0, track.preview_anchor.request_window_s));
     }
 
@@ -1019,7 +1141,11 @@ namespace Game
             return display_window_s;
         }
 
-        const double preview_window_s = std::max(maneuver_plan_preview_window_s(), maneuver_post_node_coverage_s());
+        double preview_window_s = std::max(maneuver_plan_preview_window_s(), maneuver_post_node_coverage_s());
+        if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
+        {
+            preview_window_s = std::min(preview_window_s, OrbitPredictionTuning::kDragInteractivePreviewWindowMaxS);
+        }
         return std::max(0.0, (std::max(now_s, anchor_node->time_s) - now_s) + preview_window_s);
     }
 
@@ -1072,10 +1198,15 @@ namespace Game
             maneuver_live_preview &&
             _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
         {
-            const double dt_since_build_s = now_s - track.cache.build_time_s;
-            if (dt_since_build_s < OrbitPredictionTuning::kDragRebuildMinIntervalS)
+            const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
+            if (PredictionDragDebugTelemetry::has_time(track.drag_debug.last_preview_request_tp))
             {
-                rebuild = false;
+                const double dt_since_request_s =
+                        std::chrono::duration<double>(now_tp - track.drag_debug.last_preview_request_tp).count();
+                if (dt_since_request_s < OrbitPredictionTuning::kDragRebuildMinIntervalS)
+                {
+                    rebuild = false;
+                }
             }
         }
 
@@ -1219,6 +1350,7 @@ namespace Game
         }
 
         const uint64_t generation_id = _prediction_service.request(std::move(request));
+        const auto request_tp = PredictionDragDebugTelemetry::Clock::now();
         track.latest_requested_generation_id = generation_id;
         track.request_pending = true;
         track.derived_request_pending = false;
@@ -1229,6 +1361,16 @@ namespace Game
         track.preview_last_request_at_s = now_s;
         if (maneuver_live_preview)
         {
+            PredictionDragDebugTelemetry &debug = track.drag_debug;
+            debug.last_preview_request_tp = request_tp;
+            debug.last_preview_request_generation_id = generation_id;
+            ++debug.preview_request_count;
+            if (PredictionDragDebugTelemetry::has_time(debug.last_drag_update_tp))
+            {
+                update_last_and_peak(debug.drag_to_request_ms_last,
+                                     debug.drag_to_request_ms_peak,
+                                     elapsed_ms(debug.last_drag_update_tp, request_tp));
+            }
             track.preview_state = PredictionPreviewRuntimeState::DragPreviewPending;
             if (!std::isfinite(track.preview_entered_at_s))
             {
