@@ -167,9 +167,9 @@ namespace Game
         }
 
         const PredictionTrackState *player_track = player_prediction_track();
-        if (player_track && player_track->cache.valid)
+        if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track))
         {
-            const OrbitPredictionCache &cache = player_track->cache;
+            const OrbitPredictionCache &cache = *player_cache;
             const auto &traj =
                     cache.trajectory_inertial_planned.size() >= 2 ? cache.trajectory_inertial_planned
                                                                   : cache.trajectory_inertial;

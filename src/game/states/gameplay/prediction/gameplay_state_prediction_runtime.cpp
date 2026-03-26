@@ -455,6 +455,20 @@ namespace Game
             return merged;
         }
 
+        uint64_t latest_visible_generation_id(const PredictionTrackState &track)
+        {
+            uint64_t latest_generation_id = track.cache.valid ? track.cache.generation_id : 0u;
+            if (track.preview_overlay.cache.valid)
+            {
+                latest_generation_id = std::max(latest_generation_id, track.preview_overlay.cache.generation_id);
+            }
+            if (track.preview_overlay.chunk_assembly.valid)
+            {
+                latest_generation_id = std::max(latest_generation_id, track.preview_overlay.chunk_assembly.generation_id);
+            }
+            return latest_generation_id;
+        }
+
         bool preview_anchor_matches(const PreviewAnchorCache &a, const PreviewAnchorCache &b)
         {
             return a.valid == b.valid &&
@@ -784,13 +798,16 @@ namespace Game
         }
         else if (const PredictionTrackState *player_track = player_prediction_track())
         {
-            if (!player_track->cache.trajectory_segments_inertial_planned.empty())
+            if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track))
             {
-                player_lookup_segments = player_track->cache.trajectory_segments_inertial_planned;
-            }
-            else if (!player_track->cache.trajectory_segments_inertial.empty())
-            {
-                player_lookup_segments = player_track->cache.trajectory_segments_inertial;
+                if (!player_cache->trajectory_segments_inertial_planned.empty())
+                {
+                    player_lookup_segments = player_cache->trajectory_segments_inertial_planned;
+                }
+                else if (!player_cache->trajectory_segments_inertial.empty())
+                {
+                    player_lookup_segments = player_cache->trajectory_segments_inertial;
+                }
             }
         }
 
@@ -844,13 +861,27 @@ namespace Game
         }
 
         const bool stale_derived_result =
-                track->cache.valid && result.generation_id < track->cache.generation_id;
+                result.generation_id < latest_visible_generation_id(*track);
         if (stale_derived_result)
         {
             return;
         }
 
         PredictionDragDebugTelemetry &debug = track->drag_debug;
+        const auto count_chunk_frame_data = [](const PredictionChunkAssembly &assembly) {
+            std::pair<std::size_t, std::size_t> counts{0u, 0u};
+            if (!assembly.valid)
+            {
+                return counts;
+            }
+
+            for (const OrbitChunk &chunk : assembly.chunks)
+            {
+                counts.first += chunk.frame_segments.size();
+                counts.second += chunk.frame_samples.size();
+            }
+            return counts;
+        };
         debug.last_result_solve_quality = result.solve_quality;
         debug.last_publish_stage = result.publish_stage;
         debug.last_generation_complete = result.generation_complete;
@@ -859,6 +890,14 @@ namespace Game
         debug.derived_flatten_ms_last = std::max(0.0, result.timings.flatten_ms);
         debug.flattened_planned_segments_last = result.cache.trajectory_segments_frame_planned.size();
         debug.flattened_planned_samples_last = result.cache.trajectory_frame_planned.size();
+        if (debug.flattened_planned_segments_last == 0u &&
+            debug.flattened_planned_samples_last == 0u &&
+            result.chunk_assembly.valid)
+        {
+            const auto [chunk_segment_count, chunk_sample_count] = count_chunk_frame_data(result.chunk_assembly);
+            debug.flattened_planned_segments_last = chunk_segment_count;
+            debug.flattened_planned_samples_last = chunk_sample_count;
+        }
         debug.incoming_chunk_count_last = result.chunk_assembly.valid
                                                   ? static_cast<uint32_t>(result.chunk_assembly.chunks.size())
                                                   : 0u;
@@ -903,8 +942,13 @@ namespace Game
             if (have_cache_to_publish &&
                 result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview)
             {
+                const OrbitPredictionCache &preview_merge_base =
+                        (track->preview_overlay.cache.valid &&
+                         track->preview_overlay.cache.generation_id == result.generation_id)
+                                ? track->preview_overlay.cache
+                                : track->cache;
                 const auto preview_merge_start_tp = PredictionDragDebugTelemetry::Clock::now();
-                cache_to_publish = merge_preview_planned_prefix_cache(track->cache, std::move(cache_to_publish));
+                cache_to_publish = merge_preview_planned_prefix_cache(preview_merge_base, std::move(cache_to_publish));
                 preview_merge_ms = elapsed_ms(preview_merge_start_tp, PredictionDragDebugTelemetry::Clock::now());
                 have_cache_to_publish = cache_to_publish.valid;
             }
@@ -940,27 +984,43 @@ namespace Game
             return;
         }
 
-        track->cache = std::move(cache_to_publish);
+        const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
+        if (preview_result)
+        {
+            track->preview_overlay.cache = std::move(cache_to_publish);
+        }
+        else
+        {
+            track->cache = std::move(cache_to_publish);
+            track->preview_overlay.clear();
+        }
         track->pick_cache.clear();
         double chunk_merge_ms = 0.0;
-        if (result.chunk_assembly.valid)
+        if (preview_result && result.chunk_assembly.valid)
         {
             const auto chunk_merge_start_tp = PredictionDragDebugTelemetry::Clock::now();
-            track->planned_chunk_assembly = merge_planned_chunk_assembly(track->planned_chunk_assembly,
-                                                                         std::move(result.chunk_assembly));
+            track->preview_overlay.chunk_assembly = merge_planned_chunk_assembly(track->preview_overlay.chunk_assembly,
+                                                                                 std::move(result.chunk_assembly));
             chunk_merge_ms = elapsed_ms(chunk_merge_start_tp, PredictionDragDebugTelemetry::Clock::now());
         }
-        else if (result.solve_quality != OrbitPredictionService::SolveQuality::FastPreview)
+        else
         {
-            track->planned_chunk_assembly.clear();
+            track->preview_overlay.chunk_assembly.clear();
         }
         update_last_and_peak(debug.preview_merge_ms_last, debug.preview_merge_ms_peak, preview_merge_ms);
         update_last_and_peak(debug.chunk_merge_ms_last, debug.chunk_merge_ms_peak, chunk_merge_ms);
-        debug.planned_segments_after_preview_merge = track->cache.trajectory_segments_frame_planned.size();
-        debug.merged_chunk_count_last = track->planned_chunk_assembly.valid
-                                                ? static_cast<uint32_t>(track->planned_chunk_assembly.chunks.size())
+        const OrbitPredictionCache &debug_cache =
+                track->preview_overlay.cache.valid ? track->preview_overlay.cache : track->cache;
+        debug.planned_segments_after_preview_merge = debug_cache.trajectory_segments_frame_planned.size();
+        if (debug.planned_segments_after_preview_merge == 0u &&
+            track->preview_overlay.chunk_assembly.valid)
+        {
+            const auto [chunk_segment_count, _] = count_chunk_frame_data(track->preview_overlay.chunk_assembly);
+            debug.planned_segments_after_preview_merge = chunk_segment_count;
+        }
+        debug.merged_chunk_count_last = track->preview_overlay.chunk_assembly.valid
+                                                ? static_cast<uint32_t>(track->preview_overlay.chunk_assembly.chunks.size())
                                                 : 0u;
-        const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
         if (preview_result)
         {
             track->preview_state = PredictionPreviewRuntimeState::PreviewStreaming;

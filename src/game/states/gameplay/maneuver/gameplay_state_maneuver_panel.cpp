@@ -48,11 +48,11 @@ namespace Game
                 return _prediction_analysis_selection.spec.fixed_body_id;
             }
 
-            if (player_track)
+            if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track))
             {
-                if (player_track->cache.valid && !player_track->cache.trajectory_inertial.empty())
+                if (!player_cache->trajectory_inertial.empty())
                 {
-                    return resolve_prediction_analysis_body_id(player_track->cache,
+                    return resolve_prediction_analysis_body_id(*player_cache,
                                                                player_track->key,
                                                                now_s);
                 }
@@ -276,13 +276,64 @@ namespace Game
             }
 
             const bool is_planned = (pick.ownerName == "OrbitPlot/Planned");
+            const double display_time_s = current_sim_time_s();
+            const auto sample_preview_chunk_world = [&](WorldVec3 &out_world) {
+                out_world = WorldVec3(0.0);
+                if (!player_track ||
+                    !player_track->preview_overlay.chunk_assembly.valid ||
+                    player_track->preview_overlay.chunk_assembly.chunks.empty())
+                {
+                    return false;
+                }
+
+                for (const OrbitChunk &chunk : player_track->preview_overlay.chunk_assembly.chunks)
+                {
+                    if (!chunk.valid || chunk.frame_samples.size() < 2 ||
+                        pick.time_s < chunk.t0_s || pick.time_s > chunk.t1_s)
+                    {
+                        continue;
+                    }
+
+                    auto it_hi = std::lower_bound(chunk.frame_samples.cbegin(),
+                                                  chunk.frame_samples.cend(),
+                                                  pick.time_s,
+                                                  [](const orbitsim::TrajectorySample &s, double t) { return s.t_s < t; });
+                    const size_t i_hi = static_cast<size_t>(std::distance(chunk.frame_samples.cbegin(), it_hi));
+                    if (i_hi >= chunk.frame_samples.size())
+                    {
+                        continue;
+                    }
+
+                    out_world = (i_hi > 0)
+                                        ? prediction_sample_hermite_world(*cache,
+                                                                          chunk.frame_samples[i_hi - 1],
+                                                                          chunk.frame_samples[i_hi],
+                                                                          pick.time_s,
+                                                                          display_time_s)
+                                        : prediction_sample_position_world(*cache,
+                                                                            chunk.frame_samples.front(),
+                                                                            display_time_s);
+                    out_world += compute_maneuver_align_delta(ctx, *cache, cache->trajectory_frame);
+                    return true;
+                }
+
+                return false;
+            };
             const auto &traj = is_planned
                                    ? (cache->trajectory_frame_planned.size() >= 2
                                           ? cache->trajectory_frame_planned
-                                          : cache->trajectory_frame)
+                                          : cache->trajectory_frame_planned)
                                    : cache->trajectory_frame;
             if (traj.size() < 2)
             {
+                if (is_planned)
+                {
+                    WorldVec3 preview_chunk_world{0.0};
+                    if (sample_preview_chunk_world(preview_chunk_world))
+                    {
+                        return preview_chunk_world;
+                    }
+                }
                 return pick.worldPos;
             }
 
@@ -290,6 +341,14 @@ namespace Game
             const double traj_t1 = traj.back().t_s;
             if (pick.time_s < traj_t0 || pick.time_s > traj_t1)
             {
+                if (is_planned)
+                {
+                    WorldVec3 preview_chunk_world{0.0};
+                    if (sample_preview_chunk_world(preview_chunk_world))
+                    {
+                        return preview_chunk_world;
+                    }
+                }
                 return pick.worldPos;
             }
 
@@ -298,10 +357,17 @@ namespace Game
             const size_t i_hi = static_cast<size_t>(std::distance(traj.cbegin(), it_hi));
             if (i_hi >= traj.size())
             {
+                if (is_planned)
+                {
+                    WorldVec3 preview_chunk_world{0.0};
+                    if (sample_preview_chunk_world(preview_chunk_world))
+                    {
+                        return preview_chunk_world;
+                    }
+                }
                 return pick.worldPos;
             }
 
-            const double display_time_s = current_sim_time_s();
             WorldVec3 pos = (i_hi > 0)
                                 ? prediction_sample_hermite_world(*cache, traj[i_hi - 1], traj[i_hi],
                                                                   pick.time_s, display_time_s)
@@ -673,8 +739,9 @@ namespace Game
                         dv_display.z);
         }
 
-        const orbitsim::BodyId analysis_body_id = (player_track && player_track->cache.valid)
-                                                      ? resolve_prediction_analysis_body_id(player_track->cache,
+        const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track);
+        const orbitsim::BodyId analysis_body_id = player_cache
+                                                      ? resolve_prediction_analysis_body_id(*player_cache,
                                                                                             player_track->key,
                                                                                             sel->time_s)
                                                       : default_node_primary_body_id();

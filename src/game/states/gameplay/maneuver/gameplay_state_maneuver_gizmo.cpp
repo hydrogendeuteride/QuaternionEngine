@@ -293,7 +293,7 @@ namespace Game
 
         const double analysis_time_s = current_sim_time_s();
         const PredictionTrackState *player_track = player_prediction_track();
-        const OrbitPredictionCache *player_cache = (player_track && player_track->cache.valid) ? &player_track->cache : nullptr;
+        const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track);
         const orbitsim::BodyId occluder_body_id =
                 (_prediction_analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI)
                     ? _prediction_analysis_selection.spec.fixed_body_id
