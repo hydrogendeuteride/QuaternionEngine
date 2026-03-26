@@ -28,6 +28,8 @@ namespace Game
             glm::dvec3 build_vel_world{0.0, 0.0, 0.0};
             orbitsim::GameSimulation::Config sim_config{};
             orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
+            uint64_t display_frame_key{0};
+            uint64_t display_frame_revision{0};
             orbitsim::BodyId analysis_body_id{orbitsim::kInvalidBodyId};
             std::vector<orbitsim::TrajectorySegment> player_lookup_segments_inertial{};
         };

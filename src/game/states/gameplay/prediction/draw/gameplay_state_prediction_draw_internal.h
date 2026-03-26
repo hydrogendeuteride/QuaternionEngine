@@ -110,8 +110,10 @@ namespace Game::PredictionDrawDetail
         glm::vec4 track_color_future{1.0f};
         glm::vec4 track_color_plan{1.0f};
         double future_window_s{0.0};
-        double planned_future_window_s{0.0};
+        double planned_visual_window_s{0.0};
+        double planned_pick_window_s{0.0};
         PickWindow base_pick_window{};
+        PickWindow planned_draw_window{};
         PickWindow planned_pick_window{};
         std::vector<orbitsim::TrajectorySegment> traj_base_segments_world_basis{};
         std::vector<orbitsim::TrajectorySegment> traj_stable_planned_segments_world_basis{};
@@ -218,6 +220,8 @@ namespace Game::PredictionDrawDetail
                                          OrbitPlotPerfStats &perf);
     bool should_rebuild_pick_cache(const PredictionLinePickCache &cache,
                                    uint64_t generation_id,
+                                   uint64_t display_frame_key,
+                                   uint64_t display_frame_revision,
                                    const WorldVec3 &ref_body_world,
                                    const glm::dmat3 &frame_to_world,
                                    const WorldVec3 &align_delta,
@@ -234,6 +238,8 @@ namespace Game::PredictionDrawDetail
                                    bool planned);
     void mark_pick_cache_valid(PredictionLinePickCache &cache,
                                uint64_t generation_id,
+                               uint64_t display_frame_key,
+                               uint64_t display_frame_revision,
                                const WorldVec3 &ref_body_world,
                                const glm::dmat3 &frame_to_world,
                                const WorldVec3 &align_delta,

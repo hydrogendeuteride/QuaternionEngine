@@ -168,6 +168,8 @@ namespace Game
                 if (base_pick_budget > 0 &&
                     Draw::should_rebuild_pick_cache(track.pick_cache,
                                                     stable_cache.generation_id,
+                                                    stable_cache.display_frame_key,
+                                                    stable_cache.display_frame_revision,
                                                     track_ctx.ref_body_world,
                                                     track_ctx.frame_to_world,
                                                     track_ctx.align_delta,
@@ -218,6 +220,8 @@ namespace Game
                     {
                         Draw::mark_pick_cache_valid(track.pick_cache,
                                                     stable_cache.generation_id,
+                                                    stable_cache.display_frame_key,
+                                                    stable_cache.display_frame_revision,
                                                     track_ctx.ref_body_world,
                                                     track_ctx.frame_to_world,
                                                     track_ctx.align_delta,
@@ -293,12 +297,24 @@ namespace Game
                             ? planned_chunk_assembly->generation_id
                             : (stable_planned_pick_cache ? stable_planned_pick_cache->generation_id
                                                          : planned_cache.generation_id);
+            const uint64_t planned_pick_display_frame_key =
+                    has_chunk_planned_pick
+                            ? planned_chunk_assembly->display_frame_key
+                            : (stable_planned_pick_cache ? stable_planned_pick_cache->display_frame_key
+                                                         : planned_cache.display_frame_key);
+            const uint64_t planned_pick_display_frame_revision =
+                    has_chunk_planned_pick
+                            ? planned_chunk_assembly->display_frame_revision
+                            : (stable_planned_pick_cache ? stable_planned_pick_cache->display_frame_revision
+                                                         : planned_cache.display_frame_revision);
             const bool planned_pick_uses_adaptive_curve =
                     has_chunk_planned_pick ||
                     (stable_planned_pick_cache && !stable_planned_pick_cache->render_curve_frame_planned.empty());
             pick_settings.max_segments = std::max<std::size_t>(1, remaining_pick_budget);
             const bool rebuild_cache_signature = Draw::should_rebuild_pick_cache(planned_pick_cache,
                                                                                  planned_pick_generation_id,
+                                                                                 planned_pick_display_frame_key,
+                                                                                 planned_pick_display_frame_revision,
                                                                                  track_ctx.ref_body_world,
                                                                                  track_ctx.frame_to_world,
                                                                                  track_ctx.align_delta,
@@ -498,6 +514,8 @@ namespace Game
                     planned_pick_cache.preview_fallback = std::move(rebuilt_fallback);
                     Draw::mark_pick_cache_valid(planned_pick_cache,
                                                 planned_pick_generation_id,
+                                                planned_pick_display_frame_key,
+                                                planned_pick_display_frame_revision,
                                                 track_ctx.ref_body_world,
                                                 track_ctx.frame_to_world,
                                                 track_ctx.align_delta,
@@ -590,6 +608,8 @@ namespace Game
                 {
                     Draw::mark_pick_cache_valid(planned_pick_cache,
                                                 planned_pick_generation_id,
+                                                planned_pick_display_frame_key,
+                                                planned_pick_display_frame_revision,
                                                 track_ctx.ref_body_world,
                                                 track_ctx.frame_to_world,
                                                 track_ctx.align_delta,

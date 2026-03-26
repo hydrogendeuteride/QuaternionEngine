@@ -12,6 +12,14 @@ namespace Game
 {
     namespace
     {
+        struct PreviewWindowPolicy
+        {
+            double visual_window_s{0.0};
+            double exact_window_s{0.0};
+            double pick_window_s{0.0};
+            double request_window_s{0.0};
+        };
+
         const ManeuverNode *select_preview_anchor_node(const ManeuverPlanState &plan, const double now_s)
         {
             if (const ManeuverNode *selected = plan.find_node(plan.selected_node_id))
@@ -80,6 +88,27 @@ namespace Game
             return glm::dmat3(1.0);
         }
 
+        PreviewWindowPolicy build_preview_window_policy(const double now_s,
+                                                        const double anchor_time_s,
+                                                        const double visual_window_hint_s,
+                                                        const double coverage_window_s,
+                                                        const bool drag_active)
+        {
+            PreviewWindowPolicy policy{};
+            policy.visual_window_s = std::max(visual_window_hint_s, coverage_window_s);
+            policy.exact_window_s = policy.visual_window_s;
+            if (drag_active)
+            {
+                policy.exact_window_s = std::min(policy.exact_window_s,
+                                                 OrbitPredictionTuning::kDragInteractivePreviewWindowMaxS);
+            }
+            policy.pick_window_s = policy.exact_window_s;
+            policy.request_window_s =
+                    std::max(0.0,
+                             (anchor_time_s - now_s) + std::max(policy.visual_window_s, policy.exact_window_s));
+            return policy;
+        }
+
         bool preview_anchor_matches(const PreviewAnchorCache &a, const PreviewAnchorCache &b)
         {
             return a.valid == b.valid &&
@@ -87,11 +116,11 @@ namespace Game
                    a.anchor_time_s == b.anchor_time_s &&
                    a.baseline_generation_id == b.baseline_generation_id &&
                    a.upstream_maneuver_hash == b.upstream_maneuver_hash &&
-                   a.display_frame_snapshot.type == b.display_frame_snapshot.type &&
-                   a.display_frame_snapshot.primary_body_id == b.display_frame_snapshot.primary_body_id &&
-                   a.display_frame_snapshot.secondary_body_id == b.display_frame_snapshot.secondary_body_id &&
-                   a.display_frame_snapshot.target_spacecraft_id == b.display_frame_snapshot.target_spacecraft_id &&
-                   a.patch_window_s == b.patch_window_s &&
+                   a.display_frame_key == b.display_frame_key &&
+                   a.display_frame_revision == b.display_frame_revision &&
+                   a.visual_window_s == b.visual_window_s &&
+                   a.exact_window_s == b.exact_window_s &&
+                   a.pick_window_s == b.pick_window_s &&
                    a.request_window_s == b.request_window_s &&
                    a.downstream_maneuver_node_ids == b.downstream_maneuver_node_ids;
         }
@@ -199,21 +228,28 @@ namespace Game
                 refreshed.anchor_time_s);
         refreshed.gizmo_basis_snapshot = snapshot_gizmo_basis(_maneuver_gizmo_interaction);
         refreshed.display_frame_snapshot =
-                track.cache.resolved_frame_spec_valid ? track.cache.resolved_frame_spec : _prediction_frame_selection.spec;
-        refreshed.patch_window_s = std::max(maneuver_plan_preview_window_s(), maneuver_post_node_coverage_s());
-        if (drag_active)
-        {
-            refreshed.patch_window_s =
-                    std::min(refreshed.patch_window_s, OrbitPredictionTuning::kDragInteractivePreviewWindowMaxS);
-        }
-        refreshed.request_window_s = std::max(0.0, (refreshed.anchor_time_s - now_s) + refreshed.patch_window_s);
+                (track.cache.valid && track.cache.trajectory_inertial.size() >= 2)
+                        ? resolve_prediction_display_frame_spec(track.cache, now_s)
+                        : _prediction_frame_selection.spec;
+        refreshed.display_frame_key = prediction_display_frame_key(refreshed.display_frame_snapshot);
+        refreshed.display_frame_revision = _prediction_display_frame_revision;
+        const PreviewWindowPolicy window_policy = build_preview_window_policy(now_s,
+                                                                              refreshed.anchor_time_s,
+                                                                              maneuver_plan_preview_window_s(),
+                                                                              maneuver_post_node_coverage_s(),
+                                                                              drag_active);
+        refreshed.visual_window_s = window_policy.visual_window_s;
+        refreshed.exact_window_s = window_policy.exact_window_s;
+        refreshed.pick_window_s = window_policy.pick_window_s;
+        refreshed.request_window_s = window_policy.request_window_s;
         refreshed.downstream_maneuver_node_ids.reserve(_maneuver_state.nodes.size());
-        const double patch_end_s = refreshed.anchor_time_s + refreshed.patch_window_s;
+        const double request_end_s =
+                refreshed.anchor_time_s + std::max(refreshed.visual_window_s, refreshed.exact_window_s);
         for (const ManeuverNode &node : _maneuver_state.nodes)
         {
             if (!std::isfinite(node.time_s) ||
                 node.time_s < refreshed.anchor_time_s ||
-                node.time_s > patch_end_s)
+                node.time_s > request_end_s)
             {
                 continue;
             }
@@ -316,7 +352,7 @@ namespace Game
         return required_ahead_s;
     }
 
-    double GameplayState::prediction_preview_patch_window_s(const PredictionTrackState &track,
+    double GameplayState::prediction_preview_exact_window_s(const PredictionTrackState &track,
                                                             const double now_s,
                                                             const bool with_maneuvers) const
     {
@@ -331,7 +367,7 @@ namespace Game
         {
             return 0.0;
         }
-        return std::max(0.0, track.preview_anchor.patch_window_s);
+        return std::max(0.0, track.preview_anchor.exact_window_s);
     }
 
     double GameplayState::prediction_required_window_s(const PredictionTrackState &track,
@@ -388,12 +424,13 @@ namespace Game
             return display_window_s;
         }
 
-        double preview_window_s = std::max(maneuver_plan_preview_window_s(), maneuver_post_node_coverage_s());
-        if (PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state))
-        {
-            preview_window_s = std::min(preview_window_s, OrbitPredictionTuning::kDragInteractivePreviewWindowMaxS);
-        }
-        return std::max(0.0, (std::max(now_s, anchor_node->time_s) - now_s) + preview_window_s);
+        const PreviewWindowPolicy window_policy = build_preview_window_policy(now_s,
+                                                                              std::max(now_s, anchor_node->time_s),
+                                                                              maneuver_plan_preview_window_s(),
+                                                                              maneuver_post_node_coverage_s(),
+                                                                              PredictionRuntimeDetail::maneuver_drag_active(
+                                                                                      _maneuver_gizmo_interaction.state));
+        return window_policy.request_window_s;
     }
 
     bool GameplayState::should_rebuild_prediction_track(const PredictionTrackState &track,

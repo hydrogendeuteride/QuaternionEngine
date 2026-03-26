@@ -223,6 +223,8 @@ namespace Game
         derived_request.build_vel_world = build_vel_world;
         derived_request.sim_config = _orbitsim ? _orbitsim->sim.config() : orbitsim::GameSimulation::Config{};
         derived_request.resolved_frame_spec = resolved_frame_spec;
+        derived_request.display_frame_key = prediction_display_frame_key(resolved_frame_spec);
+        derived_request.display_frame_revision = _prediction_display_frame_revision;
         derived_request.analysis_body_id = analysis_body_id;
         derived_request.player_lookup_segments_inertial = std::move(player_lookup_segments);
         _prediction_derived_service.request(std::move(derived_request));

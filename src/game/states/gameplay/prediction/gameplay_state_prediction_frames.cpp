@@ -421,6 +421,7 @@ namespace Game
         }
 
         _prediction_frame_selection.spec = spec;
+        ++_prediction_display_frame_revision;
         refresh_all_prediction_derived_caches();
         sync_prediction_dirty_flag();
         return true;
@@ -854,12 +855,32 @@ namespace Game
 
         const orbitsim::TrajectoryFrameSpec resolved_frame_spec =
                 resolve_prediction_display_frame_spec(track.cache, display_time_s);
-        if (track.preview_overlay.cache.valid &&
-            (!track.preview_overlay.cache.resolved_frame_spec_valid ||
-             !same_frame_spec(track.preview_overlay.cache.resolved_frame_spec, resolved_frame_spec)))
+        const uint64_t display_frame_key = prediction_display_frame_key(resolved_frame_spec);
+        const uint64_t display_frame_revision = _prediction_display_frame_revision;
+        const auto cache_frame_matches = [&](const OrbitPredictionCache &cache) {
+            return cache.display_frame_key == display_frame_key &&
+                   cache.display_frame_revision == display_frame_revision;
+        };
+        const auto chunk_frame_matches = [&](const PredictionChunkAssembly &assembly) {
+            return assembly.display_frame_key == display_frame_key &&
+                   assembly.display_frame_revision == display_frame_revision;
+        };
+        if ((track.preview_overlay.cache.valid && !cache_frame_matches(track.preview_overlay.cache)) ||
+            (track.preview_overlay.chunk_assembly.valid && !chunk_frame_matches(track.preview_overlay.chunk_assembly)))
         {
             track.preview_overlay.clear();
             track.pick_cache.clear();
+            track.preview_pick_cache.clear();
+        }
+        if ((track.pick_cache.generation_id != 0u || track.pick_cache.base_valid || track.pick_cache.planned_valid) &&
+            !cache_frame_matches(track.cache))
+        {
+            track.pick_cache.clear();
+        }
+        if ((track.preview_pick_cache.generation_id != 0u || track.preview_pick_cache.preview_chunk_cache_valid) &&
+            (track.preview_pick_cache.display_frame_key != display_frame_key ||
+             track.preview_pick_cache.display_frame_revision != display_frame_revision))
+        {
             track.preview_pick_cache.clear();
         }
         const bool rebuild_frame_cache =
@@ -891,6 +912,8 @@ namespace Game
             {
                 track.cache.valid = false;
                 track.cache.resolved_frame_spec_valid = false;
+                track.cache.display_frame_key = 0;
+                track.cache.display_frame_revision = 0;
                 track.cache.metrics_valid = false;
                 track.preview_overlay.clear();
                 track.pick_cache.clear();
@@ -898,6 +921,11 @@ namespace Game
                 return;
             }
         }
+
+        track.cache.resolved_frame_spec = resolved_frame_spec;
+        track.cache.resolved_frame_spec_valid = true;
+        track.cache.display_frame_key = display_frame_key;
+        track.cache.display_frame_revision = display_frame_revision;
 
         double analysis_time_s = display_time_s;
         if (!std::isfinite(analysis_time_s))
