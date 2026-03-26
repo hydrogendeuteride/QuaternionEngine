@@ -258,11 +258,23 @@ namespace Game
             ManeuverNode *node = _maneuver_state.find_node(_maneuver_gizmo_interaction.node_id);
             if (!node || !node->gizmo_valid)
             {
+                if (PredictionTrackState *track = active_prediction_track())
+                {
+                    PredictionDragDebugTelemetry &debug = track->drag_debug;
+                    debug.drag_active = false;
+                    debug.last_drag_end_tp = PredictionDragDebugTelemetry::Clock::now();
+                }
                 _maneuver_gizmo_interaction = {};
             }
             else if (!ctx.input->mouse_down(MouseButton::Left))
             {
                 const bool changed = _maneuver_gizmo_interaction.applied_delta;
+                if (PredictionTrackState *track = active_prediction_track())
+                {
+                    PredictionDragDebugTelemetry &debug = track->drag_debug;
+                    debug.drag_active = false;
+                    debug.last_drag_end_tp = PredictionDragDebugTelemetry::Clock::now();
+                }
                 if (hovered_handle_idx >= 0)
                 {
                     _maneuver_gizmo_interaction.state = ManeuverGizmoInteraction::State::HoverAxis;

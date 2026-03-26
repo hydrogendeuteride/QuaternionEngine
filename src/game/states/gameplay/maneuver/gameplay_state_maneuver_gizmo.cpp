@@ -13,6 +13,7 @@
 #include "SDL2/SDL_vulkan.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 
@@ -36,6 +37,12 @@ namespace Game
                 return fallback;
             }
             return v / len;
+        }
+
+        void update_last_and_peak(double &last_value, double &peak_value, const double sample)
+        {
+            last_value = std::max(0.0, sample);
+            peak_value = std::max(peak_value, last_value);
         }
 
         struct CameraRay
@@ -516,6 +523,17 @@ namespace Game
             });
         }
         _maneuver_gizmo_interaction.applied_delta = false;
+        if (PredictionTrackState *track = active_prediction_track())
+        {
+            PredictionDragDebugTelemetry &debug = track->drag_debug;
+            const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
+            const uint64_t next_drag_session_id = debug.drag_session_id + 1;
+            debug.clear();
+            debug.drag_session_id = next_drag_session_id;
+            debug.drag_active = true;
+            debug.drag_started_tp = now_tp;
+            debug.last_drag_update_tp = now_tp;
+        }
         return true;
     }
 
@@ -523,6 +541,7 @@ namespace Game
                                                  ManeuverNode &node,
                                                  const glm::vec2 &mouse_pos_window)
     {
+        const auto drag_apply_start_tp = PredictionDragDebugTelemetry::Clock::now();
         glm::dvec3 axis_dir_world(0.0, 1.0, 0.0);
         int component = 1;
         double sign = 1.0;
@@ -588,6 +607,18 @@ namespace Game
             node.total_dv_mps = safe_length(node.dv_rtn_mps);
             _maneuver_gizmo_interaction.applied_delta = true;
             mark_maneuver_plan_dirty();
+        }
+
+        if (PredictionTrackState *track = active_prediction_track())
+        {
+            PredictionDragDebugTelemetry &debug = track->drag_debug;
+            const auto drag_apply_end_tp = PredictionDragDebugTelemetry::Clock::now();
+            debug.drag_active = true;
+            debug.last_drag_update_tp = drag_apply_end_tp;
+            ++debug.drag_update_count;
+            update_last_and_peak(debug.drag_apply_ms_last,
+                                 debug.drag_apply_ms_peak,
+                                 std::chrono::duration<double, std::milli>(drag_apply_end_tp - drag_apply_start_tp).count());
         }
     }
 
