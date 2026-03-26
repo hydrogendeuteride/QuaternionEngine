@@ -202,13 +202,7 @@ namespace Game
         const OrbitPredictionCache *position_cache = cache;
         if (!position_cache)
         {
-            if (const PredictionTrackState *player_track = player_prediction_track())
-            {
-                if (player_track->cache.valid)
-                {
-                    position_cache = &player_track->cache;
-                }
-            }
+            position_cache = effective_prediction_cache(player_prediction_track());
         }
 
         const orbitsim::MassiveBody *body = nullptr;
@@ -275,20 +269,20 @@ namespace Game
 
     orbitsim::SpacecraftStateLookup GameplayState::build_prediction_player_lookup() const
     {
-        const PredictionTrackState *player_track = player_prediction_track();
-        if (!player_track || !player_track->cache.valid)
+        const OrbitPredictionCache *player_cache = effective_prediction_cache(player_prediction_track());
+        if (!player_cache)
         {
             return nullptr;
         }
 
         const std::vector<orbitsim::TrajectorySegment> *trajectory_segments = nullptr;
-        if (!player_track->cache.trajectory_segments_inertial_planned.empty())
+        if (!player_cache->trajectory_segments_inertial_planned.empty())
         {
-            trajectory_segments = &player_track->cache.trajectory_segments_inertial_planned;
+            trajectory_segments = &player_cache->trajectory_segments_inertial_planned;
         }
-        else if (!player_track->cache.trajectory_segments_inertial.empty())
+        else if (!player_cache->trajectory_segments_inertial.empty())
         {
-            trajectory_segments = &player_track->cache.trajectory_segments_inertial;
+            trajectory_segments = &player_cache->trajectory_segments_inertial;
         }
         if (!trajectory_segments)
         {
@@ -860,6 +854,13 @@ namespace Game
 
         const orbitsim::TrajectoryFrameSpec resolved_frame_spec =
                 resolve_prediction_display_frame_spec(track.cache, display_time_s);
+        if (track.preview_overlay.cache.valid &&
+            (!track.preview_overlay.cache.resolved_frame_spec_valid ||
+             !same_frame_spec(track.preview_overlay.cache.resolved_frame_spec, resolved_frame_spec)))
+        {
+            track.preview_overlay.clear();
+            track.pick_cache.clear();
+        }
         const bool rebuild_frame_cache =
                 !track.cache.resolved_frame_spec_valid ||
                 !same_frame_spec(track.cache.resolved_frame_spec, resolved_frame_spec) ||
@@ -868,15 +869,15 @@ namespace Game
         if (rebuild_frame_cache)
         {
             std::vector<orbitsim::TrajectorySegment> player_lookup_segments;
-            if (const PredictionTrackState *player_track = player_prediction_track())
+            if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_prediction_track()))
             {
-                if (!player_track->cache.trajectory_segments_inertial_planned.empty())
+                if (!player_cache->trajectory_segments_inertial_planned.empty())
                 {
-                    player_lookup_segments = player_track->cache.trajectory_segments_inertial_planned;
+                    player_lookup_segments = player_cache->trajectory_segments_inertial_planned;
                 }
-                else if (!player_track->cache.trajectory_segments_inertial.empty())
+                else if (!player_cache->trajectory_segments_inertial.empty())
                 {
-                    player_lookup_segments = player_track->cache.trajectory_segments_inertial;
+                    player_lookup_segments = player_cache->trajectory_segments_inertial;
                 }
             }
 
@@ -890,6 +891,8 @@ namespace Game
                 track.cache.valid = false;
                 track.cache.resolved_frame_spec_valid = false;
                 track.cache.metrics_valid = false;
+                track.preview_overlay.clear();
+                track.pick_cache.clear();
                 return;
             }
         }

@@ -366,18 +366,46 @@ namespace Game
         return find_prediction_track(PredictionSubjectKey{PredictionSubjectKind::Orbiter, player_eid.value});
     }
 
+    OrbitPredictionCache *GameplayState::effective_prediction_cache(PredictionTrackState *track)
+    {
+        if (!track)
+        {
+            return nullptr;
+        }
+
+        if (track->preview_overlay.cache.valid)
+        {
+            return &track->preview_overlay.cache;
+        }
+
+        return track->cache.valid ? &track->cache : nullptr;
+    }
+
+    const OrbitPredictionCache *GameplayState::effective_prediction_cache(const PredictionTrackState *track) const
+    {
+        if (!track)
+        {
+            return nullptr;
+        }
+
+        if (track->preview_overlay.cache.valid)
+        {
+            return &track->preview_overlay.cache;
+        }
+
+        return track->cache.valid ? &track->cache : nullptr;
+    }
+
     OrbitPredictionCache *GameplayState::player_prediction_cache()
     {
         // Expose the player's cached prediction data for HUD/UI consumers.
-        PredictionTrackState *track = player_prediction_track();
-        return track ? &track->cache : nullptr;
+        return effective_prediction_cache(player_prediction_track());
     }
 
     const OrbitPredictionCache *GameplayState::player_prediction_cache() const
     {
         // Expose the player's cached prediction data for HUD/UI consumers.
-        const PredictionTrackState *track = player_prediction_track();
-        return track ? &track->cache : nullptr;
+        return effective_prediction_cache(player_prediction_track());
     }
 
     bool GameplayState::prediction_subject_is_player(PredictionSubjectKey key) const

@@ -167,6 +167,8 @@ namespace Game
         const PredictionTrackState *active_prediction_track() const;
         PredictionTrackState *player_prediction_track();
         const PredictionTrackState *player_prediction_track() const;
+        OrbitPredictionCache *effective_prediction_cache(PredictionTrackState *track);
+        const OrbitPredictionCache *effective_prediction_cache(const PredictionTrackState *track) const;
         OrbitPredictionCache *player_prediction_cache();
         const OrbitPredictionCache *player_prediction_cache() const;
         bool prediction_subject_is_player(PredictionSubjectKey key) const;

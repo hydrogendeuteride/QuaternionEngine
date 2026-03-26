@@ -206,11 +206,6 @@ namespace Game
                             .count();
             if (frame_cache_built)
             {
-                const auto flatten_start_tp = std::chrono::steady_clock::now();
-                PredictionCacheInternal::flatten_chunk_assembly_to_cache(cache, out.chunk_assembly);
-                out.timings.flatten_ms =
-                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - flatten_start_tp)
-                                .count();
                 cache.resolved_frame_spec = resolved_frame_spec;
                 cache.resolved_frame_spec_valid = true;
                 out.diagnostics.status = PredictionDerivedStatus::Success;

@@ -382,6 +382,33 @@ namespace Game
         }
     };
 
+    struct PredictionPreviewOverlay
+    {
+        OrbitPredictionCache cache{};
+        PredictionChunkAssembly chunk_assembly{};
+
+        [[nodiscard]] bool has_cache() const
+        {
+            return cache.valid;
+        }
+
+        [[nodiscard]] bool has_chunks() const
+        {
+            return chunk_assembly.valid && !chunk_assembly.chunks.empty();
+        }
+
+        [[nodiscard]] bool valid() const
+        {
+            return has_cache() || has_chunks();
+        }
+
+        void clear()
+        {
+            cache.clear();
+            chunk_assembly.clear();
+        }
+    };
+
     enum class PredictionPreviewRuntimeState : uint8_t
     {
         Idle = 0,
@@ -506,7 +533,7 @@ namespace Game
         double preview_entered_at_s{std::numeric_limits<double>::quiet_NaN()};
         double preview_last_anchor_refresh_at_s{std::numeric_limits<double>::quiet_NaN()};
         double preview_last_request_at_s{std::numeric_limits<double>::quiet_NaN()};
-        PredictionChunkAssembly planned_chunk_assembly{};
+        PredictionPreviewOverlay preview_overlay{};
         PredictionDragDebugTelemetry drag_debug{};
         bool supports_maneuvers{false};
         bool is_celestial{false};
@@ -530,7 +557,7 @@ namespace Game
             preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
             preview_last_anchor_refresh_at_s = std::numeric_limits<double>::quiet_NaN();
             preview_last_request_at_s = std::numeric_limits<double>::quiet_NaN();
-            planned_chunk_assembly.clear();
+            preview_overlay.clear();
             drag_debug.clear();
             auto_primary_body_id = orbitsim::kInvalidBodyId;
             solver_ms_last = 0.0;
