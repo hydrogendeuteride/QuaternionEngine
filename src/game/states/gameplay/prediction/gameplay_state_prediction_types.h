@@ -16,6 +16,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Game
@@ -235,6 +236,57 @@ namespace Game
         bool planned_use_adaptive_curve{false};
         std::vector<PickingSystem::LinePickSegmentData> base_segments;
         std::vector<PickingSystem::LinePickSegmentData> planned_segments;
+        struct PreviewChunkEntry
+        {
+            uint32_t chunk_id{0};
+            uint64_t generation_id{0};
+            OrbitPredictionService::ChunkQualityState quality_state{
+                    OrbitPredictionService::ChunkQualityState::Final};
+            double t0_s{std::numeric_limits<double>::quiet_NaN()};
+            double t1_s{std::numeric_limits<double>::quiet_NaN()};
+            std::size_t max_segments{0};
+            bool use_adaptive_curve{false};
+            bool cap_hit{false};
+            std::vector<PickingSystem::LinePickSegmentData> segments;
+
+            void clear()
+            {
+                chunk_id = 0;
+                generation_id = 0;
+                quality_state = OrbitPredictionService::ChunkQualityState::Final;
+                t0_s = std::numeric_limits<double>::quiet_NaN();
+                t1_s = std::numeric_limits<double>::quiet_NaN();
+                max_segments = 0;
+                use_adaptive_curve = false;
+                cap_hit = false;
+                segments.clear();
+            }
+        };
+
+        struct PreviewFallbackCache
+        {
+            uint64_t source_generation_id{0};
+            std::size_t max_segments{0};
+            bool use_adaptive_curve{false};
+            bool cap_hit{false};
+            bool valid{false};
+            std::vector<std::pair<double, double>> uncovered_ranges;
+            std::vector<PickingSystem::LinePickSegmentData> segments;
+
+            void clear()
+            {
+                source_generation_id = 0;
+                max_segments = 0;
+                use_adaptive_curve = false;
+                cap_hit = false;
+                valid = false;
+                uncovered_ranges.clear();
+                segments.clear();
+            }
+        };
+        bool preview_chunk_cache_valid{false};
+        std::vector<PreviewChunkEntry> preview_chunk_entries;
+        PreviewFallbackCache preview_fallback{};
 
         void clear()
         {
@@ -262,6 +314,9 @@ namespace Game
             planned_use_adaptive_curve = false;
             base_segments.clear();
             planned_segments.clear();
+            preview_chunk_cache_valid = false;
+            preview_chunk_entries.clear();
+            preview_fallback.clear();
         }
     };
 
