@@ -991,7 +991,6 @@ namespace Game
         if (preview_result)
         {
             track->preview_overlay.cache = std::move(cache_to_publish);
-            track->preview_pick_cache.clear();
         }
         else
         {
