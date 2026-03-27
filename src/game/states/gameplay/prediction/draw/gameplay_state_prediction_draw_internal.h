@@ -111,6 +111,7 @@ namespace Game::PredictionDrawDetail
         glm::vec4 track_color_plan{1.0f};
         double future_window_s{0.0};
         double planned_visual_window_s{0.0};
+        double planned_exact_window_s{0.0};
         double planned_pick_window_s{0.0};
         PickWindow base_pick_window{};
         PickWindow planned_draw_window{};

@@ -85,13 +85,11 @@ namespace Game
 
         out.traj_planned_segments = &out.planned_cache->trajectory_segments_frame_planned;
         out.planned_window_segments =
-                preview_chunk_authoritative
-                        ? nullptr
-                        : (!out.stable_cache->trajectory_segments_frame_planned.empty()
-                                   ? &out.stable_cache->trajectory_segments_frame_planned
-                                   : (!out.planned_cache->trajectory_segments_frame_planned.empty()
-                                              ? &out.planned_cache->trajectory_segments_frame_planned
-                                              : out.traj_planned_segments));
+                !out.stable_cache->trajectory_segments_frame_planned.empty()
+                        ? &out.stable_cache->trajectory_segments_frame_planned
+                        : (!out.planned_cache->trajectory_segments_frame_planned.empty()
+                                   ? &out.planned_cache->trajectory_segments_frame_planned
+                                   : out.traj_planned_segments);
 
         out.is_active = track.key == _prediction_selection.active_subject;
         out.active_player_track = out.is_active && prediction_subject_is_player(track.key);
@@ -179,12 +177,14 @@ namespace Game
         if (out.active_player_track && track.preview_anchor.valid)
         {
             out.planned_visual_window_s = std::max(0.0, track.preview_anchor.visual_window_s);
+            out.planned_exact_window_s = std::max(0.0, track.preview_anchor.exact_window_s);
             out.planned_pick_window_s = std::max(0.0, track.preview_anchor.pick_window_s);
         }
         else
         {
             const double default_planned_window_s = maneuver_plan_preview_window_s();
             out.planned_visual_window_s = default_planned_window_s;
+            out.planned_exact_window_s = default_planned_window_s;
             out.planned_pick_window_s = default_planned_window_s;
         }
         return true;

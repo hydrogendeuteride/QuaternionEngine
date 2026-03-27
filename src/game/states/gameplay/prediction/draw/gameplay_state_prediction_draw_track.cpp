@@ -307,6 +307,11 @@ namespace Game
             return planned_window;
         };
 
+        const double planned_draw_future_window_s =
+                track_ctx.maneuver_drag_active
+                        ? std::min(track_ctx.planned_visual_window_s, track_ctx.planned_exact_window_s)
+                        : track_ctx.planned_visual_window_s;
+
         track_ctx.base_pick_window = {};
         track_ctx.planned_draw_window =
                 (track_ctx.active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
@@ -315,14 +320,14 @@ namespace Game
                                                                      _prediction_draw_config,
                                                                      _maneuver_state.nodes,
                                                                      track_ctx.now_s,
-                                                                     track_ctx.planned_visual_window_s,
+                                                                     planned_draw_future_window_s,
                                                                      _prediction_draw_future_segment,
                                                                      _prediction_draw_full_orbit,
                                                                      stable_cache.orbital_period_s)
                                    : (track_ctx.has_preview_planned_overlay && track_ctx.has_chunk_planned_overlay
                                                       ? build_planned_window_from_chunk_assembly(
                                                                 track_ctx.now_s,
-                                                                track_ctx.planned_visual_window_s)
+                                                                planned_draw_future_window_s)
                                                       : Draw::PickWindow{}))
                         : Draw::PickWindow{};
         track_ctx.planned_pick_window =
