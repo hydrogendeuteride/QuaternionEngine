@@ -137,7 +137,7 @@ namespace Game
         return std::max(0.0, request.preview_patch.exact_window_s);
     }
 
-    inline double preview_fp0_window_s(const OrbitPredictionService::Request &request)
+    inline double preview_streaming_window_s(const OrbitPredictionService::Request &request)
     {
         if (!request_uses_preview_patch(request))
         {
@@ -145,8 +145,8 @@ namespace Game
         }
 
         const double chunk_window_s = preview_exact_window_s(request);
-        const double fp0_window_s = chunk_window_s > 0.0 ? (chunk_window_s * 2.0) : 0.0;
-        return std::min(preview_patch_remaining_window_s(request), fp0_window_s);
+        const double streaming_window_s = chunk_window_s > 0.0 ? (chunk_window_s * 2.0) : 0.0;
+        return std::min(preview_patch_remaining_window_s(request), streaming_window_s);
     }
 
     inline bool trajectory_segments_cover_window(const std::vector<orbitsim::TrajectorySegment> &segments,

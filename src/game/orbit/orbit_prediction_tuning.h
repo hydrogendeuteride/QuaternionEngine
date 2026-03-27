@@ -94,7 +94,7 @@ namespace Game::OrbitPredictionTuning
     inline constexpr double kFastPreviewAdaptiveEphemerisToleranceScale = 4.0;
     inline constexpr std::size_t kFastPreviewTrajectorySampleCap = 1'200;
 
-    // Multi-profile chunk planner bands. The last band continues with the final cadence past 20 years.
+    // Chunk planner bands stay finer-grained than the Exact/Near/Tail profile classes.
     inline constexpr double kPredictionChunkBandNearEndS = 3.0 * kSecondsPerDay;
     inline constexpr double kPredictionChunkBandTransferEndS = 30.0 * kSecondsPerDay;
     inline constexpr double kPredictionChunkBandCruiseFineEndS = 180.0 * kSecondsPerDay;

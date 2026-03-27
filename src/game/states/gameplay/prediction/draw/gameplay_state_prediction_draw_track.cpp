@@ -264,10 +264,9 @@ namespace Game
             return planned_window;
         };
 
-        const double planned_draw_future_window_s =
-                track_ctx.maneuver_drag_active
-                        ? std::min(track_ctx.planned_visual_window_s, track_ctx.planned_exact_window_s)
-                        : track_ctx.planned_visual_window_s;
+        // During gizmo drags, exact/pick stay local but the rendered preview should keep extending
+        // as streamed tail chunks arrive so long-range planning remains legible.
+        const double planned_draw_future_window_s = track_ctx.planned_visual_window_s;
 
         track_ctx.base_pick_window = {};
         track_ctx.planned_draw_window =

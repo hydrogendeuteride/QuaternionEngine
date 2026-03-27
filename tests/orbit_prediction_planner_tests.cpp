@@ -83,22 +83,22 @@ TEST(OrbitPredictionPlannerTests, BuildsStableChunksForReferenceHorizons)
     EXPECT_EQ(plan_180d.chunks.size(), 69u);
     EXPECT_DOUBLE_EQ(plan_180d.t0_s, 10.0);
     EXPECT_DOUBLE_EQ(plan_180d.t1_s, 10.0 + 180.0 * Game::OrbitPredictionTuning::kSecondsPerDay);
-    EXPECT_EQ(plan_180d.chunks.front().profile_id, Game::OrbitPredictionService::PredictionProfileId::NearBody);
-    EXPECT_EQ(plan_180d.chunks.back().profile_id, Game::OrbitPredictionService::PredictionProfileId::Cruise);
+    EXPECT_EQ(plan_180d.chunks.front().profile_id, Game::OrbitPredictionService::PredictionProfileId::Near);
+    EXPECT_EQ(plan_180d.chunks.back().profile_id, Game::OrbitPredictionService::PredictionProfileId::Tail);
 
     const Game::OrbitPredictionService::PredictionSolvePlan plan_5y =
             Game::build_prediction_solve_plan(
                     make_request(20.0, 5.0 * Game::OrbitPredictionTuning::kSecondsPerYear));
     ASSERT_TRUE(plan_5y.valid);
     EXPECT_EQ(plan_5y.chunks.size(), 101u);
-    EXPECT_EQ(plan_5y.chunks.back().profile_id, Game::OrbitPredictionService::PredictionProfileId::DeepTail);
+    EXPECT_EQ(plan_5y.chunks.back().profile_id, Game::OrbitPredictionService::PredictionProfileId::Tail);
 
     const Game::OrbitPredictionService::PredictionSolvePlan plan_20y =
             Game::build_prediction_solve_plan(
                     make_request(30.0, 20.0 * Game::OrbitPredictionTuning::kSecondsPerYear));
     ASSERT_TRUE(plan_20y.valid);
     EXPECT_EQ(plan_20y.chunks.size(), 161u);
-    EXPECT_EQ(plan_20y.chunks.back().profile_id, Game::OrbitPredictionService::PredictionProfileId::DeepTail);
+    EXPECT_EQ(plan_20y.chunks.back().profile_id, Game::OrbitPredictionService::PredictionProfileId::Tail);
 }
 
 TEST(OrbitPredictionPlannerTests, InsertsManeuverAndPreviewBoundaries)
@@ -112,7 +112,8 @@ TEST(OrbitPredictionPlannerTests, InsertsManeuverAndPreviewBoundaries)
     request.preview_patch.active = true;
     request.preview_patch.anchor_state_valid = true;
     request.preview_patch.anchor_time_s = request.sim_time_s + 2.0 * Game::OrbitPredictionTuning::kSecondsPerHour;
-    request.preview_patch.patch_window_s = 0.5 * Game::OrbitPredictionTuning::kSecondsPerHour;
+    request.preview_patch.visual_window_s = 0.5 * Game::OrbitPredictionTuning::kSecondsPerHour;
+    request.preview_patch.exact_window_s = request.preview_patch.visual_window_s;
 
     Game::OrbitPredictionService::ManeuverImpulse maneuver_a{};
     maneuver_a.node_id = 1;
@@ -130,29 +131,29 @@ TEST(OrbitPredictionPlannerTests, InsertsManeuverAndPreviewBoundaries)
 
     EXPECT_TRUE(has_boundary(plan, request.sim_time_s));
     EXPECT_TRUE(has_boundary(plan, request.preview_patch.anchor_time_s));
-    EXPECT_TRUE(has_boundary(plan, request.preview_patch.anchor_time_s + request.preview_patch.patch_window_s));
-    EXPECT_TRUE(has_boundary(plan, request.preview_patch.anchor_time_s + request.preview_patch.patch_window_s * 2.0));
+    EXPECT_TRUE(has_boundary(plan, request.preview_patch.anchor_time_s + request.preview_patch.exact_window_s));
+    EXPECT_TRUE(has_boundary(plan, request.preview_patch.anchor_time_s + request.preview_patch.exact_window_s * 2.0));
     EXPECT_TRUE(has_boundary(plan, request.maneuver_impulses[0].t_s));
     EXPECT_TRUE(has_boundary(plan, request.maneuver_impulses[1].t_s));
 
-    std::vector<Game::OrbitPredictionService::PredictionChunkPlan> interactive_chunks;
+    std::vector<Game::OrbitPredictionService::PredictionChunkPlan> exact_chunks;
     for (const Game::OrbitPredictionService::PredictionChunkPlan &chunk : plan.chunks)
     {
-        if (chunk.profile_id == Profile::InteractiveExact)
+        if (chunk.profile_id == Profile::Exact)
         {
-            interactive_chunks.push_back(chunk);
+            exact_chunks.push_back(chunk);
         }
     }
 
-    ASSERT_EQ(interactive_chunks.size(), 2u);
-    EXPECT_NE((interactive_chunks[0].boundary_flags & static_cast<uint32_t>(Flags::PreviewAnchor)), 0u);
-    EXPECT_NE((interactive_chunks[0].boundary_flags & static_cast<uint32_t>(Flags::PreviewChunk)), 0u);
-    EXPECT_NE((interactive_chunks[1].boundary_flags & static_cast<uint32_t>(Flags::PreviewChunk)), 0u);
-    EXPECT_FALSE(interactive_chunks[0].allow_reuse);
-    EXPECT_FALSE(interactive_chunks[1].allow_reuse);
+    ASSERT_EQ(exact_chunks.size(), 2u);
+    EXPECT_NE((exact_chunks[0].boundary_flags & static_cast<uint32_t>(Flags::PreviewAnchor)), 0u);
+    EXPECT_NE((exact_chunks[0].boundary_flags & static_cast<uint32_t>(Flags::PreviewChunk)), 0u);
+    EXPECT_NE((exact_chunks[1].boundary_flags & static_cast<uint32_t>(Flags::PreviewChunk)), 0u);
+    EXPECT_FALSE(exact_chunks[0].allow_reuse);
+    EXPECT_FALSE(exact_chunks[1].allow_reuse);
 }
 
-TEST(OrbitPredictionPlannerTests, ResolvesChunkAdaptiveOptionsPerProfile)
+TEST(OrbitPredictionPlannerTests, ResolvesChunkAdaptiveOptionsPerChunkClass)
 {
     using Profile = Game::OrbitPredictionService::PredictionProfileId;
 
@@ -162,51 +163,39 @@ TEST(OrbitPredictionPlannerTests, ResolvesChunkAdaptiveOptionsPerProfile)
     const Game::OrbitPredictionService::PredictionSolvePlan plan = Game::build_prediction_solve_plan(request);
     ASSERT_TRUE(plan.valid);
 
-    const auto near_chunk = find_first_chunk_with_profile(plan, Profile::NearBody);
-    const auto transfer_chunk = find_first_chunk_with_profile(plan, Profile::Transfer);
-    const auto cruise_chunk = find_first_chunk_with_profile(plan, Profile::Cruise);
-    const auto deep_tail_chunk = find_first_chunk_with_profile(plan, Profile::DeepTail);
+    const auto near_chunk = find_first_chunk_with_profile(plan, Profile::Near);
+    const auto tail_chunk = find_first_chunk_with_profile(plan, Profile::Tail);
     ASSERT_TRUE(near_chunk.has_value());
-    ASSERT_TRUE(transfer_chunk.has_value());
-    ASSERT_TRUE(cruise_chunk.has_value());
-    ASSERT_TRUE(deep_tail_chunk.has_value());
+    ASSERT_TRUE(tail_chunk.has_value());
 
     const auto near_def = Game::resolve_prediction_profile_definition(request, *near_chunk);
-    const auto transfer_def = Game::resolve_prediction_profile_definition(request, *transfer_chunk);
-    const auto cruise_def = Game::resolve_prediction_profile_definition(request, *cruise_chunk);
-    const auto deep_tail_def = Game::resolve_prediction_profile_definition(request, *deep_tail_chunk);
+    const auto tail_def = Game::resolve_prediction_profile_definition(request, *tail_chunk);
 
-    EXPECT_LT(near_def.max_dt_s, transfer_def.max_dt_s);
-    EXPECT_LT(transfer_def.max_dt_s, cruise_def.max_dt_s);
-    EXPECT_LT(cruise_def.max_dt_s, deep_tail_def.max_dt_s);
-    EXPECT_GT(near_def.soft_max_segments, transfer_def.soft_max_segments);
-    EXPECT_GT(transfer_def.soft_max_segments, cruise_def.soft_max_segments);
-    EXPECT_GT(cruise_def.soft_max_segments, deep_tail_def.soft_max_segments);
-    EXPECT_GT(near_def.output_sample_density_scale, transfer_def.output_sample_density_scale);
-    EXPECT_GT(transfer_def.output_sample_density_scale, cruise_def.output_sample_density_scale);
-    EXPECT_GT(cruise_def.output_sample_density_scale, deep_tail_def.output_sample_density_scale);
+    EXPECT_LT(near_def.max_dt_s, tail_def.max_dt_s);
+    EXPECT_GT(near_def.soft_max_segments, tail_def.soft_max_segments);
+    EXPECT_GT(near_def.output_sample_density_scale, tail_def.output_sample_density_scale);
 
     const auto near_segment_opt =
             Game::build_spacecraft_adaptive_segment_options_for_chunk(request, *near_chunk);
-    const auto deep_tail_segment_opt =
-            Game::build_spacecraft_adaptive_segment_options_for_chunk(request, *deep_tail_chunk);
+    const auto tail_segment_opt =
+            Game::build_spacecraft_adaptive_segment_options_for_chunk(request, *tail_chunk);
     const auto near_ephemeris_opt =
             Game::build_adaptive_ephemeris_options_for_chunk(request, *near_chunk);
-    const auto deep_tail_ephemeris_opt =
-            Game::build_adaptive_ephemeris_options_for_chunk(request, *deep_tail_chunk);
+    const auto tail_ephemeris_opt =
+            Game::build_adaptive_ephemeris_options_for_chunk(request, *tail_chunk);
 
     EXPECT_DOUBLE_EQ(near_segment_opt.duration_s, near_chunk->t1_s - near_chunk->t0_s);
-    EXPECT_DOUBLE_EQ(deep_tail_segment_opt.duration_s, deep_tail_chunk->t1_s - deep_tail_chunk->t0_s);
-    EXPECT_LT(near_segment_opt.max_dt_s, deep_tail_segment_opt.max_dt_s);
-    EXPECT_GT(near_segment_opt.soft_max_segments, deep_tail_segment_opt.soft_max_segments);
-    EXPECT_LT(near_ephemeris_opt.max_dt_s, deep_tail_ephemeris_opt.max_dt_s);
-    EXPECT_GT(near_ephemeris_opt.soft_max_segments, deep_tail_ephemeris_opt.soft_max_segments);
+    EXPECT_DOUBLE_EQ(tail_segment_opt.duration_s, tail_chunk->t1_s - tail_chunk->t0_s);
+    EXPECT_LT(near_segment_opt.max_dt_s, tail_segment_opt.max_dt_s);
+    EXPECT_GT(near_segment_opt.soft_max_segments, tail_segment_opt.soft_max_segments);
+    EXPECT_LT(near_ephemeris_opt.max_dt_s, tail_ephemeris_opt.max_dt_s);
+    EXPECT_GT(near_ephemeris_opt.soft_max_segments, tail_ephemeris_opt.soft_max_segments);
 
     const std::size_t near_sample_budget =
             Game::prediction_sample_budget_for_chunk(request, *near_chunk, 256u);
-    const std::size_t deep_tail_sample_budget =
-            Game::prediction_sample_budget_for_chunk(request, *deep_tail_chunk, 256u);
-    EXPECT_GT(near_sample_budget, deep_tail_sample_budget);
+    const std::size_t tail_sample_budget =
+            Game::prediction_sample_budget_for_chunk(request, *tail_chunk, 256u);
+    EXPECT_GT(near_sample_budget, tail_sample_budget);
 }
 
 TEST(OrbitPredictionPlannerTests, PreviewAndManeuverChunksTightenProfiles)
@@ -220,7 +209,8 @@ TEST(OrbitPredictionPlannerTests, PreviewAndManeuverChunksTightenProfiles)
     request.preview_patch.active = true;
     request.preview_patch.anchor_state_valid = true;
     request.preview_patch.anchor_time_s = request.sim_time_s + 2.0 * Game::OrbitPredictionTuning::kSecondsPerHour;
-    request.preview_patch.patch_window_s = 0.5 * Game::OrbitPredictionTuning::kSecondsPerHour;
+    request.preview_patch.visual_window_s = 0.5 * Game::OrbitPredictionTuning::kSecondsPerHour;
+    request.preview_patch.exact_window_s = request.preview_patch.visual_window_s;
 
     Game::OrbitPredictionService::ManeuverImpulse maneuver{};
     maneuver.node_id = 7;
@@ -230,26 +220,26 @@ TEST(OrbitPredictionPlannerTests, PreviewAndManeuverChunksTightenProfiles)
     const Game::OrbitPredictionService::PredictionSolvePlan plan = Game::build_prediction_solve_plan(request);
     ASSERT_TRUE(plan.valid);
 
-    const auto interactive_chunk = find_first_chunk_with_profile(plan, Profile::InteractiveExact);
-    ASSERT_TRUE(interactive_chunk.has_value());
+    const auto exact_chunk = find_first_chunk_with_profile(plan, Profile::Exact);
+    ASSERT_TRUE(exact_chunk.has_value());
 
     const auto maneuver_chunk = find_first_chunk_with_flags(plan, static_cast<uint32_t>(Flags::Maneuver));
     ASSERT_TRUE(maneuver_chunk.has_value());
 
-    const auto interactive_def = Game::resolve_prediction_profile_definition(request, *interactive_chunk);
+    const auto exact_def = Game::resolve_prediction_profile_definition(request, *exact_chunk);
     const auto maneuver_def = Game::resolve_prediction_profile_definition(request, *maneuver_chunk);
 
-    EXPECT_LT(interactive_def.integrator_tolerance_multiplier, 1.0);
-    EXPECT_LT(interactive_def.max_dt_s, maneuver_def.max_dt_s);
-    EXPECT_GT(interactive_def.output_sample_density_scale, maneuver_def.output_sample_density_scale);
+    EXPECT_LT(exact_def.integrator_tolerance_multiplier, 1.0);
+    EXPECT_LT(exact_def.max_dt_s, maneuver_def.max_dt_s);
+    EXPECT_GT(exact_def.output_sample_density_scale, maneuver_def.output_sample_density_scale);
 
-    const auto interactive_opt =
-            Game::build_spacecraft_adaptive_segment_options_for_chunk(request, *interactive_chunk);
+    const auto exact_opt =
+            Game::build_spacecraft_adaptive_segment_options_for_chunk(request, *exact_chunk);
     const auto maneuver_opt =
             Game::build_spacecraft_adaptive_segment_options_for_chunk(request, *maneuver_chunk);
-    EXPECT_LT(interactive_opt.max_dt_s, maneuver_opt.max_dt_s);
-    EXPECT_LE(interactive_opt.lookup_max_dt_s, maneuver_opt.lookup_max_dt_s);
-    EXPECT_GT(interactive_opt.soft_max_segments, maneuver_opt.soft_max_segments);
+    EXPECT_LT(exact_opt.max_dt_s, maneuver_opt.max_dt_s);
+    EXPECT_LE(exact_opt.lookup_max_dt_s, maneuver_opt.lookup_max_dt_s);
+    EXPECT_GT(exact_opt.soft_max_segments, maneuver_opt.soft_max_segments);
 }
 
 TEST(OrbitPredictionPlannerTests, ActivityClassifierKeepsCalmChunkStable)
@@ -270,7 +260,7 @@ TEST(OrbitPredictionPlannerTests, ActivityClassifierKeepsCalmChunkStable)
             .chunk_id = 0u,
             .t0_s = 0.0,
             .t1_s = 10.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
-            .profile_id = Profile::DeepTail,
+            .profile_id = Profile::Tail,
     };
     const std::vector<orbitsim::TrajectorySegment> baseline{
             make_activity_segment(0.0,
@@ -290,7 +280,7 @@ TEST(OrbitPredictionPlannerTests, ActivityClassifierKeepsCalmChunkStable)
     const auto probe = Game::classify_chunk_activity(request, chunk, &baseline);
     ASSERT_TRUE(probe.valid);
     EXPECT_FALSE(probe.should_split);
-    EXPECT_EQ(probe.recommended_profile_id, Profile::DeepTail);
+    EXPECT_EQ(probe.recommended_profile_id, Profile::Tail);
     EXPECT_GT(probe.dominant_gravity_ratio, 0.99);
 }
 
@@ -318,7 +308,7 @@ TEST(OrbitPredictionPlannerTests, ActivityClassifierPromotesAndSplitsHighCurvatu
             .chunk_id = 0u,
             .t0_s = 0.0,
             .t1_s = 10.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
-            .profile_id = Profile::DeepTail,
+            .profile_id = Profile::Tail,
     };
     const std::vector<orbitsim::TrajectorySegment> baseline{
             make_activity_segment(0.0,
@@ -338,7 +328,7 @@ TEST(OrbitPredictionPlannerTests, ActivityClassifierPromotesAndSplitsHighCurvatu
     const auto probe = Game::classify_chunk_activity(request, chunk, &baseline);
     ASSERT_TRUE(probe.valid);
     EXPECT_TRUE(probe.should_split);
-    EXPECT_LT(static_cast<int>(probe.recommended_profile_id), static_cast<int>(Profile::DeepTail));
+    EXPECT_LT(static_cast<int>(probe.recommended_profile_id), static_cast<int>(Profile::Tail));
     EXPECT_LT(probe.dominant_gravity_ratio, 0.8);
 }
 
