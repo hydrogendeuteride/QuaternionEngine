@@ -1,8 +1,6 @@
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
-#include "game/states/gameplay/prediction/gameplay_prediction_cache_internal.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 
 namespace Game::PredictionDrawDetail
@@ -86,56 +84,6 @@ namespace Game::PredictionDrawDetail
         return true;
     }
 
-    void enqueue_cached_orbit_window(
-            OrbitPlotSystem *orbit_plot,
-            const std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> &cached_roots,
-            const WorldVec3 &ref_body_world,
-            const glm::dmat3 &frame_to_world,
-            const WorldVec3 &align_delta,
-            const double t_start_s,
-            const double t_end_s,
-            const glm::vec4 &color,
-            const bool dashed,
-            const float line_overlay_boost)
-    {
-        if (!orbit_plot || !cached_roots || cached_roots->empty() || !(t_end_s > t_start_s))
-        {
-            return;
-        }
-
-        orbit_plot->add_gpu_root_batch(cached_roots,
-                                       t_start_s,
-                                       t_end_s,
-                                       ref_body_world,
-                                       align_delta,
-                                       frame_to_world,
-                                       color,
-                                       dashed,
-                                       OrbitPlotDepth::DepthTested);
-
-        if (line_overlay_boost <= 0.0f)
-        {
-            return;
-        }
-
-        glm::vec4 overlay_color = color;
-        overlay_color.a = std::clamp(overlay_color.a * line_overlay_boost, 0.0f, 1.0f);
-        if (overlay_color.a <= 0.0f)
-        {
-            return;
-        }
-
-        orbit_plot->add_gpu_root_batch(cached_roots,
-                                       t_start_s,
-                                       t_end_s,
-                                       ref_body_world,
-                                       align_delta,
-                                       frame_to_world,
-                                       overlay_color,
-                                       dashed,
-                                       OrbitPlotDepth::AlwaysOnTop);
-    }
-
     ChunkAssemblyDrawResult draw_chunk_assembly_planned(
             const OrbitDrawWindowContext &draw_ctx,
             const OrbitPredictionDrawConfig &draw_config,
@@ -144,9 +92,7 @@ namespace Game::PredictionDrawDetail
             const double t_start_s,
             const double t_end_s,
             const glm::vec4 &color,
-            const bool dashed,
-            const bool use_persistent_gpu_roots,
-            const uint32_t max_chunk_builds)
+            const bool dashed)
     {
         ChunkAssemblyDrawResult result{};
         if (!assembly.valid || assembly.chunks.empty() || !(t_end_s > t_start_s))
@@ -173,64 +119,27 @@ namespace Game::PredictionDrawDetail
                 continue;
             }
 
-            bool drawn = false;
-            if (use_persistent_gpu_roots && draw_ctx.orbit_plot)
+            if (!chunk.render_curve.empty())
             {
-                if (!chunk.gpu_roots || chunk.gpu_roots->empty())
-                {
-                    if (result.chunks_built >= max_chunk_builds)
-                    {
-                        continue;
-                    }
-
-                    const auto build_start_tp = std::chrono::steady_clock::now();
-                    chunk.gpu_roots = PredictionCacheInternal::build_gpu_root_cache(chunk.frame_segments);
-                    result.gpu_root_build_ms +=
-                            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - build_start_tp)
-                                    .count();
-                    ++result.chunks_built;
-                }
-
-                if (chunk.gpu_roots && !chunk.gpu_roots->empty())
-                {
-                    enqueue_cached_orbit_window(draw_ctx.orbit_plot,
-                                                chunk.gpu_roots,
-                                                draw_ctx.ref_body_world,
-                                                draw_ctx.frame_to_world,
-                                                draw_ctx.align_delta,
-                                                draw_t0,
-                                                draw_t1,
-                                                color,
-                                                dashed,
-                                                draw_ctx.line_overlay_boost);
-                    drawn = true;
-                }
+                draw_adaptive_curve_window(draw_ctx,
+                                           draw_config,
+                                           perf,
+                                           chunk.render_curve,
+                                           draw_t0,
+                                           draw_t1,
+                                           color,
+                                           dashed);
             }
-
-            if (!drawn)
+            else
             {
-                if (!chunk.render_curve.empty())
-                {
-                    draw_adaptive_curve_window(draw_ctx,
-                                               draw_config,
-                                               perf,
-                                               chunk.render_curve,
-                                               draw_t0,
-                                               draw_t1,
-                                               color,
-                                               dashed);
-                }
-                else
-                {
-                    draw_orbit_window(draw_ctx,
-                                      draw_config,
-                                      perf,
-                                      chunk.frame_segments,
-                                      draw_t0,
-                                      draw_t1,
-                                      color,
-                                      dashed);
-                }
+                draw_orbit_window(draw_ctx,
+                                  draw_config,
+                                  perf,
+                                  chunk.frame_segments,
+                                  draw_t0,
+                                  draw_t1,
+                                  color,
+                                  dashed);
             }
 
             ++result.chunks_drawn;
