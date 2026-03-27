@@ -977,6 +977,15 @@ namespace Game
                 node.basis_n_world = _maneuver_gizmo_interaction.drag_basis_n_world;
             }
 
+            if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis &&
+                _maneuver_gizmo_interaction.node_id == node.id)
+            {
+                // Reuse the drag-start authored RTN frame so gizmo motion does not get reinterpreted mid-drag.
+                node.maneuver_basis_r_world = _maneuver_gizmo_interaction.drag_maneuver_basis_r_world;
+                node.maneuver_basis_t_world = _maneuver_gizmo_interaction.drag_maneuver_basis_t_world;
+                node.maneuver_basis_n_world = _maneuver_gizmo_interaction.drag_maneuver_basis_n_world;
+            }
+
             // Burn direction is used purely for debug visualization; zero-DV nodes fall back to the tangential axis.
             const glm::dvec3 dv_world = compose_basis_vector(node.dv_rtn_mps,
                                                              node.maneuver_basis_r_world,

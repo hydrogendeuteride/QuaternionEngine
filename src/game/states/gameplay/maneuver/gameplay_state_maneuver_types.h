@@ -154,6 +154,9 @@ namespace Game
         glm::dvec3 drag_basis_r_world{1.0, 0.0, 0.0};
         glm::dvec3 drag_basis_t_world{0.0, 1.0, 0.0};
         glm::dvec3 drag_basis_n_world{0.0, 0.0, 1.0};
+        glm::dvec3 drag_maneuver_basis_r_world{1.0, 0.0, 0.0};
+        glm::dvec3 drag_maneuver_basis_t_world{0.0, 1.0, 0.0};
+        glm::dvec3 drag_maneuver_basis_n_world{0.0, 0.0, 1.0};
         std::vector<ManeuverNodeDisplaySnapshot> drag_display_snapshots{};
         bool applied_delta{false};
     };
