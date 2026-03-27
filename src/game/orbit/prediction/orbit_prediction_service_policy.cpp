@@ -206,35 +206,27 @@ namespace Game
             if (request_uses_preview_patch(request))
             {
                 const double preview_t0_s = request.preview_patch.anchor_time_s;
-                const double preview_t1_s = preview_t0_s + preview_fp0_window_s(request);
+                const double preview_t1_s = preview_t0_s + preview_streaming_window_s(request);
                 if (preview_t1_s > preview_t0_s &&
                     chunk_t0_s < preview_t1_s &&
                     chunk_t1_s > preview_t0_s)
                 {
-                    return PredictionProfileId::InteractiveExact;
+                    return PredictionProfileId::Exact;
                 }
             }
 
             const double elapsed_s = std::max(0.0, chunk_t0_s - request.sim_time_s);
-            if (elapsed_s < OrbitPredictionTuning::kPredictionChunkBandNearEndS)
-            {
-                return PredictionProfileId::NearBody;
-            }
             if (elapsed_s < OrbitPredictionTuning::kPredictionChunkBandTransferEndS)
             {
-                return PredictionProfileId::Transfer;
+                return PredictionProfileId::Near;
             }
-            if (elapsed_s < OrbitPredictionTuning::kPredictionChunkBandCruiseEndS)
-            {
-                return PredictionProfileId::Cruise;
-            }
-            return PredictionProfileId::DeepTail;
+            return PredictionProfileId::Tail;
         }
 
         [[nodiscard]] uint32_t resolve_chunk_priority(const PredictionProfileId profile_id,
                                                       const uint32_t boundary_flags)
         {
-            if (profile_id == PredictionProfileId::InteractiveExact)
+            if (profile_id == PredictionProfileId::Exact)
             {
                 return 0u;
             }
@@ -761,7 +753,7 @@ namespace Game
                     .profile_id = profile_id,
                     .boundary_flags = boundary_flags,
                     .priority = resolve_chunk_priority(profile_id, boundary_flags),
-                    .allow_reuse = profile_id != PredictionProfileId::InteractiveExact,
+                    .allow_reuse = profile_id != PredictionProfileId::Exact,
                     .requires_seam_validation = !plan.chunks.empty(),
             });
         }
@@ -851,8 +843,8 @@ namespace Game
                 chunk.t1_s,
                 probe.primary_body_id_mid);
 
-        if (chunk.profile_id == PredictionProfileId::InteractiveExact ||
-            chunk.profile_id == PredictionProfileId::NearBody)
+        if (chunk.profile_id == PredictionProfileId::Exact ||
+            chunk.profile_id == PredictionProfileId::Near)
         {
             return probe;
         }
@@ -928,10 +920,12 @@ namespace Game
     {
         OrbitPredictionService::PredictionProfileDefinition def{};
         def.profile_id = chunk.profile_id;
+        const double elapsed_s = std::max(0.0, chunk.t0_s - request.sim_time_s);
+        const bool deep_tail_window = elapsed_s >= OrbitPredictionTuning::kPredictionChunkBandCruiseEndS;
 
         const bool fast_preview = request_uses_fast_preview(request);
         const bool preview_sensitive =
-                chunk.profile_id == PredictionProfileId::InteractiveExact ||
+                chunk.profile_id == PredictionProfileId::Exact ||
                 chunk_has_any_boundary(chunk,
                                        {PredictionChunkBoundaryFlags::PreviewAnchor,
                                         PredictionChunkBoundaryFlags::PreviewChunk});
@@ -997,7 +991,7 @@ namespace Game
 
         switch (chunk.profile_id)
         {
-        case PredictionProfileId::InteractiveExact:
+        case PredictionProfileId::Exact:
             segment_dt_scale = 0.25;
             lookup_dt_scale = 0.25;
             segment_soft_cap_scale = 1.75;
@@ -1007,7 +1001,7 @@ namespace Game
             output_sample_density_scale = 2.0;
             seam_overlap_s = 2.0 * OrbitPredictionTuning::kSecondsPerMinute;
             break;
-        case PredictionProfileId::NearBody:
+        case PredictionProfileId::Near:
             segment_dt_scale = 0.75;
             lookup_dt_scale = 0.75;
             segment_soft_cap_scale = 1.15;
@@ -1017,35 +1011,16 @@ namespace Game
             output_sample_density_scale = 1.0;
             seam_overlap_s = 5.0 * OrbitPredictionTuning::kSecondsPerMinute;
             break;
-        case PredictionProfileId::Transfer:
-            segment_dt_scale = 1.0;
-            lookup_dt_scale = 1.0;
-            segment_soft_cap_scale = 0.85;
-            ephemeris_dt_scale = 1.0;
-            ephemeris_soft_cap_scale = 0.85;
-            tolerance_scale = 1.0;
-            output_sample_density_scale = 0.7;
-            seam_overlap_s = 30.0 * OrbitPredictionTuning::kSecondsPerMinute;
-            break;
-        case PredictionProfileId::Cruise:
-            segment_dt_scale = 1.5;
-            lookup_dt_scale = 1.5;
-            segment_soft_cap_scale = 0.55;
-            ephemeris_dt_scale = 1.5;
-            ephemeris_soft_cap_scale = 0.6;
-            tolerance_scale = 1.5;
-            output_sample_density_scale = 0.4;
-            seam_overlap_s = 6.0 * OrbitPredictionTuning::kSecondsPerHour;
-            break;
-        case PredictionProfileId::DeepTail:
-            segment_dt_scale = 2.5;
-            lookup_dt_scale = 2.5;
-            segment_soft_cap_scale = 0.3;
-            ephemeris_dt_scale = 2.5;
-            ephemeris_soft_cap_scale = 0.35;
-            tolerance_scale = 2.5;
-            output_sample_density_scale = 0.2;
-            seam_overlap_s = 1.0 * OrbitPredictionTuning::kSecondsPerDay;
+        case PredictionProfileId::Tail:
+            segment_dt_scale = deep_tail_window ? 2.5 : 1.25;
+            lookup_dt_scale = deep_tail_window ? 2.5 : 1.25;
+            segment_soft_cap_scale = deep_tail_window ? 0.3 : 0.7;
+            ephemeris_dt_scale = deep_tail_window ? 2.5 : 1.25;
+            ephemeris_soft_cap_scale = deep_tail_window ? 0.35 : 0.75;
+            tolerance_scale = deep_tail_window ? 2.5 : 1.25;
+            output_sample_density_scale = deep_tail_window ? 0.2 : 0.55;
+            seam_overlap_s = deep_tail_window ? (1.0 * OrbitPredictionTuning::kSecondsPerDay)
+                                              : (2.0 * OrbitPredictionTuning::kSecondsPerHour);
             break;
         }
 

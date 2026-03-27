@@ -114,10 +114,10 @@ namespace Game
             {
                 case OrbitPredictionService::PublishStage::Full:
                     return "Full";
-                case OrbitPredictionService::PublishStage::FastPreviewFP0:
-                    return "FastPreviewFP0";
-                case OrbitPredictionService::PublishStage::FastPreviewFP1:
-                    return "FastPreviewFP1";
+                case OrbitPredictionService::PublishStage::PreviewStreaming:
+                    return "PreviewStreaming";
+                case OrbitPredictionService::PublishStage::PreviewFinalizing:
+                    return "PreviewFinalizing";
             }
 
             return "Unknown";

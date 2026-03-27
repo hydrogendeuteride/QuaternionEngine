@@ -91,11 +91,13 @@ namespace Game
         PreviewWindowPolicy build_preview_window_policy(const double now_s,
                                                         const double anchor_time_s,
                                                         const double visual_window_hint_s,
+                                                        const double anchored_visual_window_hint_s,
                                                         const double coverage_window_s,
                                                         const bool drag_active)
         {
             PreviewWindowPolicy policy{};
-            policy.visual_window_s = std::max(visual_window_hint_s, coverage_window_s);
+            policy.visual_window_s =
+                    std::max({visual_window_hint_s, anchored_visual_window_hint_s, coverage_window_s});
             policy.exact_window_s = policy.visual_window_s;
             if (drag_active)
             {
@@ -244,9 +246,13 @@ namespace Game
                         : _prediction_frame_selection.spec;
         refreshed.display_frame_key = prediction_display_frame_key(refreshed.display_frame_snapshot);
         refreshed.display_frame_revision = _prediction_display_frame_revision;
+        const double display_window_s = prediction_display_window_s(track.key, now_s, true);
+        const double anchored_display_window_s =
+                std::max(0.0, display_window_s - std::max(0.0, refreshed.anchor_time_s - now_s));
         const PreviewWindowPolicy window_policy = build_preview_window_policy(now_s,
                                                                               refreshed.anchor_time_s,
                                                                               maneuver_plan_preview_window_s(),
+                                                                              anchored_display_window_s,
                                                                               maneuver_post_node_coverage_s(),
                                                                               drag_active);
         refreshed.visual_window_s = window_policy.visual_window_s;
@@ -435,9 +441,13 @@ namespace Game
             return display_window_s;
         }
 
+        const double anchor_time_s = std::max(now_s, anchor_node->time_s);
+        const double anchored_display_window_s =
+                std::max(0.0, display_window_s - std::max(0.0, anchor_time_s - now_s));
         const PreviewWindowPolicy window_policy = build_preview_window_policy(now_s,
-                                                                              std::max(now_s, anchor_node->time_s),
+                                                                              anchor_time_s,
                                                                               maneuver_plan_preview_window_s(),
+                                                                              anchored_display_window_s,
                                                                               maneuver_post_node_coverage_s(),
                                                                               PredictionRuntimeDetail::maneuver_drag_active(
                                                                                       _maneuver_gizmo_interaction.state));

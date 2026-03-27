@@ -61,8 +61,8 @@ namespace Game
         enum class PublishStage : uint8_t
         {
             Full = 0,
-            FastPreviewFP0,
-            FastPreviewFP1,
+            PreviewStreaming,
+            PreviewFinalizing,
         };
 
         enum class ChunkQualityState : uint8_t
@@ -143,11 +143,9 @@ namespace Game
 
         enum class PredictionProfileId : uint8_t
         {
-            InteractiveExact = 0,
-            NearBody,
-            Transfer,
-            Cruise,
-            DeepTail,
+            Exact = 0,
+            Near,
+            Tail,
         };
 
         enum class PredictionChunkBoundaryFlags : uint32_t
@@ -164,7 +162,7 @@ namespace Game
 
         struct PredictionProfileDefinition
         {
-            PredictionProfileId profile_id{PredictionProfileId::NearBody};
+            PredictionProfileId profile_id{PredictionProfileId::Near};
             double integrator_tolerance_multiplier{1.0};
             double min_dt_s{0.0};
             double max_dt_s{0.0};
@@ -182,7 +180,7 @@ namespace Game
             uint32_t chunk_id{0};
             double t0_s{std::numeric_limits<double>::quiet_NaN()};
             double t1_s{std::numeric_limits<double>::quiet_NaN()};
-            PredictionProfileId profile_id{PredictionProfileId::NearBody};
+            PredictionProfileId profile_id{PredictionProfileId::Near};
             uint32_t boundary_flags{0u};
             uint32_t priority{0u};
             bool allow_reuse{true};
@@ -208,7 +206,7 @@ namespace Game
             orbitsim::BodyId primary_body_id_start{orbitsim::kInvalidBodyId};
             orbitsim::BodyId primary_body_id_mid{orbitsim::kInvalidBodyId};
             orbitsim::BodyId primary_body_id_end{orbitsim::kInvalidBodyId};
-            PredictionProfileId recommended_profile_id{PredictionProfileId::NearBody};
+            PredictionProfileId recommended_profile_id{PredictionProfileId::Near};
             bool should_split{false};
         };
 
@@ -340,7 +338,7 @@ namespace Game
             uint64_t frame_independent_generation{0};
             double chunk_t0_s{std::numeric_limits<double>::quiet_NaN()};
             double chunk_t1_s{std::numeric_limits<double>::quiet_NaN()};
-            PredictionProfileId profile_id{PredictionProfileId::NearBody};
+            PredictionProfileId profile_id{PredictionProfileId::Near};
         };
 
         struct PlannedChunkCacheEntry
