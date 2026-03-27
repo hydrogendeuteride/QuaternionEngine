@@ -22,14 +22,17 @@ namespace Game
         }
 
         out.stable_cache = &track.cache;
-        out.preview_planned_cache = track.preview_overlay.cache.valid ? &track.preview_overlay.cache : nullptr;
-        out.planned_cache = out.preview_planned_cache ? out.preview_planned_cache : out.stable_cache;
         out.planned_chunk_assembly =
                 track.preview_overlay.chunk_assembly.valid ? &track.preview_overlay.chunk_assembly : nullptr;
         out.has_preview_planned_overlay = track.preview_overlay.valid();
         out.has_chunk_planned_overlay =
                 out.planned_chunk_assembly && out.planned_chunk_assembly->valid &&
                 !out.planned_chunk_assembly->chunks.empty();
+        out.preview_planned_cache =
+                (!out.has_chunk_planned_overlay && track.preview_overlay.has_flat_planned_cache())
+                        ? &track.preview_overlay.cache
+                        : nullptr;
+        out.planned_cache = out.preview_planned_cache ? out.preview_planned_cache : out.stable_cache;
         const bool preview_chunk_authoritative = out.has_chunk_planned_overlay;
 
         out.traj_base = &out.stable_cache->trajectory_frame;
@@ -87,9 +90,12 @@ namespace Game
         out.planned_window_segments =
                 !out.stable_cache->trajectory_segments_frame_planned.empty()
                         ? &out.stable_cache->trajectory_segments_frame_planned
-                        : (!out.planned_cache->trajectory_segments_frame_planned.empty()
-                                   ? &out.planned_cache->trajectory_segments_frame_planned
-                                   : out.traj_planned_segments);
+                        : (out.preview_planned_cache &&
+                                   !out.preview_planned_cache->trajectory_segments_frame_planned.empty()
+                                   ? &out.preview_planned_cache->trajectory_segments_frame_planned
+                                   : (!out.planned_cache->trajectory_segments_frame_planned.empty()
+                                              ? &out.planned_cache->trajectory_segments_frame_planned
+                                              : (preview_chunk_authoritative ? nullptr : out.traj_planned_segments)));
 
         out.is_active = track.key == _prediction_selection.active_subject;
         out.active_player_track = out.is_active && prediction_subject_is_player(track.key);
@@ -97,7 +103,9 @@ namespace Game
                 out.active_player_track &&
                 _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
         out.suppress_stale_planned_preview =
-                out.maneuver_drag_active && track.preview_state == PredictionPreviewRuntimeState::EnterDrag;
+                out.maneuver_drag_active &&
+                track.preview_state == PredictionPreviewRuntimeState::EnterDrag &&
+                !track.preview_overlay.valid();
         out.drag_anchor_valid = out.maneuver_drag_active && track.preview_anchor.valid &&
                                 std::isfinite(track.preview_anchor.anchor_time_s);
         out.drag_anchor_time_s =
