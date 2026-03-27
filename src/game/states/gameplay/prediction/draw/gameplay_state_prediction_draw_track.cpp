@@ -310,7 +310,7 @@ namespace Game
         track_ctx.base_pick_window = {};
         track_ctx.planned_draw_window =
                 (track_ctx.active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
-                        ? (!track_ctx.planned_window_segments->empty()
+                        ? ((track_ctx.planned_window_segments && !track_ctx.planned_window_segments->empty())
                                    ? Draw::build_planned_pick_window(*track_ctx.planned_window_segments,
                                                                      _prediction_draw_config,
                                                                      _maneuver_state.nodes,
@@ -327,7 +327,7 @@ namespace Game
                         : Draw::PickWindow{};
         track_ctx.planned_pick_window =
                 (track_ctx.active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
-                        ? (!track_ctx.planned_window_segments->empty()
+                        ? ((track_ctx.planned_window_segments && !track_ctx.planned_window_segments->empty())
                                    ? Draw::build_planned_pick_window(*track_ctx.planned_window_segments,
                                                                      _prediction_draw_config,
                                                                      _maneuver_state.nodes,
@@ -487,7 +487,13 @@ namespace Game
             _orbit_plot_perf.planned_window_anchor_s = track_ctx.planned_draw_window.anchor_time_s;
             _orbit_plot_perf.planned_window_t_start = track_ctx.planned_draw_window.t0_s;
             _orbit_plot_perf.planned_window_t_end = track_ctx.planned_draw_window.t1_s;
-            if (track_ctx.traj_planned_segments && !track_ctx.traj_planned_segments->empty())
+            if (track_ctx.has_chunk_planned_overlay &&
+                planned_chunk_assembly &&
+                !planned_chunk_assembly->chunks.empty())
+            {
+                _orbit_plot_perf.planned_window_t0p = planned_chunk_assembly->start_time_s();
+            }
+            else if (track_ctx.traj_planned_segments && !track_ctx.traj_planned_segments->empty())
             {
                 _orbit_plot_perf.planned_window_t0p = track_ctx.traj_planned_segments->front().t0_s;
             }
@@ -564,9 +570,15 @@ namespace Game
         }
 
         OrbitPredictionCache *const fallback_planned_cache =
-                (!stable_cache.trajectory_segments_frame_planned.empty() || !stable_cache.trajectory_frame_planned.empty())
-                        ? &stable_cache
-                        : &planned_cache;
+                track_ctx.has_chunk_planned_overlay
+                        ? ((!stable_cache.trajectory_segments_frame_planned.empty() ||
+                            !stable_cache.trajectory_frame_planned.empty())
+                                   ? &stable_cache
+                                   : nullptr)
+                        : ((!stable_cache.trajectory_segments_frame_planned.empty() ||
+                            !stable_cache.trajectory_frame_planned.empty())
+                                   ? &stable_cache
+                                   : &planned_cache);
 
         if (track_ctx.has_chunk_planned_overlay)
         {
@@ -606,7 +618,7 @@ namespace Game
             {
                 _orbit_plot_perf.planned_fallback_range_count = static_cast<uint32_t>(fallback_ranges.size());
             }
-            if (!fallback_ranges.empty())
+            if (!fallback_ranges.empty() && fallback_planned_cache)
             {
                 const auto fallback_draw_start_tp = std::chrono::steady_clock::now();
                 for (const auto &[fallback_t0_s, fallback_t1_s] : fallback_ranges)
@@ -644,7 +656,7 @@ namespace Game
                                                                          track_ctx.planned_draw_window.t0_s,
                                                                          track_ctx.planned_draw_window.t1_s);
         const auto fallback_ranges =
-                (fallback_planned_cache != &planned_cache)
+                (fallback_planned_cache && fallback_planned_cache != &planned_cache)
                         ? (track_ctx.maneuver_drag_active
                                    ? compute_drag_prefix_fallback_ranges(track_ctx.planned_draw_window.t0_s,
                                                                          track_ctx.planned_draw_window.t1_s,
@@ -658,7 +670,7 @@ namespace Game
             _orbit_plot_perf.planned_fallback_range_count = static_cast<uint32_t>(fallback_ranges.size());
         }
 
-        if (!fallback_ranges.empty())
+        if (!fallback_ranges.empty() && fallback_planned_cache)
         {
             const auto fallback_draw_start_tp = std::chrono::steady_clock::now();
             for (const auto &[fallback_t0_s, fallback_t1_s] : fallback_ranges)
