@@ -41,65 +41,6 @@ namespace Game::PredictionDrawDetail
             }
         }
 
-        void emit_gpu_root_segments(const OrbitDrawWindowContext &ctx,
-                                    const OrbitPredictionDrawConfig &draw_config,
-                                    const std::vector<orbitsim::TrajectorySegment> &traj_segments,
-                                    const double t_start_s,
-                                    const double t_end_s,
-                                    const glm::vec4 &color,
-                                    const bool dashed,
-                                    const OrbitPlotDepth depth)
-        {
-            (void) draw_config;
-            if (!ctx.orbit_plot || traj_segments.empty() || !(t_end_s > t_start_s))
-            {
-                return;
-            }
-
-            std::vector<OrbitPlotSystem::GpuRootSegment> roots;
-            roots.reserve(traj_segments.size());
-            double prefix_length_m = 0.0;
-            for (const orbitsim::TrajectorySegment &segment : traj_segments)
-            {
-                if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
-                {
-                    continue;
-                }
-
-                OrbitPlotSystem::GpuRootSegment root{};
-                root.t0_s = segment.t0_s;
-                root.p0_bci = glm::dvec3(segment.start.position_m);
-                root.v0_bci = glm::dvec3(segment.start.velocity_mps);
-                root.p1_bci = glm::dvec3(segment.end.position_m);
-                root.v1_bci = glm::dvec3(segment.end.velocity_mps);
-                root.dt_s = segment.dt_s;
-                root.prefix_length_m = prefix_length_m;
-                roots.push_back(root);
-
-                const double chord_m = glm::length(root.p1_bci - root.p0_bci);
-                if (std::isfinite(chord_m) && chord_m > 0.0)
-                {
-                    prefix_length_m += chord_m;
-                }
-            }
-
-            if (roots.empty())
-            {
-                return;
-            }
-
-            ctx.orbit_plot->add_gpu_root_batch(
-                    std::make_shared<const std::vector<OrbitPlotSystem::GpuRootSegment>>(std::move(roots)),
-                    t_start_s,
-                    t_end_s,
-                    ctx.ref_body_world,
-                    ctx.align_delta,
-                    ctx.frame_to_world,
-                    color,
-                    dashed,
-                    depth);
-        }
-
         void emit_render_lod_segments(const OrbitDrawWindowContext &ctx,
                                       const OrbitPredictionDrawConfig &draw_config,
                                       OrbitPlotPerfStats &perf,
@@ -249,37 +190,6 @@ namespace Game::PredictionDrawDetail
                         : std::vector<orbitsim::TrajectorySegment>{};
         const std::vector<orbitsim::TrajectorySegment> &segments_world_basis =
                 needs_world_basis_transform ? transformed_segments : traj_segments;
-
-        const bool gpu_subdivision_enabled = false;
-        if (gpu_subdivision_enabled)
-        {
-            emit_gpu_root_segments(ctx,
-                                   draw_config,
-                                   segments_world_basis,
-                                   t_start_s,
-                                   t_end_s,
-                                   color,
-                                   dashed,
-                                   OrbitPlotDepth::DepthTested);
-
-            if (ctx.line_overlay_boost > 0.0f)
-            {
-                glm::vec4 overlay_color = color;
-                overlay_color.a = std::clamp(overlay_color.a * ctx.line_overlay_boost, 0.0f, 1.0f);
-                if (overlay_color.a > 0.0f)
-                {
-                    emit_gpu_root_segments(ctx,
-                                           draw_config,
-                                           segments_world_basis,
-                                           t_start_s,
-                                           t_end_s,
-                                           overlay_color,
-                                           dashed,
-                                           OrbitPlotDepth::AlwaysOnTop);
-                }
-            }
-            return;
-        }
 
         emit_cpu_render_lod(ctx, draw_config, perf, segments_world_basis, t_start_s, t_end_s, color, dashed);
     }

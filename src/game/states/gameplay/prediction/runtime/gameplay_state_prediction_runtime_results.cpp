@@ -44,7 +44,6 @@ namespace Game
 
         void clear_preview_planned_render_artifacts(OrbitPredictionCache &cache)
         {
-            cache.gpu_roots_frame_planned.reset();
             cache.render_curve_frame_planned.clear();
         }
 
@@ -53,7 +52,6 @@ namespace Game
         {
             preview_cache.trajectory_frame = base_cache.trajectory_frame;
             preview_cache.trajectory_segments_frame = base_cache.trajectory_segments_frame;
-            preview_cache.gpu_roots_frame = base_cache.gpu_roots_frame;
             preview_cache.render_curve_frame = base_cache.render_curve_frame;
             if (base_cache.analysis_cache_valid &&
                 base_cache.analysis_cache_body_id != orbitsim::kInvalidBodyId &&

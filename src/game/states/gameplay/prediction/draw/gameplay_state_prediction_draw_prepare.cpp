@@ -160,9 +160,6 @@ namespace Game
         out.draw_ctx.line_overlay_boost = std::clamp(_prediction_line_overlay_boost, 0.0f, 1.0f);
 
         out.identity_frame_transform = Draw::frame_transform_is_identity(out.frame_to_world);
-        out.use_persistent_gpu_roots =
-                global_ctx.orbit_plot && global_ctx.orbit_plot->settings().gpu_generate_enabled &&
-                !out.direct_world_polyline;
         out.use_base_adaptive_curve = !out.stable_cache->render_curve_frame.empty();
 
         out.world_basis_draw_ctx = out.draw_ctx;

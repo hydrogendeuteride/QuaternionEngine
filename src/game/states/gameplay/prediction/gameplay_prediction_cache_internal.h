@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <memory>
 #include <optional>
 #include <vector>
 
@@ -144,60 +143,6 @@ namespace Game::PredictionCacheInternal
         };
     }
 
-    inline std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> build_gpu_root_cache(
-            const std::vector<orbitsim::TrajectorySegment> &segments)
-    {
-        auto out = std::make_shared<std::vector<OrbitPlotSystem::GpuRootSegment>>();
-        out->reserve(segments.size());
-
-        double prefix_length_m = 0.0;
-        for (const orbitsim::TrajectorySegment &segment : segments)
-        {
-            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
-            {
-                continue;
-            }
-
-            const glm::dvec3 p0 = glm::dvec3(segment.start.position_m);
-            const glm::dvec3 p1 = glm::dvec3(segment.end.position_m);
-            const glm::dvec3 v0 = glm::dvec3(segment.start.velocity_mps);
-            const glm::dvec3 v1 = glm::dvec3(segment.end.velocity_mps);
-            if (!finite_vec3(p0) || !finite_vec3(p1) || !finite_vec3(v0) || !finite_vec3(v1))
-            {
-                continue;
-            }
-
-            OrbitPlotSystem::GpuRootSegment root{};
-            root.t0_s = segment.t0_s;
-            root.p0_bci = p0;
-            root.v0_bci = v0;
-            root.p1_bci = p1;
-            root.v1_bci = v1;
-            root.dt_s = segment.dt_s;
-            root.prefix_length_m = prefix_length_m;
-            out->push_back(root);
-
-            const double chord_m = glm::length(p1 - p0);
-            if (std::isfinite(chord_m) && chord_m > 0.0)
-            {
-                prefix_length_m += chord_m;
-            }
-        }
-
-        return out;
-    }
-
-    inline const std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> &ensure_gpu_root_cache(
-            std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> &cache_roots,
-            const std::vector<orbitsim::TrajectorySegment> &segments)
-    {
-        if (!cache_roots && !segments.empty())
-        {
-            cache_roots = build_gpu_root_cache(segments);
-        }
-        return cache_roots;
-    }
-
     inline std::vector<double> collect_maneuver_node_times(const OrbitPredictionCache &cache)
     {
         std::vector<double> out;
@@ -298,8 +243,6 @@ namespace Game::PredictionCacheInternal
         cache.trajectory_frame_planned.clear();
         cache.trajectory_segments_frame.clear();
         cache.trajectory_segments_frame_planned.clear();
-        cache.gpu_roots_frame.reset();
-        cache.gpu_roots_frame_planned.reset();
         cache.render_curve_frame.clear();
         cache.render_curve_frame_planned.clear();
         cache.resolved_frame_spec = {};
@@ -476,7 +419,6 @@ namespace Game::PredictionCacheInternal
 
         cache.trajectory_frame_planned.clear();
         cache.trajectory_segments_frame_planned.clear();
-        cache.gpu_roots_frame_planned.reset();
         cache.render_curve_frame_planned.clear();
         cache.resolved_frame_spec = {};
         cache.resolved_frame_spec_valid = false;
@@ -667,7 +609,6 @@ namespace Game::PredictionCacheInternal
         const std::size_t sample_budget = std::max<std::size_t>(inertial_segments.size(), 2);
         chunk.frame_samples = sample_prediction_segments(chunk.frame_segments, sample_budget);
         chunk.render_curve = OrbitRenderCurve::build(chunk.frame_segments);
-        chunk.gpu_roots = build_gpu_root_cache(chunk.frame_segments);
         chunk.valid = true;
         return true;
     }
@@ -758,7 +699,6 @@ namespace Game::PredictionCacheInternal
     {
         cache.trajectory_frame_planned.clear();
         cache.trajectory_segments_frame_planned.clear();
-        cache.gpu_roots_frame_planned.reset();
         cache.render_curve_frame_planned.clear();
 
         if (!assembly.valid || assembly.chunks.empty())
