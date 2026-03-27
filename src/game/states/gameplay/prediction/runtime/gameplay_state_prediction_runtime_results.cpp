@@ -426,6 +426,9 @@ namespace Game
         const bool keep_dirty_for_followup = track->invalidated_while_pending;
         track->invalidated_while_pending = false;
 
+        const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
+        const bool preview_chunk_authoritative = preview_result && result.chunk_assembly.valid;
+
         OrbitPredictionCache cache_to_publish{};
         OrbitPredictionDerivedDiagnostics diagnostics_to_publish = result.diagnostics;
         bool have_cache_to_publish = false;
@@ -458,7 +461,8 @@ namespace Game
             }
 
             if (have_cache_to_publish &&
-                result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview)
+                preview_result &&
+                !preview_chunk_authoritative)
             {
                 const OrbitPredictionCache empty_preview_merge_base{};
                 const bool can_merge_with_overlay =
@@ -482,7 +486,6 @@ namespace Game
         }
 
         track->derived_diagnostics = diagnostics_to_publish;
-        const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
         if (!have_cache_to_publish)
         {
             track->derived_diagnostics.status = PredictionDerivedStatus::MissingSolverData;
@@ -539,7 +542,9 @@ namespace Game
                 debug.chunk_merge_ms_peak,
                 chunk_merge_ms);
         const OrbitPredictionCache &debug_cache =
-                track->preview_overlay.cache.valid ? track->preview_overlay.cache : track->cache;
+                (!track->preview_overlay.chunk_assembly.valid && track->preview_overlay.cache.valid)
+                        ? track->preview_overlay.cache
+                        : track->cache;
         debug.planned_segments_after_preview_merge = debug_cache.trajectory_segments_frame_planned.size();
         if (debug.planned_segments_after_preview_merge == 0u &&
             track->preview_overlay.chunk_assembly.valid)

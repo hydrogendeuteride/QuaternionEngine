@@ -30,6 +30,7 @@ namespace Game
         out.has_chunk_planned_overlay =
                 out.planned_chunk_assembly && out.planned_chunk_assembly->valid &&
                 !out.planned_chunk_assembly->chunks.empty();
+        const bool preview_chunk_authoritative = out.has_chunk_planned_overlay;
 
         out.traj_base = &out.stable_cache->trajectory_frame;
         out.traj_planned = &out.planned_cache->trajectory_frame_planned;
@@ -83,11 +84,14 @@ namespace Game
         }
 
         out.traj_planned_segments = &out.planned_cache->trajectory_segments_frame_planned;
-        out.planned_window_segments = !out.stable_cache->trajectory_segments_frame_planned.empty()
-                                              ? &out.stable_cache->trajectory_segments_frame_planned
-                                              : (!out.planned_cache->trajectory_segments_frame_planned.empty()
-                                                         ? &out.planned_cache->trajectory_segments_frame_planned
-                                                         : out.traj_planned_segments);
+        out.planned_window_segments =
+                preview_chunk_authoritative
+                        ? nullptr
+                        : (!out.stable_cache->trajectory_segments_frame_planned.empty()
+                                   ? &out.stable_cache->trajectory_segments_frame_planned
+                                   : (!out.planned_cache->trajectory_segments_frame_planned.empty()
+                                              ? &out.planned_cache->trajectory_segments_frame_planned
+                                              : out.traj_planned_segments));
 
         out.is_active = track.key == _prediction_selection.active_subject;
         out.active_player_track = out.is_active && prediction_subject_is_player(track.key);
@@ -104,7 +108,19 @@ namespace Game
         if (out.is_active)
         {
             _orbit_plot_perf.solver_segments_base = static_cast<uint32_t>(out.traj_base_segments->size());
-            _orbit_plot_perf.solver_segments_planned = static_cast<uint32_t>(out.traj_planned_segments->size());
+            if (preview_chunk_authoritative)
+            {
+                uint32_t planned_segment_count = 0u;
+                for (const OrbitChunk &chunk : out.planned_chunk_assembly->chunks)
+                {
+                    planned_segment_count += static_cast<uint32_t>(chunk.frame_segments.size());
+                }
+                _orbit_plot_perf.solver_segments_planned = planned_segment_count;
+            }
+            else
+            {
+                _orbit_plot_perf.solver_segments_planned = static_cast<uint32_t>(out.traj_planned_segments->size());
+            }
         }
 
         out.i_hi = Draw::lower_bound_sample_index(*out.traj_base, out.now_s);
