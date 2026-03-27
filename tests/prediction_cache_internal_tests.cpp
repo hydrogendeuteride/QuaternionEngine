@@ -134,6 +134,52 @@ TEST(PredictionCacheInternalTests, RebuildPredictionMetricsUsesSegmentDerivedSam
     EXPECT_NEAR(fixture.cache.speed_kmps.front(), 0.0005f, 1.0e-5f);
 }
 
+TEST(PredictionCacheInternalTests, RebuildFrameCacheCanSkipPreviewPlannedRenderCurve)
+{
+    LinearPredictionFixture fixture = make_linear_cache();
+    ASSERT_TRUE(fixture.cache.valid);
+    ASSERT_NE(fixture.body_id, orbitsim::kInvalidBodyId);
+    ASSERT_FALSE(fixture.cache.trajectory_segments_inertial.empty());
+
+    fixture.cache.trajectory_inertial_planned = fixture.cache.trajectory_inertial;
+    fixture.cache.trajectory_segments_inertial_planned = fixture.cache.trajectory_segments_inertial;
+
+    ASSERT_TRUE(Game::PredictionCacheInternal::rebuild_prediction_frame_cache(
+            fixture.cache,
+            orbitsim::TrajectoryFrameSpec::body_centered_inertial(fixture.body_id),
+            fixture.cache.trajectory_segments_inertial,
+            {},
+            nullptr,
+            false));
+
+    EXPECT_FALSE(fixture.cache.render_curve_frame.empty());
+    EXPECT_FALSE(fixture.cache.trajectory_segments_frame_planned.empty());
+    EXPECT_TRUE(fixture.cache.render_curve_frame_planned.empty());
+}
+
+TEST(PredictionCacheInternalTests, RebuildPlannedFrameCacheCanSkipPreviewPlannedRenderCurve)
+{
+    LinearPredictionFixture fixture = make_linear_cache();
+    ASSERT_TRUE(fixture.cache.valid);
+    ASSERT_NE(fixture.body_id, orbitsim::kInvalidBodyId);
+    ASSERT_FALSE(fixture.cache.trajectory_segments_inertial.empty());
+
+    fixture.cache.trajectory_inertial_planned = fixture.cache.trajectory_inertial;
+    fixture.cache.trajectory_segments_inertial_planned = fixture.cache.trajectory_segments_inertial;
+
+    ASSERT_TRUE(Game::PredictionCacheInternal::rebuild_prediction_planned_frame_cache(
+            fixture.cache,
+            orbitsim::TrajectoryFrameSpec::body_centered_inertial(fixture.body_id),
+            fixture.cache.trajectory_segments_inertial,
+            {},
+            nullptr,
+            false));
+
+    EXPECT_FALSE(fixture.cache.trajectory_segments_frame_planned.empty());
+    EXPECT_GE(fixture.cache.trajectory_frame_planned.size(), 2u);
+    EXPECT_TRUE(fixture.cache.render_curve_frame_planned.empty());
+}
+
 TEST(PredictionCacheInternalTests, RebuildPredictionMetricsCachesAnalysisTransformResults)
 {
     LinearPredictionFixture fixture = make_linear_cache();
@@ -214,6 +260,8 @@ TEST(PredictionCacheInternalTests, RebuildPredictionPatchChunksClipsStraddlingSe
             published_chunks,
             7u,
             orbitsim::TrajectoryFrameSpec::inertial(),
+            0u,
+            0u,
             {},
             {},
             &diagnostics));

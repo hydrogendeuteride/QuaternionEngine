@@ -154,6 +154,8 @@ namespace Game
         out.solve_quality = solver.solve_quality;
         out.publish_stage = solver.publish_stage;
         out.generation_complete = solver.generation_complete;
+        const bool build_preview_planned_render_curve =
+                solver.solve_quality != OrbitPredictionService::SolveQuality::FastPreview;
         if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
         {
             out.diagnostics.status = PredictionDerivedStatus::MissingSolverData;
@@ -222,7 +224,8 @@ namespace Game
                     resolved_frame_spec,
                     request.player_lookup_segments_inertial,
                     cancel_requested,
-                    &out.diagnostics);
+                    &out.diagnostics,
+                    build_preview_planned_render_curve);
             out.timings.frame_build_ms =
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frame_build_start_tp)
                             .count();
@@ -234,7 +237,8 @@ namespace Game
                     resolved_frame_spec,
                     request.player_lookup_segments_inertial,
                     cancel_requested,
-                    &out.diagnostics);
+                    &out.diagnostics,
+                    build_preview_planned_render_curve);
             out.timings.frame_build_ms =
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frame_build_start_tp)
                             .count();

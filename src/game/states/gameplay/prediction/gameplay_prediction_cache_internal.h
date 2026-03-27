@@ -286,7 +286,8 @@ namespace Game::PredictionCacheInternal
             const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
             const std::vector<orbitsim::TrajectorySegment> &player_lookup_segments_inertial,
             const CancelCheck &cancel_requested = {},
-            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr)
+            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr,
+            const bool build_planned_render_curve = true)
     {
         if (diagnostics)
         {
@@ -450,9 +451,10 @@ namespace Game::PredictionCacheInternal
         }
 
         cache.render_curve_frame = OrbitRenderCurve::build(cache.trajectory_segments_frame);
-        cache.render_curve_frame_planned = cache.trajectory_segments_frame_planned.empty()
-                                                  ? OrbitRenderCurve{}
-                                                  : OrbitRenderCurve::build(cache.trajectory_segments_frame_planned);
+        cache.render_curve_frame_planned =
+                (build_planned_render_curve && !cache.trajectory_segments_frame_planned.empty())
+                        ? OrbitRenderCurve::build(cache.trajectory_segments_frame_planned)
+                        : OrbitRenderCurve{};
         cache.resolved_frame_spec = resolved_frame_spec;
         cache.resolved_frame_spec_valid = true;
         update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::Success);
@@ -464,7 +466,8 @@ namespace Game::PredictionCacheInternal
             const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
             const std::vector<orbitsim::TrajectorySegment> &player_lookup_segments_inertial,
             const CancelCheck &cancel_requested = {},
-            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr)
+            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr,
+            const bool build_planned_render_curve = true)
     {
         if (diagnostics)
         {
@@ -572,9 +575,10 @@ namespace Game::PredictionCacheInternal
             }
         }
 
-        cache.render_curve_frame_planned = cache.trajectory_segments_frame_planned.empty()
-                                                  ? OrbitRenderCurve{}
-                                                  : OrbitRenderCurve::build(cache.trajectory_segments_frame_planned);
+        cache.render_curve_frame_planned =
+                (build_planned_render_curve && !cache.trajectory_segments_frame_planned.empty())
+                        ? OrbitRenderCurve::build(cache.trajectory_segments_frame_planned)
+                        : OrbitRenderCurve{};
         cache.resolved_frame_spec = resolved_frame_spec;
         cache.resolved_frame_spec_valid = true;
         update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::Success);

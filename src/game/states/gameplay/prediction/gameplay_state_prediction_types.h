@@ -188,6 +188,14 @@ namespace Game
         orbitsim::BodyId metrics_body_id{orbitsim::kInvalidBodyId};
         bool metrics_valid{false};
 
+        [[nodiscard]] bool has_planned_frame_draw_data() const
+        {
+            return trajectory_frame_planned.size() >= 2 ||
+                   !trajectory_segments_frame_planned.empty() ||
+                   !render_curve_frame_planned.empty() ||
+                   (gpu_roots_frame_planned && !gpu_roots_frame_planned->empty());
+        }
+
         // Reset every cached prediction artifact so the next update rebuilds from scratch.
         void clear()
         {
@@ -478,6 +486,11 @@ namespace Game
         [[nodiscard]] bool has_cache() const
         {
             return cache.valid;
+        }
+
+        [[nodiscard]] bool has_flat_planned_cache() const
+        {
+            return cache.valid && cache.has_planned_frame_draw_data();
         }
 
         [[nodiscard]] bool has_chunks() const

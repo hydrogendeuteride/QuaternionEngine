@@ -42,6 +42,12 @@ namespace Game
                    assembly.display_frame_revision == display_frame_revision;
         }
 
+        void clear_preview_planned_render_artifacts(OrbitPredictionCache &cache)
+        {
+            cache.gpu_roots_frame_planned.reset();
+            cache.render_curve_frame_planned.clear();
+        }
+
         OrbitPredictionCache merge_reused_base_frame_cache(const OrbitPredictionCache &base_cache,
                                                            OrbitPredictionCache preview_cache)
         {
@@ -225,11 +231,7 @@ namespace Game
                     previous_cache.maneuver_previews,
                     preview_cache.maneuver_previews);
 
-            preview_cache.gpu_roots_frame_planned.reset();
-            preview_cache.render_curve_frame_planned = preview_cache.trajectory_segments_frame_planned.empty()
-                                                              ? OrbitRenderCurve{}
-                                                              : OrbitRenderCurve::build(
-                                                                        preview_cache.trajectory_segments_frame_planned);
+            clear_preview_planned_render_artifacts(preview_cache);
             preview_cache.valid = preview_cache.trajectory_inertial.size() >= 2 &&
                                   preview_cache.trajectory_frame.size() >= 2 &&
                                   !preview_cache.trajectory_segments_frame.empty();
@@ -497,6 +499,7 @@ namespace Game
 
         if (preview_result)
         {
+            clear_preview_planned_render_artifacts(cache_to_publish);
             track->preview_overlay.cache = std::move(cache_to_publish);
         }
         else

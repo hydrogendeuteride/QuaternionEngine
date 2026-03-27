@@ -109,6 +109,18 @@ namespace Game
             return policy;
         }
 
+        double resolve_interactive_prediction_reference_time_s(
+                const double sim_time_s,
+                const GameplayState::ManeuverGizmoInteraction &interaction)
+        {
+            if (PredictionRuntimeDetail::maneuver_drag_active(interaction.state) &&
+                std::isfinite(interaction.drag_display_reference_time_s))
+            {
+                return std::min(sim_time_s, interaction.drag_display_reference_time_s);
+            }
+            return sim_time_s;
+        }
+
         bool preview_anchor_matches(const PreviewAnchorCache &a, const PreviewAnchorCache &b)
         {
             return a.valid == b.valid &&
@@ -121,7 +133,6 @@ namespace Game
                    a.visual_window_s == b.visual_window_s &&
                    a.exact_window_s == b.exact_window_s &&
                    a.pick_window_s == b.pick_window_s &&
-                   a.request_window_s == b.request_window_s &&
                    a.downstream_maneuver_node_ids == b.downstream_maneuver_node_ids;
         }
     } // namespace
@@ -535,6 +546,8 @@ namespace Game
         rebuild_prediction_analysis_options();
 
         const double now_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+        const double interactive_reference_time_s =
+                resolve_interactive_prediction_reference_time_s(now_s, _maneuver_gizmo_interaction);
 
         const std::vector<PredictionSubjectKey> visible_subjects = collect_visible_prediction_subjects();
         if (!_orbitsim)
@@ -569,8 +582,10 @@ namespace Game
                     _maneuver_nodes_enabled &&
                     !_maneuver_state.nodes.empty();
             const bool thrusting = prediction_subject_thrust_applied_this_tick(track.key);
-            refresh_prediction_preview_anchor(track, now_s, with_maneuvers);
-            const bool rebuild = should_rebuild_prediction_track(track, now_s, fixed_dt, thrusting, with_maneuvers);
+            const double track_reference_time_s = with_maneuvers ? interactive_reference_time_s : now_s;
+            refresh_prediction_preview_anchor(track, track_reference_time_s, with_maneuvers);
+            const bool rebuild =
+                    should_rebuild_prediction_track(track, track_reference_time_s, fixed_dt, thrusting, with_maneuvers);
             if (!rebuild)
             {
                 continue;
@@ -582,7 +597,7 @@ namespace Game
                 continue;
             }
 
-            update_orbiter_prediction_track(track, now_s, thrusting, with_maneuvers);
+            update_orbiter_prediction_track(track, track_reference_time_s, thrusting, with_maneuvers);
         }
 
         // Mirror the active track's last solver time into the shared debug HUD stats.
