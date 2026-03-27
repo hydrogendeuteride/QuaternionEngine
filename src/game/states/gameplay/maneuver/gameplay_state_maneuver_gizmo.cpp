@@ -505,6 +505,10 @@ namespace Game
         _maneuver_gizmo_interaction.drag_basis_r_world = node->basis_r_world;
         _maneuver_gizmo_interaction.drag_basis_t_world = node->basis_t_world;
         _maneuver_gizmo_interaction.drag_basis_n_world = node->basis_n_world;
+        // Keep both the visible handle basis and the authored RTN basis fixed for the whole drag session.
+        _maneuver_gizmo_interaction.drag_maneuver_basis_r_world = node->maneuver_basis_r_world;
+        _maneuver_gizmo_interaction.drag_maneuver_basis_t_world = node->maneuver_basis_t_world;
+        _maneuver_gizmo_interaction.drag_maneuver_basis_n_world = node->maneuver_basis_n_world;
         _maneuver_gizmo_interaction.drag_display_snapshots.clear();
         _maneuver_gizmo_interaction.drag_display_snapshots.reserve(_maneuver_state.nodes.size());
         for (const ManeuverNode &candidate : _maneuver_state.nodes)
@@ -553,10 +557,41 @@ namespace Game
         glm::dvec3 axis_dir_world(0.0, 1.0, 0.0);
         int component = 1;
         double sign = 1.0;
-        if (!resolve_maneuver_axis(node, _maneuver_gizmo_interaction.axis, axis_dir_world, component, sign))
+        switch (_maneuver_gizmo_interaction.axis)
         {
-            _maneuver_gizmo_interaction = {};
-            return;
+            case ManeuverHandleAxis::TangentialPos:
+                axis_dir_world = _maneuver_gizmo_interaction.drag_basis_t_world;
+                component = 1;
+                sign = +1.0;
+                break;
+            case ManeuverHandleAxis::TangentialNeg:
+                axis_dir_world = -_maneuver_gizmo_interaction.drag_basis_t_world;
+                component = 1;
+                sign = -1.0;
+                break;
+            case ManeuverHandleAxis::RadialPos:
+                axis_dir_world = _maneuver_gizmo_interaction.drag_basis_r_world;
+                component = 0;
+                sign = +1.0;
+                break;
+            case ManeuverHandleAxis::RadialNeg:
+                axis_dir_world = -_maneuver_gizmo_interaction.drag_basis_r_world;
+                component = 0;
+                sign = -1.0;
+                break;
+            case ManeuverHandleAxis::NormalPos:
+                axis_dir_world = _maneuver_gizmo_interaction.drag_basis_n_world;
+                component = 2;
+                sign = +1.0;
+                break;
+            case ManeuverHandleAxis::NormalNeg:
+                axis_dir_world = -_maneuver_gizmo_interaction.drag_basis_n_world;
+                component = 2;
+                sign = -1.0;
+                break;
+            default:
+                _maneuver_gizmo_interaction = {};
+                return;
         }
 
         CameraRay ray{};
@@ -616,14 +651,16 @@ namespace Game
             dv_display_new.z = _maneuver_gizmo_interaction.start_dv_display_mps.z + delta_mps;
         }
 
-        const glm::dvec3 dv_world_new = compose_basis_vector(dv_display_new,
-                                                             node.basis_r_world,
-                                                             node.basis_t_world,
-                                                             node.basis_n_world);
-        const glm::dvec3 dv_new = project_basis_vector(dv_world_new,
-                                                       node.maneuver_basis_r_world,
-                                                       node.maneuver_basis_t_world,
-                                                       node.maneuver_basis_n_world);
+        const glm::dvec3 dv_world_new =
+                compose_basis_vector(dv_display_new,
+                                     _maneuver_gizmo_interaction.drag_basis_r_world,
+                                     _maneuver_gizmo_interaction.drag_basis_t_world,
+                                     _maneuver_gizmo_interaction.drag_basis_n_world);
+        const glm::dvec3 dv_new =
+                project_basis_vector(dv_world_new,
+                                     _maneuver_gizmo_interaction.drag_maneuver_basis_r_world,
+                                     _maneuver_gizmo_interaction.drag_maneuver_basis_t_world,
+                                     _maneuver_gizmo_interaction.drag_maneuver_basis_n_world);
 
         if (finite3(dv_new) && safe_length(dv_new - node.dv_rtn_mps) > 1.0e-7)
         {
@@ -639,7 +676,15 @@ namespace Game
                                                                : _prediction_frame_selection.spec;
                 if (prediction_frame_is_lagrange_sensitive(display_frame_spec))
                 {
-                    track->preview_state = PredictionPreviewRuntimeState::EnterDrag;
+                    const bool preview_streaming =
+                            track->preview_state == PredictionPreviewRuntimeState::DragPreviewPending ||
+                            track->preview_state == PredictionPreviewRuntimeState::PreviewStreaming;
+                    if (!preview_streaming || !track->preview_overlay.valid())
+                    {
+                        // Once an interactive preview is already visible, keep drawing it until the
+                        // next preview patch lands instead of blanking back to prefix-only fallback.
+                        track->preview_state = PredictionPreviewRuntimeState::EnterDrag;
+                    }
                 }
             }
         }
