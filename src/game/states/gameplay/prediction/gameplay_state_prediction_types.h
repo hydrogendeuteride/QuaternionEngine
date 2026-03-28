@@ -1,6 +1,5 @@
 #pragma once
 
-#include "core/orbit_plot/orbit_plot.h"
 #include "core/picking/picking_system.h"
 #include "core/world.h"
 #include "game/orbit/orbit_prediction_service.h"
@@ -15,7 +14,6 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -164,8 +162,6 @@ namespace Game
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame_planned;
         std::vector<orbitsim::TrajectorySample> trajectory_analysis_bci;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_analysis_bci;
-        std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> gpu_roots_frame;
-        std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> gpu_roots_frame_planned;
         OrbitRenderCurve render_curve_frame;
         OrbitRenderCurve render_curve_frame_planned;
         orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
@@ -188,6 +184,13 @@ namespace Game
         orbitsim::BodyId metrics_body_id{orbitsim::kInvalidBodyId};
         bool metrics_valid{false};
 
+        [[nodiscard]] bool has_planned_frame_draw_data() const
+        {
+            return trajectory_frame_planned.size() >= 2 ||
+                   !trajectory_segments_frame_planned.empty() ||
+                   !render_curve_frame_planned.empty();
+        }
+
         // Reset every cached prediction artifact so the next update rebuilds from scratch.
         void clear()
         {
@@ -208,8 +211,6 @@ namespace Game
             trajectory_segments_frame_planned.clear();
             trajectory_analysis_bci.clear();
             trajectory_segments_analysis_bci.clear();
-            gpu_roots_frame.reset();
-            gpu_roots_frame_planned.reset();
             render_curve_frame.clear();
             render_curve_frame_planned.clear();
             resolved_frame_spec = {};
@@ -416,7 +417,6 @@ namespace Game
 
         // Per-chunk render data.
         OrbitRenderCurve render_curve;
-        std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> gpu_roots;
 
         bool valid{false};
 
@@ -432,7 +432,6 @@ namespace Game
             frame_samples.clear();
             frame_segments.clear();
             render_curve.clear();
-            gpu_roots.reset();
             valid = false;
         }
     };
@@ -478,6 +477,11 @@ namespace Game
         [[nodiscard]] bool has_cache() const
         {
             return cache.valid;
+        }
+
+        [[nodiscard]] bool has_flat_planned_cache() const
+        {
+            return cache.valid && cache.has_planned_frame_draw_data();
         }
 
         [[nodiscard]] bool has_chunks() const
@@ -712,10 +716,8 @@ namespace Game
         // Chunk assembly draw stats.
         uint32_t planned_chunk_count{0};
         uint32_t planned_chunks_drawn{0};
-        uint32_t planned_chunk_builds{0};
         uint32_t planned_fallback_range_count{0};
         double planned_chunk_enqueue_ms_last{0.0};
-        double planned_chunk_gpu_build_ms_last{0.0};
         double planned_fallback_draw_ms_last{0.0};
     };
 } // namespace Game

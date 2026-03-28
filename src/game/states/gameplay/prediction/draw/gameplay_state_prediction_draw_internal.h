@@ -10,7 +10,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <memory>
 #include <span>
 #include <utility>
 #include <vector>
@@ -22,8 +21,6 @@ namespace Game::PredictionDrawDetail
     struct ChunkAssemblyDrawResult
     {
         uint32_t chunks_drawn{0};
-        uint32_t chunks_built{0};
-        double gpu_root_build_ms{0.0};
         std::vector<std::pair<double, double>> covered_ranges{};
     };
 
@@ -102,7 +99,6 @@ namespace Game::PredictionDrawDetail
         bool has_chunk_planned_overlay{false};
         bool direct_world_polyline{false};
         bool identity_frame_transform{true};
-        bool use_persistent_gpu_roots{false};
         bool use_base_adaptive_curve{false};
         OrbitDrawWindowContext draw_ctx{};
         OrbitDrawWindowContext world_basis_draw_ctx{};
@@ -111,6 +107,7 @@ namespace Game::PredictionDrawDetail
         glm::vec4 track_color_plan{1.0f};
         double future_window_s{0.0};
         double planned_visual_window_s{0.0};
+        double planned_exact_window_s{0.0};
         double planned_pick_window_s{0.0};
         PickWindow base_pick_window{};
         PickWindow planned_draw_window{};
@@ -126,17 +123,6 @@ namespace Game::PredictionDrawDetail
                                 bool prediction_enabled);
     bool same_matrix(const glm::dmat3 &a, const glm::dmat3 &b, double epsilon);
     bool same_matrix(const glm::mat4 &a, const glm::mat4 &b, float epsilon);
-    void enqueue_cached_orbit_window(
-            OrbitPlotSystem *orbit_plot,
-            const std::shared_ptr<const std::vector<OrbitPlotSystem::GpuRootSegment>> &cached_roots,
-            const WorldVec3 &ref_body_world,
-            const glm::dmat3 &frame_to_world,
-            const WorldVec3 &align_delta,
-            double t_start_s,
-            double t_end_s,
-            const glm::vec4 &color,
-            bool dashed,
-            float line_overlay_boost);
     glm::vec4 scale_line_color(glm::vec4 color, float line_alpha_scale);
     double compute_prediction_display_time_s(double sim_time_s,
                                              double last_sim_step_dt_s,
@@ -190,9 +176,7 @@ namespace Game::PredictionDrawDetail
             double t_start_s,
             double t_end_s,
             const glm::vec4 &color,
-            bool dashed,
-            bool use_persistent_gpu_roots,
-            uint32_t max_chunk_builds);
+            bool dashed);
     std::vector<std::pair<double, double>> compute_uncovered_ranges(
             double t_start_s,
             double t_end_s,

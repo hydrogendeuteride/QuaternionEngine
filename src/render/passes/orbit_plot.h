@@ -3,8 +3,6 @@
 #include <render/renderpass.h>
 #include <render/graph/types.h>
 
-#include "orbit_plot_generate.h"
-
 #include <array>
 #include <cstddef>
 
@@ -38,13 +36,8 @@ private:
     void draw_orbit_plot(VkCommandBuffer cmd,
                          EngineContext *ctx,
                          bool is_ldr_target);
-    void draw_orbit_plot_indirect(VkCommandBuffer cmd,
-                                  EngineContext *ctx,
-                                  bool is_ldr_target,
-                                  const OrbitPlotGenerate::PreparedFrame &generated_frame);
 
     EngineContext *_context = nullptr;
     DeletionQueue _deletionQueue;
     std::array<UploadSlot, k_upload_ring_slots> _upload_ring{};
-    OrbitPlotGenerate _gpu_generate{};
 };

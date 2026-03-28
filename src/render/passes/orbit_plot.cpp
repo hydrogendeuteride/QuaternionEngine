@@ -120,7 +120,6 @@ void OrbitPlotPass::init(EngineContext *context)
     hdr_overlay.configure = make_cfg(hdr_format, false);
     _context->pipelines->createGraphicsPipeline(k_hdr_overlay, hdr_overlay);
 
-    _gpu_generate.init(context);
 }
 
 void OrbitPlotPass::cleanup()
@@ -138,7 +137,6 @@ void OrbitPlotPass::cleanup()
             slot.capacity_bytes = 0;
         }
     }
-    _gpu_generate.cleanup();
     _deletionQueue.flush();
 }
 
@@ -163,76 +161,7 @@ void OrbitPlotPass::register_graph(RenderGraph *graph,
         return;
     }
 
-    const bool has_cpu_lines = plot->has_active_lines();
-    const bool has_gpu_roots = plot->has_active_gpu_root_batches();
-    if (!has_cpu_lines && !has_gpu_roots)
-    {
-        return;
-    }
-
-    WorldVec3 origin_world{0.0, 0.0, 0.0};
-    if (_context->scene)
-    {
-        origin_world = _context->scene->get_world_origin();
-    }
-
-    const bool gpu_requested = plot->settings().gpu_generate_enabled;
-    OrbitPlotGenerate::PreparedFrame generated{};
-    bool gpu_active = false;
-
-    if (gpu_requested && has_gpu_roots && _gpu_generate.can_generate())
-    {
-        const std::size_t max_segments_gpu = std::max<std::size_t>(1ull, plot->settings().render_max_segments_gpu);
-        gpu_active = _gpu_generate.prepare_and_register(
-                graph,
-                *plot,
-                origin_world,
-                _context->frameIndex,
-                max_segments_gpu,
-                generated);
-    }
-
-    if (gpu_active)
-    {
-        plot->record_upload_stats(generated.upload_bytes,
-                                  generated.upload_budget_bytes,
-                                  generated.upload_ms,
-                                  generated.upload_cap_hit,
-                                  generated.depth_segment_count_estimate,
-                                  generated.overlay_segment_count_estimate);
-        plot->record_gpu_path_stats(true, generated.gpu_cap_hit, false);
-
-        graph->add_pass(
-                "OrbitPlot",
-                RGPassType::Graphics,
-                [target_color, depth, generated](RGPassBuilder &builder, EngineContext *) {
-                    builder.read_buffer(generated.depth_vertex_buffer,
-                                        RGBufferUsage::StorageRead,
-                                        generated.depth_vertex_buffer_size,
-                                        "orbit_plot.depth_vertices");
-                    builder.read_buffer(generated.overlay_vertex_buffer,
-                                        RGBufferUsage::StorageRead,
-                                        generated.overlay_vertex_buffer_size,
-                                        "orbit_plot.overlay_vertices");
-                    builder.read_buffer(generated.indirect_buffer,
-                                        RGBufferUsage::IndirectArgs,
-                                        generated.indirect_buffer_size,
-                                        "orbit_plot.indirect");
-                    builder.write_color(target_color);
-                    if (depth.valid())
-                    {
-                        builder.write_depth(depth, false /*load existing depth*/);
-                    }
-                },
-                [this, is_ldr_target, generated](VkCommandBuffer cmd, const RGPassResources &, EngineContext *ctx) {
-                    draw_orbit_plot_indirect(cmd, ctx, is_ldr_target, generated);
-                });
-        return;
-    }
-
-    plot->record_gpu_path_stats(false, false, gpu_requested && has_gpu_roots);
-
-    if (!has_cpu_lines)
+    if (!plot->has_active_lines())
     {
         return;
     }
@@ -421,90 +350,5 @@ void OrbitPlotPass::draw_orbit_plot(VkCommandBuffer cmd,
             vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
             vkCmdDraw(cmd, 6, overlay_segment_count, 0, depth_segment_count);
         }
-    }
-}
-
-void OrbitPlotPass::draw_orbit_plot_indirect(VkCommandBuffer cmd,
-                                             EngineContext *ctx,
-                                             const bool is_ldr_target,
-                                             const OrbitPlotGenerate::PreparedFrame &generated_frame)
-{
-    EngineContext *ctx_local = ctx ? ctx : _context;
-    if (!ctx_local || !ctx_local->getDevice() || !ctx_local->pipelines)
-    {
-        return;
-    }
-
-    if (!generated_frame.valid ||
-        generated_frame.depth_vertex_buffer == VK_NULL_HANDLE ||
-        generated_frame.overlay_vertex_buffer == VK_NULL_HANDLE ||
-        generated_frame.indirect_buffer == VK_NULL_HANDLE)
-    {
-        return;
-    }
-
-    OrbitPlotSystem *plot = ctx_local->orbit_plot;
-    if (!plot || !plot->settings().enabled)
-    {
-        return;
-    }
-
-    DeviceManager *dm = ctx_local->getDevice();
-    VkBufferDeviceAddressInfo depth_addr_info{};
-    depth_addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    depth_addr_info.buffer = generated_frame.depth_vertex_buffer;
-    const VkDeviceAddress depth_addr = vkGetBufferDeviceAddress(dm->device(), &depth_addr_info);
-
-    VkBufferDeviceAddressInfo overlay_addr_info{};
-    overlay_addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    overlay_addr_info.buffer = generated_frame.overlay_vertex_buffer;
-    const VkDeviceAddress overlay_addr = vkGetBufferDeviceAddress(dm->device(), &overlay_addr_info);
-
-    if (depth_addr == 0 || overlay_addr == 0)
-    {
-        return;
-    }
-
-    OrbitPlotPushConstants pc{};
-    pc.viewproj = ctx_local->getSceneData().viewproj;
-    const VkExtent2D extent = ctx_local->getDrawExtent();
-    const float width_px = std::clamp(plot->settings().line_width_px, 1.0f, 8.0f);
-    const float aa_px = std::clamp(plot->settings().line_aa_px, 0.0f, 4.0f);
-    const float inv_w = 2.0f / static_cast<float>(std::max(1u, extent.width));
-    const float inv_h = 2.0f / static_cast<float>(std::max(1u, extent.height));
-    pc.inv_viewport_size_ndc = glm::vec2(inv_w, inv_h);
-    pc.half_line_width_px = 0.5f * width_px;
-    pc.aa_px = aa_px;
-
-    VkViewport vp{0.f, 0.f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.f, 1.f};
-    VkRect2D sc{{0, 0}, extent};
-    vkCmdSetViewport(cmd, 0, 1, &vp);
-    vkCmdSetScissor(cmd, 0, 1, &sc);
-
-    const char *depth_pipe_name = is_ldr_target ? k_ldr_depth : k_hdr_depth;
-    const char *overlay_pipe_name = is_ldr_target ? k_ldr_overlay : k_hdr_overlay;
-
-    VkPipeline depth_pipeline = VK_NULL_HANDLE;
-    VkPipelineLayout depth_layout = VK_NULL_HANDLE;
-    if (ctx_local->pipelines->getGraphics(depth_pipe_name, depth_pipeline, depth_layout))
-    {
-        pc.vertex_buffer = depth_addr;
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_pipeline);
-        vkCmdPushConstants(cmd, depth_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
-        vkCmdDrawIndirect(cmd, generated_frame.indirect_buffer, 0, 1, sizeof(VkDrawIndirectCommand));
-    }
-
-    VkPipeline overlay_pipeline = VK_NULL_HANDLE;
-    VkPipelineLayout overlay_layout = VK_NULL_HANDLE;
-    if (ctx_local->pipelines->getGraphics(overlay_pipe_name, overlay_pipeline, overlay_layout))
-    {
-        pc.vertex_buffer = overlay_addr;
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, overlay_pipeline);
-        vkCmdPushConstants(cmd, overlay_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
-        vkCmdDrawIndirect(cmd,
-                          generated_frame.indirect_buffer,
-                          sizeof(VkDrawIndirectCommand),
-                          1,
-                          sizeof(VkDrawIndirectCommand));
     }
 }
