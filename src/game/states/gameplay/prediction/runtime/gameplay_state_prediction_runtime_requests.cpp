@@ -166,6 +166,7 @@ namespace Game
                 PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
         orbitsim::State cached_reference_state{};
         const bool use_cached_reference_state =
+                solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
                 drag_active &&
                 sample_cached_reference_state(track, now_s, cached_reference_state);
 

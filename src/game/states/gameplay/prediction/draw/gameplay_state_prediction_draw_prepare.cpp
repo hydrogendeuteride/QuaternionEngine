@@ -173,6 +173,10 @@ namespace Game
         out.track_color_full = Draw::scale_line_color(glm::vec4(track_rgb, 0.22f), global_ctx.line_alpha_scale);
         out.track_color_future = Draw::scale_line_color(glm::vec4(track_rgb, 0.80f), global_ctx.line_alpha_scale);
         out.track_color_plan = global_ctx.color_orbit_plan;
+        if (out.maneuver_drag_active)
+        {
+            out.track_color_plan.a = out.track_color_future.a;
+        }
         if (!out.is_active)
         {
             out.draw_ctx.line_overlay_boost = std::clamp(_prediction_line_overlay_boost * 0.35f, 0.0f, 1.0f);
