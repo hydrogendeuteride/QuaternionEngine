@@ -114,10 +114,10 @@ namespace Game
             {
                 case OrbitPredictionService::PublishStage::Full:
                     return "Full";
-                case OrbitPredictionService::PublishStage::FastPreviewFP0:
-                    return "FastPreviewFP0";
-                case OrbitPredictionService::PublishStage::FastPreviewFP1:
-                    return "FastPreviewFP1";
+                case OrbitPredictionService::PublishStage::PreviewStreaming:
+                    return "PreviewStreaming";
+                case OrbitPredictionService::PublishStage::PreviewFinalizing:
+                    return "PreviewFinalizing";
             }
 
             return "Unknown";
@@ -734,6 +734,17 @@ namespace Game
 
                     ImGui::SeparatorText("Prediction Policy");
 
+                    if (ImGui::Checkbox("Enable fast preview", &_prediction_fast_preview_enabled))
+                    {
+                        if (!_prediction_fast_preview_enabled)
+                        {
+                            _maneuver_plan_live_preview_active = false;
+                        }
+                        mark_prediction_dirty();
+                    }
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted("(maneuver drag/live preview)");
+
                     float orbiter_min_window_s = static_cast<float>(_prediction_sampling_policy.orbiter_min_window_s);
                     if (ImGui::DragFloat("Orbiter min window (s)",
                                          &orbiter_min_window_s,
@@ -799,26 +810,6 @@ namespace Game
 
                     if (orbit_plot)
                     {
-                        bool gpu_generate_enabled = orbit_plot->settings().gpu_generate_enabled;
-                        if (ImGui::Checkbox("Orbit GPU generate + indirect", &gpu_generate_enabled))
-                        {
-                            orbit_plot->settings().gpu_generate_enabled = gpu_generate_enabled;
-                        }
-
-                        int render_max_segments_gpu = static_cast<int>(
-                                std::clamp<std::size_t>(orbit_plot->settings().render_max_segments_gpu,
-                                                        64ull,
-                                                        400000ull));
-                        if (ImGui::DragInt("Render max segments (GPU)",
-                                           &render_max_segments_gpu,
-                                           250.0f,
-                                           64,
-                                           400000))
-                        {
-                            orbit_plot->settings().render_max_segments_gpu =
-                                    static_cast<std::size_t>(std::clamp(render_max_segments_gpu, 64, 400000));
-                        }
-
                         int upload_budget_mib = static_cast<int>(std::clamp<std::size_t>(
                                 orbit_plot->settings().upload_budget_bytes / (1024ull * 1024ull),
                                 1ull,
@@ -884,15 +875,9 @@ namespace Game
                     ImGui::Text("Orbit lines (active/pending): %u / %u",
                                 plot_stats.active_line_count,
                                 plot_stats.pending_line_count);
-                    ImGui::Text("Orbit GPU roots (active/pending): %u / %u",
-                                plot_stats.active_gpu_root_count,
-                                plot_stats.pending_gpu_root_count);
                     ImGui::Text("Orbit segments (depth/overlay): %u / %u",
                                 plot_stats.depth_segment_count,
                                 plot_stats.overlay_segment_count);
-                    ImGui::Text("Orbit path: %s (GPU fallback: %llu)",
-                                plot_stats.gpu_path_active_last_frame ? "GPU" : "CPU",
-                                static_cast<unsigned long long>(plot_stats.gpu_fallback_count));
                     ImGui::Text("Pick segments (before/after): %u / %u",
                                 perf.pick_segments_before_cull,
                                 perf.pick_segments);
@@ -906,12 +891,10 @@ namespace Game
                                 upload_mib,
                                 budget_mib,
                                 plot_stats.upload_cap_hit_last_frame ? " [cap]" : "");
-                    ImGui::Text("Cap hits (render/pick/upload/gpu): %llu / %llu / %llu / %llu%s",
+                    ImGui::Text("Cap hits (render/pick/upload): %llu / %llu / %llu",
                                 static_cast<unsigned long long>(perf.render_cap_hits_total),
                                 static_cast<unsigned long long>(perf.pick_cap_hits_total),
-                                static_cast<unsigned long long>(plot_stats.upload_cap_hits_total),
-                                static_cast<unsigned long long>(plot_stats.gpu_generate_cap_hits_total),
-                                plot_stats.gpu_generate_cap_hit_last_frame ? " [gpu cap]" : "");
+                                static_cast<unsigned long long>(plot_stats.upload_cap_hits_total));
                     ImGui::Text("Orbit upload peak: %.2f MiB, upload ms peak: %.3f",
                                 peak_mib,
                                 plot_stats.upload_ms_peak);
@@ -1047,6 +1030,9 @@ namespace Game
         const bool live_chunk_path_supported =
                 frame_spec.type != orbitsim::TrajectoryFrameType::Inertial &&
                 frame_spec.type != orbitsim::TrajectoryFrameType::LVLH;
+        const bool maneuver_fast_preview_live =
+                prediction_subject_supports_maneuvers(active_track->key) &&
+                maneuver_fast_preview_active(true);
 
         const bool have_sim_now = _orbitsim != nullptr;
         const double sim_now_s = have_sim_now ? _orbitsim->sim.time_s() : 0.0;
@@ -1069,7 +1055,7 @@ namespace Game
                     active_track->request_pending ? "yes" : "no",
                     active_track->derived_request_pending ? "yes" : "no",
                     active_track->dirty ? "yes" : "no",
-                    _maneuver_plan_live_preview_active ? "yes" : "no");
+                    maneuver_fast_preview_live ? "yes" : "no");
         ImGui::Text("Gizmo state: %s", gizmo_state);
         if (_maneuver_gizmo_interaction.node_id >= 0)
         {
@@ -1135,7 +1121,6 @@ namespace Game
                     _orbit_plot_perf.planned_chunk_enqueue_ms_last,
                     _orbit_plot_perf.planned_fallback_draw_ms_last,
                     _orbit_plot_perf.pick_lod_ms_last);
-        ImGui::Text("Chunk GPU root build: %.3f ms", _orbit_plot_perf.planned_chunk_gpu_build_ms_last);
         if (plot_stats)
         {
             ImGui::Text("Orbit upload last/peak: %.3f / %.3f ms",
@@ -1148,11 +1133,10 @@ namespace Game
                     debug.flattened_planned_segments_last,
                     debug.flattened_planned_samples_last);
         ImGui::Text("Merged planned segs after preview merge: %zu", debug.planned_segments_after_preview_merge);
-        ImGui::Text("Incoming/merged/drawn/built chunks: %u / %u / %u / %u",
+        ImGui::Text("Incoming/merged/drawn chunks: %u / %u / %u",
                     debug.incoming_chunk_count_last,
                     debug.merged_chunk_count_last,
-                    _orbit_plot_perf.planned_chunks_drawn,
-                    _orbit_plot_perf.planned_chunk_builds);
+                    _orbit_plot_perf.planned_chunks_drawn);
         ImGui::Text("Fallback ranges / pick segs before-after: %u / %u -> %u",
                     _orbit_plot_perf.planned_fallback_range_count,
                     _orbit_plot_perf.pick_segments_before_cull,

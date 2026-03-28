@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 
+#include "game/states/gameplay/prediction/gameplay_prediction_cache_internal.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include <algorithm>
@@ -42,12 +43,16 @@ namespace Game
                    assembly.display_frame_revision == display_frame_revision;
         }
 
+        void clear_preview_planned_render_artifacts(OrbitPredictionCache &cache)
+        {
+            cache.render_curve_frame_planned.clear();
+        }
+
         OrbitPredictionCache merge_reused_base_frame_cache(const OrbitPredictionCache &base_cache,
                                                            OrbitPredictionCache preview_cache)
         {
             preview_cache.trajectory_frame = base_cache.trajectory_frame;
             preview_cache.trajectory_segments_frame = base_cache.trajectory_segments_frame;
-            preview_cache.gpu_roots_frame = base_cache.gpu_roots_frame;
             preview_cache.render_curve_frame = base_cache.render_curve_frame;
             if (base_cache.analysis_cache_valid &&
                 base_cache.analysis_cache_body_id != orbitsim::kInvalidBodyId &&
@@ -225,11 +230,7 @@ namespace Game
                     previous_cache.maneuver_previews,
                     preview_cache.maneuver_previews);
 
-            preview_cache.gpu_roots_frame_planned.reset();
-            preview_cache.render_curve_frame_planned = preview_cache.trajectory_segments_frame_planned.empty()
-                                                              ? OrbitRenderCurve{}
-                                                              : OrbitRenderCurve::build(
-                                                                        preview_cache.trajectory_segments_frame_planned);
+            clear_preview_planned_render_artifacts(preview_cache);
             preview_cache.valid = preview_cache.trajectory_inertial.size() >= 2 &&
                                   preview_cache.trajectory_frame.size() >= 2 &&
                                   !preview_cache.trajectory_segments_frame.empty();
@@ -426,6 +427,10 @@ namespace Game
         const bool keep_dirty_for_followup = track->invalidated_while_pending;
         track->invalidated_while_pending = false;
 
+        const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
+        const bool overlay_result = preview_result || !result.generation_complete;
+        const bool preview_chunk_authoritative = overlay_result && result.chunk_assembly.valid;
+
         OrbitPredictionCache cache_to_publish{};
         OrbitPredictionDerivedDiagnostics diagnostics_to_publish = result.diagnostics;
         bool have_cache_to_publish = false;
@@ -458,7 +463,8 @@ namespace Game
             }
 
             if (have_cache_to_publish &&
-                result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview)
+                preview_result &&
+                !preview_chunk_authoritative)
             {
                 const OrbitPredictionCache empty_preview_merge_base{};
                 const bool can_merge_with_overlay =
@@ -482,7 +488,6 @@ namespace Game
         }
 
         track->derived_diagnostics = diagnostics_to_publish;
-        const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
         if (!have_cache_to_publish)
         {
             track->derived_diagnostics.status = PredictionDerivedStatus::MissingSolverData;
@@ -492,8 +497,9 @@ namespace Game
             return;
         }
 
-        if (preview_result)
+        if (overlay_result)
         {
+            clear_preview_planned_render_artifacts(cache_to_publish);
             track->preview_overlay.cache = std::move(cache_to_publish);
         }
         else
@@ -505,7 +511,7 @@ namespace Game
         }
 
         double chunk_merge_ms = 0.0;
-        if (preview_result && result.chunk_assembly.valid)
+        if (overlay_result && result.chunk_assembly.valid)
         {
             const bool chunk_frame_changed =
                     track->preview_overlay.chunk_assembly.valid &&
@@ -530,6 +536,15 @@ namespace Game
             track->preview_pick_cache.clear();
         }
 
+        if (overlay_result &&
+            track->preview_overlay.cache.valid &&
+            track->preview_overlay.chunk_assembly.valid)
+        {
+            PredictionCacheInternal::flatten_chunk_assembly_to_cache(
+                    track->preview_overlay.cache,
+                    track->preview_overlay.chunk_assembly);
+        }
+
         PredictionRuntimeDetail::update_last_and_peak(
                 debug.preview_merge_ms_last,
                 debug.preview_merge_ms_peak,
@@ -539,7 +554,9 @@ namespace Game
                 debug.chunk_merge_ms_peak,
                 chunk_merge_ms);
         const OrbitPredictionCache &debug_cache =
-                track->preview_overlay.cache.valid ? track->preview_overlay.cache : track->cache;
+                (!track->preview_overlay.chunk_assembly.valid && track->preview_overlay.cache.valid)
+                        ? track->preview_overlay.cache
+                        : track->cache;
         debug.planned_segments_after_preview_merge = debug_cache.trajectory_segments_frame_planned.size();
         if (debug.planned_segments_after_preview_merge == 0u &&
             track->preview_overlay.chunk_assembly.valid)

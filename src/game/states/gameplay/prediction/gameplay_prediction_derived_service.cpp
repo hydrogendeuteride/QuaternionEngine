@@ -154,6 +154,9 @@ namespace Game
         out.solve_quality = solver.solve_quality;
         out.publish_stage = solver.publish_stage;
         out.generation_complete = solver.generation_complete;
+        const bool staged_solver_result = !solver.generation_complete;
+        const bool build_preview_planned_render_curve =
+                solver.solve_quality != OrbitPredictionService::SolveQuality::FastPreview;
         if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
         {
             out.diagnostics.status = PredictionDerivedStatus::MissingSolverData;
@@ -179,9 +182,7 @@ namespace Game
         const orbitsim::TrajectoryFrameSpec &resolved_frame_spec = request.resolved_frame_spec;
         cache.display_frame_key = request.display_frame_key;
         cache.display_frame_revision = request.display_frame_revision;
-        const bool reuse_existing_base_frame =
-                request.reuse_existing_base_frame &&
-                solver.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
+        const bool reuse_existing_base_frame = request.reuse_existing_base_frame;
         if (reuse_existing_base_frame)
         {
             cache.analysis_cache_body_id = request.analysis_body_id;
@@ -189,7 +190,10 @@ namespace Game
         }
 
         const bool use_chunk_path =
-                reuse_existing_base_frame && !solver.published_chunks.empty();
+                reuse_existing_base_frame &&
+                !solver.published_chunks.empty() &&
+                (solver.solve_quality == OrbitPredictionService::SolveQuality::FastPreview ||
+                 staged_solver_result);
         bool frame_cache_built = false;
         const auto frame_build_start_tp = std::chrono::steady_clock::now();
         if (use_chunk_path)
@@ -222,7 +226,8 @@ namespace Game
                     resolved_frame_spec,
                     request.player_lookup_segments_inertial,
                     cancel_requested,
-                    &out.diagnostics);
+                    &out.diagnostics,
+                    build_preview_planned_render_curve);
             out.timings.frame_build_ms =
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frame_build_start_tp)
                             .count();
@@ -234,7 +239,8 @@ namespace Game
                     resolved_frame_spec,
                     request.player_lookup_segments_inertial,
                     cancel_requested,
-                    &out.diagnostics);
+                    &out.diagnostics,
+                    build_preview_planned_render_curve);
             out.timings.frame_build_ms =
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frame_build_start_tp)
                             .count();

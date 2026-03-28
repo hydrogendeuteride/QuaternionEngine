@@ -120,6 +120,7 @@ namespace Game
         void clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects);
         void apply_completed_prediction_result(OrbitPredictionService::Result result);
         void apply_completed_prediction_derived_result(OrbitPredictionDerivedService::Result result);
+        bool maneuver_fast_preview_active(bool with_maneuvers) const;
         bool should_rebuild_prediction_track(const PredictionTrackState &track,
                                              double now_s,
                                              float fixed_dt,
@@ -416,6 +417,7 @@ namespace Game
         ManeuverUIConfig _maneuver_ui_config{};
         ManeuverGizmoInteraction _maneuver_gizmo_interaction{};
         bool _maneuver_plan_live_preview_active{false};
+        bool _prediction_fast_preview_enabled{true};
 
         // Maneuver-node warp/execute helpers
         bool _warp_to_time_active{false};

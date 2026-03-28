@@ -1,5 +1,4 @@
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
-#include "game/states/gameplay/prediction/gameplay_prediction_cache_internal.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 #include <algorithm>
 #include <chrono>
@@ -8,11 +7,6 @@
 namespace Game
 {
     namespace Draw = PredictionDrawDetail;
-
-    namespace
-    {
-        constexpr uint32_t kMaxPlannedChunkGpuRootBuildsPerFrame = 2u;
-    } // namespace
 
     void GameplayState::draw_orbit_prediction_track_windows(Draw::PredictionTrackDrawContext &track_ctx)
     {
@@ -144,43 +138,6 @@ namespace Game
                 return;
             }
 
-            if (track_ctx.use_persistent_gpu_roots && cache.gpu_roots_frame_planned &&
-                !cache.gpu_roots_frame_planned->empty())
-            {
-                Draw::enqueue_cached_orbit_window(track_ctx.draw_ctx.orbit_plot,
-                                                  cache.gpu_roots_frame_planned,
-                                                  track_ctx.ref_body_world,
-                                                  track_ctx.frame_to_world,
-                                                  track_ctx.align_delta,
-                                                  window_t0_s,
-                                                  window_t1_s,
-                                                  color,
-                                                  _prediction_draw_config.draw_planned_as_dashed,
-                                                  track_ctx.draw_ctx.line_overlay_boost);
-                return;
-            }
-
-            if (track_ctx.use_persistent_gpu_roots)
-            {
-                const auto &gpu_roots_planned =
-                        PredictionCacheInternal::ensure_gpu_root_cache(cache.gpu_roots_frame_planned,
-                                                                       cache.trajectory_segments_frame_planned);
-                if (gpu_roots_planned && !gpu_roots_planned->empty())
-                {
-                    Draw::enqueue_cached_orbit_window(track_ctx.draw_ctx.orbit_plot,
-                                                      gpu_roots_planned,
-                                                      track_ctx.ref_body_world,
-                                                      track_ctx.frame_to_world,
-                                                      track_ctx.align_delta,
-                                                      window_t0_s,
-                                                      window_t1_s,
-                                                      color,
-                                                      _prediction_draw_config.draw_planned_as_dashed,
-                                                      track_ctx.draw_ctx.line_overlay_boost);
-                    return;
-                }
-            }
-
             if (!cache.render_curve_frame_planned.empty())
             {
                 Draw::draw_adaptive_curve_window(track_ctx.draw_ctx,
@@ -307,27 +264,31 @@ namespace Game
             return planned_window;
         };
 
+        // During gizmo drags, exact/pick stay local but the rendered preview should keep extending
+        // as streamed tail chunks arrive so long-range planning remains legible.
+        const double planned_draw_future_window_s = track_ctx.planned_visual_window_s;
+
         track_ctx.base_pick_window = {};
         track_ctx.planned_draw_window =
                 (track_ctx.active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
-                        ? (!track_ctx.planned_window_segments->empty()
+                        ? ((track_ctx.planned_window_segments && !track_ctx.planned_window_segments->empty())
                                    ? Draw::build_planned_pick_window(*track_ctx.planned_window_segments,
                                                                      _prediction_draw_config,
                                                                      _maneuver_state.nodes,
                                                                      track_ctx.now_s,
-                                                                     track_ctx.planned_visual_window_s,
+                                                                     planned_draw_future_window_s,
                                                                      _prediction_draw_future_segment,
                                                                      _prediction_draw_full_orbit,
                                                                      stable_cache.orbital_period_s)
                                    : (track_ctx.has_preview_planned_overlay && track_ctx.has_chunk_planned_overlay
                                                       ? build_planned_window_from_chunk_assembly(
                                                                 track_ctx.now_s,
-                                                                track_ctx.planned_visual_window_s)
+                                                                planned_draw_future_window_s)
                                                       : Draw::PickWindow{}))
                         : Draw::PickWindow{};
         track_ctx.planned_pick_window =
                 (track_ctx.active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty())
-                        ? (!track_ctx.planned_window_segments->empty()
+                        ? ((track_ctx.planned_window_segments && !track_ctx.planned_window_segments->empty())
                                    ? Draw::build_planned_pick_window(*track_ctx.planned_window_segments,
                                                                      _prediction_draw_config,
                                                                      _maneuver_state.nodes,
@@ -364,43 +325,6 @@ namespace Game
                                            track_ctx.track_color_full,
                                            false);
             }
-            else if (track_ctx.use_persistent_gpu_roots && stable_cache.gpu_roots_frame &&
-                     !stable_cache.gpu_roots_frame->empty())
-            {
-                Draw::enqueue_cached_orbit_window(track_ctx.draw_ctx.orbit_plot,
-                                                  stable_cache.gpu_roots_frame,
-                                                  track_ctx.ref_body_world,
-                                                  track_ctx.frame_to_world,
-                                                  track_ctx.align_delta,
-                                                  track_ctx.t0_s,
-                                                  t_full_end,
-                                                  track_ctx.track_color_full,
-                                                  false,
-                                                  track_ctx.draw_ctx.line_overlay_boost);
-            }
-            else if (track_ctx.use_persistent_gpu_roots)
-            {
-                const auto &gpu_roots = PredictionCacheInternal::ensure_gpu_root_cache(
-                        stable_cache.gpu_roots_frame,
-                        stable_cache.trajectory_segments_frame);
-                if (gpu_roots && !gpu_roots->empty())
-                {
-                    Draw::enqueue_cached_orbit_window(track_ctx.draw_ctx.orbit_plot,
-                                                      gpu_roots,
-                                                      track_ctx.ref_body_world,
-                                                      track_ctx.frame_to_world,
-                                                      track_ctx.align_delta,
-                                                      track_ctx.t0_s,
-                                                      t_full_end,
-                                                      track_ctx.track_color_full,
-                                                      false,
-                                                      track_ctx.draw_ctx.line_overlay_boost);
-                }
-                else
-                {
-                    draw_cpu_base_window(track_ctx.t0_s, t_full_end, track_ctx.track_color_full);
-                }
-            }
             else
             {
                 draw_cpu_base_window(track_ctx.t0_s, t_full_end, track_ctx.track_color_full);
@@ -430,43 +354,6 @@ namespace Game
                                            track_ctx.track_color_future,
                                            false);
             }
-            else if (track_ctx.use_persistent_gpu_roots && stable_cache.gpu_roots_frame &&
-                     !stable_cache.gpu_roots_frame->empty())
-            {
-                Draw::enqueue_cached_orbit_window(track_ctx.draw_ctx.orbit_plot,
-                                                  stable_cache.gpu_roots_frame,
-                                                  track_ctx.ref_body_world,
-                                                  track_ctx.frame_to_world,
-                                                  track_ctx.align_delta,
-                                                  track_ctx.now_s,
-                                                  t_end,
-                                                  track_ctx.track_color_future,
-                                                  false,
-                                                  track_ctx.draw_ctx.line_overlay_boost);
-            }
-            else if (track_ctx.use_persistent_gpu_roots)
-            {
-                const auto &gpu_roots = PredictionCacheInternal::ensure_gpu_root_cache(
-                        stable_cache.gpu_roots_frame,
-                        stable_cache.trajectory_segments_frame);
-                if (gpu_roots && !gpu_roots->empty())
-                {
-                    Draw::enqueue_cached_orbit_window(track_ctx.draw_ctx.orbit_plot,
-                                                      gpu_roots,
-                                                      track_ctx.ref_body_world,
-                                                      track_ctx.frame_to_world,
-                                                      track_ctx.align_delta,
-                                                      track_ctx.now_s,
-                                                      t_end,
-                                                      track_ctx.track_color_future,
-                                                      false,
-                                                      track_ctx.draw_ctx.line_overlay_boost);
-                }
-                else
-                {
-                    draw_cpu_base_window(track_ctx.now_s, t_end, track_ctx.track_color_future);
-                }
-            }
             else
             {
                 draw_cpu_base_window(track_ctx.now_s, t_end, track_ctx.track_color_future);
@@ -487,7 +374,13 @@ namespace Game
             _orbit_plot_perf.planned_window_anchor_s = track_ctx.planned_draw_window.anchor_time_s;
             _orbit_plot_perf.planned_window_t_start = track_ctx.planned_draw_window.t0_s;
             _orbit_plot_perf.planned_window_t_end = track_ctx.planned_draw_window.t1_s;
-            if (track_ctx.traj_planned_segments && !track_ctx.traj_planned_segments->empty())
+            if (track_ctx.has_chunk_planned_overlay &&
+                planned_chunk_assembly &&
+                !planned_chunk_assembly->chunks.empty())
+            {
+                _orbit_plot_perf.planned_window_t0p = planned_chunk_assembly->start_time_s();
+            }
+            else if (track_ctx.traj_planned_segments && !track_ctx.traj_planned_segments->empty())
             {
                 _orbit_plot_perf.planned_window_t0p = track_ctx.traj_planned_segments->front().t0_s;
             }
@@ -564,9 +457,15 @@ namespace Game
         }
 
         OrbitPredictionCache *const fallback_planned_cache =
-                (!stable_cache.trajectory_segments_frame_planned.empty() || !stable_cache.trajectory_frame_planned.empty())
-                        ? &stable_cache
-                        : &planned_cache;
+                track_ctx.has_chunk_planned_overlay
+                        ? ((!stable_cache.trajectory_segments_frame_planned.empty() ||
+                            !stable_cache.trajectory_frame_planned.empty())
+                                   ? &stable_cache
+                                   : nullptr)
+                        : ((!stable_cache.trajectory_segments_frame_planned.empty() ||
+                            !stable_cache.trajectory_frame_planned.empty())
+                                   ? &stable_cache
+                                   : &planned_cache);
 
         if (track_ctx.has_chunk_planned_overlay)
         {
@@ -579,9 +478,7 @@ namespace Game
                                                       track_ctx.planned_draw_window.t0_s,
                                                       track_ctx.planned_draw_window.t1_s,
                                                       track_ctx.track_color_plan,
-                                                      _prediction_draw_config.draw_planned_as_dashed,
-                                                      track_ctx.use_persistent_gpu_roots,
-                                                      kMaxPlannedChunkGpuRootBuildsPerFrame);
+                                                      _prediction_draw_config.draw_planned_as_dashed);
             const double chunk_draw_ms =
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - chunk_draw_start_tp)
                             .count();
@@ -589,9 +486,7 @@ namespace Game
             if (track_ctx.active_player_track)
             {
                 _orbit_plot_perf.planned_chunks_drawn = chunk_draw_result.chunks_drawn;
-                _orbit_plot_perf.planned_chunk_builds = chunk_draw_result.chunks_built;
                 _orbit_plot_perf.planned_chunk_enqueue_ms_last = chunk_draw_ms;
-                _orbit_plot_perf.planned_chunk_gpu_build_ms_last = chunk_draw_result.gpu_root_build_ms;
             }
 
             const auto fallback_ranges =
@@ -606,7 +501,7 @@ namespace Game
             {
                 _orbit_plot_perf.planned_fallback_range_count = static_cast<uint32_t>(fallback_ranges.size());
             }
-            if (!fallback_ranges.empty())
+            if (!fallback_ranges.empty() && fallback_planned_cache)
             {
                 const auto fallback_draw_start_tp = std::chrono::steady_clock::now();
                 for (const auto &[fallback_t0_s, fallback_t1_s] : fallback_ranges)
@@ -644,7 +539,7 @@ namespace Game
                                                                          track_ctx.planned_draw_window.t0_s,
                                                                          track_ctx.planned_draw_window.t1_s);
         const auto fallback_ranges =
-                (fallback_planned_cache != &planned_cache)
+                (fallback_planned_cache && fallback_planned_cache != &planned_cache)
                         ? (track_ctx.maneuver_drag_active
                                    ? compute_drag_prefix_fallback_ranges(track_ctx.planned_draw_window.t0_s,
                                                                          track_ctx.planned_draw_window.t1_s,
@@ -658,7 +553,7 @@ namespace Game
             _orbit_plot_perf.planned_fallback_range_count = static_cast<uint32_t>(fallback_ranges.size());
         }
 
-        if (!fallback_ranges.empty())
+        if (!fallback_ranges.empty() && fallback_planned_cache)
         {
             const auto fallback_draw_start_tp = std::chrono::steady_clock::now();
             for (const auto &[fallback_t0_s, fallback_t1_s] : fallback_ranges)

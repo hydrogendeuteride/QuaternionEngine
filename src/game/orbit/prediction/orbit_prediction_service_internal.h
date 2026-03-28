@@ -50,9 +50,15 @@ namespace Game
     inline bool request_can_reuse_spacecraft_baseline(const OrbitPredictionService::Request &request)
     {
         return request.kind == OrbitPredictionService::RequestKind::Spacecraft &&
-               request_uses_fast_preview(request) &&
                !request.thrusting &&
                !request.maneuver_impulses.empty();
+    }
+
+    inline bool request_uses_interactive_chunk_streaming(const OrbitPredictionService::Request &request)
+    {
+        return request_can_reuse_spacecraft_baseline(request) &&
+               !request_uses_fast_preview(request) &&
+               request.priority == OrbitPredictionService::RequestPriority::ActiveInteractiveTrack;
     }
 
     inline std::size_t prediction_sample_budget(const OrbitPredictionService::Request &request,
@@ -137,7 +143,7 @@ namespace Game
         return std::max(0.0, request.preview_patch.exact_window_s);
     }
 
-    inline double preview_fp0_window_s(const OrbitPredictionService::Request &request)
+    inline double preview_streaming_window_s(const OrbitPredictionService::Request &request)
     {
         if (!request_uses_preview_patch(request))
         {
@@ -145,8 +151,8 @@ namespace Game
         }
 
         const double chunk_window_s = preview_exact_window_s(request);
-        const double fp0_window_s = chunk_window_s > 0.0 ? (chunk_window_s * 2.0) : 0.0;
-        return std::min(preview_patch_remaining_window_s(request), fp0_window_s);
+        const double streaming_window_s = chunk_window_s > 0.0 ? (chunk_window_s * 2.0) : 0.0;
+        return std::min(preview_patch_remaining_window_s(request), streaming_window_s);
     }
 
     inline bool trajectory_segments_cover_window(const std::vector<orbitsim::TrajectorySegment> &segments,

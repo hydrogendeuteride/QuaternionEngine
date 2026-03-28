@@ -1006,6 +1006,25 @@ namespace Game
                 return true;
             };
 
+            struct PlannedChunkPacket
+            {
+                OrbitPredictionService::PredictionChunkPlan chunk{};
+                std::vector<orbitsim::TrajectorySegment> segments{};
+                std::vector<orbitsim::TrajectorySample> samples{};
+                std::vector<ManeuverNodePreview> previews{};
+                orbitsim::State start_state{};
+                orbitsim::State end_state{};
+                AdaptiveStageDiagnostics diagnostics{};
+                bool reused_from_cache{false};
+            };
+
+            struct PlannedSolveRangeSummary
+            {
+                orbitsim::State end_state{};
+                AdaptiveStageDiagnostics diagnostics{};
+                Status status{Status::Success};
+            };
+
             struct PlannedSolveOutput
             {
                 std::vector<orbitsim::TrajectorySegment> segments{};
@@ -1199,6 +1218,43 @@ namespace Game
                 bool reused_from_cache{false};
             };
 
+            const auto append_planned_chunk_packet =
+                    [](PlannedSolveOutput &planned, PlannedChunkPacket packet) {
+                        planned.chunk_reused.push_back(packet.reused_from_cache);
+                        planned.previews.insert(planned.previews.end(),
+                                                std::make_move_iterator(packet.previews.begin()),
+                                                std::make_move_iterator(packet.previews.end()));
+                        planned.segments.insert(planned.segments.end(),
+                                                std::make_move_iterator(packet.segments.begin()),
+                                                std::make_move_iterator(packet.segments.end()));
+                        append_chunk_samples(planned.samples, std::move(packet.samples));
+                    };
+
+            const auto apply_planned_range_summary =
+                    [](PlannedSolveOutput &planned, const PlannedSolveRangeSummary &summary) {
+                        planned.end_state = summary.end_state;
+                        planned.diagnostics = summary.diagnostics;
+                        planned.status = summary.status;
+                    };
+
+            const auto validate_segment_boundary =
+                    [](const orbitsim::TrajectorySegment &previous_segment,
+                       const orbitsim::TrajectorySegment &current_segment) {
+                        const double previous_end_time_s = prediction_segment_end_time(previous_segment);
+                        if (std::abs(current_segment.t0_s - previous_end_time_s) >
+                            continuity_time_epsilon_s(previous_end_time_s))
+                        {
+                            return false;
+                        }
+
+                        if (segment_allows_velocity_discontinuity(current_segment))
+                        {
+                            return states_are_position_continuous(previous_segment.end, current_segment.start);
+                        }
+
+                        return states_are_continuous(previous_segment.end, current_segment.start);
+                    };
+
             const auto select_primary_body_id_for_state =
                     [&](const orbitsim::State &state,
                         const double time_s,
@@ -1236,9 +1292,8 @@ namespace Game
                 if (!current_chunk.requires_seam_validation ||
                     previous_seam_segments.empty() ||
                     current_segments.empty() ||
-                    current_chunk.profile_id == OrbitPredictionService::PredictionProfileId::InteractiveExact ||
-                    current_chunk.profile_id == OrbitPredictionService::PredictionProfileId::NearBody ||
-                    current_chunk.profile_id == OrbitPredictionService::PredictionProfileId::Transfer ||
+                    current_chunk.profile_id == OrbitPredictionService::PredictionProfileId::Exact ||
+                    current_chunk.profile_id == OrbitPredictionService::PredictionProfileId::Near ||
                     (current_chunk.boundary_flags &
                      static_cast<uint32_t>(OrbitPredictionService::PredictionChunkBoundaryFlags::Maneuver)) != 0u)
                 {
@@ -1305,20 +1360,21 @@ namespace Game
                         const OrbitPredictionService::PredictionSolvePlan &solve_plan,
                         const std::size_t chunk_begin_index,
                         const std::size_t chunk_end_index,
-                        const orbitsim::State &range_start_state) -> PlannedSolveOutput {
-                PlannedSolveOutput planned{};
+                        const orbitsim::State &range_start_state,
+                        auto &&chunk_sink) -> PlannedSolveRangeSummary {
+                PlannedSolveRangeSummary summary{};
                 if (!solve_plan.valid ||
                     chunk_begin_index >= chunk_end_index ||
                     chunk_end_index > solve_plan.chunks.size() ||
                     !finite_state(range_start_state))
                 {
-                    planned.status = Status::InvalidInput;
-                    return planned;
+                    summary.status = Status::InvalidInput;
+                    return summary;
                 }
 
                 constexpr double kChunkBoundaryEpsilonS = 1.0e-9;
                 orbitsim::State chunk_start_state = range_start_state;
-                planned.end_state = range_start_state;
+                summary.end_state = range_start_state;
                 const uint64_t baseline_generation_id =
                         hash_baseline_generation(planner_request, solve_plan.t0_s, range_start_state);
                 const uint64_t frame_independent_generation =
@@ -1327,20 +1383,23 @@ namespace Game
                 bool have_dt = false;
                 const orbitsim::SpacecraftStateLookup empty_lookup{};
                 std::vector<orbitsim::TrajectorySegment> previous_chunk_seam_segments;
+                std::optional<orbitsim::TrajectorySegment> previous_published_segment;
+                std::size_t published_sample_count = 0u;
+                double previous_sample_time_s = std::numeric_limits<double>::quiet_NaN();
 
                 for (std::size_t chunk_index = chunk_begin_index; chunk_index < chunk_end_index; ++chunk_index)
                 {
                     if (cancel_requested())
                     {
-                        planned.status = Status::Cancelled;
-                        return planned;
+                        summary.status = Status::Cancelled;
+                        return summary;
                     }
 
                     const OrbitPredictionService::PredictionChunkPlan &chunk = solve_plan.chunks[chunk_index];
                     if (!(chunk.t1_s > chunk.t0_s))
                     {
-                        planned.status = Status::InvalidInput;
-                        return planned;
+                        summary.status = Status::InvalidInput;
+                        return summary;
                     }
 
                     const bool include_chunk_end_impulse = (chunk_index + 1u) == solve_plan.chunks.size();
@@ -1760,7 +1819,7 @@ namespace Game
                     effective_chunk.profile_id = activity_probe.recommended_profile_id;
                     effective_chunk.allow_reuse = chunk.allow_reuse &&
                                                   effective_chunk.profile_id !=
-                                                          OrbitPredictionService::PredictionProfileId::InteractiveExact;
+                                                          OrbitPredictionService::PredictionProfileId::Exact;
 
                     bool split_chunk = activity_probe.should_split &&
                                        (chunk.t1_s - chunk.t0_s) >=
@@ -1776,8 +1835,8 @@ namespace Game
                         chunk_attempt = solve_chunk_attempt(effective_chunk, split_chunk, chunk_start_state);
                         if (chunk_attempt.status != Status::Success)
                         {
-                            planned.status = chunk_attempt.status;
-                            return planned;
+                            summary.status = chunk_attempt.status;
+                            return summary;
                         }
 
                         if (validate_chunk_seam(effective_chunk,
@@ -1810,54 +1869,94 @@ namespace Game
                         effective_chunk.profile_id = promoted_profile;
                         effective_chunk.allow_reuse = chunk.allow_reuse &&
                                                       effective_chunk.profile_id !=
-                                                              OrbitPredictionService::PredictionProfileId::InteractiveExact;
+                                                              OrbitPredictionService::PredictionProfileId::Exact;
                     }
 
                     if (!chunk_solved)
                     {
-                        planned.status = Status::ContinuityFailed;
-                        return planned;
+                        summary.status = Status::ContinuityFailed;
+                        return summary;
                     }
 
-                    accumulate_stage_diagnostics(planned.diagnostics,
+                    if (chunk_attempt.segments.empty())
+                    {
+                        summary.status = Status::TrajectorySegmentsUnavailable;
+                        return summary;
+                    }
+                    if (chunk_attempt.samples.size() < 2u)
+                    {
+                        summary.status = Status::TrajectorySamplesUnavailable;
+                        return summary;
+                    }
+
+                    if (previous_published_segment.has_value() &&
+                        !validate_segment_boundary(*previous_published_segment, chunk_attempt.segments.front()))
+                    {
+                        summary.status = Status::ContinuityFailed;
+                        return summary;
+                    }
+
+                    const orbitsim::TrajectorySegment last_published_segment = chunk_attempt.segments.back();
+                    if (published_sample_count == 0u)
+                    {
+                        published_sample_count = chunk_attempt.samples.size();
+                    }
+                    else
+                    {
+                        published_sample_count += chunk_attempt.samples.size();
+                        if (std::isfinite(previous_sample_time_s))
+                        {
+                            const double time_epsilon_s = continuity_time_epsilon_s(chunk_attempt.samples.front().t_s);
+                            if (std::abs(previous_sample_time_s - chunk_attempt.samples.front().t_s) <= time_epsilon_s)
+                            {
+                                --published_sample_count;
+                            }
+                        }
+                    }
+                    previous_sample_time_s = chunk_attempt.samples.back().t_s;
+
+                    PlannedChunkPacket chunk_packet{};
+                    chunk_packet.chunk = effective_chunk;
+                    chunk_packet.start_state = chunk_start_state;
+                    chunk_packet.end_state = chunk_attempt.end_state;
+                    chunk_packet.diagnostics = chunk_attempt.diagnostics;
+                    chunk_packet.reused_from_cache = chunk_attempt.reused_from_cache;
+                    chunk_packet.previews = std::move(chunk_attempt.previews);
+                    chunk_packet.segments = std::move(chunk_attempt.segments);
+                    chunk_packet.samples = std::move(chunk_attempt.samples);
+                    if (!chunk_sink(std::move(chunk_packet)))
+                    {
+                        summary.status = Status::Cancelled;
+                        return summary;
+                    }
+
+                    accumulate_stage_diagnostics(summary.diagnostics,
                                                  chunk_attempt.diagnostics,
                                                  diagnostic_dt_sum_s,
                                                  have_dt);
-                    planned.chunk_reused.push_back(chunk_attempt.reused_from_cache);
-                    planned.previews.insert(planned.previews.end(),
-                                            chunk_attempt.previews.begin(),
-                                            chunk_attempt.previews.end());
-                    planned.segments.insert(planned.segments.end(),
-                                            std::make_move_iterator(chunk_attempt.segments.begin()),
-                                            std::make_move_iterator(chunk_attempt.segments.end()));
-                    append_chunk_samples(planned.samples, std::move(chunk_attempt.samples));
                     chunk_start_state = chunk_attempt.end_state;
+                    summary.end_state = chunk_start_state;
                     previous_chunk_seam_segments = std::move(chunk_attempt.seam_validation_segments);
+                    previous_published_segment = last_published_segment;
                 }
 
-                if (planned.segments.empty())
+                if (!previous_published_segment.has_value())
                 {
-                    planned.status = Status::TrajectorySegmentsUnavailable;
-                    return planned;
+                    summary.status = Status::TrajectorySegmentsUnavailable;
+                    return summary;
                 }
-                if (!validate_trajectory_segment_continuity(planned.segments))
+                if (published_sample_count < 2u)
                 {
-                    planned.status = Status::ContinuityFailed;
-                    return planned;
+                    summary.status = Status::TrajectorySamplesUnavailable;
+                    return summary;
                 }
-                if (planned.samples.size() < 2)
+                if (summary.diagnostics.accepted_segments > 0u)
                 {
-                    planned.status = Status::TrajectorySamplesUnavailable;
-                    return planned;
+                    summary.diagnostics.avg_dt_s =
+                            diagnostic_dt_sum_s / static_cast<double>(summary.diagnostics.accepted_segments);
                 }
-                if (planned.diagnostics.accepted_segments > 0u)
-                {
-                    planned.diagnostics.avg_dt_s =
-                            diagnostic_dt_sum_s / static_cast<double>(planned.diagnostics.accepted_segments);
-                }
-                planned.end_state = chunk_start_state;
 
-                return planned;
+                return summary;
             };
 
             const auto collect_published_chunks =
@@ -1896,15 +1995,144 @@ namespace Game
                         return chunks;
                     };
 
+            constexpr std::size_t kChunkPublishBatchSize = 2u;
+
+            const auto append_chunk_to_streamed_prefix =
+                    [&](PlannedSolveOutput &prefix_output,
+                        PlannedChunkPacket &&chunk_packet,
+                        double &diagnostic_dt_sum_s,
+                        bool &have_dt) {
+                        const AdaptiveStageDiagnostics chunk_diag = chunk_packet.diagnostics;
+                        const orbitsim::State chunk_end_state = chunk_packet.end_state;
+                        append_planned_chunk_packet(prefix_output, std::move(chunk_packet));
+                        accumulate_stage_diagnostics(prefix_output.diagnostics,
+                                                     chunk_diag,
+                                                     diagnostic_dt_sum_s,
+                                                     have_dt);
+                        if (prefix_output.diagnostics.accepted_segments > 0u)
+                        {
+                            prefix_output.diagnostics.avg_dt_s =
+                                    diagnostic_dt_sum_s /
+                                    static_cast<double>(prefix_output.diagnostics.accepted_segments);
+                        }
+                        prefix_output.end_state = chunk_end_state;
+                        prefix_output.status = Status::Success;
+                    };
+
+            const auto publish_chunk_batch =
+                    [&](const PlannedSolveOutput &prefix_output,
+                        std::vector<OrbitPredictionService::PublishedChunk> published_chunks,
+                        const PublishStage publish_stage,
+                        const bool generation_complete) {
+                        if (published_chunks.empty() ||
+                            prefix_output.segments.empty() ||
+                            prefix_output.samples.size() < 2u)
+                        {
+                            return true;
+                        }
+
+                        Result preview_result = out;
+                        preview_result.generation_complete = generation_complete;
+                        preview_result.publish_stage = publish_stage;
+                        preview_result.diagnostics.trajectory_planned = prefix_output.diagnostics;
+                        preview_result.diagnostics.trajectory_sample_count_planned = prefix_output.samples.size();
+                        preview_result.diagnostics.trajectory_segment_count_planned =
+                                preview_result.diagnostics.trajectory_planned.accepted_segments;
+                        preview_result.trajectory_segments_inertial_planned = prefix_output.segments;
+                        preview_result.trajectory_inertial_planned = prefix_output.samples;
+                        preview_result.maneuver_previews = prefix_output.previews;
+                        preview_result.published_chunks = std::move(published_chunks);
+                        preview_result.valid = true;
+                        preview_result.diagnostics.status = Status::Success;
+                        return publish(std::move(preview_result));
+                    };
+
+            const auto stream_chunk_stage =
+                    [&](const OrbitPredictionService::Request &planner_request,
+                        const OrbitPredictionService::PredictionSolvePlan &solve_plan,
+                        const std::size_t chunk_begin_index,
+                        const std::size_t chunk_end_index,
+                        const orbitsim::State &range_start_state,
+                        const OrbitPredictionService::ChunkQualityState quality_state,
+                        const PublishStage publish_stage,
+                        const bool generation_complete_on_last_publish,
+                        PlannedSolveOutput &streamed_prefix) -> PlannedSolveRangeSummary {
+                streamed_prefix = {};
+                double prefix_dt_sum_s = 0.0;
+                bool prefix_have_dt = false;
+                const std::size_t chunk_publish_batch_size =
+                        request_uses_interactive_chunk_streaming(planner_request) ? 1u : kChunkPublishBatchSize;
+                std::vector<OrbitPredictionService::PublishedChunk> published_batch;
+                published_batch.reserve(std::min(chunk_publish_batch_size, chunk_end_index - chunk_begin_index));
+                std::size_t streamed_chunk_count = 0u;
+                const std::size_t total_chunk_count = chunk_end_index - chunk_begin_index;
+
+                return solve_planned_chunk_range(
+                        planner_request,
+                        solve_plan,
+                        chunk_begin_index,
+                        chunk_end_index,
+                        range_start_state,
+                        [&](PlannedChunkPacket &&chunk_packet) {
+                            const uint32_t chunk_id = chunk_packet.chunk.chunk_id;
+                            const double chunk_t0_s = chunk_packet.chunk.t0_s;
+                            const double chunk_t1_s = chunk_packet.chunk.t1_s;
+                            const bool reused_from_cache = chunk_packet.reused_from_cache;
+
+                            append_chunk_to_streamed_prefix(streamed_prefix,
+                                                            std::move(chunk_packet),
+                                                            prefix_dt_sum_s,
+                                                            prefix_have_dt);
+                            published_batch.push_back(make_published_chunk(chunk_id,
+                                                                          quality_state,
+                                                                          chunk_t0_s,
+                                                                          chunk_t1_s,
+                                                                          true,
+                                                                          reused_from_cache));
+
+                            ++streamed_chunk_count;
+                            const bool stage_complete = streamed_chunk_count >= total_chunk_count;
+                            const bool should_flush =
+                                    published_batch.size() >= chunk_publish_batch_size ||
+                                    stage_complete;
+                            if (!should_flush)
+                            {
+                                return true;
+                            }
+
+                            const PublishStage effective_publish_stage =
+                                    (generation_complete_on_last_publish && stage_complete)
+                                            ? PublishStage::PreviewFinalizing
+                                            : publish_stage;
+                            const bool generation_complete =
+                                    generation_complete_on_last_publish && stage_complete;
+                            if (!publish_chunk_batch(streamed_prefix,
+                                                     std::move(published_batch),
+                                                     effective_publish_stage,
+                                                     generation_complete))
+                            {
+                                return false;
+                            }
+
+                            published_batch.clear();
+                            published_batch.reserve(std::min(chunk_publish_batch_size, total_chunk_count));
+                            return true;
+                        });
+            };
+
             const bool use_preview_patch = request_uses_preview_patch(request);
             if (use_preview_patch)
             {
                 const double full_window_s = preview_patch_remaining_window_s(request);
-                const double fp0_window_s = preview_fp0_window_s(request);
+                const double streaming_window_s = preview_streaming_window_s(request);
                 if (full_window_s > 0.0)
                 {
                     orbitsim::State preview_patch_anchor_state = request.preview_patch.anchor_state_inertial;
-                    if (!resolve_anchor_state(request.sim_time_s,
+                    const bool have_preview_patch_anchor_state =
+                            request.preview_patch.anchor_state_valid &&
+                            finite_state(preview_patch_anchor_state);
+                    if (!have_preview_patch_anchor_state &&
+                        !resolve_anchor_state(request.sim_time_s,
                                               ship_sc.state,
                                               maneuver_impulses,
                                               request.preview_patch.anchor_time_s,
@@ -1947,107 +2175,88 @@ namespace Game
                         return;
                     }
 
-                    const double fp0_end_s = planner_request.sim_time_s + (fp0_window_s > 0.0 ? fp0_window_s : full_window_s);
-                    std::size_t fp0_chunk_end_index = 0u;
-                    while (fp0_chunk_end_index < solve_plan.chunks.size() &&
-                           solve_plan.chunks[fp0_chunk_end_index].t0_s < (fp0_end_s - kContinuityMinTimeEpsilonS))
+                    const double streaming_end_s =
+                            planner_request.sim_time_s + (streaming_window_s > 0.0 ? streaming_window_s : full_window_s);
+                    std::size_t streaming_chunk_end_index = 0u;
+                    while (streaming_chunk_end_index < solve_plan.chunks.size() &&
+                           solve_plan.chunks[streaming_chunk_end_index].t0_s <
+                                   (streaming_end_s - kContinuityMinTimeEpsilonS))
                     {
-                        ++fp0_chunk_end_index;
+                        ++streaming_chunk_end_index;
                     }
-                    if (fp0_chunk_end_index == 0u)
+                    if (streaming_chunk_end_index == 0u)
                     {
                         fail(Status::InvalidInput);
                         return;
                     }
 
-                    const PlannedSolveOutput fp0_planned =
-                            solve_planned_chunk_range(planner_request,
-                                                      solve_plan,
-                                                      0u,
-                                                      fp0_chunk_end_index,
-                                                      preview_patch_anchor_state);
-                    if (fp0_planned.status != Status::Success)
+                    const bool streaming_covers_full_generation =
+                            full_window_s <= (streaming_window_s + kContinuityMinTimeEpsilonS);
+                    PlannedSolveOutput streaming_prefix{};
+                    const PlannedSolveRangeSummary streaming_summary =
+                            stream_chunk_stage(planner_request,
+                                               solve_plan,
+                                               0u,
+                                               streaming_chunk_end_index,
+                                               preview_patch_anchor_state,
+                                               streaming_covers_full_generation
+                                                       ? ChunkQualityState::Final
+                                                       : ChunkQualityState::PreviewPatch,
+                                               PublishStage::PreviewStreaming,
+                                               streaming_covers_full_generation,
+                                               streaming_prefix);
+                    if (streaming_summary.status != Status::Success)
                     {
-                        fail(fp0_planned.status);
+                        if (streaming_summary.status == Status::Cancelled)
+                        {
+                            return;
+                        }
+                        fail(streaming_summary.status);
                         return;
                     }
 
-                    Result fp0_result = out;
-                    fp0_result.generation_complete = full_window_s <= (fp0_window_s + kContinuityMinTimeEpsilonS);
-                    fp0_result.publish_stage = fp0_result.generation_complete ? PublishStage::FastPreviewFP1
-                                                                              : PublishStage::FastPreviewFP0;
-                    fp0_result.diagnostics.trajectory_planned = fp0_planned.diagnostics;
-                    fp0_result.diagnostics.trajectory_sample_count_planned = fp0_planned.samples.size();
-                    fp0_result.trajectory_segments_inertial_planned = fp0_planned.segments;
-                    fp0_result.trajectory_inertial_planned = fp0_planned.samples;
-                    fp0_result.maneuver_previews = fp0_planned.previews;
-                    fp0_result.published_chunks = collect_published_chunks(
-                            solve_plan,
-                            0u,
-                            fp0_chunk_end_index,
-                            fp0_result.generation_complete ? ChunkQualityState::Final : ChunkQualityState::PreviewPatch,
-                            &fp0_planned.chunk_reused);
-
-                    fp0_result.valid = true;
-                    fp0_result.diagnostics.status = Status::Success;
-                    fp0_result.diagnostics.trajectory_segment_count_planned =
-                            fp0_result.diagnostics.trajectory_planned.accepted_segments;
-                    if (!publish(std::move(fp0_result)))
+                    if (cancel_requested() || streaming_covers_full_generation)
                     {
                         return;
                     }
 
-                    if (cancel_requested() || full_window_s <= (fp0_window_s + kContinuityMinTimeEpsilonS))
+                    if (streaming_chunk_end_index >= solve_plan.chunks.size())
                     {
                         return;
                     }
 
-                    if (fp0_chunk_end_index >= solve_plan.chunks.size())
-                    {
-                        return;
-                    }
-
-                    const double tail_start_time_s = solve_plan.chunks[fp0_chunk_end_index].t0_s;
-                    const double fp0_actual_end_s =
-                            prediction_segment_end_time(fp0_planned.segments.back());
-                    if (std::abs(fp0_actual_end_s - tail_start_time_s) >
+                    const double tail_start_time_s = solve_plan.chunks[streaming_chunk_end_index].t0_s;
+                    const double streaming_actual_end_s =
+                            prediction_segment_end_time(streaming_prefix.segments.back());
+                    if (std::abs(streaming_actual_end_s - tail_start_time_s) >
                             continuity_time_epsilon_s(tail_start_time_s) ||
-                        !finite_state(fp0_planned.end_state))
+                        !finite_state(streaming_summary.end_state))
                     {
                         fail(Status::ContinuityFailed);
                         return;
                     }
-                    const orbitsim::State tail_start_state = fp0_planned.end_state;
+                    const orbitsim::State tail_start_state = streaming_summary.end_state;
 
-                    const PlannedSolveOutput final_planned =
-                            solve_planned_chunk_range(planner_request,
-                                                      solve_plan,
-                                                      fp0_chunk_end_index,
-                                                      solve_plan.chunks.size(),
-                                                      tail_start_state);
-                    if (final_planned.status != Status::Success)
+                    PlannedSolveOutput final_streamed_prefix{};
+                    const PlannedSolveRangeSummary final_summary =
+                            stream_chunk_stage(planner_request,
+                                               solve_plan,
+                                               streaming_chunk_end_index,
+                                               solve_plan.chunks.size(),
+                                               tail_start_state,
+                                               ChunkQualityState::Final,
+                                               PublishStage::PreviewFinalizing,
+                                               true,
+                                               final_streamed_prefix);
+                    if (final_summary.status != Status::Success)
                     {
-                        fail(final_planned.status);
+                        if (final_summary.status == Status::Cancelled)
+                        {
+                            return;
+                        }
+                        fail(final_summary.status);
                         return;
                     }
-
-                    out.generation_complete = true;
-                    out.publish_stage = PublishStage::FastPreviewFP1;
-                    out.diagnostics.trajectory_planned = final_planned.diagnostics;
-                    out.diagnostics.trajectory_sample_count_planned = final_planned.samples.size();
-                    out.trajectory_segments_inertial_planned = final_planned.segments;
-                    out.trajectory_inertial_planned = final_planned.samples;
-                    out.maneuver_previews = final_planned.previews;
-                    out.published_chunks =
-                            collect_published_chunks(solve_plan,
-                                                     fp0_chunk_end_index,
-                                                     solve_plan.chunks.size(),
-                                                     ChunkQualityState::Final,
-                                                     &final_planned.chunk_reused);
-                    out.diagnostics.trajectory_segment_count_planned = out.diagnostics.trajectory_planned.accepted_segments;
-                    out.valid = true;
-                    out.diagnostics.status = Status::Success;
-                    publish(std::move(out));
                     return;
                 }
             }
@@ -2059,12 +2268,44 @@ namespace Game
                 return;
             }
 
-            const PlannedSolveOutput planned =
+            if (reused_baseline &&
+                request_uses_interactive_chunk_streaming(request))
+            {
+                PlannedSolveOutput streamed_prefix{};
+                const PlannedSolveRangeSummary streaming_summary =
+                        stream_chunk_stage(request,
+                                           solve_plan,
+                                           0u,
+                                           solve_plan.chunks.size(),
+                                           ship_sc.state,
+                                           ChunkQualityState::Final,
+                                           PublishStage::PreviewStreaming,
+                                           true,
+                                           streamed_prefix);
+                if (streaming_summary.status != Status::Success)
+                {
+                    if (streaming_summary.status == Status::Cancelled)
+                    {
+                        return;
+                    }
+                    fail(streaming_summary.status);
+                    return;
+                }
+                return;
+            }
+
+            PlannedSolveOutput planned{};
+            const PlannedSolveRangeSummary planned_summary =
                     solve_planned_chunk_range(request,
                                               solve_plan,
                                               0u,
                                               solve_plan.chunks.size(),
-                                              ship_sc.state);
+                                              ship_sc.state,
+                                              [&planned, &append_planned_chunk_packet](PlannedChunkPacket &&chunk_packet) {
+                                                  append_planned_chunk_packet(planned, std::move(chunk_packet));
+                                                  return true;
+                                              });
+            apply_planned_range_summary(planned, planned_summary);
             if (planned.status != Status::Success)
             {
                 fail(planned.status);
