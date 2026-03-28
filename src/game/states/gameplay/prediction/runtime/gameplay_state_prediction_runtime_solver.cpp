@@ -63,8 +63,7 @@ namespace Game
                                                  const OrbitPredictionService::Result &result,
                                                  const orbitsim::TrajectoryFrameSpec &resolved_frame_spec)
         {
-            return result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
-                   result.baseline_reused &&
+            return result.baseline_reused &&
                    track.cache.valid &&
                    track.cache.resolved_frame_spec_valid &&
                    frame_supports_live_base_frame_reuse(resolved_frame_spec) &&
