@@ -139,6 +139,15 @@ namespace Game
         }
     } // namespace
 
+    bool GameplayState::maneuver_fast_preview_active(const bool with_maneuvers) const
+    {
+        return _prediction_fast_preview_enabled &&
+               PredictionRuntimeDetail::maneuver_live_preview(
+                       with_maneuvers,
+                       _maneuver_plan_live_preview_active,
+                       _maneuver_gizmo_interaction.state);
+    }
+
     void GameplayState::sync_prediction_dirty_flag()
     {
         // Collapse only visible-track rebuild demand into one cheap UI-facing flag.
@@ -184,7 +193,7 @@ namespace Game
     void GameplayState::mark_maneuver_plan_dirty()
     {
         // Maneuver edits should live-update until the latest authored plan finishes solving once.
-        _maneuver_plan_live_preview_active = true;
+        _maneuver_plan_live_preview_active = _prediction_fast_preview_enabled;
         mark_prediction_dirty();
     }
 
@@ -195,12 +204,7 @@ namespace Game
         const bool preview_track =
                 with_maneuvers &&
                 track.key == _prediction_selection.active_subject;
-        const bool preview_live =
-                preview_track &&
-                PredictionRuntimeDetail::maneuver_live_preview(
-                        true,
-                        _maneuver_plan_live_preview_active,
-                        _maneuver_gizmo_interaction.state);
+        const bool preview_live = preview_track && maneuver_fast_preview_active(with_maneuvers);
         const bool drag_active =
                 PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
 
@@ -376,10 +380,7 @@ namespace Game
         (void) now_s;
         const bool preview_live =
                 track.key == _prediction_selection.active_subject &&
-                PredictionRuntimeDetail::maneuver_live_preview(
-                        with_maneuvers,
-                        _maneuver_plan_live_preview_active,
-                        _maneuver_gizmo_interaction.state);
+                maneuver_fast_preview_active(with_maneuvers);
         if (!preview_live || !track.preview_anchor.valid)
         {
             return 0.0;
@@ -394,10 +395,7 @@ namespace Game
         const double display_window_s = prediction_display_window_s(track.key, now_s, with_maneuvers);
         const bool preview_live =
                 track.key == _prediction_selection.active_subject &&
-                PredictionRuntimeDetail::maneuver_live_preview(
-                        with_maneuvers,
-                        _maneuver_plan_live_preview_active,
-                        _maneuver_gizmo_interaction.state);
+                maneuver_fast_preview_active(with_maneuvers);
         if (!preview_live || !track.preview_anchor.valid)
         {
             return display_window_s;
@@ -426,10 +424,7 @@ namespace Game
                 key == _prediction_selection.active_subject;
         const bool maneuver_live_preview =
                 preview_subject_matches &&
-                PredictionRuntimeDetail::maneuver_live_preview(
-                        with_maneuvers,
-                        _maneuver_plan_live_preview_active,
-                        _maneuver_gizmo_interaction.state);
+                maneuver_fast_preview_active(with_maneuvers);
         if (!maneuver_live_preview)
         {
             return display_window_s;
@@ -461,10 +456,7 @@ namespace Game
                                                         const bool with_maneuvers) const
     {
         // Rebuild when cache state, thrusting, timing, or horizon coverage says we must.
-        const bool maneuver_live_preview = PredictionRuntimeDetail::maneuver_live_preview(
-                with_maneuvers,
-                _maneuver_plan_live_preview_active,
-                _maneuver_gizmo_interaction.state);
+        const bool maneuver_live_preview = maneuver_fast_preview_active(with_maneuvers);
         bool rebuild = track.dirty || !track.cache.valid;
         if (!rebuild && track.preview_state == PredictionPreviewRuntimeState::EnterDrag)
         {

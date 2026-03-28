@@ -25,13 +25,14 @@ namespace Game
         out.planned_chunk_assembly =
                 track.preview_overlay.chunk_assembly.valid ? &track.preview_overlay.chunk_assembly : nullptr;
         out.has_preview_planned_overlay = track.preview_overlay.valid();
-        out.has_chunk_planned_overlay =
-                out.planned_chunk_assembly && out.planned_chunk_assembly->valid &&
-                !out.planned_chunk_assembly->chunks.empty();
         out.preview_planned_cache =
-                (!out.has_chunk_planned_overlay && track.preview_overlay.has_flat_planned_cache())
+                track.preview_overlay.has_flat_planned_cache()
                         ? &track.preview_overlay.cache
                         : nullptr;
+        out.has_chunk_planned_overlay =
+                !out.preview_planned_cache &&
+                out.planned_chunk_assembly && out.planned_chunk_assembly->valid &&
+                !out.planned_chunk_assembly->chunks.empty();
         out.planned_cache = out.preview_planned_cache ? out.preview_planned_cache : out.stable_cache;
         const bool preview_chunk_authoritative = out.has_chunk_planned_overlay;
 

@@ -734,6 +734,17 @@ namespace Game
 
                     ImGui::SeparatorText("Prediction Policy");
 
+                    if (ImGui::Checkbox("Enable fast preview", &_prediction_fast_preview_enabled))
+                    {
+                        if (!_prediction_fast_preview_enabled)
+                        {
+                            _maneuver_plan_live_preview_active = false;
+                        }
+                        mark_prediction_dirty();
+                    }
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted("(maneuver drag/live preview)");
+
                     float orbiter_min_window_s = static_cast<float>(_prediction_sampling_policy.orbiter_min_window_s);
                     if (ImGui::DragFloat("Orbiter min window (s)",
                                          &orbiter_min_window_s,
@@ -1019,6 +1030,9 @@ namespace Game
         const bool live_chunk_path_supported =
                 frame_spec.type != orbitsim::TrajectoryFrameType::Inertial &&
                 frame_spec.type != orbitsim::TrajectoryFrameType::LVLH;
+        const bool maneuver_fast_preview_live =
+                prediction_subject_supports_maneuvers(active_track->key) &&
+                maneuver_fast_preview_active(true);
 
         const bool have_sim_now = _orbitsim != nullptr;
         const double sim_now_s = have_sim_now ? _orbitsim->sim.time_s() : 0.0;
@@ -1041,7 +1055,7 @@ namespace Game
                     active_track->request_pending ? "yes" : "no",
                     active_track->derived_request_pending ? "yes" : "no",
                     active_track->dirty ? "yes" : "no",
-                    _maneuver_plan_live_preview_active ? "yes" : "no");
+                    maneuver_fast_preview_live ? "yes" : "no");
         ImGui::Text("Gizmo state: %s", gizmo_state);
         if (_maneuver_gizmo_interaction.node_id >= 0)
         {

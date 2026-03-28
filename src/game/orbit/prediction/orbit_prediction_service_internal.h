@@ -50,9 +50,15 @@ namespace Game
     inline bool request_can_reuse_spacecraft_baseline(const OrbitPredictionService::Request &request)
     {
         return request.kind == OrbitPredictionService::RequestKind::Spacecraft &&
-               request_uses_fast_preview(request) &&
                !request.thrusting &&
                !request.maneuver_impulses.empty();
+    }
+
+    inline bool request_uses_interactive_chunk_streaming(const OrbitPredictionService::Request &request)
+    {
+        return request_can_reuse_spacecraft_baseline(request) &&
+               !request_uses_fast_preview(request) &&
+               request.priority == OrbitPredictionService::RequestPriority::ActiveInteractiveTrack;
     }
 
     inline std::size_t prediction_sample_budget(const OrbitPredictionService::Request &request,

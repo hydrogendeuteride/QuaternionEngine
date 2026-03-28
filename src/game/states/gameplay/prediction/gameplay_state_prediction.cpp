@@ -375,10 +375,17 @@ namespace Game
 
         if (track->preview_overlay.cache.valid)
         {
-            return &track->preview_overlay.cache;
+            const bool chunk_only_overlay =
+                    track->preview_overlay.has_chunks() &&
+                    !track->preview_overlay.has_flat_planned_cache();
+            if (!chunk_only_overlay || !track->cache.valid)
+            {
+                return &track->preview_overlay.cache;
+            }
         }
 
-        return track->cache.valid ? &track->cache : nullptr;
+        return track->cache.valid ? &track->cache
+                                  : (track->preview_overlay.cache.valid ? &track->preview_overlay.cache : nullptr);
     }
 
     const OrbitPredictionCache *GameplayState::effective_prediction_cache(const PredictionTrackState *track) const
@@ -390,10 +397,17 @@ namespace Game
 
         if (track->preview_overlay.cache.valid)
         {
-            return &track->preview_overlay.cache;
+            const bool chunk_only_overlay =
+                    track->preview_overlay.has_chunks() &&
+                    !track->preview_overlay.has_flat_planned_cache();
+            if (!chunk_only_overlay || !track->cache.valid)
+            {
+                return &track->preview_overlay.cache;
+            }
         }
 
-        return track->cache.valid ? &track->cache : nullptr;
+        return track->cache.valid ? &track->cache
+                                  : (track->preview_overlay.cache.valid ? &track->preview_overlay.cache : nullptr);
     }
 
     OrbitPredictionCache *GameplayState::player_prediction_cache()

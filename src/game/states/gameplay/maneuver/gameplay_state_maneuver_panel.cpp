@@ -274,6 +274,8 @@ namespace Game
             {
                 return pick.worldPos;
             }
+            const OrbitPredictionCache *stable_cache =
+                    (player_track && player_track->cache.valid) ? &player_track->cache : cache;
 
             const bool is_planned = (pick.ownerName == "OrbitPlot/Planned");
             const double display_time_s = current_sim_time_s();
@@ -321,8 +323,10 @@ namespace Game
             };
             const auto &traj = is_planned
                                    ? (cache->trajectory_frame_planned.size() >= 2
-                                          ? cache->trajectory_frame_planned
-                                          : cache->trajectory_frame_planned)
+                                              ? cache->trajectory_frame_planned
+                                              : (stable_cache && stable_cache->trajectory_frame_planned.size() >= 2
+                                                         ? stable_cache->trajectory_frame_planned
+                                                         : cache->trajectory_frame))
                                    : cache->trajectory_frame;
             if (traj.size() < 2)
             {

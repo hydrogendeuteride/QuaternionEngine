@@ -1995,7 +1995,7 @@ namespace Game
                         return chunks;
                     };
 
-            constexpr std::size_t kPreviewChunkPublishBatchSize = 2u;
+            constexpr std::size_t kChunkPublishBatchSize = 2u;
 
             const auto append_chunk_to_streamed_prefix =
                     [&](PlannedSolveOutput &prefix_output,
@@ -2019,7 +2019,7 @@ namespace Game
                         prefix_output.status = Status::Success;
                     };
 
-            const auto publish_preview_chunk_batch =
+            const auto publish_chunk_batch =
                     [&](const PlannedSolveOutput &prefix_output,
                         std::vector<OrbitPredictionService::PublishedChunk> published_chunks,
                         const PublishStage publish_stage,
@@ -2047,7 +2047,7 @@ namespace Game
                         return publish(std::move(preview_result));
                     };
 
-            const auto stream_preview_chunk_stage =
+            const auto stream_chunk_stage =
                     [&](const OrbitPredictionService::Request &planner_request,
                         const OrbitPredictionService::PredictionSolvePlan &solve_plan,
                         const std::size_t chunk_begin_index,
@@ -2060,8 +2060,10 @@ namespace Game
                 streamed_prefix = {};
                 double prefix_dt_sum_s = 0.0;
                 bool prefix_have_dt = false;
+                const std::size_t chunk_publish_batch_size =
+                        request_uses_interactive_chunk_streaming(planner_request) ? 1u : kChunkPublishBatchSize;
                 std::vector<OrbitPredictionService::PublishedChunk> published_batch;
-                published_batch.reserve(std::min(kPreviewChunkPublishBatchSize, chunk_end_index - chunk_begin_index));
+                published_batch.reserve(std::min(chunk_publish_batch_size, chunk_end_index - chunk_begin_index));
                 std::size_t streamed_chunk_count = 0u;
                 const std::size_t total_chunk_count = chunk_end_index - chunk_begin_index;
 
@@ -2091,7 +2093,7 @@ namespace Game
                             ++streamed_chunk_count;
                             const bool stage_complete = streamed_chunk_count >= total_chunk_count;
                             const bool should_flush =
-                                    published_batch.size() >= kPreviewChunkPublishBatchSize ||
+                                    published_batch.size() >= chunk_publish_batch_size ||
                                     stage_complete;
                             if (!should_flush)
                             {
@@ -2104,16 +2106,16 @@ namespace Game
                                             : publish_stage;
                             const bool generation_complete =
                                     generation_complete_on_last_publish && stage_complete;
-                            if (!publish_preview_chunk_batch(streamed_prefix,
-                                                             std::move(published_batch),
-                                                             effective_publish_stage,
-                                                             generation_complete))
+                            if (!publish_chunk_batch(streamed_prefix,
+                                                     std::move(published_batch),
+                                                     effective_publish_stage,
+                                                     generation_complete))
                             {
                                 return false;
                             }
 
                             published_batch.clear();
-                            published_batch.reserve(std::min(kPreviewChunkPublishBatchSize, total_chunk_count));
+                            published_batch.reserve(std::min(chunk_publish_batch_size, total_chunk_count));
                             return true;
                         });
             };
@@ -2126,7 +2128,11 @@ namespace Game
                 if (full_window_s > 0.0)
                 {
                     orbitsim::State preview_patch_anchor_state = request.preview_patch.anchor_state_inertial;
-                    if (!resolve_anchor_state(request.sim_time_s,
+                    const bool have_preview_patch_anchor_state =
+                            request.preview_patch.anchor_state_valid &&
+                            finite_state(preview_patch_anchor_state);
+                    if (!have_preview_patch_anchor_state &&
+                        !resolve_anchor_state(request.sim_time_s,
                                               ship_sc.state,
                                               maneuver_impulses,
                                               request.preview_patch.anchor_time_s,
@@ -2188,17 +2194,17 @@ namespace Game
                             full_window_s <= (streaming_window_s + kContinuityMinTimeEpsilonS);
                     PlannedSolveOutput streaming_prefix{};
                     const PlannedSolveRangeSummary streaming_summary =
-                            stream_preview_chunk_stage(planner_request,
-                                                       solve_plan,
-                                                       0u,
-                                                       streaming_chunk_end_index,
-                                                       preview_patch_anchor_state,
-                                                       streaming_covers_full_generation
-                                                               ? ChunkQualityState::Final
-                                                               : ChunkQualityState::PreviewPatch,
-                                                       PublishStage::PreviewStreaming,
-                                                       streaming_covers_full_generation,
-                                                       streaming_prefix);
+                            stream_chunk_stage(planner_request,
+                                               solve_plan,
+                                               0u,
+                                               streaming_chunk_end_index,
+                                               preview_patch_anchor_state,
+                                               streaming_covers_full_generation
+                                                       ? ChunkQualityState::Final
+                                                       : ChunkQualityState::PreviewPatch,
+                                               PublishStage::PreviewStreaming,
+                                               streaming_covers_full_generation,
+                                               streaming_prefix);
                     if (streaming_summary.status != Status::Success)
                     {
                         if (streaming_summary.status == Status::Cancelled)
@@ -2233,15 +2239,15 @@ namespace Game
 
                     PlannedSolveOutput final_streamed_prefix{};
                     const PlannedSolveRangeSummary final_summary =
-                            stream_preview_chunk_stage(planner_request,
-                                                       solve_plan,
-                                                       streaming_chunk_end_index,
-                                                       solve_plan.chunks.size(),
-                                                       tail_start_state,
-                                                       ChunkQualityState::Final,
-                                                       PublishStage::PreviewFinalizing,
-                                                       true,
-                                                       final_streamed_prefix);
+                            stream_chunk_stage(planner_request,
+                                               solve_plan,
+                                               streaming_chunk_end_index,
+                                               solve_plan.chunks.size(),
+                                               tail_start_state,
+                                               ChunkQualityState::Final,
+                                               PublishStage::PreviewFinalizing,
+                                               true,
+                                               final_streamed_prefix);
                     if (final_summary.status != Status::Success)
                     {
                         if (final_summary.status == Status::Cancelled)
@@ -2259,6 +2265,32 @@ namespace Game
             if (!solve_plan.valid)
             {
                 fail(Status::InvalidInput);
+                return;
+            }
+
+            if (reused_baseline &&
+                request_uses_interactive_chunk_streaming(request))
+            {
+                PlannedSolveOutput streamed_prefix{};
+                const PlannedSolveRangeSummary streaming_summary =
+                        stream_chunk_stage(request,
+                                           solve_plan,
+                                           0u,
+                                           solve_plan.chunks.size(),
+                                           ship_sc.state,
+                                           ChunkQualityState::Final,
+                                           PublishStage::PreviewStreaming,
+                                           true,
+                                           streamed_prefix);
+                if (streaming_summary.status != Status::Success)
+                {
+                    if (streaming_summary.status == Status::Cancelled)
+                    {
+                        return;
+                    }
+                    fail(streaming_summary.status);
+                    return;
+                }
                 return;
             }
 

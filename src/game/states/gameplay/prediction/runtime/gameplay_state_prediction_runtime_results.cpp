@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 
+#include "game/states/gameplay/prediction/gameplay_prediction_cache_internal.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include <algorithm>
@@ -427,7 +428,8 @@ namespace Game
         track->invalidated_while_pending = false;
 
         const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
-        const bool preview_chunk_authoritative = preview_result && result.chunk_assembly.valid;
+        const bool overlay_result = preview_result || !result.generation_complete;
+        const bool preview_chunk_authoritative = overlay_result && result.chunk_assembly.valid;
 
         OrbitPredictionCache cache_to_publish{};
         OrbitPredictionDerivedDiagnostics diagnostics_to_publish = result.diagnostics;
@@ -495,7 +497,7 @@ namespace Game
             return;
         }
 
-        if (preview_result)
+        if (overlay_result)
         {
             clear_preview_planned_render_artifacts(cache_to_publish);
             track->preview_overlay.cache = std::move(cache_to_publish);
@@ -509,7 +511,7 @@ namespace Game
         }
 
         double chunk_merge_ms = 0.0;
-        if (preview_result && result.chunk_assembly.valid)
+        if (overlay_result && result.chunk_assembly.valid)
         {
             const bool chunk_frame_changed =
                     track->preview_overlay.chunk_assembly.valid &&
@@ -532,6 +534,15 @@ namespace Game
         {
             track->preview_overlay.chunk_assembly.clear();
             track->preview_pick_cache.clear();
+        }
+
+        if (overlay_result &&
+            track->preview_overlay.cache.valid &&
+            track->preview_overlay.chunk_assembly.valid)
+        {
+            PredictionCacheInternal::flatten_chunk_assembly_to_cache(
+                    track->preview_overlay.cache,
+                    track->preview_overlay.chunk_assembly);
         }
 
         PredictionRuntimeDetail::update_last_and_peak(
