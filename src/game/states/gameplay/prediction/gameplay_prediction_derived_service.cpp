@@ -155,8 +155,7 @@ namespace Game
         out.publish_stage = solver.publish_stage;
         out.generation_complete = solver.generation_complete;
         const bool staged_solver_result = !solver.generation_complete;
-        const bool build_preview_planned_render_curve =
-                solver.solve_quality != OrbitPredictionService::SolveQuality::FastPreview;
+        const bool build_preview_planned_render_curve = true;
         if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
         {
             out.diagnostics.status = PredictionDerivedStatus::MissingSolverData;
@@ -192,8 +191,7 @@ namespace Game
         const bool use_chunk_path =
                 reuse_existing_base_frame &&
                 !solver.published_chunks.empty() &&
-                (solver.solve_quality == OrbitPredictionService::SolveQuality::FastPreview ||
-                 staged_solver_result);
+                staged_solver_result;
         bool frame_cache_built = false;
         const auto frame_build_start_tp = std::chrono::steady_clock::now();
         if (use_chunk_path)
@@ -258,14 +256,11 @@ namespace Game
             out.diagnostics.frame_base = request.reused_base_frame_diagnostics;
         }
 
-        if (solver.solve_quality != OrbitPredictionService::SolveQuality::FastPreview)
-        {
-            PredictionCacheInternal::rebuild_prediction_metrics(
-                    cache,
-                    request.sim_config,
-                    request.analysis_body_id,
-                    cancel_requested);
-        }
+        PredictionCacheInternal::rebuild_prediction_metrics(
+                cache,
+                request.sim_config,
+                request.analysis_body_id,
+                cancel_requested);
 
         if (cancel_requested())
         {
