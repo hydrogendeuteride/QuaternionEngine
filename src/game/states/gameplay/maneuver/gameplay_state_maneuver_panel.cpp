@@ -4,8 +4,6 @@
 
 #include "core/engine.h"
 
-#include "game/orbit/orbit_prediction_math.h"
-
 #include "imgui.h"
 
 #include <algorithm>
@@ -16,7 +14,7 @@ namespace Game
 {
     namespace
     {
-        using OrbitPredictionMath::safe_length;
+        using namespace ManeuverUtil;
 
         const char *prediction_publish_stage_label(const OrbitPredictionService::PublishStage stage)
         {

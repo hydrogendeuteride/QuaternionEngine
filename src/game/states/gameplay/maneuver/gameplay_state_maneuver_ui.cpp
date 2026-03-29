@@ -6,8 +6,6 @@
 #include "core/engine.h"
 #include "core/input/input_system.h"
 
-#include "game/orbit/orbit_prediction_math.h"
-
 #include "imgui.h"
 
 #include "SDL2/SDL.h"
@@ -20,7 +18,6 @@ namespace Game
 {
     namespace
     {
-        using OrbitPredictionMath::safe_length;
         using namespace ManeuverUtil;
     } // namespace
 
@@ -53,7 +50,6 @@ namespace Game
             }
         }
 
-        _maneuver_ui_config.dpi = display_dpi;
         _maneuver_ui_config.effective_scale = _maneuver_ui_config.ui_scale * std::max(dpi_scale, display_dpi / _maneuver_ui_config.base_dpi);
         _maneuver_ui_config.effective_scale = std::clamp(_maneuver_ui_config.effective_scale, 0.5f, 4.0f);
     }

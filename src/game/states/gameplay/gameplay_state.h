@@ -404,6 +404,7 @@ namespace Game
         orbitsim::BodyId resolve_maneuver_node_primary_body_id(const ManeuverNode &node, double query_time_s) const;
         void remove_maneuver_node(int node_id, int hint_index = -1);
         void remove_maneuver_node_suffix(int node_id, int hint_index = -1);
+        void finalize_maneuver_node_removal(bool removed_selected, bool removed_gizmo, bool removed_execute, int hint_index);
         WorldVec3 compute_maneuver_align_delta(GameStateContext &ctx,
                                                const OrbitPredictionCache &cache,
                                                const std::vector<orbitsim::TrajectorySample> &traj_base);

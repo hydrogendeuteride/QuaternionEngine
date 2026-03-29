@@ -207,8 +207,8 @@ namespace Game
         float ui_scale{1.0f};
         bool auto_dpi_scale{true};
         float effective_scale{1.0f};
-        float dpi{96.0f};
 
         float scaled(float base_px) const { return base_px * effective_scale; }
     };
+
 } // namespace Game
