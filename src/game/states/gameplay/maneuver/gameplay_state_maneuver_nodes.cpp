@@ -180,7 +180,7 @@ namespace Game
                 !cache.massive_bodies.empty())
             {
                 const orbitsim::BodyId preferred_body_id =
-                        node.primary_body_id != orbitsim::kInvalidBodyId ? node.primary_body_id : player_track->auto_primary_body_id;
+                        node.primary_body_auto ? orbitsim::kInvalidBodyId : node.primary_body_id;
                 const orbitsim::BodyId primary_body_id = select_prediction_primary_body_id(
                         cache.massive_bodies,
                         &cache,
