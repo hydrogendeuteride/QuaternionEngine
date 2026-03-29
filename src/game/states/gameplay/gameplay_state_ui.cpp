@@ -101,8 +101,6 @@ namespace Game
             {
                 case OrbitPredictionService::SolveQuality::Full:
                     return "Full";
-                case OrbitPredictionService::SolveQuality::FastPreview:
-                    return "FastPreview";
             }
 
             return "Unknown";
@@ -116,8 +114,6 @@ namespace Game
                     return "Full";
                 case OrbitPredictionService::PublishStage::PreviewStreaming:
                     return "PreviewStreaming";
-                case OrbitPredictionService::PublishStage::PreviewFinalizing:
-                    return "PreviewFinalizing";
             }
 
             return "Unknown";

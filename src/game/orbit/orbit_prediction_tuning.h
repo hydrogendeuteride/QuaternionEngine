@@ -83,17 +83,6 @@ namespace Game::OrbitPredictionTuning
     inline constexpr double kPrimaryBodyHysteresisKeepRatio = 0.90;
     inline constexpr double kPostNodeCoverageMinS = 120.0;
     inline constexpr double kManeuverRefreshS = 0.1;
-    inline constexpr double kFastPreviewAdaptiveSegmentMinDtS = 0.25;
-    inline constexpr double kFastPreviewAdaptiveSegmentMaxDtS = 600.0;
-    inline constexpr double kFastPreviewAdaptiveSegmentLookupMaxDtS = 120.0;
-    inline constexpr std::size_t kFastPreviewAdaptiveSegmentSoftMaxSegments = 1'500;
-    inline constexpr double kFastPreviewAdaptiveSegmentToleranceScale = 4.0;
-    inline constexpr double kFastPreviewAdaptiveEphemerisMinDtS = 0.25;
-    inline constexpr double kFastPreviewAdaptiveEphemerisMaxDtS = 120.0;
-    inline constexpr std::size_t kFastPreviewAdaptiveEphemerisSoftMaxSegments = 1'500;
-    inline constexpr double kFastPreviewAdaptiveEphemerisToleranceScale = 4.0;
-    inline constexpr std::size_t kFastPreviewTrajectorySampleCap = 1'200;
-
     // Chunk planner bands stay finer-grained than the Exact/Near/Tail profile classes.
     inline constexpr double kPredictionChunkBandNearEndS = 3.0 * kSecondsPerDay;
     inline constexpr double kPredictionChunkBandTransferEndS = 30.0 * kSecondsPerDay;

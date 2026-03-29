@@ -33,20 +33,6 @@ namespace Game
 
     using CancelCheck = std::function<bool()>;
 
-    inline bool request_uses_fast_preview(const OrbitPredictionService::Request &request)
-    {
-        return request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
-    }
-
-    inline bool request_uses_preview_patch(const OrbitPredictionService::Request &request)
-    {
-        return request_uses_fast_preview(request) &&
-               request.preview_patch.active &&
-               request.preview_patch.anchor_state_valid &&
-               std::isfinite(request.preview_patch.anchor_time_s) &&
-               request.preview_patch.anchor_time_s >= request.sim_time_s;
-    }
-
     inline bool request_can_reuse_spacecraft_baseline(const OrbitPredictionService::Request &request)
     {
         return request.kind == OrbitPredictionService::RequestKind::Spacecraft &&
@@ -57,16 +43,15 @@ namespace Game
     inline bool request_uses_interactive_chunk_streaming(const OrbitPredictionService::Request &request)
     {
         return request_can_reuse_spacecraft_baseline(request) &&
-               !request_uses_fast_preview(request) &&
                request.priority == OrbitPredictionService::RequestPriority::ActiveInteractiveTrack;
     }
 
     inline std::size_t prediction_sample_budget(const OrbitPredictionService::Request &request,
                                                 const std::size_t segment_count)
     {
-        const std::size_t sample_multiplier = request_uses_fast_preview(request) ? 1u : 2u;
-        const std::size_t sample_cap =
-                request_uses_fast_preview(request) ? OrbitPredictionTuning::kFastPreviewTrajectorySampleCap : 4'000u;
+        (void) request;
+        const std::size_t sample_multiplier = 2u;
+        const std::size_t sample_cap = 4'000u;
         return std::clamp<std::size_t>(segment_count * sample_multiplier, 2u, sample_cap);
     }
 
@@ -111,48 +96,6 @@ namespace Game
     inline double request_end_time_s(const OrbitPredictionService::Request &request)
     {
         return request.sim_time_s + std::max(0.0, std::isfinite(request.future_window_s) ? request.future_window_s : 0.0);
-    }
-
-    inline double preview_patch_remaining_window_s(const OrbitPredictionService::Request &request)
-    {
-        if (!request_uses_preview_patch(request))
-        {
-            return 0.0;
-        }
-
-        return std::max(0.0, request_end_time_s(request) - request.preview_patch.anchor_time_s);
-    }
-
-    inline double preview_visual_window_s(const OrbitPredictionService::Request &request)
-    {
-        if (!request_uses_preview_patch(request))
-        {
-            return 0.0;
-        }
-
-        return std::max(0.0, request.preview_patch.visual_window_s);
-    }
-
-    inline double preview_exact_window_s(const OrbitPredictionService::Request &request)
-    {
-        if (!request_uses_preview_patch(request))
-        {
-            return 0.0;
-        }
-
-        return std::max(0.0, request.preview_patch.exact_window_s);
-    }
-
-    inline double preview_streaming_window_s(const OrbitPredictionService::Request &request)
-    {
-        if (!request_uses_preview_patch(request))
-        {
-            return 0.0;
-        }
-
-        const double chunk_window_s = preview_exact_window_s(request);
-        const double streaming_window_s = chunk_window_s > 0.0 ? (chunk_window_s * 2.0) : 0.0;
-        return std::min(preview_patch_remaining_window_s(request), streaming_window_s);
     }
 
     inline bool trajectory_segments_cover_window(const std::vector<orbitsim::TrajectorySegment> &segments,

@@ -32,7 +32,6 @@ namespace Game
         enum class SolveQuality : uint8_t
         {
             Full = 0,
-            FastPreview,
         };
 
         enum class RequestPriority : uint8_t
@@ -62,13 +61,11 @@ namespace Game
         {
             Full = 0,
             PreviewStreaming,
-            PreviewFinalizing,
         };
 
         enum class ChunkQualityState : uint8_t
         {
             Final = 0,
-            PreviewPatch,
         };
 
         struct AdaptiveStageDiagnostics
@@ -119,18 +116,6 @@ namespace Game
             orbitsim::Vec3 dv_rtn_mps{0.0, 0.0, 0.0};
         };
 
-        struct PreviewPatchRequest
-        {
-            bool active{false};
-            bool anchor_state_valid{false};
-            uint64_t baseline_generation_id{0};
-            double anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
-            double visual_window_s{0.0};
-            double exact_window_s{0.0};
-            double pick_window_s{0.0};
-            orbitsim::State anchor_state_inertial{};
-        };
-
         struct PublishedChunk
         {
             uint32_t chunk_id{0};
@@ -154,10 +139,8 @@ namespace Game
             RequestStart = 1u << 0u,
             RequestEnd = 1u << 1u,
             Maneuver = 1u << 2u,
-            PreviewAnchor = 1u << 3u,
-            PreviewChunk = 1u << 4u,
-            KnownDiscontinuity = 1u << 5u,
-            TimeBand = 1u << 6u,
+            KnownDiscontinuity = 1u << 3u,
+            TimeBand = 1u << 4u,
         };
 
         struct PredictionProfileDefinition
@@ -247,7 +230,6 @@ namespace Game
             double future_window_s{600.0};
             double celestial_ephemeris_dt_s{0.0};
             orbitsim::BodyId preferred_primary_body_id{orbitsim::kInvalidBodyId};
-            PreviewPatchRequest preview_patch{};
             std::vector<ManeuverImpulse> maneuver_impulses;
         };
 
