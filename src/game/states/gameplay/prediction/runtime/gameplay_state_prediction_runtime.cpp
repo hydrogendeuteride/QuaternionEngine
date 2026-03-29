@@ -301,7 +301,21 @@ namespace Game
             {
                 track.invalidated_while_pending = track.request_pending || track.derived_request_pending;
             }
-            track.preview_state = PredictionPreviewRuntimeState::EnterDrag;
+            const bool keep_visible_preview_overlay =
+                    track.preview_overlay.valid() &&
+                    (track.preview_state == PredictionPreviewRuntimeState::DragPreviewPending ||
+                     track.preview_state == PredictionPreviewRuntimeState::PreviewStreaming);
+            if (keep_visible_preview_overlay)
+            {
+                track.preview_state =
+                        (track.request_pending || track.derived_request_pending)
+                                ? PredictionPreviewRuntimeState::DragPreviewPending
+                                : PredictionPreviewRuntimeState::PreviewStreaming;
+            }
+            else
+            {
+                track.preview_state = PredictionPreviewRuntimeState::EnterDrag;
+            }
             return;
         }
 
