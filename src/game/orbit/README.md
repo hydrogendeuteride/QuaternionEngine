@@ -8,14 +8,20 @@ This folder contains the orbit prediction, LOD tessellation, and rendering pipel
 orbit/
   orbit_prediction_tuning.h          # tuning constants
   orbit_prediction_math.h / .cpp     # orbital mechanics math
-  orbit_prediction_service.h / .cpp  # prediction service public API + class methods
+  orbit_prediction_service.h / .cpp  # prediction service public API, lifecycle, cache, threading
   orbit_render_curve.h               # LOD tree public API
   orbit_plot_util.h / .cpp           # shared plot helpers
   prediction/
-    orbit_prediction_service_internal.h     # shared types + declarations
-    orbit_prediction_service_trajectory.cpp # segment math
-    orbit_prediction_service_sampling.cpp   # multi-band sampling
-    orbit_prediction_service_policy.cpp     # policy resolvers + ephemeris
+    orbit_prediction_service_internal.h              # shared types, context, declarations
+    orbit_prediction_service_compute.cpp             # compute_prediction entry + celestial/baseline paths
+    orbit_prediction_service_planned.cpp             # planned trajectory solving (maneuvers)
+    orbit_prediction_service_trajectory.cpp          # segment math (Hermite eval, boundary split)
+    orbit_prediction_service_sampling.cpp            # uniform resampling
+    orbit_prediction_service_policy_integrator.cpp   # integrator profile configuration
+    orbit_prediction_service_policy_chunking.cpp     # time-band chunk planning
+    orbit_prediction_service_policy_profile.cpp      # activity classification + profile resolution
+    orbit_prediction_service_policy_adaptive.cpp     # adaptive segment/ephemeris options
+    orbit_prediction_service_policy_ephemeris.cpp    # ephemeris compatibility + build
   render_curve/
     orbit_render_curve_internal.h     # inline helpers (frustum, eval)
     orbit_render_curve.cpp            # tree construction + LOD select
@@ -38,23 +44,41 @@ orbit/
 - `orbit_prediction_service.h / .cpp`
   Background-threaded prediction worker.
   `OrbitPredictionService` owns a thread pool that consumes `Request` jobs (spacecraft or celestial), propagates trajectories via `orbitsim`, applies maneuver impulses, builds/caches celestial ephemerides, and publishes `Result` structs with inertial trajectory samples and segments. Supports generation-based staleness detection and per-track request coalescing.
-  The `.cpp` contains only the class method implementations; all internal helpers live in `prediction/`.
+  The `.cpp` contains lifecycle (constructor, destructor, `request`, `poll_completed`, `reset`), threading (`worker_loop`), and caching (`get_or_build_ephemeris`, baseline cache). The compute and planned trajectory logic live in `prediction/`.
 
 ### `prediction/` subfolder
 
 Internal helpers split out from `orbit_prediction_service.cpp`. Not included by anything outside the orbit module.
 
 - `orbit_prediction_service_internal.h`
-  Shared types (`PlannedSegmentBoundaryState`, `MultiBandSampleWindow`, `SpacecraftSamplingBudget`, `CelestialPredictionSamplingSpec`), constants, inline micro-helpers (`finite_vec3`, `finite_state`, `prediction_segment_end_time`), and template functions (`sample_multi_band`, `select_primary_index_with_hysteresis`). Also declares all functions implemented in the three `.cpp` files below.
+  Shared types (`PlannedSegmentBoundaryState`, `CelestialPredictionSamplingSpec`, `PlannedTrajectoryContext`, `PlannedChunkPacket`, `PlannedSolveOutput`, etc.), constants, inline micro-helpers (`finite_vec3`, `finite_state`, `prediction_segment_end_time`), and template functions (`select_primary_index_with_hysteresis`). Declares all functions implemented in the `.cpp` files below.
+
+- `orbit_prediction_service_compute.cpp`
+  `compute_prediction()` entry point: input validation, simulation setup, celestial prediction path, spacecraft baseline trajectory (reuse or compute), planned trajectory orchestration via `PlannedTrajectoryContext`, and final result publishing.
+
+- `orbit_prediction_service_planned.cpp`
+  Planned trajectory solving for maneuver-bearing predictions. Contains `solve_planned_chunk_range()` (chunk-by-chunk adaptive solving with seam validation), `stream_chunk_stage()` (incremental result streaming), chunk cache operations, maneuver impulse application, and publishing helpers.
 
 - `orbit_prediction_service_trajectory.cpp`
-  Trajectory segment math: Hermite interpolation (`eval_segment_state`), binary-search lookup (`sample_trajectory_segment_state`), segment construction from samples (`trajectory_segments_from_samples`), boundary splitting (`split_trajectory_segments_at_known_boundaries`), maneuver preview building, and planned boundary state merging.
+  Trajectory segment math: Hermite interpolation (`eval_segment_state`), binary-search lookup (`sample_trajectory_segment_state`), boundary splitting (`split_trajectory_segments_at_known_boundaries`), segment slicing, and maneuver preview building.
 
 - `orbit_prediction_service_sampling.cpp`
-  Multi-band sampling system: density-tagged window construction from band templates (`build_base_band_windows`, `build_multi_band_sample_windows`), per-maneuver-node high-density window insertion, budget distribution across windows (`distribute_sample_budget`), and multi-band trajectory/ephemeris sampling.
+  Uniform resampling of trajectory segments and ephemeris data.
 
-- `orbit_prediction_service_policy.cpp`
-  Prediction policy resolvers: long-range detection, horizon/dt/step caps, integrator profile application (Lagrange and standard), spacecraft sampling budgets, ephemeris compatibility checking, ephemeris construction from request, celestial prediction sampling spec, and ephemeris build request assembly.
+- `orbit_prediction_service_policy_integrator.cpp`
+  Integrator profile configuration: Lagrange and standard prediction integrator parameter application.
+
+- `orbit_prediction_service_policy_chunking.cpp`
+  Time-band chunk planning: boundary generation, merging, and `build_prediction_solve_plan()` that partitions the prediction window into prioritized chunks.
+
+- `orbit_prediction_service_policy_profile.cpp`
+  Activity classification (`classify_chunk_activity()`) and profile resolution (`resolve_prediction_profile_definition()`). Determines numerical accuracy level per chunk based on heading changes, jerk, gravity dominance, and SOI transitions.
+
+- `orbit_prediction_service_policy_adaptive.cpp`
+  Adaptive segment and ephemeris option builders: tolerance ramps, timestep limits, and per-chunk option scaling based on profile definitions.
+
+- `orbit_prediction_service_policy_ephemeris.cpp`
+  Ephemeris compatibility checking, build request assembly, ephemeris construction from simulation, and celestial prediction sampling spec derivation.
 
 ### Rendering (public header in `orbit/`)
 
@@ -111,17 +135,35 @@ The entry point is `GameplayState`, which:
 - Orbital element computation, period estimation, or Hermite interpolation:
   Start in `orbit_prediction_math.h/.cpp`.
 
-- Background propagation, maneuver impulse application, ephemeris caching, or worker threading:
+- Worker threading, request queuing, ephemeris caching, or baseline cache:
   Start in `orbit_prediction_service.h/.cpp`.
 
-- Trajectory segment Hermite evaluation, boundary splitting, or sample-to-segment conversion:
+- Compute entry point, celestial prediction, or spacecraft baseline:
+  Start in `prediction/orbit_prediction_service_compute.cpp`.
+
+- Maneuver impulse application, planned chunk solving, seam validation, or chunk streaming:
+  Start in `prediction/orbit_prediction_service_planned.cpp`.
+
+- Trajectory segment Hermite evaluation, boundary splitting, or segment slicing:
   Start in `prediction/orbit_prediction_service_trajectory.cpp`.
 
-- Multi-band sampling windows, density distribution, or per-maneuver-node sample density:
+- Trajectory or ephemeris resampling:
   Start in `prediction/orbit_prediction_service_sampling.cpp`.
 
-- Long-range policy, integrator profiles, ephemeris compatibility, or celestial sampling spec:
-  Start in `prediction/orbit_prediction_service_policy.cpp`.
+- Integrator profiles:
+  Start in `prediction/orbit_prediction_service_policy_integrator.cpp`.
+
+- Chunk planning or time-band boundaries:
+  Start in `prediction/orbit_prediction_service_policy_chunking.cpp`.
+
+- Activity classification or profile resolution:
+  Start in `prediction/orbit_prediction_service_policy_profile.cpp`.
+
+- Adaptive segment/ephemeris options or tolerance ramps:
+  Start in `prediction/orbit_prediction_service_policy_adaptive.cpp`.
+
+- Ephemeris compatibility, build requests, or celestial sampling spec:
+  Start in `prediction/orbit_prediction_service_policy_ephemeris.cpp`.
 
 - Per-segment Hermite evaluation or pixel-size computation:
   Start in `orbit_plot_util.h/.cpp`.

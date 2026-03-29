@@ -302,16 +302,6 @@ namespace Game
         // Derive spacecraft prediction horizon and cadence from the current orbital state.
         static EphemerisSamplingSpec build_ephemeris_sampling_spec(const Request &request);
 
-    private:
-        struct ReusableBaselineCacheEntry
-        {
-            uint64_t generation_id{0};
-            uint64_t request_epoch{0};
-            SharedCelestialEphemeris shared_ephemeris{};
-            std::vector<orbitsim::TrajectorySample> trajectory_inertial{};
-            std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial{};
-        };
-
         struct PlannedChunkCacheKey
         {
             uint64_t track_id{0};
@@ -334,6 +324,16 @@ namespace Game
             std::vector<orbitsim::TrajectorySample> samples{};
             std::vector<ManeuverNodePreview> previews{};
             uint64_t last_use_serial{0};
+        };
+
+    private:
+        struct ReusableBaselineCacheEntry
+        {
+            uint64_t generation_id{0};
+            uint64_t request_epoch{0};
+            SharedCelestialEphemeris shared_ephemeris{};
+            std::vector<orbitsim::TrajectorySample> trajectory_inertial{};
+            std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial{};
         };
 
         struct PendingJob
