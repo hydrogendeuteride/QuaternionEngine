@@ -529,7 +529,6 @@ namespace Game
         _maneuver_gizmo_interaction.applied_delta = false;
         if (PredictionTrackState *track = active_prediction_track())
         {
-            track->preview_state = PredictionPreviewRuntimeState::EnterDrag;
             track->preview_anchor.clear();
             track->invalidated_while_pending = track->request_pending || track->derived_request_pending;
             if (!std::isfinite(track->preview_entered_at_s))
@@ -676,15 +675,7 @@ namespace Game
                                                                : _prediction_frame_selection.spec;
                 if (prediction_frame_is_lagrange_sensitive(display_frame_spec))
                 {
-                    const bool preview_streaming =
-                            track->preview_state == PredictionPreviewRuntimeState::DragPreviewPending ||
-                            track->preview_state == PredictionPreviewRuntimeState::PreviewStreaming;
-                    if (!preview_streaming || !track->preview_overlay.valid())
-                    {
-                        // Once an interactive preview is already visible, keep drawing it until the
-                        // next preview patch lands instead of blanking back to prefix-only fallback.
-                        track->preview_state = PredictionPreviewRuntimeState::EnterDrag;
-                    }
+                    track->preview_anchor.clear();
                 }
             }
         }
