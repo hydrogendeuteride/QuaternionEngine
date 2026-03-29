@@ -105,18 +105,8 @@ namespace Game
         out.maneuver_drag_active =
                 out.active_player_track &&
                 _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
-        const bool drag_entry_grace_active =
-                out.maneuver_drag_active &&
-                std::isfinite(track.preview_entered_at_s) &&
-                std::isfinite(global_ctx.display_time_s) &&
-                (global_ctx.display_time_s - track.preview_entered_at_s) < OrbitPredictionTuning::kDragStalePreviewGraceS;
-        out.suppress_stale_planned_preview =
-                out.maneuver_drag_active &&
-                track.preview_state == PredictionPreviewRuntimeState::EnterDrag &&
-                !track.preview_overlay.valid() &&
-                !drag_entry_grace_active;
-        out.drag_anchor_valid = out.maneuver_drag_active && track.preview_anchor.valid &&
-                                std::isfinite(track.preview_anchor.anchor_time_s);
+        out.suppress_stale_planned_preview = false;
+        out.drag_anchor_valid = false;
         out.drag_anchor_time_s =
                 out.drag_anchor_valid ? track.preview_anchor.anchor_time_s : std::numeric_limits<double>::quiet_NaN();
 

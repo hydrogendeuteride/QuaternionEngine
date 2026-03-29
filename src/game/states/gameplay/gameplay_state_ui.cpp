@@ -734,17 +734,6 @@ namespace Game
 
                     ImGui::SeparatorText("Prediction Policy");
 
-                    if (ImGui::Checkbox("Enable fast preview", &_prediction_fast_preview_enabled))
-                    {
-                        if (!_prediction_fast_preview_enabled)
-                        {
-                            _maneuver_plan_live_preview_active = false;
-                        }
-                        mark_prediction_dirty();
-                    }
-                    ImGui::SameLine();
-                    ImGui::TextUnformatted("(maneuver drag/live preview)");
-
                     float orbiter_min_window_s = static_cast<float>(_prediction_sampling_policy.orbiter_min_window_s);
                     if (ImGui::DragFloat("Orbiter min window (s)",
                                          &orbiter_min_window_s,
@@ -1030,10 +1019,6 @@ namespace Game
         const bool live_chunk_path_supported =
                 frame_spec.type != orbitsim::TrajectoryFrameType::Inertial &&
                 frame_spec.type != orbitsim::TrajectoryFrameType::LVLH;
-        const bool maneuver_fast_preview_live =
-                prediction_subject_supports_maneuvers(active_track->key) &&
-                maneuver_fast_preview_active(true);
-
         const bool have_sim_now = _orbitsim != nullptr;
         const double sim_now_s = have_sim_now ? _orbitsim->sim.time_s() : 0.0;
         const bool have_build_time = active_track->cache.valid && have_sim_now;
@@ -1051,11 +1036,10 @@ namespace Game
         ImGui::Text("Result quality/stage: %s / %s",
                     prediction_solve_quality_label(debug.last_result_solve_quality),
                     prediction_publish_stage_label(debug.last_publish_stage));
-        ImGui::Text("Pending solver/derived/dirty/live: %s / %s / %s / %s",
+        ImGui::Text("Pending solver/derived/dirty: %s / %s / %s",
                     active_track->request_pending ? "yes" : "no",
                     active_track->derived_request_pending ? "yes" : "no",
-                    active_track->dirty ? "yes" : "no",
-                    maneuver_fast_preview_live ? "yes" : "no");
+                    active_track->dirty ? "yes" : "no");
         ImGui::Text("Gizmo state: %s", gizmo_state);
         if (_maneuver_gizmo_interaction.node_id >= 0)
         {
@@ -1143,13 +1127,11 @@ namespace Game
                     _orbit_plot_perf.pick_segments);
 
         ImGui::Separator();
-        if (debug.derived_flatten_ms_last > 0.0 || debug.preview_merge_ms_last > 0.0)
+        if (debug.derived_flatten_ms_last > 0.0)
         {
             ImGui::TextWrapped(
-                    "Hot path: FastPreview still flattens chunk output into a flat planned cache and re-merges the full planned curve "
-                    "(flattened %zu segs, merged %zu segs).",
-                    debug.flattened_planned_segments_last,
-                    debug.planned_segments_after_preview_merge);
+                    "Hot path: planned chunk output still flattens into a flat planned cache (%zu segs).",
+                    debug.flattened_planned_segments_last);
         }
         if (drag_gate_remaining_ms > 0.0)
         {
