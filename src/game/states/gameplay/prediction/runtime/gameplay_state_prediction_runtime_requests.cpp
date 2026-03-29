@@ -84,8 +84,10 @@ namespace Game
         const bool dragging_maneuver_axis =
                 with_maneuvers &&
                 PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
+        const bool active_subject = track.key == _prediction_selection.active_subject;
         const bool interactive_request =
-                track.key == _prediction_selection.active_subject && (thrusting || dragging_maneuver_axis);
+                active_subject &&
+                (thrusting || with_maneuvers || dragging_maneuver_axis);
         const OrbitPredictionService::SolveQuality solve_quality = OrbitPredictionService::SolveQuality::Full;
 
         OrbitPredictionService::Request request{};

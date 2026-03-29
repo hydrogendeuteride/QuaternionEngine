@@ -90,10 +90,11 @@ namespace Game::OrbitPredictionTuning
     inline constexpr double kPredictionChunkBandCruiseEndS = 2.0 * kSecondsPerYear;
     inline constexpr double kPredictionChunkBandDeepTailEndS = 20.0 * kSecondsPerYear;
     inline constexpr double kPredictionChunkSpanNearS = 6.0 * kSecondsPerHour;
-    inline constexpr double kPredictionChunkSpanTransferS = 1.0 * kSecondsPerDay;
-    inline constexpr double kPredictionChunkSpanCruiseFineS = 5.0 * kSecondsPerDay;
-    inline constexpr double kPredictionChunkSpanCruiseS = 30.0 * kSecondsPerDay;
-    inline constexpr double kPredictionChunkSpanDeepTailS = 90.0 * kSecondsPerDay;
+    // Keep long-horizon maneuver previews responsive by publishing smaller tail chunks.
+    inline constexpr double kPredictionChunkSpanTransferS = 12.0 * kSecondsPerHour;
+    inline constexpr double kPredictionChunkSpanCruiseFineS = 2.0 * kSecondsPerDay;
+    inline constexpr double kPredictionChunkSpanCruiseS = 10.0 * kSecondsPerDay;
+    inline constexpr double kPredictionChunkSpanDeepTailS = 30.0 * kSecondsPerDay;
 
     // Slice 6 activity probe and seam-retry tuning.
     inline constexpr double kPredictionActivityProbeHeadingPromoteRad = 0.08;

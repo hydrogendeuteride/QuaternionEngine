@@ -18,6 +18,43 @@ namespace Game
     {
         using OrbitPredictionMath::safe_length;
 
+        const char *prediction_publish_stage_label(const OrbitPredictionService::PublishStage stage)
+        {
+            switch (stage)
+            {
+                case OrbitPredictionService::PublishStage::Full:
+                    return "Full";
+                case OrbitPredictionService::PublishStage::PreviewStreaming:
+                    return "PreviewStreaming";
+                default:
+                    return "Unknown";
+            }
+        }
+
+        const char *prediction_derived_status_label(const PredictionDerivedStatus status)
+        {
+            switch (status)
+            {
+                case PredictionDerivedStatus::Success:
+                    return "Ready";
+                case PredictionDerivedStatus::MissingSolverData:
+                    return "Waiting for solver data";
+                case PredictionDerivedStatus::MissingEphemeris:
+                    return "Missing ephemeris";
+                case PredictionDerivedStatus::FrameTransformFailed:
+                    return "Frame transform failed";
+                case PredictionDerivedStatus::FrameSamplesUnavailable:
+                    return "Frame samples unavailable";
+                case PredictionDerivedStatus::ContinuityFailed:
+                    return "Continuity failed";
+                case PredictionDerivedStatus::Cancelled:
+                    return "Cancelled";
+                case PredictionDerivedStatus::None:
+                default:
+                    return "Idle";
+            }
+        }
+
         void draw_diamond(ImDrawList *dl, const ImVec2 &p, float r_px, ImU32 col)
         {
             const ImVec2 pts[4]{
@@ -146,6 +183,122 @@ namespace Game
         {
             _maneuver_plan_windows.solve_margin_s = static_cast<double>(std::max(0.0f, solve_margin_s));
             mark_maneuver_plan_dirty();
+        }
+
+        if (player_track)
+        {
+            const bool has_plan = !_maneuver_state.nodes.empty();
+            const bool solver_pending = player_track->request_pending;
+            const bool derived_pending = player_track->derived_request_pending;
+            const bool has_chunk_overlay =
+                    player_track->preview_overlay.chunk_assembly.valid &&
+                    !player_track->preview_overlay.chunk_assembly.chunks.empty();
+            const bool has_ready_plan =
+                    player_track->cache.valid &&
+                    player_track->cache.has_planned_frame_draw_data();
+
+            const char *status_label = "Idle";
+            const char *status_detail = "Add a maneuver node to start a planned solve.";
+            ImVec4 status_color = ImVec4(0.70f, 0.72f, 0.76f, 1.0f);
+
+            if (has_plan && player_track->dirty && !solver_pending && !derived_pending)
+            {
+                status_label = "Queued";
+                status_detail = "Plan preview is marked dirty and will rebuild on the next prediction tick.";
+                status_color = ImVec4(0.95f, 0.78f, 0.24f, 1.0f);
+            }
+            else if (solver_pending && has_chunk_overlay)
+            {
+                status_label = "Streaming";
+                status_detail = "Solved chunks are being published and rendered while the remaining horizon is processed.";
+                status_color = ImVec4(0.29f, 0.76f, 1.00f, 1.0f);
+            }
+            else if (solver_pending)
+            {
+                status_label = "Solving";
+                status_detail = "The solver is still building the planned trajectory.";
+                status_color = ImVec4(0.95f, 0.78f, 0.24f, 1.0f);
+            }
+            else if (derived_pending)
+            {
+                status_label = has_chunk_overlay ? "Finalizing" : "Preparing";
+                status_detail = has_chunk_overlay
+                                        ? "The final publish arrived; frame-space render data is still being merged."
+                                        : "Solver output is being converted into frame-space render data.";
+                status_color = ImVec4(0.98f, 0.66f, 0.26f, 1.0f);
+            }
+            else if (has_plan && has_ready_plan)
+            {
+                status_label = "Ready";
+                status_detail = "Planned trajectory solve is complete.";
+                status_color = ImVec4(0.33f, 0.86f, 0.46f, 1.0f);
+            }
+            else if (has_plan)
+            {
+                status_label = prediction_derived_status_label(player_track->derived_diagnostics.status);
+                status_detail = "The last planned solve did not publish final draw data yet.";
+                status_color = ImVec4(0.95f, 0.48f, 0.34f, 1.0f);
+            }
+
+            ImGui::TextColored(status_color, "Planner Status: %s", status_label);
+            ImGui::TextWrapped("%s", status_detail);
+
+            if (has_plan)
+            {
+                const std::size_t streamed_chunk_count =
+                        has_chunk_overlay ? player_track->preview_overlay.chunk_assembly.chunks.size() : 0u;
+                const double requested_window_s = std::max(
+                        prediction_required_window_s(*player_track, now_s, true),
+                        maneuver_plan_preview_window_s());
+                float progress = 1.0f;
+                if (solver_pending || derived_pending)
+                {
+                    if (has_chunk_overlay && requested_window_s > 0.0)
+                    {
+                        const double covered_window_s =
+                                std::max(0.0, player_track->preview_overlay.chunk_assembly.end_time_s() - now_s);
+                        progress = static_cast<float>(std::clamp(covered_window_s / requested_window_s, 0.0, 1.0));
+                    }
+                    else
+                    {
+                        const double pulse = 0.5 + 0.5 * std::sin(ImGui::GetTime() * 3.0);
+                        progress = static_cast<float>(0.20 + 0.60 * pulse);
+                    }
+                }
+
+                char progress_label[128];
+                if (solver_pending || derived_pending)
+                {
+                    std::snprintf(progress_label,
+                                  sizeof(progress_label),
+                                  has_chunk_overlay ? "%zu chunks streamed" : "Calculating preview...",
+                                  streamed_chunk_count);
+                }
+                else
+                {
+                    std::snprintf(progress_label, sizeof(progress_label), "Preview ready");
+                }
+                ImGui::ProgressBar(progress, ImVec2(ImGui::GetContentRegionAvail().x, 0.0f), progress_label);
+
+                ImGui::Text("Last publish: %s", prediction_publish_stage_label(player_track->drag_debug.last_publish_stage));
+                ImGui::SameLine();
+                ImGui::Text("Solver: %.1f ms", player_track->solver_ms_last);
+
+                if (has_chunk_overlay)
+                {
+                    ImGui::Text("Streamed chunks: %zu  Visible merged chunks: %u",
+                                streamed_chunk_count,
+                                player_track->drag_debug.merged_chunk_count_last);
+                }
+            }
+            else
+            {
+                ImGui::TextDisabled("Planner preview is idle until at least one node exists.");
+            }
+        }
+        else
+        {
+            ImGui::TextDisabled("Planner status unavailable without a player prediction track.");
         }
 
         // Gizmo basis toggle: large colored tab-style buttons.
