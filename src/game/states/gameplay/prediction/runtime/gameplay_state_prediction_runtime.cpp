@@ -130,10 +130,34 @@ namespace Game
                                                             const double now_s,
                                                             const bool with_maneuvers) const
     {
-        (void) track;
-        (void) now_s;
-        (void) with_maneuvers;
-        return 0.0;
+        if (!with_maneuvers || !prediction_subject_is_player(track.key) || _maneuver_state.nodes.empty())
+        {
+            return 0.0;
+        }
+
+        double last_future_node_time_s = -std::numeric_limits<double>::infinity();
+        for (const ManeuverNode &node : _maneuver_state.nodes)
+        {
+            if (!std::isfinite(node.time_s))
+            {
+                continue;
+            }
+
+            if (node.time_s >= now_s)
+            {
+                last_future_node_time_s = std::max(last_future_node_time_s, node.time_s);
+            }
+        }
+
+        if (!std::isfinite(last_future_node_time_s))
+        {
+            return 0.0;
+        }
+
+        // Request enough horizon to keep the preview stable across successive node executions.
+        // Rendering still anchors to the first future node, but the solve should already cover
+        // the final future node plus the requested preview tail.
+        return std::max(0.0, last_future_node_time_s - now_s) + maneuver_plan_preview_window_s();
     }
 
     double GameplayState::prediction_required_window_s(const PredictionTrackState &track,
@@ -141,7 +165,10 @@ namespace Game
                                                        const bool with_maneuvers) const
     {
         const double display_window_s = prediction_display_window_s(track.key, now_s, with_maneuvers);
-        return std::max(display_window_s, std::max(0.0, track.preview_anchor.request_window_s));
+        const double preview_exact_window_s = prediction_preview_exact_window_s(track, now_s, with_maneuvers);
+        return std::max({display_window_s,
+                         preview_exact_window_s,
+                         std::max(0.0, track.preview_anchor.request_window_s)});
     }
 
     double GameplayState::prediction_required_window_s(const PredictionSubjectKey key,
