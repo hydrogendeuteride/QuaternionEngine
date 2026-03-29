@@ -1,11 +1,10 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
+#include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include "core/device/images.h"
 #include "core/engine.h"
 #include "core/input/input_system.h"
-
-#include "game/orbit/orbit_prediction_math.h"
 
 #include "imgui.h"
 
@@ -21,29 +20,7 @@ namespace Game
 {
     namespace
     {
-        using OrbitPredictionMath::safe_length;
         using namespace ManeuverUtil;
-
-        bool finite3(const glm::dvec3 &v)
-        {
-            return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-        }
-
-        glm::dvec3 normalized_or(const glm::dvec3 &v, const glm::dvec3 &fallback)
-        {
-            const double len = OrbitPredictionMath::safe_length(v);
-            if (!(len > 0.0) || !std::isfinite(len))
-            {
-                return fallback;
-            }
-            return v / len;
-        }
-
-        void update_last_and_peak(double &last_value, double &peak_value, const double sample)
-        {
-            last_value = std::max(0.0, sample);
-            peak_value = std::max(peak_value, last_value);
-        }
 
         struct CameraRay
         {
@@ -407,46 +384,11 @@ namespace Game
                                               int &out_component,
                                               double &out_sign) const
     {
-        // Map a visible handle to both its world-space drag axis and the RTN component it edits.
-        out_axis_dir_world = glm::dvec3(0.0, 1.0, 0.0);
-        out_component = 1;
-        out_sign = 1.0;
-
-        switch (axis)
-        {
-            case ManeuverHandleAxis::TangentialPos:
-                out_axis_dir_world = node.basis_t_world;
-                out_component = 1;
-                out_sign = +1.0;
-                return true;
-            case ManeuverHandleAxis::TangentialNeg:
-                out_axis_dir_world = -node.basis_t_world;
-                out_component = 1;
-                out_sign = -1.0;
-                return true;
-            case ManeuverHandleAxis::RadialPos:
-                out_axis_dir_world = node.basis_r_world;
-                out_component = 0;
-                out_sign = +1.0;
-                return true;
-            case ManeuverHandleAxis::RadialNeg:
-                out_axis_dir_world = -node.basis_r_world;
-                out_component = 0;
-                out_sign = -1.0;
-                return true;
-            case ManeuverHandleAxis::NormalPos:
-                out_axis_dir_world = node.basis_n_world;
-                out_component = 2;
-                out_sign = +1.0;
-                return true;
-            case ManeuverHandleAxis::NormalNeg:
-                out_axis_dir_world = -node.basis_n_world;
-                out_component = 2;
-                out_sign = -1.0;
-                return true;
-            default:
-                return false;
-        }
+        const AxisResolveResult r = resolve_axis(axis, node.basis_r_world, node.basis_t_world, node.basis_n_world);
+        out_axis_dir_world = r.axis_dir_world;
+        out_component = r.component;
+        out_sign = r.sign;
+        return r.valid;
     }
 
     bool GameplayState::begin_maneuver_axis_drag(GameStateContext &ctx,
@@ -579,45 +521,19 @@ namespace Game
         }
         _maneuver_gizmo_interaction.drag_last_sample_mouse_window_pos = mouse_pos_window;
 
-        glm::dvec3 axis_dir_world(0.0, 1.0, 0.0);
-        int component = 1;
-        double sign = 1.0;
-        switch (_maneuver_gizmo_interaction.axis)
+        const AxisResolveResult axis_result = resolve_axis(
+                _maneuver_gizmo_interaction.axis,
+                _maneuver_gizmo_interaction.drag_basis_r_world,
+                _maneuver_gizmo_interaction.drag_basis_t_world,
+                _maneuver_gizmo_interaction.drag_basis_n_world);
+        if (!axis_result.valid)
         {
-            case ManeuverHandleAxis::TangentialPos:
-                axis_dir_world = _maneuver_gizmo_interaction.drag_basis_t_world;
-                component = 1;
-                sign = +1.0;
-                break;
-            case ManeuverHandleAxis::TangentialNeg:
-                axis_dir_world = -_maneuver_gizmo_interaction.drag_basis_t_world;
-                component = 1;
-                sign = -1.0;
-                break;
-            case ManeuverHandleAxis::RadialPos:
-                axis_dir_world = _maneuver_gizmo_interaction.drag_basis_r_world;
-                component = 0;
-                sign = +1.0;
-                break;
-            case ManeuverHandleAxis::RadialNeg:
-                axis_dir_world = -_maneuver_gizmo_interaction.drag_basis_r_world;
-                component = 0;
-                sign = -1.0;
-                break;
-            case ManeuverHandleAxis::NormalPos:
-                axis_dir_world = _maneuver_gizmo_interaction.drag_basis_n_world;
-                component = 2;
-                sign = +1.0;
-                break;
-            case ManeuverHandleAxis::NormalNeg:
-                axis_dir_world = -_maneuver_gizmo_interaction.drag_basis_n_world;
-                component = 2;
-                sign = -1.0;
-                break;
-            default:
-                _maneuver_gizmo_interaction = {};
-                return;
+            _maneuver_gizmo_interaction = {};
+            return;
         }
+        const glm::dvec3 &axis_dir_world = axis_result.axis_dir_world;
+        const int component = axis_result.component;
+        const double sign = axis_result.sign;
 
         CameraRay ray{};
         if (!compute_camera_ray(ctx, mouse_pos_window, ray))
@@ -625,20 +541,10 @@ namespace Game
             return;
         }
 
-        const auto find_drag_snapshot = [&](const int node_id) -> const ManeuverNodeDisplaySnapshot * {
-            for (const ManeuverNodeDisplaySnapshot &snapshot : _maneuver_gizmo_interaction.drag_display_snapshots)
-            {
-                if (snapshot.node_id == node_id)
-                {
-                    return &snapshot;
-                }
-            }
-            return nullptr;
-        };
-
         double current_t = 0.0;
         WorldVec3 axis_origin_world = node.position_world;
-        if (const ManeuverNodeDisplaySnapshot *drag_snapshot = find_drag_snapshot(node.id))
+        if (const ManeuverNodeDisplaySnapshot *drag_snapshot =
+                    find_display_snapshot(_maneuver_gizmo_interaction.drag_display_snapshots, node.id))
         {
             axis_origin_world = drag_snapshot->position_world;
         }
@@ -713,7 +619,7 @@ namespace Game
             debug.drag_active = true;
             debug.last_drag_update_tp = drag_apply_end_tp;
             ++debug.drag_update_count;
-            update_last_and_peak(debug.drag_apply_ms_last,
+            PredictionRuntimeDetail::update_last_and_peak(debug.drag_apply_ms_last,
                                  debug.drag_apply_ms_peak,
                                  std::chrono::duration<double, std::milli>(drag_apply_end_tp - drag_apply_start_tp).count());
         }

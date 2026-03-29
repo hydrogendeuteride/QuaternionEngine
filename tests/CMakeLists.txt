@@ -6,6 +6,23 @@ if(NOT TARGET gtest)
   )
 endif()
 
+set(ORBIT_PREDICTION_POLICY_SOURCES
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_policy_integrator.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_policy_chunking.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_policy_profile.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_policy_adaptive.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_policy_ephemeris.cpp"
+)
+
+set(ORBIT_PREDICTION_SERVICE_SOURCES
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_service.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_compute.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_planned.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_trajectory.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_sampling.cpp"
+  ${ORBIT_PREDICTION_POLICY_SOURCES}
+)
+
 add_executable(scenario_loader_tests
   scenario_loader_tests.cpp
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/scenario/scenario_loader.cpp"
@@ -65,7 +82,7 @@ add_test(NAME orbit_helpers_tests COMMAND orbit_helpers_tests)
 add_executable(orbit_prediction_planner_tests
   orbit_prediction_planner_tests.cpp
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_math.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_policy.cpp"
+  ${ORBIT_PREDICTION_POLICY_SOURCES}
 )
 
 set_property(TARGET orbit_prediction_planner_tests PROPERTY CXX_STANDARD 20)
@@ -141,10 +158,7 @@ add_executable(gameplay_time_warp_transition_tests
   "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_render.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_pick.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_plot_util.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_service.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_trajectory.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_sampling.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_policy.cpp"
+  ${ORBIT_PREDICTION_SERVICE_SOURCES}
 )
 
 set_property(TARGET gameplay_time_warp_transition_tests PROPERTY CXX_STANDARD 20)
@@ -177,10 +191,7 @@ add_executable(gameplay_prediction_maneuver_tests
   "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_render.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_pick.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_plot_util.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_service.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_trajectory.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_sampling.cpp"
-  "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_policy.cpp"
+  ${ORBIT_PREDICTION_SERVICE_SOURCES}
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_sim.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/gameplay_state_prediction.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime.cpp"

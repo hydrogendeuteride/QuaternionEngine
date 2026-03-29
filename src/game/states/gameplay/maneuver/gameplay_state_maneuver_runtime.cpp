@@ -1,7 +1,5 @@
 #include "game/states/gameplay/gameplay_state.h"
-
-#include "game/orbit/orbit_prediction_math.h"
-#include "orbitsim/coordinate_frames.hpp"
+#include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 
 #include <cmath>
 
@@ -9,19 +7,7 @@ namespace Game
 {
     namespace
     {
-        using OrbitPredictionMath::safe_length;
-
-        bool finite3(const glm::dvec3 &v)
-        {
-            return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-        }
-
-        orbitsim::RtnFrame compute_maneuver_frame(const glm::dvec3 &r_rel_m,
-                                                  const glm::dvec3 &v_rel_mps)
-        {
-            return orbitsim::compute_rtn_frame(orbitsim::Vec3{r_rel_m.x, r_rel_m.y, r_rel_m.z},
-                                               orbitsim::Vec3{v_rel_mps.x, v_rel_mps.y, v_rel_mps.z});
-        }
+        using namespace ManeuverUtil;
     } // namespace
 
     void GameplayState::update_maneuver_nodes_time_warp(GameStateContext &ctx, const float fixed_dt)
