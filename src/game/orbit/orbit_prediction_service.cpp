@@ -1036,93 +1036,6 @@ namespace Game
                 Status status{Status::Success};
             };
 
-            const auto resolve_anchor_state = [&](const double base_time_s,
-                                                  const orbitsim::State &base_state,
-                                                  const std::vector<ManeuverImpulse> &source_impulses,
-                                                  const double anchor_time_s,
-                                                  orbitsim::State &out_anchor_state) -> bool {
-                out_anchor_state = base_state;
-                if (!std::isfinite(base_time_s) || !std::isfinite(anchor_time_s) || !finite_state(base_state))
-                {
-                    return false;
-                }
-
-                constexpr double kAnchorTimeEpsilonS = 1.0e-9;
-                if (anchor_time_s < (base_time_s - kAnchorTimeEpsilonS))
-                {
-                    return false;
-                }
-
-                orbitsim::Spacecraft preview_spacecraft{};
-                preview_spacecraft.id = ship_h.id;
-                preview_spacecraft.state = base_state;
-                preview_spacecraft.dry_mass_kg = 1.0;
-                double preview_time_s = base_time_s;
-                const orbitsim::SpacecraftStateLookup empty_lookup{};
-
-                for (const ManeuverImpulse &src : source_impulses)
-                {
-                    if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rtn_mps))
-                    {
-                        continue;
-                    }
-
-                    if ((src.t_s + kAnchorTimeEpsilonS) >= anchor_time_s)
-                    {
-                        break;
-                    }
-                    if (src.t_s < (preview_time_s - kAnchorTimeEpsilonS))
-                    {
-                        continue;
-                    }
-
-                    if (src.t_s > preview_time_s)
-                    {
-                        preview_spacecraft = orbitsim::detail::propagate_spacecraft_in_ephemeris(
-                                preview_spacecraft,
-                                out.massive_bodies,
-                                eph,
-                                orbitsim::ManeuverPlan{},
-                                sim.config().gravitational_constant,
-                                sim.config().softening_length_m,
-                                sim.config().spacecraft_integrator,
-                                preview_time_s,
-                                src.t_s - preview_time_s,
-                                empty_lookup);
-                        preview_time_s = src.t_s;
-                    }
-
-                        if (!apply_maneuver_impulse_to_spacecraft(preview_spacecraft,
-                                                                  src,
-                                                                  out.massive_bodies,
-                                                                  eph,
-                                                                  sim.config().softening_length_m,
-                                                                  nullptr,
-                                                                  nullptr))
-                        {
-                            return false;
-                        }
-                }
-
-                if (anchor_time_s > preview_time_s)
-                {
-                    preview_spacecraft = orbitsim::detail::propagate_spacecraft_in_ephemeris(
-                            preview_spacecraft,
-                            out.massive_bodies,
-                            eph,
-                            orbitsim::ManeuverPlan{},
-                            sim.config().gravitational_constant,
-                            sim.config().softening_length_m,
-                            sim.config().spacecraft_integrator,
-                            preview_time_s,
-                            anchor_time_s - preview_time_s,
-                            empty_lookup);
-                }
-
-                out_anchor_state = preview_spacecraft.state;
-                return finite_state(out_anchor_state);
-            };
-
             const auto planned_chunk_cache_key_matches =
                     [](const OrbitPredictionService::PlannedChunkCacheKey &a,
                        const OrbitPredictionService::PlannedChunkCacheKey &b) {
@@ -1554,7 +1467,6 @@ namespace Game
                             OrbitPredictionService::Request chunk_request = planner_request;
                             chunk_request.sim_time_s = subchunk.t0_s;
                             chunk_request.future_window_s = extended_t1_s - subchunk.t0_s;
-                            chunk_request.preview_patch = {};
                             chunk_request.maneuver_impulses = chunk_impulses;
 
                             const orbitsim::AdaptiveSegmentOptions chunk_segment_opt =
@@ -2100,12 +2012,8 @@ namespace Game
                                 return true;
                             }
 
-                            const PublishStage effective_publish_stage =
-                                    (generation_complete_on_last_publish && stage_complete)
-                                            ? PublishStage::PreviewFinalizing
-                                            : publish_stage;
-                            const bool generation_complete =
-                                    generation_complete_on_last_publish && stage_complete;
+                            const PublishStage effective_publish_stage = publish_stage;
+                            const bool generation_complete = generation_complete_on_last_publish && stage_complete;
                             if (!publish_chunk_batch(streamed_prefix,
                                                      std::move(published_batch),
                                                      effective_publish_stage,
@@ -2119,147 +2027,6 @@ namespace Game
                             return true;
                         });
             };
-
-            const bool use_preview_patch = request_uses_preview_patch(request);
-            if (use_preview_patch)
-            {
-                const double full_window_s = preview_patch_remaining_window_s(request);
-                const double streaming_window_s = preview_streaming_window_s(request);
-                if (full_window_s > 0.0)
-                {
-                    orbitsim::State preview_patch_anchor_state = request.preview_patch.anchor_state_inertial;
-                    const bool have_preview_patch_anchor_state =
-                            request.preview_patch.anchor_state_valid &&
-                            finite_state(preview_patch_anchor_state);
-                    if (!have_preview_patch_anchor_state &&
-                        !resolve_anchor_state(request.sim_time_s,
-                                              ship_sc.state,
-                                              maneuver_impulses,
-                                              request.preview_patch.anchor_time_s,
-                                              preview_patch_anchor_state))
-                    {
-                        fail(Status::InvalidInput);
-                        return;
-                    }
-
-                    std::vector<ManeuverImpulse> patch_maneuver_impulses;
-                    patch_maneuver_impulses.reserve(maneuver_impulses.size());
-                    constexpr double kPatchAnchorTimeEpsilonS = 1.0e-9;
-                    for (const ManeuverImpulse &src : maneuver_impulses)
-                    {
-                        if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rtn_mps))
-                        {
-                            continue;
-                        }
-                        if ((src.t_s + kPatchAnchorTimeEpsilonS) < request.preview_patch.anchor_time_s)
-                        {
-                            continue;
-                        }
-                        patch_maneuver_impulses.push_back(src);
-                    }
-
-                    OrbitPredictionService::Request planner_request = request;
-                    planner_request.sim_time_s = request.preview_patch.anchor_time_s;
-                    planner_request.future_window_s = full_window_s;
-                    planner_request.preview_patch.active = true;
-                    planner_request.preview_patch.anchor_state_valid = true;
-                    planner_request.preview_patch.anchor_time_s = planner_request.sim_time_s;
-                    planner_request.preview_patch.anchor_state_inertial = preview_patch_anchor_state;
-                    planner_request.maneuver_impulses = patch_maneuver_impulses;
-
-                    const OrbitPredictionService::PredictionSolvePlan solve_plan =
-                            build_prediction_solve_plan(planner_request);
-                    if (!solve_plan.valid)
-                    {
-                        fail(Status::InvalidInput);
-                        return;
-                    }
-
-                    const double streaming_end_s =
-                            planner_request.sim_time_s + (streaming_window_s > 0.0 ? streaming_window_s : full_window_s);
-                    std::size_t streaming_chunk_end_index = 0u;
-                    while (streaming_chunk_end_index < solve_plan.chunks.size() &&
-                           solve_plan.chunks[streaming_chunk_end_index].t0_s <
-                                   (streaming_end_s - kContinuityMinTimeEpsilonS))
-                    {
-                        ++streaming_chunk_end_index;
-                    }
-                    if (streaming_chunk_end_index == 0u)
-                    {
-                        fail(Status::InvalidInput);
-                        return;
-                    }
-
-                    const bool streaming_covers_full_generation =
-                            full_window_s <= (streaming_window_s + kContinuityMinTimeEpsilonS);
-                    PlannedSolveOutput streaming_prefix{};
-                    const PlannedSolveRangeSummary streaming_summary =
-                            stream_chunk_stage(planner_request,
-                                               solve_plan,
-                                               0u,
-                                               streaming_chunk_end_index,
-                                               preview_patch_anchor_state,
-                                               streaming_covers_full_generation
-                                                       ? ChunkQualityState::Final
-                                                       : ChunkQualityState::PreviewPatch,
-                                               PublishStage::PreviewStreaming,
-                                               streaming_covers_full_generation,
-                                               streaming_prefix);
-                    if (streaming_summary.status != Status::Success)
-                    {
-                        if (streaming_summary.status == Status::Cancelled)
-                        {
-                            return;
-                        }
-                        fail(streaming_summary.status);
-                        return;
-                    }
-
-                    if (cancel_requested() || streaming_covers_full_generation)
-                    {
-                        return;
-                    }
-
-                    if (streaming_chunk_end_index >= solve_plan.chunks.size())
-                    {
-                        return;
-                    }
-
-                    const double tail_start_time_s = solve_plan.chunks[streaming_chunk_end_index].t0_s;
-                    const double streaming_actual_end_s =
-                            prediction_segment_end_time(streaming_prefix.segments.back());
-                    if (std::abs(streaming_actual_end_s - tail_start_time_s) >
-                            continuity_time_epsilon_s(tail_start_time_s) ||
-                        !finite_state(streaming_summary.end_state))
-                    {
-                        fail(Status::ContinuityFailed);
-                        return;
-                    }
-                    const orbitsim::State tail_start_state = streaming_summary.end_state;
-
-                    PlannedSolveOutput final_streamed_prefix{};
-                    const PlannedSolveRangeSummary final_summary =
-                            stream_chunk_stage(planner_request,
-                                               solve_plan,
-                                               streaming_chunk_end_index,
-                                               solve_plan.chunks.size(),
-                                               tail_start_state,
-                                               ChunkQualityState::Final,
-                                               PublishStage::PreviewFinalizing,
-                                               true,
-                                               final_streamed_prefix);
-                    if (final_summary.status != Status::Success)
-                    {
-                        if (final_summary.status == Status::Cancelled)
-                        {
-                            return;
-                        }
-                        fail(final_summary.status);
-                        return;
-                    }
-                    return;
-                }
-            }
 
             const OrbitPredictionService::PredictionSolvePlan solve_plan = build_prediction_solve_plan(request);
             if (!solve_plan.valid)

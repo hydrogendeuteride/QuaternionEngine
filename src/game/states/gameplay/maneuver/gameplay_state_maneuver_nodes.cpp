@@ -380,35 +380,21 @@ namespace Game
         const OrbitPredictionCache *effective_prediction_cache = player_prediction_cache();
         const OrbitPredictionCache *stable_prediction_cache =
                 (player_track && player_track->cache.valid) ? &player_track->cache : effective_prediction_cache;
-        const bool suppress_stale_preview =
-                player_track &&
-                _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis &&
-                (player_track->preview_state == PredictionPreviewRuntimeState::EnterDrag ||
-                 player_track->preview_state == PredictionPreviewRuntimeState::DragPreviewPending) &&
-                !player_track->preview_overlay.valid();
         const bool interaction_idle =
                 _maneuver_gizmo_interaction.state != ManeuverGizmoInteraction::State::DragAxis;
         const bool hold_cached_release_state =
                 player_track &&
                 interaction_idle &&
-                (player_track->preview_state == PredictionPreviewRuntimeState::DragPreviewPending ||
-                 player_track->preview_state == PredictionPreviewRuntimeState::PreviewStreaming ||
-                 player_track->preview_state == PredictionPreviewRuntimeState::AwaitFullRefine ||
-                 player_track->request_pending ||
-                 player_track->derived_request_pending ||
-                 _maneuver_plan_live_preview_active);
+                (player_track->request_pending || player_track->derived_request_pending);
         const PredictionChunkAssembly *preview_chunk_assembly =
-                (!suppress_stale_preview &&
-                 player_track &&
+                (player_track &&
                  player_track->preview_overlay.chunk_assembly.valid &&
                  !player_track->preview_overlay.chunk_assembly.chunks.empty())
                         ? &player_track->preview_overlay.chunk_assembly
                         : nullptr;
-        const OrbitPredictionCache *display_prediction_cache =
-                (suppress_stale_preview && stable_prediction_cache) ? stable_prediction_cache : effective_prediction_cache;
+        const OrbitPredictionCache *display_prediction_cache = effective_prediction_cache;
         const OrbitPredictionCache *preview_prediction_cache =
-                (!suppress_stale_preview &&
-                 player_track &&
+                (player_track &&
                  player_track->preview_overlay.cache.valid)
                         ? &player_track->preview_overlay.cache
                         : nullptr;
@@ -1099,7 +1085,6 @@ namespace Game
             }
 
             const bool freeze_active_drag_snapshot =
-                    suppress_stale_preview &&
                     drag_display_snapshots_available &&
                     _maneuver_gizmo_interaction.node_id == node.id;
             const bool freeze_passive_drag_snapshot =

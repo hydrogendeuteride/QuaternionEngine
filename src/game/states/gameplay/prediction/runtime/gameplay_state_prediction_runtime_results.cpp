@@ -427,8 +427,7 @@ namespace Game
         const bool keep_dirty_for_followup = track->invalidated_while_pending;
         track->invalidated_while_pending = false;
 
-        const bool preview_result = result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
-        const bool overlay_result = preview_result || !result.generation_complete;
+        const bool overlay_result = !result.generation_complete;
         const bool preview_chunk_authoritative = overlay_result && result.chunk_assembly.valid;
 
         OrbitPredictionCache cache_to_publish{};
@@ -462,29 +461,6 @@ namespace Game
                 have_cache_to_publish = cache_to_publish.valid;
             }
 
-            if (have_cache_to_publish &&
-                preview_result &&
-                !preview_chunk_authoritative)
-            {
-                const OrbitPredictionCache empty_preview_merge_base{};
-                const bool can_merge_with_overlay =
-                        track->preview_overlay.cache.valid &&
-                        track->preview_overlay.cache.generation_id == result.generation_id &&
-                        cache_frame_version_matches(track->preview_overlay.cache, cache_to_publish);
-                const bool can_merge_with_stable =
-                        track->cache.valid &&
-                        cache_frame_version_matches(track->cache, cache_to_publish);
-                const OrbitPredictionCache &preview_merge_base =
-                        can_merge_with_overlay
-                                ? track->preview_overlay.cache
-                                : (can_merge_with_stable ? track->cache : empty_preview_merge_base);
-                const auto preview_merge_start_tp = PredictionDragDebugTelemetry::Clock::now();
-                cache_to_publish = merge_preview_planned_prefix_cache(preview_merge_base, std::move(cache_to_publish));
-                preview_merge_ms = PredictionRuntimeDetail::elapsed_ms(
-                        preview_merge_start_tp,
-                        PredictionDragDebugTelemetry::Clock::now());
-                have_cache_to_publish = cache_to_publish.valid;
-            }
         }
 
         track->derived_diagnostics = diagnostics_to_publish;
@@ -568,63 +544,18 @@ namespace Game
                                                 ? static_cast<uint32_t>(track->preview_overlay.chunk_assembly.chunks.size())
                                                 : 0u;
 
-        if (preview_result)
-        {
-            track->preview_state = PredictionPreviewRuntimeState::PreviewStreaming;
-        }
-        else if (track->preview_state != PredictionPreviewRuntimeState::Idle)
+        if (track->preview_state != PredictionPreviewRuntimeState::Idle)
         {
             track->preview_state = PredictionPreviewRuntimeState::Idle;
             track->preview_anchor.clear();
             track->preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
         }
 
-        const bool maneuver_preview_subject =
-                prediction_subject_supports_maneuvers(track->key) &&
-                _maneuver_nodes_enabled &&
-                !_maneuver_state.nodes.empty();
-        const bool interaction_idle =
-                !PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
-        const bool schedule_full_refine =
-                preview_result &&
-                result.generation_complete &&
-                maneuver_preview_subject &&
-                _maneuver_plan_live_preview_active &&
-                interaction_idle &&
-                !keep_dirty_for_followup;
-        track->dirty = keep_dirty_for_followup || schedule_full_refine;
-
-        const bool freeze_maneuver_plan =
-                maneuver_preview_subject &&
-                _maneuver_plan_live_preview_active &&
-                interaction_idle &&
-                !preview_result &&
-                !keep_dirty_for_followup;
-        if (schedule_full_refine)
-        {
-            // Publish a cheap preview first, then immediately fall through to a full rebuild.
-            track->preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
-            _maneuver_plan_live_preview_active = false;
-        }
-        if (freeze_maneuver_plan)
-        {
-            track->preview_state = PredictionPreviewRuntimeState::Idle;
-            track->preview_anchor.clear();
-            track->preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
-            _maneuver_plan_live_preview_active = false;
-        }
+        track->dirty = keep_dirty_for_followup;
 
         const auto derived_apply_end_tp = PredictionDragDebugTelemetry::Clock::now();
         record_derived_apply_debug(debug, result.generation_id, derived_apply_start_tp, derived_apply_end_tp);
-        if (preview_result)
-        {
-            debug.last_preview_publish_tp = derived_apply_end_tp;
-            ++debug.preview_publish_count;
-        }
-        else
-        {
-            debug.last_full_publish_tp = derived_apply_end_tp;
-            ++debug.full_publish_count;
-        }
+        debug.last_full_publish_tp = derived_apply_end_tp;
+        ++debug.full_publish_count;
     }
 } // namespace Game

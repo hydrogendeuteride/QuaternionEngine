@@ -37,12 +37,6 @@ namespace Game
     {
         if (request_needs_control_sensitive_prediction(request))
         {
-            if (request_uses_fast_preview(request))
-            {
-                return std::min(OrbitPredictionTuning::kPredictionIntegratorMaxStepS,
-                                OrbitPredictionTuning::kPredictionIntegratorMaxStepPreviewS);
-            }
-
             return OrbitPredictionTuning::kPredictionIntegratorMaxStepControlledS;
         }
 
@@ -203,18 +197,6 @@ namespace Game
                                                                    const double chunk_t0_s,
                                                                    const double chunk_t1_s)
         {
-            if (request_uses_preview_patch(request))
-            {
-                const double preview_t0_s = request.preview_patch.anchor_time_s;
-                const double preview_t1_s = preview_t0_s + preview_streaming_window_s(request);
-                if (preview_t1_s > preview_t0_s &&
-                    chunk_t0_s < preview_t1_s &&
-                    chunk_t1_s > preview_t0_s)
-                {
-                    return PredictionProfileId::Exact;
-                }
-            }
-
             const double elapsed_s = std::max(0.0, chunk_t0_s - request.sim_time_s);
             if (elapsed_s < OrbitPredictionTuning::kPredictionChunkBandTransferEndS)
             {
@@ -230,9 +212,7 @@ namespace Game
             {
                 return 0u;
             }
-            if (planner_boundary_has_flag(boundary_flags, PredictionChunkBoundaryFlags::Maneuver) ||
-                planner_boundary_has_flag(boundary_flags, PredictionChunkBoundaryFlags::PreviewAnchor) ||
-                planner_boundary_has_flag(boundary_flags, PredictionChunkBoundaryFlags::PreviewChunk))
+            if (planner_boundary_has_flag(boundary_flags, PredictionChunkBoundaryFlags::Maneuver))
             {
                 return 1u;
             }
@@ -503,14 +483,6 @@ namespace Game
                 ramp.vel_far_mps *= 0.25;
             }
 
-            if (request_uses_fast_preview(request))
-            {
-                ramp.pos_near_m *= OrbitPredictionTuning::kFastPreviewAdaptiveSegmentToleranceScale;
-                ramp.pos_far_m *= OrbitPredictionTuning::kFastPreviewAdaptiveSegmentToleranceScale;
-                ramp.vel_near_mps *= OrbitPredictionTuning::kFastPreviewAdaptiveSegmentToleranceScale;
-                ramp.vel_far_mps *= OrbitPredictionTuning::kFastPreviewAdaptiveSegmentToleranceScale;
-            }
-
             return ramp;
         }
 
@@ -538,14 +510,6 @@ namespace Game
                 ramp.pos_far_m *= 0.5;
                 ramp.vel_near_mps *= 0.5;
                 ramp.vel_far_mps *= 0.5;
-            }
-
-            if (request_uses_fast_preview(request))
-            {
-                ramp.pos_near_m *= OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisToleranceScale;
-                ramp.pos_far_m *= OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisToleranceScale;
-                ramp.vel_near_mps *= OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisToleranceScale;
-                ramp.vel_far_mps *= OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisToleranceScale;
             }
 
             return ramp;
@@ -658,40 +622,6 @@ namespace Game
                                     request_t1_s,
                                     impulse.t_s,
                                     PredictionChunkBoundaryFlags::Maneuver);
-        }
-
-        if (request_uses_preview_patch(request))
-        {
-            append_planner_boundary(boundaries,
-                                    request_t0_s,
-                                    request_t1_s,
-                                    request.preview_patch.anchor_time_s,
-                                    PredictionChunkBoundaryFlags::PreviewAnchor);
-
-            const double preview_exact_span_s = preview_exact_window_s(request);
-            const double preview_visual_span_s = preview_visual_window_s(request);
-            if (preview_visual_span_s > 0.0)
-            {
-                append_planner_boundary(boundaries,
-                                        request_t0_s,
-                                        request_t1_s,
-                                        request.preview_patch.anchor_time_s + preview_visual_span_s,
-                                        PredictionChunkBoundaryFlags::PreviewChunk);
-            }
-            const double preview_chunk_span_s = preview_exact_span_s;
-            if (preview_chunk_span_s > 0.0)
-            {
-                append_planner_boundary(boundaries,
-                                        request_t0_s,
-                                        request_t1_s,
-                                        request.preview_patch.anchor_time_s + preview_chunk_span_s,
-                                        PredictionChunkBoundaryFlags::PreviewChunk);
-                append_planner_boundary(boundaries,
-                                        request_t0_s,
-                                        request_t1_s,
-                                        request.preview_patch.anchor_time_s + preview_chunk_span_s * 2.0,
-                                        PredictionChunkBoundaryFlags::PreviewChunk);
-            }
         }
 
         append_time_band_boundaries(boundaries,
@@ -923,52 +853,35 @@ namespace Game
         const double elapsed_s = std::max(0.0, chunk.t0_s - request.sim_time_s);
         const bool deep_tail_window = elapsed_s >= OrbitPredictionTuning::kPredictionChunkBandCruiseEndS;
 
-        const bool fast_preview = request_uses_fast_preview(request);
-        const bool preview_sensitive =
-                chunk.profile_id == PredictionProfileId::Exact ||
-                chunk_has_any_boundary(chunk,
-                                       {PredictionChunkBoundaryFlags::PreviewAnchor,
-                                        PredictionChunkBoundaryFlags::PreviewChunk});
+        const bool preview_sensitive = chunk.profile_id == PredictionProfileId::Exact;
         const bool maneuver_sensitive =
                 chunk_has_any_boundary(chunk, {PredictionChunkBoundaryFlags::Maneuver});
         const bool control_sensitive =
                 request_needs_control_sensitive_prediction(request) || preview_sensitive || maneuver_sensitive;
 
         const double base_segment_min_dt_s = control_sensitive
-                                                     ? (fast_preview
-                                                                ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentMinDtS
-                                                                : OrbitPredictionTuning::kAdaptiveSegmentMinDtControlledS)
+                                                     ? OrbitPredictionTuning::kAdaptiveSegmentMinDtControlledS
                                                      : OrbitPredictionTuning::kAdaptiveSegmentMinDtS;
         double base_segment_max_dt_s = OrbitPredictionTuning::kAdaptiveSegmentMaxDtS;
         if (control_sensitive)
         {
             base_segment_max_dt_s = std::min(base_segment_max_dt_s,
-                                             fast_preview
-                                                     ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentMaxDtS
-                                                     : OrbitPredictionTuning::kAdaptiveSegmentMaxDtControlledS);
+                                             OrbitPredictionTuning::kAdaptiveSegmentMaxDtControlledS);
         }
         const double base_lookup_max_dt_s = control_sensitive
-                                                    ? (fast_preview
-                                                               ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentLookupMaxDtS
-                                                               : OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtControlledS)
+                                                    ? OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtControlledS
                                                     : OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtS;
         const std::size_t base_segment_soft_cap =
-                fast_preview
-                        ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentSoftMaxSegments
-                        : OrbitPredictionTuning::kAdaptiveSegmentSoftMaxSegmentsNormal;
+                OrbitPredictionTuning::kAdaptiveSegmentSoftMaxSegmentsNormal;
 
         const double base_ephemeris_min_dt_s = control_sensitive
-                                                       ? (fast_preview
-                                                                  ? OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisMinDtS
-                                                                  : OrbitPredictionTuning::kAdaptiveEphemerisMinDtControlledS)
+                                                       ? OrbitPredictionTuning::kAdaptiveEphemerisMinDtControlledS
                                                        : OrbitPredictionTuning::kAdaptiveEphemerisMinDtS;
         double base_ephemeris_max_dt_s = OrbitPredictionTuning::kAdaptiveEphemerisMaxDtS;
         if (control_sensitive)
         {
             base_ephemeris_max_dt_s = std::min(base_ephemeris_max_dt_s,
-                                               fast_preview
-                                                       ? OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisMaxDtS
-                                                       : OrbitPredictionTuning::kAdaptiveEphemerisMaxDtControlledS);
+                                               OrbitPredictionTuning::kAdaptiveEphemerisMaxDtControlledS);
         }
         if (request.lagrange_sensitive)
         {
@@ -976,9 +889,7 @@ namespace Game
                                                OrbitPredictionTuning::kLagrangeEphemerisMaxDtS);
         }
         const std::size_t base_ephemeris_soft_cap =
-                fast_preview
-                        ? OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisSoftMaxSegments
-                        : OrbitPredictionTuning::kAdaptiveEphemerisSoftMaxSegments;
+                OrbitPredictionTuning::kAdaptiveEphemerisSoftMaxSegments;
 
         double segment_dt_scale = 1.0;
         double lookup_dt_scale = 1.0;
@@ -1077,9 +988,7 @@ namespace Game
         const std::size_t base_budget = prediction_sample_budget(request, segment_count);
         const double scaled_budget =
                 std::ceil(static_cast<double>(base_budget) * std::max(0.05, def.output_sample_density_scale));
-        const std::size_t max_budget = request_uses_fast_preview(request)
-                                               ? OrbitPredictionTuning::kFastPreviewTrajectorySampleCap
-                                               : 4'000u;
+        const std::size_t max_budget = 4'000u;
         return std::clamp<std::size_t>(static_cast<std::size_t>(std::max(2.0, scaled_budget)), 2u, max_budget);
     }
 
@@ -1096,14 +1005,9 @@ namespace Game
 
         const bool controlled = request_needs_control_sensitive_prediction(request);
 
-        const std::size_t soft_cap =
-                request_uses_fast_preview(request)
-                    ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentSoftMaxSegments
-                    : OrbitPredictionTuning::kAdaptiveSegmentSoftMaxSegmentsNormal;
+        const std::size_t soft_cap = OrbitPredictionTuning::kAdaptiveSegmentSoftMaxSegmentsNormal;
         std::size_t hard_cap =
-                request_uses_fast_preview(request)
-                    ? std::max<std::size_t>(soft_cap * 2u, soft_cap)
-                    : OrbitPredictionTuning::kAdaptiveSegmentHardMaxSegmentsNormal;
+                OrbitPredictionTuning::kAdaptiveSegmentHardMaxSegmentsNormal;
         if (sampling_spec.horizon_s > 0.0)
         {
             const auto horizon_scaled = static_cast<std::size_t>(
@@ -1115,22 +1019,16 @@ namespace Game
         if (controlled)
         {
             max_dt_s = std::min(max_dt_s,
-                                request_uses_fast_preview(request)
-                                    ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentMaxDtS
-                                    : OrbitPredictionTuning::kAdaptiveSegmentMaxDtControlledS);
+                                OrbitPredictionTuning::kAdaptiveSegmentMaxDtControlledS);
         }
 
         const double lookup_max_dt_s = controlled
-                                               ? (request_uses_fast_preview(request)
-                                                      ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentLookupMaxDtS
-                                                      : OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtControlledS)
+                                               ? OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtControlledS
                                                : OrbitPredictionTuning::kAdaptiveSegmentLookupMaxDtS;
 
         out.duration_s = sampling_spec.horizon_s;
         out.min_dt_s = request_needs_control_sensitive_prediction(request)
-                               ? (request_uses_fast_preview(request)
-                                      ? OrbitPredictionTuning::kFastPreviewAdaptiveSegmentMinDtS
-                                      : OrbitPredictionTuning::kAdaptiveSegmentMinDtControlledS)
+                               ? OrbitPredictionTuning::kAdaptiveSegmentMinDtControlledS
                                : OrbitPredictionTuning::kAdaptiveSegmentMinDtS;
         out.max_dt_s = std::max(out.min_dt_s, max_dt_s);
         out.lookup_max_dt_s = std::clamp(lookup_max_dt_s, out.min_dt_s, out.max_dt_s);
@@ -1191,28 +1089,21 @@ namespace Game
 
         const bool controlled = request_needs_control_sensitive_prediction(request);
 
-        const std::size_t soft_cap =
-                request_uses_fast_preview(request)
-                    ? OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisSoftMaxSegments
-                    : OrbitPredictionTuning::kAdaptiveEphemerisSoftMaxSegments;
+        const std::size_t soft_cap = OrbitPredictionTuning::kAdaptiveEphemerisSoftMaxSegments;
         const std::size_t hard_cap = std::max<std::size_t>(
                 request.lagrange_sensitive ? OrbitPredictionTuning::kLagrangeEphemerisMaxSamples : soft_cap,
                 soft_cap);
 
         out.duration_s = sampling_spec.horizon_s;
         out.min_dt_s = controlled
-                               ? (request_uses_fast_preview(request)
-                                      ? OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisMinDtS
-                                      : OrbitPredictionTuning::kAdaptiveEphemerisMinDtControlledS)
+                               ? OrbitPredictionTuning::kAdaptiveEphemerisMinDtControlledS
                                : OrbitPredictionTuning::kAdaptiveEphemerisMinDtS;
 
         double max_dt_s = OrbitPredictionTuning::kAdaptiveEphemerisMaxDtS;
         if (controlled)
         {
             max_dt_s = std::min(max_dt_s,
-                                request_uses_fast_preview(request)
-                                    ? OrbitPredictionTuning::kFastPreviewAdaptiveEphemerisMaxDtS
-                                    : OrbitPredictionTuning::kAdaptiveEphemerisMaxDtControlledS);
+                                OrbitPredictionTuning::kAdaptiveEphemerisMaxDtControlledS);
         }
         if (request.lagrange_sensitive)
         {
