@@ -157,6 +157,9 @@ namespace Game
         glm::dvec3 drag_maneuver_basis_r_world{1.0, 0.0, 0.0};
         glm::dvec3 drag_maneuver_basis_t_world{0.0, 1.0, 0.0};
         glm::dvec3 drag_maneuver_basis_n_world{0.0, 0.0, 1.0};
+        glm::vec2 drag_start_mouse_window_pos{0.0f, 0.0f};
+        glm::vec2 drag_last_sample_mouse_window_pos{0.0f, 0.0f};
+        bool drag_threshold_passed{false};
         std::vector<ManeuverNodeDisplaySnapshot> drag_display_snapshots{};
         bool applied_delta{false};
     };

@@ -4,6 +4,8 @@
 #include "game/states/gameplay/prediction/gameplay_prediction_cache_internal.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 
 namespace Game
@@ -47,6 +49,61 @@ namespace Game
             track.pending_solve_quality = solve_quality;
             track.invalidated_while_pending = false;
             track.preview_last_request_at_s = now_s;
+
+            PredictionDragDebugTelemetry &debug = track.drag_debug;
+            const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
+            debug.last_preview_request_tp = now_tp;
+            debug.last_preview_request_generation_id = generation_id;
+            ++debug.preview_request_count;
+            if (debug.drag_active && PredictionDragDebugTelemetry::has_time(debug.last_drag_update_tp))
+            {
+                PredictionRuntimeDetail::update_last_and_peak(
+                        debug.drag_to_request_ms_last,
+                        debug.drag_to_request_ms_peak,
+                        PredictionRuntimeDetail::elapsed_ms(debug.last_drag_update_tp, now_tp));
+            }
+        }
+
+        bool prediction_request_is_interactive(const PredictionSelectionState &selection,
+                                               const std::vector<ManeuverNode> &nodes,
+                                               const ManeuverGizmoInteraction::State gizmo_state,
+                                               const PredictionTrackState &track,
+                                               const double now_s,
+                                               const bool thrusting,
+                                               const bool with_maneuvers)
+        {
+            const bool dragging_maneuver_axis =
+                    with_maneuvers &&
+                    PredictionRuntimeDetail::maneuver_drag_active(gizmo_state);
+            const bool has_future_maneuver_node =
+                    with_maneuvers &&
+                    std::any_of(nodes.begin(),
+                                nodes.end(),
+                                [now_s](const ManeuverNode &node) {
+                                    return std::isfinite(node.time_s) && node.time_s >= now_s;
+                                });
+            const bool active_subject = track.key == selection.active_subject;
+            return active_subject &&
+                   (thrusting || has_future_maneuver_node || dragging_maneuver_axis);
+        }
+
+        bool prediction_request_is_throttled(const PredictionTrackState &track, const bool interactive_request)
+        {
+            if (!interactive_request)
+            {
+                return false;
+            }
+
+            const PredictionDragDebugTelemetry &debug = track.drag_debug;
+            if (!PredictionDragDebugTelemetry::has_time(debug.last_preview_request_tp))
+            {
+                return false;
+            }
+
+            const double elapsed_s = std::chrono::duration<double>(
+                                             PredictionDragDebugTelemetry::Clock::now() - debug.last_preview_request_tp)
+                                             .count();
+            return elapsed_s < OrbitPredictionTuning::kDragRebuildMinIntervalS;
         }
 
     } // namespace
@@ -56,9 +113,14 @@ namespace Game
                                                          const glm::dvec3 &subject_vel_world,
                                                          const double now_s,
                                                          const bool thrusting,
-                                                         const bool with_maneuvers)
+                                                         const bool with_maneuvers,
+                                                         bool *out_throttled)
     {
         // Package the current spacecraft state into a worker request.
+        if (out_throttled)
+        {
+            *out_throttled = false;
+        }
         refresh_prediction_preview_anchor(track, now_s, with_maneuvers);
         if (!_orbitsim)
         {
@@ -81,11 +143,23 @@ namespace Game
             return false;
         }
 
-        const bool dragging_maneuver_axis =
-                with_maneuvers &&
-                PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
         const bool interactive_request =
-                track.key == _prediction_selection.active_subject && (thrusting || dragging_maneuver_axis);
+                prediction_request_is_interactive(
+                        _prediction_selection,
+                        _maneuver_state.nodes,
+                        _maneuver_gizmo_interaction.state,
+                        track,
+                        now_s,
+                        thrusting,
+                        with_maneuvers);
+        if (prediction_request_is_throttled(track, interactive_request))
+        {
+            if (out_throttled)
+            {
+                *out_throttled = true;
+            }
+            return false;
+        }
         const OrbitPredictionService::SolveQuality solve_quality = OrbitPredictionService::SolveQuality::Full;
 
         OrbitPredictionService::Request request{};
@@ -108,7 +182,10 @@ namespace Game
         const orbitsim::TrajectoryFrameSpec display_frame_spec =
                 track.cache.resolved_frame_spec_valid ? track.cache.resolved_frame_spec : _prediction_frame_selection.spec;
         request.lagrange_sensitive = prediction_frame_is_lagrange_sensitive(display_frame_spec);
-        request.preferred_primary_body_id = track.auto_primary_body_id;
+        const bool auto_primary_may_shift_across_plan =
+                with_maneuvers && prediction_subject_is_player(track.key);
+        request.preferred_primary_body_id =
+                auto_primary_may_shift_across_plan ? orbitsim::kInvalidBodyId : track.auto_primary_body_id;
         if (request.preferred_primary_body_id == orbitsim::kInvalidBodyId &&
             _prediction_analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
             _prediction_analysis_selection.spec.fixed_body_id != orbitsim::kInvalidBodyId)
@@ -220,10 +297,17 @@ namespace Game
             return;
         }
 
-        const bool requested =
-                request_orbiter_prediction_async(track, subject_pos_world, subject_vel_world, now_s, thrusting, with_maneuvers);
+        bool throttled = false;
+        const bool requested = request_orbiter_prediction_async(
+                track,
+                subject_pos_world,
+                subject_vel_world,
+                now_s,
+                thrusting,
+                with_maneuvers,
+                &throttled);
         track.dirty = !requested;
-        if (!requested)
+        if (!requested && !throttled)
         {
             track.clear_runtime();
         }
