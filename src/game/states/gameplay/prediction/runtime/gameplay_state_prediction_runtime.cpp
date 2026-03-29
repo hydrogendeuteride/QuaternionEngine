@@ -170,12 +170,6 @@ namespace Game
             rebuild = dt_since_build_s >= _prediction_thrust_refresh_s;
         }
 
-        if (!rebuild && with_maneuvers && !_maneuver_state.nodes.empty())
-        {
-            const double dt_since_build_s = now_s - track.cache.build_time_s;
-            rebuild = dt_since_build_s >= OrbitPredictionTuning::kManeuverRefreshS;
-        }
-
         if (!rebuild && _prediction_periodic_refresh_s > 0.0)
         {
             const double dt_since_build_s = now_s - track.cache.build_time_s;
