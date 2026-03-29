@@ -95,13 +95,11 @@ namespace Game
         {
             return _maneuver_gizmo_interaction.drag_display_reference_time_s;
         }
-        const bool maneuver_live_preview =
-                _maneuver_plan_live_preview_active || dragging_maneuver_axis;
         const bool freeze_planned_synodic =
                 prediction_frame_is_lagrange_sensitive(frame_spec) &&
                 _maneuver_nodes_enabled &&
                 !_maneuver_state.nodes.empty() &&
-                !maneuver_live_preview &&
+                !dragging_maneuver_axis &&
                 std::isfinite(cache.build_time_s);
         return freeze_planned_synodic ? cache.build_time_s : reference_time_s;
     }
