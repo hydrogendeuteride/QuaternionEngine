@@ -474,8 +474,9 @@ namespace Game
         }
 
         const ImVec2 mouse_pos = ImGui::GetIO().MousePos;
+        const glm::vec2 mouse_pos_window(mouse_pos.x, mouse_pos.y);
         CameraRay ray{};
-        if (!compute_camera_ray(ctx, glm::vec2(mouse_pos.x, mouse_pos.y), ray))
+        if (!compute_camera_ray(ctx, mouse_pos_window, ray))
         {
             return false;
         }
@@ -509,6 +510,9 @@ namespace Game
         _maneuver_gizmo_interaction.drag_maneuver_basis_r_world = node->maneuver_basis_r_world;
         _maneuver_gizmo_interaction.drag_maneuver_basis_t_world = node->maneuver_basis_t_world;
         _maneuver_gizmo_interaction.drag_maneuver_basis_n_world = node->maneuver_basis_n_world;
+        _maneuver_gizmo_interaction.drag_start_mouse_window_pos = mouse_pos_window;
+        _maneuver_gizmo_interaction.drag_last_sample_mouse_window_pos = mouse_pos_window;
+        _maneuver_gizmo_interaction.drag_threshold_passed = false;
         _maneuver_gizmo_interaction.drag_display_snapshots.clear();
         _maneuver_gizmo_interaction.drag_display_snapshots.reserve(_maneuver_state.nodes.size());
         for (const ManeuverNode &candidate : _maneuver_state.nodes)
@@ -553,6 +557,28 @@ namespace Game
                                                  const glm::vec2 &mouse_pos_window)
     {
         const auto drag_apply_start_tp = PredictionDragDebugTelemetry::Clock::now();
+
+        const glm::vec2 drag_from_start =
+                mouse_pos_window - _maneuver_gizmo_interaction.drag_start_mouse_window_pos;
+        if (!_maneuver_gizmo_interaction.drag_threshold_passed)
+        {
+            const float drag_threshold_px =
+                    std::max(ImGui::GetIO().MouseDragThreshold, _maneuver_ui_config.scaled(2.0f));
+            if (glm::dot(drag_from_start, drag_from_start) < (drag_threshold_px * drag_threshold_px))
+            {
+                return;
+            }
+            _maneuver_gizmo_interaction.drag_threshold_passed = true;
+        }
+
+        const glm::vec2 drag_since_last_sample =
+                mouse_pos_window - _maneuver_gizmo_interaction.drag_last_sample_mouse_window_pos;
+        if (glm::dot(drag_since_last_sample, drag_since_last_sample) <= 1.0e-8f)
+        {
+            return;
+        }
+        _maneuver_gizmo_interaction.drag_last_sample_mouse_window_pos = mouse_pos_window;
+
         glm::dvec3 axis_dir_world(0.0, 1.0, 0.0);
         int component = 1;
         double sign = 1.0;

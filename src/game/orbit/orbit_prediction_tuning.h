@@ -90,10 +90,11 @@ namespace Game::OrbitPredictionTuning
     inline constexpr double kPredictionChunkBandCruiseEndS = 2.0 * kSecondsPerYear;
     inline constexpr double kPredictionChunkBandDeepTailEndS = 20.0 * kSecondsPerYear;
     inline constexpr double kPredictionChunkSpanNearS = 6.0 * kSecondsPerHour;
-    inline constexpr double kPredictionChunkSpanTransferS = 1.0 * kSecondsPerDay;
-    inline constexpr double kPredictionChunkSpanCruiseFineS = 5.0 * kSecondsPerDay;
-    inline constexpr double kPredictionChunkSpanCruiseS = 30.0 * kSecondsPerDay;
-    inline constexpr double kPredictionChunkSpanDeepTailS = 90.0 * kSecondsPerDay;
+    // Keep long-horizon maneuver previews responsive by publishing smaller tail chunks.
+    inline constexpr double kPredictionChunkSpanTransferS = 12.0 * kSecondsPerHour;
+    inline constexpr double kPredictionChunkSpanCruiseFineS = 2.0 * kSecondsPerDay;
+    inline constexpr double kPredictionChunkSpanCruiseS = 10.0 * kSecondsPerDay;
+    inline constexpr double kPredictionChunkSpanDeepTailS = 30.0 * kSecondsPerDay;
 
     // Slice 6 activity probe and seam-retry tuning.
     inline constexpr double kPredictionActivityProbeHeadingPromoteRad = 0.08;
@@ -114,8 +115,8 @@ namespace Game::OrbitPredictionTuning
     inline constexpr double kThrustHorizonWindowScale = 1.25;
     inline constexpr double kThrustHorizonMaxS = 172'800.0; // 48 hours
 
-    // Maneuver-gizmo drag rebuild cap.
-    inline constexpr double kDragRebuildMinIntervalS = 0.02; // ~50 Hz
+    // Maneuver/planner interactive rebuild cap.
+    inline constexpr double kDragRebuildMinIntervalS = 1.0 / 15.0; // 15 Hz
     inline constexpr double kDragStalePreviewGraceS = 0.10;
     inline constexpr double kDragInteractivePreviewWindowMaxS = 43'200.0; // 12 hours
 }

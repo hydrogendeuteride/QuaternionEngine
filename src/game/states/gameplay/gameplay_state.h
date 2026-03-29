@@ -135,7 +135,8 @@ namespace Game
                                               const glm::dvec3 &subject_vel_world,
                                               double now_s,
                                               bool thrusting,
-                                              bool with_maneuvers);
+                                              bool with_maneuvers,
+                                              bool *out_throttled = nullptr);
         bool request_celestial_prediction_async(PredictionTrackState &track,
                                                 double now_s);
         void update_orbiter_prediction_track(PredictionTrackState &track,

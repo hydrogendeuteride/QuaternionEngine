@@ -180,7 +180,7 @@ namespace Game
                 !cache.massive_bodies.empty())
             {
                 const orbitsim::BodyId preferred_body_id =
-                        node.primary_body_id != orbitsim::kInvalidBodyId ? node.primary_body_id : player_track->auto_primary_body_id;
+                        node.primary_body_auto ? orbitsim::kInvalidBodyId : node.primary_body_id;
                 const orbitsim::BodyId primary_body_id = select_prediction_primary_body_id(
                         cache.massive_bodies,
                         &cache,
@@ -487,20 +487,79 @@ namespace Game
         const bool freeze_nonrotating_drag_snapshots =
                 display_frame_uses_preview_anchor &&
                 drag_display_snapshots_available;
-        WorldVec3 display_origin_world_now{0.0, 0.0, 0.0};
-        glm::dmat3 display_frame_to_world_now{1.0};
-        const bool have_display_transform_now =
-                !display_frame_uses_preview_anchor ||
-                build_prediction_display_transform(*display_prediction_cache,
-                                                   display_origin_world_now,
-                                                   display_frame_to_world_now,
-                                                   now_s);
         const auto transform_inertial_basis_to_world =
                 [&](const glm::dvec3 &basis_inertial, const glm::dvec3 &fallback) -> glm::dvec3 {
                     // Keep maneuver axes in physical inertial/world orientation. If we remap them
                     // through the active display frame, Synodic rotation feeds back into RTN/PON
                     // and the gizmo visibly twists while editing.
                     return normalized_or(basis_inertial, fallback);
+                };
+        bool display_player_lookup_attempted = false;
+        orbitsim::SpacecraftStateLookup display_player_lookup{};
+        const auto get_display_player_lookup = [&]() -> const orbitsim::SpacecraftStateLookup * {
+            if (!display_player_lookup_attempted)
+            {
+                display_player_lookup = build_prediction_player_lookup();
+                display_player_lookup_attempted = true;
+            }
+            return display_player_lookup ? &display_player_lookup : nullptr;
+        };
+        const auto resolve_sample_display_frame_spec =
+                [&](const OrbitPredictionCache &sample_cache) -> orbitsim::TrajectoryFrameSpec {
+                    return sample_cache.resolved_frame_spec_valid
+                               ? sample_cache.resolved_frame_spec
+                               : resolve_prediction_display_frame_spec(sample_cache, now_s);
+                };
+        const auto transform_preview_inertial_state_to_display_sample =
+                [&](const OrbitPredictionCache &sample_cache,
+                    const double sample_time_s,
+                    const glm::dvec3 &preview_position_m,
+                    const glm::dvec3 &preview_velocity_mps,
+                    orbitsim::TrajectorySample &out_sample) -> bool {
+                    out_sample = {};
+                    if (!std::isfinite(sample_time_s) || !finite3(preview_position_m) || !finite3(preview_velocity_mps))
+                    {
+                        return false;
+                    }
+
+                    const orbitsim::TrajectoryFrameSpec sample_frame_spec = resolve_sample_display_frame_spec(sample_cache);
+                    if (sample_frame_spec.type != orbitsim::TrajectoryFrameType::Inertial &&
+                        (!sample_cache.shared_ephemeris || sample_cache.shared_ephemeris->empty()))
+                    {
+                        return false;
+                    }
+
+                    const orbitsim::SpacecraftStateLookup *player_lookup = nullptr;
+                    if (sample_frame_spec.type == orbitsim::TrajectoryFrameType::LVLH)
+                    {
+                        player_lookup = get_display_player_lookup();
+                        if (player_lookup == nullptr)
+                        {
+                            return false;
+                        }
+                    }
+
+                    const std::vector<orbitsim::TrajectorySample> frame_samples = orbitsim::trajectory_to_frame_spec(
+                            std::vector<orbitsim::TrajectorySample>{orbitsim::TrajectorySample{
+                                    .t_s = sample_time_s,
+                                    .position_m = orbitsim::Vec3{preview_position_m.x, preview_position_m.y, preview_position_m.z},
+                                    .velocity_mps = orbitsim::Vec3{preview_velocity_mps.x,
+                                                                   preview_velocity_mps.y,
+                                                                   preview_velocity_mps.z},
+                            }},
+                            sample_cache.shared_ephemeris ? *sample_cache.shared_ephemeris
+                                                          : orbitsim::CelestialEphemeris{},
+                            sample_cache.massive_bodies,
+                            sample_frame_spec,
+                            player_lookup ? *player_lookup : orbitsim::SpacecraftStateLookup{});
+                    if (frame_samples.size() != 1)
+                    {
+                        return false;
+                    }
+
+                    out_sample = frame_samples.front();
+                    return finite3(glm::dvec3(out_sample.position_m)) &&
+                           finite3(glm::dvec3(out_sample.velocity_mps));
                 };
 
         const auto sample_displayed_node_world =
@@ -674,71 +733,53 @@ namespace Game
                     return finite3(out_tangent_world);
                 };
 
-        const auto display_frame_origin_state_at = [&](const double sample_time_s, orbitsim::State &out_state) -> bool {
-            out_state = {};
-            switch (display_frame_spec.type)
-            {
-                case orbitsim::TrajectoryFrameType::Inertial:
-                    return true;
-                case orbitsim::TrajectoryFrameType::BodyCenteredInertial:
-                {
-                    const orbitsim::MassiveBody *frame_body =
-                            find_massive_body(display_prediction_cache->massive_bodies, display_frame_spec.primary_body_id);
-                    if (!frame_body)
-                    {
-                        return false;
-                    }
-
-                    out_state =
-                            (display_prediction_cache->shared_ephemeris && !display_prediction_cache->shared_ephemeris->empty())
-                                ? display_prediction_cache->shared_ephemeris->body_state_at_by_id(frame_body->id, sample_time_s)
-                                : frame_body->state;
-                    return finite3(glm::dvec3(out_state.position_m)) && finite3(glm::dvec3(out_state.velocity_mps));
-                }
-                default:
-                    return false;
-            }
-        };
-
-        const auto sample_preview_node_world = [&](const double sample_time_s,
+        const auto sample_preview_node_world = [&](const OrbitPredictionCache &sample_cache,
+                                                   const double sample_time_s,
                                                    const glm::dvec3 &preview_position_m,
+                                                   const glm::dvec3 &preview_velocity_mps,
                                                    WorldVec3 &out_world) -> bool {
             out_world = WorldVec3(0.0, 0.0, 0.0);
-            if (!display_frame_uses_preview_anchor || !have_display_transform_now || !std::isfinite(sample_time_s) ||
-                !finite3(preview_position_m))
+            orbitsim::TrajectorySample preview_frame_sample{};
+            if (!transform_preview_inertial_state_to_display_sample(
+                        sample_cache,
+                        sample_time_s,
+                        preview_position_m,
+                        preview_velocity_mps,
+                        preview_frame_sample))
             {
                 return false;
             }
 
-            orbitsim::State frame_origin_state{};
-            if (!display_frame_origin_state_at(sample_time_s, frame_origin_state))
-            {
-                return false;
-            }
-
-            const glm::dvec3 local_position_m = preview_position_m - glm::dvec3(frame_origin_state.position_m);
-            out_world = display_origin_world_now + WorldVec3(display_frame_to_world_now * local_position_m) + align_delta;
+            out_world = prediction_sample_position_world(sample_cache, preview_frame_sample, now_s) + align_delta;
             return finite3(glm::dvec3(out_world));
         };
 
-        const auto sample_preview_tangent_world = [&](const double sample_time_s,
+        const auto sample_preview_tangent_world = [&](const OrbitPredictionCache &sample_cache,
+                                                      const double sample_time_s,
+                                                      const glm::dvec3 &preview_position_m,
                                                       const glm::dvec3 &preview_velocity_mps,
                                                       glm::dvec3 &out_tangent_world) -> bool {
             out_tangent_world = glm::dvec3(0.0, 0.0, 0.0);
-            if (!display_frame_uses_preview_anchor || !have_display_transform_now || !std::isfinite(sample_time_s) ||
-                !finite3(preview_velocity_mps))
+            orbitsim::TrajectorySample preview_frame_sample{};
+            if (!transform_preview_inertial_state_to_display_sample(
+                        sample_cache,
+                        sample_time_s,
+                        preview_position_m,
+                        preview_velocity_mps,
+                        preview_frame_sample))
             {
                 return false;
             }
 
-            orbitsim::State frame_origin_state{};
-            if (!display_frame_origin_state_at(sample_time_s, frame_origin_state))
+            WorldVec3 display_origin_world{0.0, 0.0, 0.0};
+            glm::dmat3 display_frame_to_world(1.0);
+            if (!build_prediction_display_transform(sample_cache, display_origin_world, display_frame_to_world, now_s))
             {
                 return false;
             }
-
-            const glm::dvec3 local_velocity_mps = preview_velocity_mps - glm::dvec3(frame_origin_state.velocity_mps);
-            out_tangent_world = normalized_or(display_frame_to_world_now * local_velocity_mps, glm::dvec3(0.0, 1.0, 0.0));
+            out_tangent_world =
+                    normalized_or(display_frame_to_world * glm::dvec3(preview_frame_sample.velocity_mps),
+                                  glm::dvec3(0.0, 1.0, 0.0));
             return finite3(out_tangent_world);
         };
 
@@ -902,17 +943,21 @@ namespace Game
                 basis_time_s = std::max(node_traj_world->front().t_s, basis_time_s - 1e-3);
             }
 
+            const bool have_preview_position_world =
+                    preview && preview->valid &&
+                    sample_preview_node_world(*node_display_cache,
+                                              node.time_s,
+                                              glm::dvec3(preview->inertial_position_m),
+                                              glm::dvec3(preview->inertial_velocity_mps),
+                                              node_position_world);
             const bool have_preview_chunk_position_world =
+                    !have_preview_position_world &&
                     sample_preview_chunk_node_world(*node_display_cache,
                                                     node_preview_chunk_assembly,
                                                     node.time_s,
                                                     node_position_world);
-            const bool have_preview_position_world =
-                    !have_preview_chunk_position_world &&
-                    preview && preview->valid &&
-                    sample_preview_node_world(node.time_s, glm::dvec3(preview->inertial_position_m), node_position_world);
-            if (!have_preview_chunk_position_world &&
-                !have_preview_position_world &&
+            if (!have_preview_position_world &&
+                !have_preview_chunk_position_world &&
                 (!node_traj_world ||
                  !sample_displayed_node_world(*node_display_cache, *node_traj_world, node.time_s, node_position_world)))
             {
@@ -1039,20 +1084,22 @@ namespace Game
                     glm::dvec3 preview_chunk_tangent_world{0.0, 0.0, 0.0};
                     glm::dvec3 preview_tangent_world{0.0, 0.0, 0.0};
                     glm::dvec3 displayed_tangent_world{0.0, 0.0, 0.0};
-                    if (sample_preview_chunk_tangent_world(*node_display_cache,
-                                                           node_preview_chunk_assembly,
-                                                           *node_traj_world,
-                                                           node.time_s,
-                                                           preview_chunk_tangent_world))
-                    {
-                        prograde_world_fallback = preview_chunk_tangent_world;
-                    }
-                    else if (preview && preview->valid &&
-                             sample_preview_tangent_world(node.time_s,
-                                                          glm::dvec3(preview->inertial_velocity_mps),
-                                                          preview_tangent_world))
+                    if (preview && preview->valid &&
+                        sample_preview_tangent_world(*node_display_cache,
+                                                     node.time_s,
+                                                     glm::dvec3(preview->inertial_position_m),
+                                                     glm::dvec3(preview->inertial_velocity_mps),
+                                                     preview_tangent_world))
                     {
                         prograde_world_fallback = preview_tangent_world;
+                    }
+                    else if (sample_preview_chunk_tangent_world(*node_display_cache,
+                                                                node_preview_chunk_assembly,
+                                                                *node_traj_world,
+                                                                node.time_s,
+                                                                preview_chunk_tangent_world))
+                    {
+                        prograde_world_fallback = preview_chunk_tangent_world;
                     }
                     else if (sample_displayed_tangent_world(*node_display_cache,
                                                             *node_traj_world,
