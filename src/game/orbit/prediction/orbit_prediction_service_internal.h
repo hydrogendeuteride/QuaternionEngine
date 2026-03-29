@@ -554,4 +554,96 @@ namespace Game
             const OrbitPredictionService::Request &request,
             const orbitsim::MassiveBody &subject_body);
 
+    // ── Planned trajectory types (orbit_prediction_service_planned.cpp) ────
+    using PublishFn = std::function<bool(OrbitPredictionService::Result)>;
+
+    struct PlannedTrajectoryContext
+    {
+        const OrbitPredictionService::Request &request;
+        const CancelCheck &cancel_requested;
+        OrbitPredictionService::Result &out;
+        const orbitsim::CelestialEphemeris &ephemeris;
+        PublishFn publish;
+
+        std::function<std::optional<OrbitPredictionService::PlannedChunkCacheEntry>(
+                const OrbitPredictionService::PlannedChunkCacheKey &,
+                const orbitsim::State &)> find_cached_chunk;
+        std::function<void(OrbitPredictionService::PlannedChunkCacheEntry)> store_cached_chunk;
+        std::function<OrbitPredictionService::SharedCelestialEphemeris(
+                const OrbitPredictionService::EphemerisBuildRequest &,
+                const CancelCheck &)> get_or_build_ephemeris;
+    };
+
+    struct PlannedChunkPacket
+    {
+        OrbitPredictionService::PredictionChunkPlan chunk{};
+        std::vector<orbitsim::TrajectorySegment> segments{};
+        std::vector<orbitsim::TrajectorySample> samples{};
+        std::vector<OrbitPredictionService::ManeuverNodePreview> previews{};
+        orbitsim::State start_state{};
+        orbitsim::State end_state{};
+        OrbitPredictionService::AdaptiveStageDiagnostics diagnostics{};
+        bool reused_from_cache{false};
+    };
+
+    struct PlannedSolveRangeSummary
+    {
+        orbitsim::State end_state{};
+        OrbitPredictionService::AdaptiveStageDiagnostics diagnostics{};
+        OrbitPredictionService::Status status{OrbitPredictionService::Status::Success};
+    };
+
+    struct PlannedSolveOutput
+    {
+        std::vector<orbitsim::TrajectorySegment> segments{};
+        std::vector<orbitsim::TrajectorySample> samples{};
+        std::vector<OrbitPredictionService::ManeuverNodePreview> previews{};
+        std::vector<bool> chunk_reused{};
+        orbitsim::State end_state{};
+        OrbitPredictionService::AdaptiveStageDiagnostics diagnostics{};
+        OrbitPredictionService::Status status{OrbitPredictionService::Status::Success};
+    };
+
+    struct ChunkAttemptOutput
+    {
+        std::vector<orbitsim::TrajectorySegment> segments{};
+        std::vector<orbitsim::TrajectorySegment> seam_validation_segments{};
+        std::vector<orbitsim::TrajectorySample> samples{};
+        std::vector<OrbitPredictionService::ManeuverNodePreview> previews{};
+        orbitsim::State end_state{};
+        OrbitPredictionService::AdaptiveStageDiagnostics diagnostics{};
+        OrbitPredictionService::Status status{OrbitPredictionService::Status::Success};
+        bool reused_from_cache{false};
+    };
+
+    // ── Planned trajectory helpers (orbit_prediction_service_planned.cpp) ────
+    void append_planned_chunk_packet(PlannedSolveOutput &planned, PlannedChunkPacket packet);
+    void apply_planned_range_summary(PlannedSolveOutput &planned, const PlannedSolveRangeSummary &summary);
+
+    std::vector<OrbitPredictionService::PublishedChunk> collect_published_chunks(
+            const OrbitPredictionService::PredictionSolvePlan &solve_plan,
+            std::size_t chunk_begin_index,
+            std::size_t chunk_end_index,
+            OrbitPredictionService::ChunkQualityState quality_state,
+            const std::vector<bool> *chunk_reused = nullptr);
+
+    PlannedSolveRangeSummary solve_planned_chunk_range(
+            PlannedTrajectoryContext &ctx,
+            const OrbitPredictionService::PredictionSolvePlan &solve_plan,
+            std::size_t chunk_begin_index,
+            std::size_t chunk_end_index,
+            const orbitsim::State &range_start_state,
+            std::function<bool(PlannedChunkPacket &&)> chunk_sink);
+
+    PlannedSolveRangeSummary stream_chunk_stage(
+            PlannedTrajectoryContext &ctx,
+            const OrbitPredictionService::PredictionSolvePlan &solve_plan,
+            std::size_t chunk_begin_index,
+            std::size_t chunk_end_index,
+            const orbitsim::State &range_start_state,
+            OrbitPredictionService::ChunkQualityState quality_state,
+            OrbitPredictionService::PublishStage publish_stage,
+            bool generation_complete_on_last_publish,
+            PlannedSolveOutput &streamed_prefix);
+
 } // namespace Game
