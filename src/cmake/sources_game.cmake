@@ -26,9 +26,15 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/orbit/orbit_prediction_service.h
   game/orbit/orbit_prediction_service.cpp
   game/orbit/prediction/orbit_prediction_service_internal.h
+  game/orbit/prediction/orbit_prediction_service_compute.cpp
+  game/orbit/prediction/orbit_prediction_service_planned.cpp
   game/orbit/prediction/orbit_prediction_service_trajectory.cpp
   game/orbit/prediction/orbit_prediction_service_sampling.cpp
-  game/orbit/prediction/orbit_prediction_service_policy.cpp
+  game/orbit/prediction/orbit_prediction_service_policy_integrator.cpp
+  game/orbit/prediction/orbit_prediction_service_policy_chunking.cpp
+  game/orbit/prediction/orbit_prediction_service_policy_profile.cpp
+  game/orbit/prediction/orbit_prediction_service_policy_adaptive.cpp
+  game/orbit/prediction/orbit_prediction_service_policy_ephemeris.cpp
 
   # game root
   game/main_game.h
@@ -84,6 +90,7 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/maneuver/gameplay_state_maneuver_util.h
   game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_nodes.cpp
+  game/states/gameplay/maneuver/gameplay_state_maneuver_nodes_cache.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_panel.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_runtime.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_ui.cpp
