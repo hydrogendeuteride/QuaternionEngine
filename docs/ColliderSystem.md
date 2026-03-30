@@ -67,6 +67,90 @@ Benefits:
 - Iterate on colliders without re-exporting visuals.
 - Different collider sets for different use cases.
 
+#### 4. Blender Sidecar Workflow (`.gltf`)
+
+For rigid props and machines, the safest workflow is to author colliders in a separate Blender scene or collection and export them as a sidecar file.
+
+Example asset layout:
+
+- Visual model: `assets/mirage_c/mirage_c.gltf`
+- Collider sidecar: `assets/mirage_c/mirage_c.colliders.gltf`
+- Optional collider masses: `assets/mirage_c/mirage_c.colliders.json`
+
+Recommended Blender hierarchy for the sidecar:
+
+```text
+body
+├── COL_CYLINDER_b
+└── COL_TAPERED_a
+```
+
+Important:
+
+- `body` must be a real Blender object, usually an `Empty`.
+- `COL_*` objects should be children of `body` using **Object parent** relationships.
+- Putting objects in the same Collection is **not enough**. Collections do not define the exported glTF node hierarchy.
+- The parent object name must match a node name in the main `.gltf` file. In the example above, `body` must also exist in `mirage_c.gltf`.
+
+Suggested authoring steps in Blender:
+
+1. Import or inspect the main `.gltf` and note the owner node name you want to attach colliders to.
+2. Create an `Empty` and rename it to that exact owner name, for example `body`.
+3. Create one `Empty` per collider primitive.
+4. Rename those objects with `COL_*` prefixes such as `COL_BOX_base`, `COL_CAPSULE_arm`, or `COL_CYLINDER_b`.
+5. Move, rotate, and scale each collider object so it matches the desired volume.
+6. Parent each `COL_*` object to the owner `Empty` with `Ctrl+P -> Object (Keep Transform)`.
+7. Export the owner and collider objects together as `name.colliders.gltf`.
+
+The Outliner should show indentation like this before export:
+
+```text
+body
+  COL_CYLINDER_b
+  COL_TAPERED_a
+```
+
+If the collider objects appear at the top level in the Outliner, the engine will not know which main-scene node they belong to.
+
+Recommended export rules:
+
+- Export the owner `Empty` and all `COL_*` children together.
+- Prefer `Empty` objects over mesh objects for primitive colliders.
+- If you export `.gltf`, Blender will usually emit a sibling `.bin` file automatically. Keep it next to the `.gltf`.
+- Use sidecars for colliders instead of mixing collider empties into the visual asset unless you explicitly want embedded markers.
+
+#### 5. Blender Transform Interpretation
+
+For primitive collider markers, the engine reads the node transform, not the mesh geometry. In practice, this means `Location`, `Rotation`, and `Scale` on the Blender object are what matter.
+
+- `COL_BOX`: object scale maps to full box size on X/Y/Z.
+- `COL_SPHERE`: the largest of X/Y/Z is used as the sphere diameter.
+- `COL_CAPSULE`: X/Z define diameter, Y defines total height.
+- `COL_CYLINDER`: X/Z define diameter, Y defines total height.
+- `COL_TAPERED`: X defines top diameter, Z defines bottom diameter, Y defines height.
+
+When possible, keep primitive collider objects as simple empties with clear names instead of visible mesh geometry.
+
+#### 6. Optional Collider Mass JSON
+
+Primitive colliders can also have mass data in a separate JSON file next to the sidecar:
+
+```json
+{
+  "masses": {
+    "COL_CYLINDER_b": 9000.0,
+    "COL_TAPERED_a": 3000.0
+  }
+}
+```
+
+For a main file `mirage_c.gltf`, the engine looks for:
+
+- `mirage_c.colliders.gltf`
+- `mirage_c.colliders.json`
+
+When using dynamic root rigid bodies, the default total mass comes from the sum of child collider masses unless an explicit total-mass override is applied at runtime.
+
 ### Automatic Loading
 
 When `AssetManager::loadGLTF()` loads a model:

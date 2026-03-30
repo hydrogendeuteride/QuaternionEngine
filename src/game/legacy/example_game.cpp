@@ -33,11 +33,7 @@ namespace Game
         _runtime = &runtime;
         auto &api = runtime.api();
         _world.set_api(&api);
-        _audio_test_event = "assets/sounds/dripping.mp3";
-        _audio_test_preloaded = false;
-        _audio_test_last_status.clear();
 
-        // Setup camera
         VulkanEngine *renderer = runtime.renderer();
         if (renderer && renderer->_assetManager)
         {
@@ -47,273 +43,23 @@ namespace Game
             ibl.brdfLut = renderer->_assetManager->assetPath("ibl/brdf_lut.ktx2");
             ibl.background = renderer->_assetManager->assetPath("ibl/sky.ktx2");
             api.load_global_ibl(ibl);
-
-            _audio_test_event = renderer->_assetManager->assetPath("sounds/dripping.mp3");
         }
 
-        api.set_camera_position(glm::vec3(-15.0f, 6.0f, 0.0f));
-        api.camera_look_at(glm::vec3(1.0f, 0.0f, 0.0f));
-
-        // Build layout data
-        build_box_stack_layout();
-
-        // Setup game scene (entities + render/physics resources)
+        api.set_camera_position(glm::vec3(-28.0f, 10.0f, 24.0f));
+        api.camera_look_at(glm::vec3(0.0f, 4.0f, 0.0f));
         setup_scene();
-        spawn_test_decals();
-
-        // Rocket-plume style Mesh VFX demo:
-        // - no albedo texture (falls back to white)
-        // - two layered capsule instances (outer cone + bright core)
-        // - scrolling dual-noise + UV gradient + fresnel
+        if (renderer && renderer->ui())
         {
-            GameAPI::MeshVfxMaterialSettings outer{};
-            outer.albedoPath = ""; // intentionally empty: no albedo texture
-            outer.noise1Path = "vfx/perlin.ktx2";
-            outer.noise2Path = "vfx/simplex.ktx2";
-            outer.noise1SRGB = false;
-            outer.noise2SRGB = false;
-            outer.tint = glm::vec3(1.0f, 0.92f, 0.86f);
-            outer.opacity = 0.72f;
-            outer.fresnelPower = 2.2f;
-            outer.fresnelStrength = 1.35f;
-            outer.scrollVelocity1 = glm::vec2(0.02f, -2.6f);
-            outer.scrollVelocity2 = glm::vec2(-0.03f, -1.35f);
-            outer.distortionStrength = 0.19f;
-            outer.noiseBlend = 0.35f;
-            outer.coreColor = glm::vec3(0.95f, 0.98f, 1.05f);
-            outer.edgeColor = glm::vec3(1.0f, 0.38f, 0.06f);
-            outer.gradientAxis = 1.0f;
-            outer.gradientStart = 0.04f;
-            outer.gradientEnd = 0.92f;
-            outer.emissionStrength = 3.8f;
-
-            GameAPI::MeshVfxMaterialSettings inner{};
-            inner.albedoPath = ""; // intentionally empty: no albedo texture
-            inner.noise1Path = "vfx/simplex.ktx2";
-            inner.noise2Path = "vfx/perlin.ktx2";
-            inner.noise1SRGB = false;
-            inner.noise2SRGB = false;
-            inner.tint = glm::vec3(0.88f, 0.98f, 1.2f);
-            inner.opacity = 0.95f;
-            inner.fresnelPower = 1.35f;
-            inner.fresnelStrength = 0.6f;
-            inner.scrollVelocity1 = glm::vec2(-0.01f, -3.8f);
-            inner.scrollVelocity2 = glm::vec2(0.01f, -2.1f);
-            inner.distortionStrength = 0.08f;
-            inner.noiseBlend = 0.58f;
-            inner.coreColor = glm::vec3(1.2f, 1.45f, 1.9f);
-            inner.edgeColor = glm::vec3(0.62f, 0.9f, 1.35f);
-            inner.gradientAxis = 1.0f;
-            inner.gradientStart = 0.02f;
-            inner.gradientEnd = 0.68f;
-            inner.emissionStrength = 6.2f;
-
-            const bool outer_ok = api.create_or_update_mesh_vfx_material(_plume_outer_material_name, outer);
-            const bool inner_ok = api.create_or_update_mesh_vfx_material(_plume_inner_material_name, inner);
-            if (outer_ok && inner_ok)
-            {
-                const glm::vec3 nozzle = glm::vec3(_plume_nozzle_pos);
-
-                GameAPI::Transform outer_tr{};
-                outer_tr.position = nozzle + glm::vec3(0.0f, -1.1f, 0.0f);
-                outer_tr.scale = glm::vec3(0.34f, 1.55f, 0.34f);
-
-                GameAPI::Transform inner_tr{};
-                inner_tr.position = nozzle + glm::vec3(0.0f, -0.85f, 0.0f);
-                inner_tr.scale = glm::vec3(0.18f, 1.1f, 0.18f);
-
-                const bool spawned_outer = api.add_primitive_instance(_plume_outer_instance_name,
-                                                                       GameAPI::PrimitiveType::Capsule,
-                                                                       outer_tr);
-                const bool applied_outer = spawned_outer && api.apply_mesh_vfx_material_to_primitive(
-                    _plume_outer_instance_name,
-                    _plume_outer_material_name);
-
-                const bool spawned_inner = api.add_primitive_instance(_plume_inner_instance_name,
-                                                                       GameAPI::PrimitiveType::Capsule,
-                                                                       inner_tr);
-                const bool applied_inner = spawned_inner && api.apply_mesh_vfx_material_to_primitive(
-                    _plume_inner_instance_name,
-                    _plume_inner_material_name);
-
-                _plume_spawned = applied_outer && applied_inner;
-                if (!_plume_spawned)
-                {
-                    if (spawned_outer) api.remove_mesh_instance(_plume_outer_instance_name);
-                    if (spawned_inner) api.remove_mesh_instance(_plume_inner_instance_name);
-                }
-            }
+            renderer->ui()->addDrawCallback([this]() { draw_contact_debug_ui(); });
         }
 
-        // Blackbody hot-metal demo:
-        // - nozzle/barrel style heat profile in object space
-        // - triplanar + axial streak noise modulates breakup/turbulence
-        // - emissiveTex is repurposed as a noise texture when enabled
-        {
-            GameAPI::BlackbodyMaterialSettings bb{};
-            bb.colorFactor = glm::vec4(0.05f, 0.05f, 0.05f, 1.0f);
-            bb.metallic = 0.1f;
-            bb.roughness = 0.72f;
-            bb.normalScale = 1.0f;
-
-            bb.blackbody.noisePath = "vfx/simplex.ktx2";
-            bb.blackbody.intensity = 1.0f;
-            bb.blackbody.tempMinK = 1000.0f;
-            bb.blackbody.tempMaxK = 1600.0f;
-            bb.blackbody.noiseScale = 1.0f;
-            bb.blackbody.noiseContrast = 1.0f;
-            bb.blackbody.noiseScroll = glm::vec2(1.0f, -1.0f);
-            bb.blackbody.noiseSpeed = 0.0f;
-            bb.blackbody.heatAxisLocal = glm::vec3(0.0f, 1.0f, 0.0f);
-            bb.blackbody.hotEndBias = -1.0f;
-            bb.blackbody.hotRangeStart = 0.52f;
-            bb.blackbody.hotRangeEnd = 0.98f;
-
-            const bool mat_ok = api.create_or_update_blackbody_material(_blackbody_material_name, bb);
-            if (mat_ok)
-            {
-                GameAPI::Transform tr{};
-                tr.position = glm::vec3(0.5f, 1.45f, -4.0f);
-                tr.scale = glm::vec3(0.32f, 1.35f, 0.32f);
-
-                const bool spawned = api.add_primitive_instance(_blackbody_instance_name,
-                                                               GameAPI::PrimitiveType::Capsule,
-                                                               tr);
-                const bool applied = spawned && api.apply_blackbody_material_to_primitive(
-                    _blackbody_instance_name,
-                    _blackbody_material_name);
-
-                _blackbody_spawned = applied;
-                if (!_blackbody_spawned && spawned)
-                {
-                    api.remove_mesh_instance(_blackbody_instance_name);
-                }
-            }
-        }
-
-        _world.set_rebase_anchor(_sphere_entity);
-        _world.set_rebase_settings(GameWorld::RebaseSettings{
-            .origin_threshold_m = 500.0,
-            .origin_snap_m = 100.0,
-            .velocity_threshold_mps = 1000.0
-        });
-
-        // Game ImGui panels
-        if (VulkanEngine *renderer = runtime.renderer())
-        {
-            if (renderer->ui())
-            {
-                renderer->ui()->addDrawCallback([this]() { draw_contact_debug_ui(); });
-            }
-        }
-
-        // Minimal ImGui image sample: load a texture from assets/textures.
-        GameAPI::TextureLoadParams ui_tex_params{};
-        ui_tex_params.srgb = true;
-        ui_tex_params.mipmapped = false;
-        _imgui_example_texture = api.load_texture("grass_albedo.png", ui_tex_params);
-        if (_imgui_example_texture != GameAPI::InvalidTexture)
-        {
-            api.pin_texture(_imgui_example_texture);
-        }
-
-        if (auto *audio = runtime.audio())
-        {
-            _audio_test_preloaded = audio->preload(_audio_test_event);
-            if (_audio_test_preloaded)
-            {
-                const auto sound = audio->play_2d(_audio_test_event,
-                                                  GameRuntime::IAudioSystem::Bus::Sfx,
-                                                  _audio_test_volume,
-                                                  _audio_test_pitch,
-                                                  false);
-                _audio_test_last_status = (sound != GameRuntime::IAudioSystem::INVALID_SOUND_HANDLE)
-                                              ? "Init: played dripping.mp3"
-                                              : "Init: play failed";
-            }
-            else
-            {
-                _audio_test_last_status = "Init: preload failed";
-                Logger::error("[ExampleGame] Failed to preload audio test '{}'", _audio_test_event);
-            }
-        }
-        else
-        {
-            _audio_test_last_status = "Audio system not available";
-        }
-
+        _elapsed = 0.0f;
         _fixed_time = 0.0f;
-        _sphere_launched = false;
     }
 
     void ExampleGame::on_update(float dt)
     {
         _elapsed += dt;
-
-        if (!_runtime)
-        {
-            return;
-        }
-
-        const float alpha = _runtime->interpolation_alpha();
-        auto &api = _runtime->api();
-
-        if (_plume_spawned)
-        {
-            // Throttle-like pulse on geometry while shader time drives UV/noise animation.
-            float throttle = 0.82f
-                + 0.16f * std::sin(_elapsed * 2.9f)
-                + 0.08f * std::sin(_elapsed * 11.0f);
-            throttle = std::clamp(throttle, 0.35f, 1.2f);
-
-            const glm::vec3 nozzle = glm::vec3(_plume_nozzle_pos);
-
-            GameAPI::Transform outer_tr{};
-            outer_tr.position = nozzle;
-            outer_tr.scale = glm::vec3(0.34f + 0.05f * throttle,
-                                       1.35f + 1.05f * throttle,
-                                       0.34f + 0.05f * throttle);
-
-            GameAPI::Transform inner_tr{};
-            inner_tr.position = nozzle;
-            inner_tr.scale = glm::vec3(0.16f + 0.025f * throttle,
-                                       1.0f + 0.82f * throttle,
-                                       0.16f + 0.025f * throttle);
-
-            api.set_mesh_instance_transform(_plume_outer_instance_name, outer_tr);
-            api.set_mesh_instance_transform(_plume_inner_instance_name, inner_tr);
-        }
-
-        // Sync all entities to render (world-space, double precision)
-        _world.entities().sync_to_render(api, alpha);
-
-        // Check for reset condition
-        bool reset_requested = false;
-
-        if (Entity *sphere = _world.entities().find(_sphere_entity))
-        {
-            if (sphere->position_world().y < -50.0)
-            {
-                reset_requested = true;
-            }
-        }
-
-        for (EntityId box_id: _box_entities)
-        {
-            if (Entity *box = _world.entities().find(box_id))
-            {
-                if (box->position_world().y < -50.0)
-                {
-                    reset_requested = true;
-                    break;
-                }
-            }
-        }
-
-        if (reset_requested)
-        {
-            reset_scene();
-        }
     }
 
     void ExampleGame::on_fixed_update(float fixed_dt)
@@ -326,26 +72,8 @@ namespace Game
             return;
         }
 
-        // Pre-physics: interpolation + automatic rebasing (if configured)
-        _world.pre_physics_step();
-
         // Step physics
         _physics->step(fixed_dt);
-
-        // Post-physics: update entity transforms from physics
-        _world.post_physics_step();
-
-        // Launch bowling ball after settling
-        if (!_sphere_launched && _fixed_time >= 10.0f)
-        {
-            Entity *sphere = _world.entities().find(_sphere_entity);
-            if (sphere && sphere->has_physics())
-            {
-                Physics::BodyId body_id{sphere->physics_body_value()};
-                _physics->set_linear_velocity(body_id, glm::vec3(18.0f, 0.0f, 4.0f));
-                _sphere_launched = true;
-            }
-        }
 #endif
     }
 
@@ -354,46 +82,9 @@ namespace Game
         if (_runtime)
         {
             auto &api = _runtime->api();
-            clear_test_decals();
-            if (_imgui_example_texture_id != nullptr)
-            {
-                api.free_imgui_texture(_imgui_example_texture_id);
-                _imgui_example_texture_id = nullptr;
-            }
-            if (_imgui_example_texture != GameAPI::InvalidTexture)
-            {
-                api.unpin_texture(_imgui_example_texture);
-                api.unload_texture(_imgui_example_texture);
-                _imgui_example_texture = GameAPI::InvalidTexture;
-            }
-            if (_plume_spawned)
-            {
-                api.remove_mesh_instance(_plume_outer_instance_name);
-                api.remove_mesh_instance(_plume_inner_instance_name);
-                _plume_spawned = false;
-            }
-            (void)api.remove_mesh_vfx_material(_plume_outer_material_name);
-            (void)api.remove_mesh_vfx_material(_plume_inner_material_name);
-
-            if (_blackbody_spawned)
-            {
-                api.remove_mesh_instance(_blackbody_instance_name);
-                _blackbody_spawned = false;
-            }
-            (void)api.remove_blackbody_material(_blackbody_material_name);
-
-            if (auto *audio = _runtime->audio())
-            {
-                if (_audio_test_preloaded)
-                {
-                    audio->unload(_audio_test_event);
-                }
-            }
+            (void) api.remove_gltf_instance(_mirage_instance_name);
+            (void) api.remove_mesh_instance(_ground_mesh_instance_name);
         }
-        _audio_test_preloaded = false;
-        _audio_test_last_status.clear();
-
-        _world.clear_rebase_anchor();
 
         _world.clear();
         _world.set_physics(nullptr);
@@ -419,6 +110,7 @@ namespace Game
             _physics->destroy_body(_ground_collider_body);
             _ground_collider_body = Physics::BodyId{};
         }
+        _mirage_body = Physics::BodyId{};
         _physics_context.reset();
         _physics.reset();
 #endif
@@ -438,6 +130,7 @@ namespace Game
         _box_entities.clear();
         _initial_pose.clear();
         _ground_collider_body = Physics::BodyId{};
+        _mirage_body = Physics::BodyId{};
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         _physics = std::make_unique<Physics::JoltPhysicsWorld>();
@@ -462,119 +155,58 @@ namespace Game
             }
         }
 
-        // Ground (render)
-        {
-            Transform tr{};
-            tr.position_world = {0.0, 0.0, 0.0};
-            tr.scale = {50.0f, 1.0f, 50.0f};
-            if (Entity *ground = _world.builder("ground")
-                    .transform(tr)
-                    .render_primitive(GameAPI::PrimitiveType::Plane)
-                    .build())
-            {
-                _ground_entity = ground->id();
-            }
-        }
+        auto &api = _runtime->api();
+        api.set_debug_draw_enabled(false);
+
+        GameAPI::Transform ground_tr{};
+        ground_tr.position = glm::vec3(0.0f, 0.0f, 0.0f);
+        ground_tr.scale = glm::vec3(200.0f, 1.0f, 200.0f);
+        (void) api.add_primitive_instance(_ground_mesh_instance_name, GameAPI::PrimitiveType::Plane, ground_tr);
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         // Ground (physics collider; placed so the top surface is at y=0)
-        if (_physics && _ground_entity.is_valid())
+        if (_physics)
         {
             _ground_collider_body = _physics->create_body(Physics::BodySettings{}
-                .set_shape(Physics::CollisionShape::Box(25.0f, 1.0f, 25.0f))
+                .set_shape(Physics::CollisionShape::Box(100.0f, 1.0f, 100.0f))
                 .set_position(0.0f, -1.0f, 0.0f)
-                .set_user_data(static_cast<uint64_t>(_ground_entity.value))
+                .set_user_data(1)
                 .set_static()
                 .set_friction(0.8f));
         }
 #endif
 
-        // Sphere
+        GameAPI::TransformD mirage_tr{};
+        mirage_tr.position = glm::dvec3(0.0, 14.0, 0.0);
+        mirage_tr.rotation = glm::angleAxis(glm::radians(9.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        mirage_tr.scale = glm::vec3(1.0f);
+        const bool mirage_added = api.add_gltf_instance(_mirage_instance_name,
+                                                        "mirage_c/mirage_c.gltf",
+                                                        mirage_tr,
+                                                        true);
+
+        if (!mirage_added)
         {
-            Transform tr{};
-            tr.position_world = WorldVec3(SPHERE_SPAWN_POS);
-            tr.scale = {1.0f, 1.0f, 1.0f};
+            Logger::error("[ExampleGame] Failed to spawn '{}'", _mirage_instance_name);
+            return;
+        }
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-            if (_physics)
+        if (VulkanEngine *renderer = _runtime->renderer(); renderer && renderer->_sceneManager && _physics)
+        {
+            _mirage_body = renderer->_sceneManager->enableDynamicRootColliderBody(_mirage_instance_name,
+                                                                                  _physics.get(),
+                                                                                  Physics::Layer::Dynamic,
+                                                                                  2);
+            if (_mirage_body.is_valid())
             {
-                Physics::BodySettings settings{};
-                settings.set_shape(Physics::CollisionShape::Sphere(SPHERE_RADIUS))
-                        .set_dynamic()
-                        .set_friction(0.6f)
-                        .set_restitution(0.1f)
-                        .set_linear_damping(0.02f);
-
-                if (Entity *sphere = _world.builder("sphere")
-                        .transform(tr)
-                        .render_primitive(GameAPI::PrimitiveType::Sphere)
-                        .physics(settings)
-                        .build())
-                {
-                    _sphere_entity = sphere->id();
-                    _initial_pose[_sphere_entity.value] = InitialPose{tr.position_world, tr.rotation};
-                }
+                _physics->set_angular_velocity(_mirage_body, glm::vec3(0.0f, 0.0f, 0.35f));
             }
             else
-#endif
             {
-                if (Entity *sphere = _world.builder("sphere")
-                        .transform(tr)
-                        .render_primitive(GameAPI::PrimitiveType::Sphere)
-                        .build())
-                {
-                    _sphere_entity = sphere->id();
-                    _initial_pose[_sphere_entity.value] = InitialPose{tr.position_world, tr.rotation};
-                }
+                Logger::error("[ExampleGame] Failed to create dynamic root collider body for '{}'", _mirage_instance_name);
             }
         }
-
-        // Boxes
-        _box_entities.reserve(_box_layouts.size());
-
-        for (const BoxLayout &layout: _box_layouts)
-        {
-            Transform tr{};
-            tr.position_world = WorldVec3(layout.position);
-            tr.rotation = layout.rotation;
-            tr.scale = layout.half_extents * 2.0f;
-
-#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-            if (_physics)
-            {
-                Physics::BodySettings settings{};
-                settings.set_shape(Physics::CollisionShape::Box(layout.half_extents))
-                        .set_dynamic()
-                        .set_friction(0.8f)
-                        .set_restitution(0.0f)
-                        .set_linear_damping(0.02f)
-                        .set_angular_damping(0.05f);
-
-                if (Entity *box = _world.builder(layout.name)
-                        .transform(tr)
-                        .render_primitive(GameAPI::PrimitiveType::Cube)
-                        .physics(settings)
-                        .build())
-                {
-                    _box_entities.push_back(box->id());
-                    _initial_pose[box->id().value] = InitialPose{tr.position_world, tr.rotation};
-                }
-                continue;
-            }
-#endif
-
-            if (Entity *box = _world.builder(layout.name)
-                    .transform(tr)
-                    .render_primitive(GameAPI::PrimitiveType::Cube)
-                    .build())
-            {
-                _box_entities.push_back(box->id());
-                _initial_pose[box->id().value] = InitialPose{tr.position_world, tr.rotation};
-            }
-        }
-
-#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-        install_contact_callbacks();
 #endif
     }
 
