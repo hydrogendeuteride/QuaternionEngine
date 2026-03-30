@@ -1,12 +1,17 @@
 list(APPEND VULKAN_ENGINE_SOURCES
   # scene
   scene/vk_scene.h
+  scene/vk_scene_internal.h
   scene/vk_scene.cpp
+  scene/vk_scene_update.cpp
+  scene/vk_scene_instances.cpp
+  scene/vk_scene_physics.cpp
   scene/vk_scene_picking.cpp
   scene/mesh_bvh.h
   scene/mesh_bvh.cpp
   scene/vk_loader.h
   scene/vk_loader.cpp
+  scene/vk_loader_load.cpp
   scene/tangent_space.h
   scene/tangent_space.cpp
   scene/camera.h
