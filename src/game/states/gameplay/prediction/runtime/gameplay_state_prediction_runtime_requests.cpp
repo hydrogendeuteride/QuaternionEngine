@@ -48,13 +48,13 @@ namespace Game
             track.derived_request_pending = false;
             track.pending_solve_quality = solve_quality;
             track.invalidated_while_pending = false;
-            track.preview_last_request_at_s = now_s;
+            (void) now_s;
 
             PredictionDragDebugTelemetry &debug = track.drag_debug;
             const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
-            debug.last_preview_request_tp = now_tp;
-            debug.last_preview_request_generation_id = generation_id;
-            ++debug.preview_request_count;
+            debug.last_request_tp = now_tp;
+            debug.last_request_generation_id = generation_id;
+            ++debug.request_count;
             if (debug.drag_active && PredictionDragDebugTelemetry::has_time(debug.last_drag_update_tp))
             {
                 PredictionRuntimeDetail::update_last_and_peak(
@@ -95,15 +95,27 @@ namespace Game
             }
 
             const PredictionDragDebugTelemetry &debug = track.drag_debug;
-            if (!PredictionDragDebugTelemetry::has_time(debug.last_preview_request_tp))
+            if (!PredictionDragDebugTelemetry::has_time(debug.last_request_tp))
             {
                 return false;
             }
 
             const double elapsed_s = std::chrono::duration<double>(
-                                             PredictionDragDebugTelemetry::Clock::now() - debug.last_preview_request_tp)
+                                             PredictionDragDebugTelemetry::Clock::now() - debug.last_request_tp)
                                              .count();
             return elapsed_s < OrbitPredictionTuning::kDragRebuildMinIntervalS;
+        }
+
+        bool should_defer_solver_request_until_publish(const PredictionTrackState &track)
+        {
+            if (track.request_pending)
+            {
+                return true;
+            }
+
+            const bool awaiting_latest_publish =
+                    !PredictionRuntimeDetail::latest_solver_generation_published(track);
+            return (track.derived_request_pending || awaiting_latest_publish) && !track.dirty;
         }
 
     } // namespace
@@ -121,7 +133,6 @@ namespace Game
         {
             *out_throttled = false;
         }
-        refresh_prediction_preview_anchor(track, now_s, with_maneuvers);
         if (!_orbitsim)
         {
             return false;
@@ -224,7 +235,6 @@ namespace Game
 
         const uint64_t generation_id = _prediction_service.request(std::move(request));
         mark_prediction_request_submitted(track, generation_id, now_s, solve_quality);
-        track.preview_state = PredictionPreviewRuntimeState::Idle;
         return true;
     }
 
@@ -292,7 +302,7 @@ namespace Game
             return;
         }
 
-        if (track.request_pending)
+        if (should_defer_solver_request_until_publish(track))
         {
             return;
         }
@@ -322,7 +332,7 @@ namespace Game
             return;
         }
 
-        if (track.request_pending)
+        if (should_defer_solver_request_until_publish(track))
         {
             return;
         }

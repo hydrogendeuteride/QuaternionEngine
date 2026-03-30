@@ -18,12 +18,6 @@ namespace Game::PredictionDrawDetail
 {
     inline constexpr uint32_t kInvalidPickGroup = std::numeric_limits<uint32_t>::max();
 
-    struct ChunkAssemblyDrawResult
-    {
-        uint32_t chunks_drawn{0};
-        std::vector<std::pair<double, double>> covered_ranges{};
-    };
-
     struct OrbitDrawWindowContext
     {
         OrbitPlotSystem *orbit_plot{nullptr};
@@ -70,9 +64,7 @@ namespace Game::PredictionDrawDetail
         PredictionTrackState *track{nullptr};
         OrbitPredictionCache *stable_cache{nullptr};
         OrbitPredictionCache *planned_cache{nullptr};
-        OrbitPredictionCache *preview_planned_cache{nullptr};
         OrbitPredictionCache *display_cache{nullptr};
-        PredictionChunkAssembly *planned_chunk_assembly{nullptr};
         const std::vector<orbitsim::TrajectorySample> *traj_base{nullptr};
         const std::vector<orbitsim::TrajectorySample> *traj_planned{nullptr};
         const std::vector<orbitsim::TrajectorySegment> *traj_base_segments{nullptr};
@@ -92,11 +84,6 @@ namespace Game::PredictionDrawDetail
         bool is_active{false};
         bool active_player_track{false};
         bool maneuver_drag_active{false};
-        bool suppress_stale_planned_preview{false};
-        bool drag_anchor_valid{false};
-        double drag_anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
-        bool has_preview_planned_overlay{false};
-        bool has_chunk_planned_overlay{false};
         bool direct_world_polyline{false};
         bool identity_frame_transform{true};
         bool use_base_adaptive_curve{false};
@@ -114,7 +101,6 @@ namespace Game::PredictionDrawDetail
         PickWindow planned_pick_window{};
         std::vector<orbitsim::TrajectorySegment> traj_base_segments_world_basis{};
         std::vector<orbitsim::TrajectorySegment> traj_stable_planned_segments_world_basis{};
-        std::vector<orbitsim::TrajectorySegment> traj_preview_planned_segments_world_basis{};
     };
 
     void reset_orbit_plot_state(PickingSystem *picking,
@@ -168,15 +154,6 @@ namespace Game::PredictionDrawDetail
                                     double t_end_s,
                                     const glm::vec4 &color,
                                     bool dashed);
-    ChunkAssemblyDrawResult draw_chunk_assembly_planned(
-            const OrbitDrawWindowContext &draw_ctx,
-            const OrbitPredictionDrawConfig &draw_config,
-            OrbitPlotPerfStats &perf,
-            PredictionChunkAssembly &assembly,
-            double t_start_s,
-            double t_end_s,
-            const glm::vec4 &color,
-            bool dashed);
     std::vector<std::pair<double, double>> compute_uncovered_ranges(
             double t_start_s,
             double t_end_s,
@@ -242,23 +219,6 @@ namespace Game::PredictionDrawDetail
                                double cached_t1_s,
                                double t0_s,
                                double t1_s);
-    bool same_pick_ranges(const std::vector<std::pair<double, double>> &a,
-                          const std::vector<std::pair<double, double>> &b);
-    const PredictionLinePickCache::PreviewChunkEntry *find_preview_pick_chunk_entry(
-            const PredictionLinePickCache &cache,
-            uint32_t chunk_id);
-    bool preview_pick_chunk_entry_matches(const PredictionLinePickCache::PreviewChunkEntry &entry,
-                                          const OrbitChunk &chunk,
-                                          double t0_s,
-                                          double t1_s,
-                                          std::size_t max_segments,
-                                          bool use_adaptive_curve);
-    bool preview_pick_fallback_matches(const PredictionLinePickCache::PreviewFallbackCache &fallback,
-                                       uint64_t source_generation_id,
-                                       const std::vector<std::pair<double, double>> &uncovered_ranges,
-                                       std::size_t max_segments,
-                                       bool use_adaptive_curve);
-    void clear_preview_pick_chunk_cache(PredictionLinePickCache &cache);
     bool frame_spec_uses_direct_world_polyline(const orbitsim::TrajectoryFrameSpec &spec);
     void draw_polyline_window(const OrbitDrawWindowContext &ctx,
                               const OrbitPredictionDrawConfig &draw_config,

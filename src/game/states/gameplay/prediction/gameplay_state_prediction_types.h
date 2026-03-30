@@ -260,57 +260,6 @@ namespace Game
         bool planned_use_adaptive_curve{false};
         std::vector<PickingSystem::LinePickSegmentData> base_segments;
         std::vector<PickingSystem::LinePickSegmentData> planned_segments;
-        struct PreviewChunkEntry
-        {
-            uint32_t chunk_id{0};
-            uint64_t generation_id{0};
-            OrbitPredictionService::ChunkQualityState quality_state{
-                    OrbitPredictionService::ChunkQualityState::Final};
-            double t0_s{std::numeric_limits<double>::quiet_NaN()};
-            double t1_s{std::numeric_limits<double>::quiet_NaN()};
-            std::size_t max_segments{0};
-            bool use_adaptive_curve{false};
-            bool cap_hit{false};
-            std::vector<PickingSystem::LinePickSegmentData> segments;
-
-            void clear()
-            {
-                chunk_id = 0;
-                generation_id = 0;
-                quality_state = OrbitPredictionService::ChunkQualityState::Final;
-                t0_s = std::numeric_limits<double>::quiet_NaN();
-                t1_s = std::numeric_limits<double>::quiet_NaN();
-                max_segments = 0;
-                use_adaptive_curve = false;
-                cap_hit = false;
-                segments.clear();
-            }
-        };
-
-        struct PreviewFallbackCache
-        {
-            uint64_t source_generation_id{0};
-            std::size_t max_segments{0};
-            bool use_adaptive_curve{false};
-            bool cap_hit{false};
-            bool valid{false};
-            std::vector<std::pair<double, double>> uncovered_ranges;
-            std::vector<PickingSystem::LinePickSegmentData> segments;
-
-            void clear()
-            {
-                source_generation_id = 0;
-                max_segments = 0;
-                use_adaptive_curve = false;
-                cap_hit = false;
-                valid = false;
-                uncovered_ranges.clear();
-                segments.clear();
-            }
-        };
-        bool preview_chunk_cache_valid{false};
-        std::vector<PreviewChunkEntry> preview_chunk_entries;
-        PreviewFallbackCache preview_fallback{};
 
         void clear()
         {
@@ -340,9 +289,6 @@ namespace Game
             planned_use_adaptive_curve = false;
             base_segments.clear();
             planned_segments.clear();
-            preview_chunk_cache_valid = false;
-            preview_chunk_entries.clear();
-            preview_fallback.clear();
         }
     };
 
@@ -398,156 +344,6 @@ namespace Game
         }
     };
 
-    // A single chunk of frame-derived planned-path data.  Produced by the
-    // derived service when processing a preview patch publish so that the
-    // renderer (Slice 4) can display individual chunks as they arrive.
-    struct OrbitChunk
-    {
-        uint32_t chunk_id{0};
-        uint64_t generation_id{0};
-        uint64_t display_frame_key{0};
-        uint64_t display_frame_revision{0};
-        OrbitPredictionService::ChunkQualityState quality_state{OrbitPredictionService::ChunkQualityState::Final};
-        double t0_s{std::numeric_limits<double>::quiet_NaN()};
-        double t1_s{std::numeric_limits<double>::quiet_NaN()};
-
-        // Frame-derived data (built by derived service from inertial segments).
-        std::vector<orbitsim::TrajectorySample> frame_samples;
-        std::vector<orbitsim::TrajectorySegment> frame_segments;
-
-        // Per-chunk render data.
-        OrbitRenderCurve render_curve;
-
-        bool valid{false};
-
-        void clear()
-        {
-            chunk_id = 0;
-            generation_id = 0;
-            display_frame_key = 0;
-            display_frame_revision = 0;
-            quality_state = OrbitPredictionService::ChunkQualityState::Final;
-            t0_s = std::numeric_limits<double>::quiet_NaN();
-            t1_s = std::numeric_limits<double>::quiet_NaN();
-            frame_samples.clear();
-            frame_segments.clear();
-            render_curve.clear();
-            valid = false;
-        }
-    };
-
-    // Ordered collection of OrbitChunks covering the planned path.
-    // Chunks are sorted by t0_s and must not overlap.
-    struct PredictionChunkAssembly
-    {
-        uint64_t generation_id{0};
-        uint64_t display_frame_key{0};
-        uint64_t display_frame_revision{0};
-        std::vector<OrbitChunk> chunks;
-        bool valid{false};
-
-        [[nodiscard]] bool empty() const { return chunks.empty(); }
-        [[nodiscard]] std::size_t size() const { return chunks.size(); }
-
-        [[nodiscard]] double start_time_s() const
-        {
-            return chunks.empty() ? std::numeric_limits<double>::quiet_NaN() : chunks.front().t0_s;
-        }
-
-        [[nodiscard]] double end_time_s() const
-        {
-            return chunks.empty() ? std::numeric_limits<double>::quiet_NaN() : chunks.back().t1_s;
-        }
-
-        void clear()
-        {
-            generation_id = 0;
-            display_frame_key = 0;
-            display_frame_revision = 0;
-            chunks.clear();
-            valid = false;
-        }
-    };
-
-    struct PredictionPreviewOverlay
-    {
-        OrbitPredictionCache cache{};
-        PredictionChunkAssembly chunk_assembly{};
-
-        [[nodiscard]] bool has_cache() const
-        {
-            return cache.valid;
-        }
-
-        [[nodiscard]] bool has_flat_planned_cache() const
-        {
-            return cache.valid && cache.has_planned_frame_draw_data();
-        }
-
-        [[nodiscard]] bool has_chunks() const
-        {
-            return chunk_assembly.valid && !chunk_assembly.chunks.empty();
-        }
-
-        [[nodiscard]] bool valid() const
-        {
-            return has_cache() || has_chunks();
-        }
-
-        void clear()
-        {
-            cache.clear();
-            chunk_assembly.clear();
-        }
-    };
-
-    enum class PredictionPreviewRuntimeState : uint8_t
-    {
-        Idle = 0,
-        EnterDrag,
-        DragPreviewPending,
-        PreviewStreaming,
-        AwaitFullRefine,
-    };
-
-    struct PreviewAnchorCache
-    {
-        bool valid{false};
-        int anchor_node_id{-1};
-        double anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
-        uint64_t baseline_generation_id{0};
-        uint64_t upstream_maneuver_hash{0};
-        orbitsim::State anchor_state_inertial{};
-        glm::dmat3 gizmo_basis_snapshot{1.0};
-        orbitsim::TrajectoryFrameSpec display_frame_snapshot{};
-        uint64_t display_frame_key{0};
-        uint64_t display_frame_revision{0};
-        std::vector<int> downstream_maneuver_node_ids{};
-        double visual_window_s{0.0};
-        double exact_window_s{0.0};
-        double pick_window_s{0.0};
-        double request_window_s{0.0};
-
-        void clear()
-        {
-            valid = false;
-            anchor_node_id = -1;
-            anchor_time_s = std::numeric_limits<double>::quiet_NaN();
-            baseline_generation_id = 0;
-            upstream_maneuver_hash = 0;
-            anchor_state_inertial = {};
-            gizmo_basis_snapshot = glm::dmat3(1.0);
-            display_frame_snapshot = {};
-            display_frame_key = 0;
-            display_frame_revision = 0;
-            downstream_maneuver_node_ids.clear();
-            visual_window_s = 0.0;
-            exact_window_s = 0.0;
-            pick_window_s = 0.0;
-            request_window_s = 0.0;
-        }
-    };
-
     struct PredictionDragDebugTelemetry
     {
         using Clock = std::chrono::steady_clock;
@@ -555,23 +351,21 @@ namespace Game
 
         uint64_t drag_session_id{0};
         uint64_t drag_update_count{0};
-        uint64_t preview_request_count{0};
+        uint64_t request_count{0};
         uint64_t solver_result_count{0};
         uint64_t derived_result_count{0};
-        uint64_t preview_publish_count{0};
-        uint64_t full_publish_count{0};
-        uint64_t last_preview_request_generation_id{0};
+        uint64_t publish_count{0};
+        uint64_t last_request_generation_id{0};
         uint64_t last_solver_result_generation_id{0};
         uint64_t last_derived_result_generation_id{0};
 
         TimePoint drag_started_tp{};
         TimePoint last_drag_update_tp{};
         TimePoint last_drag_end_tp{};
-        TimePoint last_preview_request_tp{};
+        TimePoint last_request_tp{};
         TimePoint last_solver_result_tp{};
         TimePoint last_derived_result_tp{};
-        TimePoint last_preview_publish_tp{};
-        TimePoint last_full_publish_tp{};
+        TimePoint last_publish_tp{};
 
         double drag_to_request_ms_last{0.0};
         double drag_to_request_ms_peak{0.0};
@@ -587,22 +381,13 @@ namespace Game
         double derived_worker_ms_peak{0.0};
         double derived_frame_build_ms_last{0.0};
         double derived_flatten_ms_last{0.0};
-        double preview_merge_ms_last{0.0};
-        double preview_merge_ms_peak{0.0};
-        double chunk_merge_ms_last{0.0};
-        double chunk_merge_ms_peak{0.0};
         double derived_apply_ms_last{0.0};
         double derived_apply_ms_peak{0.0};
 
-        std::size_t planned_segments_after_preview_merge{0};
         std::size_t flattened_planned_segments_last{0};
         std::size_t flattened_planned_samples_last{0};
-        uint32_t incoming_chunk_count_last{0};
-        uint32_t merged_chunk_count_last{0};
 
         OrbitPredictionService::SolveQuality last_result_solve_quality{OrbitPredictionService::SolveQuality::Full};
-        OrbitPredictionService::PublishStage last_publish_stage{OrbitPredictionService::PublishStage::Full};
-        bool last_generation_complete{true};
         bool drag_active{false};
 
         static bool has_time(const TimePoint &tp)
@@ -622,19 +407,16 @@ namespace Game
         std::string label{};
         OrbitPredictionCache cache{};
         PredictionLinePickCache pick_cache{};
-        PredictionLinePickCache preview_pick_cache{};
         bool dirty{true};
         bool request_pending{false};
         bool derived_request_pending{false};
         uint64_t latest_requested_generation_id{0};
+        uint64_t latest_requested_derived_generation_id{0};
+        uint64_t latest_requested_derived_display_frame_key{0};
+        uint64_t latest_requested_derived_display_frame_revision{0};
+        orbitsim::BodyId latest_requested_derived_analysis_body_id{orbitsim::kInvalidBodyId};
         OrbitPredictionService::SolveQuality pending_solve_quality{OrbitPredictionService::SolveQuality::Full};
         bool invalidated_while_pending{false};
-        PredictionPreviewRuntimeState preview_state{PredictionPreviewRuntimeState::Idle};
-        PreviewAnchorCache preview_anchor{};
-        double preview_entered_at_s{std::numeric_limits<double>::quiet_NaN()};
-        double preview_last_anchor_refresh_at_s{std::numeric_limits<double>::quiet_NaN()};
-        double preview_last_request_at_s{std::numeric_limits<double>::quiet_NaN()};
-        PredictionPreviewOverlay preview_overlay{};
         PredictionDragDebugTelemetry drag_debug{};
         bool supports_maneuvers{false};
         bool is_celestial{false};
@@ -647,19 +429,16 @@ namespace Game
         {
             cache.clear();
             pick_cache.clear();
-            preview_pick_cache.clear();
             dirty = true;
             request_pending = false;
             derived_request_pending = false;
             latest_requested_generation_id = 0;
+            latest_requested_derived_generation_id = 0;
+            latest_requested_derived_display_frame_key = 0;
+            latest_requested_derived_display_frame_revision = 0;
+            latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
             pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             invalidated_while_pending = false;
-            preview_state = PredictionPreviewRuntimeState::Idle;
-            preview_anchor.clear();
-            preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
-            preview_last_anchor_refresh_at_s = std::numeric_limits<double>::quiet_NaN();
-            preview_last_request_at_s = std::numeric_limits<double>::quiet_NaN();
-            preview_overlay.clear();
             drag_debug.clear();
             auto_primary_body_id = orbitsim::kInvalidBodyId;
             solver_ms_last = 0.0;

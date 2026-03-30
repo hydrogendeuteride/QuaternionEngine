@@ -57,17 +57,6 @@ namespace Game
             Cancelled,
         };
 
-        enum class PublishStage : uint8_t
-        {
-            Full = 0,
-            PreviewStreaming,
-        };
-
-        enum class ChunkQualityState : uint8_t
-        {
-            Final = 0,
-        };
-
         struct AdaptiveStageDiagnostics
         {
             double requested_duration_s{0.0};
@@ -114,16 +103,6 @@ namespace Game
             orbitsim::BodyId primary_body_id{orbitsim::kInvalidBodyId};
             // Gameplay UI authors node DV directly in true RTN using the pre-burn primary-relative state.
             orbitsim::Vec3 dv_rtn_mps{0.0, 0.0, 0.0};
-        };
-
-        struct PublishedChunk
-        {
-            uint32_t chunk_id{0};
-            ChunkQualityState quality_state{ChunkQualityState::Final};
-            double t0_s{std::numeric_limits<double>::quiet_NaN()};
-            double t1_s{std::numeric_limits<double>::quiet_NaN()};
-            bool includes_planned_path{false};
-            bool reused_from_cache{false};
         };
 
         enum class PredictionProfileId : uint8_t
@@ -239,12 +218,9 @@ namespace Game
             uint64_t generation_id{0};
             bool valid{false};
             bool baseline_reused{false};
-            bool generation_complete{true};
             SolveQuality solve_quality{SolveQuality::Full};
-            PublishStage publish_stage{PublishStage::Full};
             double compute_time_ms{0.0};
             Diagnostics diagnostics{};
-            std::vector<PublishedChunk> published_chunks{};
 
             double build_time_s{0.0};
             SharedCelestialEphemeris shared_ephemeris{};
