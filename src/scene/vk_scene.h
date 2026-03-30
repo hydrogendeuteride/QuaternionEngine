@@ -437,6 +437,12 @@ private:
     };
     std::unordered_map<std::string, DynamicRootColliderBodyEntry> _dynamicRootColliderBodies;
 
+    struct PunctualLightSummary
+    {
+        uint32_t point_count = 0;
+        uint32_t spot_count = 0;
+    };
+
     void destroyColliderSyncEntry(ColliderSyncEntry &entry);
     void destroyDynamicRootColliderBodyEntry(DynamicRootColliderBodyEntry &entry);
     void syncDynamicRootColliderBodies();
@@ -449,4 +455,16 @@ private:
     bool rebuildDynamicRootColliderBody(const std::string &instanceName,
                                         DynamicRootColliderBodyEntry &entry,
                                         bool preserve_instance_transform = false);
+    void releasePendingGLTFReleases();
+    void resetMainDrawContext();
+    float updateFrameTiming();
+    void recenterFloatingOriginIfNeeded();
+    void emitDynamicGLTFInstances(const WorldVec3 &origin_world, float dt);
+    void emitDynamicMeshInstances(const WorldVec3 &origin_world);
+    void emitDynamicDecals(const WorldVec3 &origin_world);
+    void updateViewProjectionData();
+    void updateDirectionalShadowData();
+    void updateRayTracingSceneData(const WorldVec3 &origin_world);
+    PunctualLightSummary updatePunctualLightData(const WorldVec3 &origin_world);
+    uint32_t updatePlanetOccluders(const WorldVec3 &origin_world);
 };
