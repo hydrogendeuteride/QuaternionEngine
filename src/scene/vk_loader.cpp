@@ -238,11 +238,14 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
 
     //> load_2
     // we can stimate the descriptors we will need accurately
-    Logger::info("[GLTF] loadGltf: materials={} meshes={} images={} samplers={} (creating descriptor pool)",
+    const uint32_t material_set_capacity = std::max<uint32_t>(1u, static_cast<uint32_t>(gltf.materials.size()));
+
+    Logger::info("[GLTF] loadGltf: materials={} meshes={} images={} samplers={} (creating descriptor pool with {} sets)",
                  gltf.materials.size(),
                  gltf.meshes.size(),
                  gltf.images.size(),
-                 gltf.samplers.size());
+                 gltf.samplers.size(),
+                 material_set_capacity);
 
     // One material descriptor set binds:
     // - 1x uniform buffer (material constants)
@@ -256,7 +259,7 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
     };
 
-    file.descriptorPool.init(engine->_deviceManager->device(), gltf.materials.size(), sizes);
+    file.descriptorPool.init(engine->_deviceManager->device(), material_set_capacity, sizes);
 
     Logger::info("[GLTF] loadGltf: descriptor pool initialized for '{}' (materials={})",
                  filePath,
@@ -370,8 +373,9 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
 
     //> load_buffer
     // create buffer to hold the material data
+    const size_t material_count = std::max<size_t>(1, gltf.materials.size());
     file.materialDataBuffer = engine->_resourceManager->create_buffer(
-        sizeof(GLTFMetallic_Roughness::MaterialConstants) * gltf.materials.size(),
+        sizeof(GLTFMetallic_Roughness::MaterialConstants) * material_count,
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
     int data_index = 0;
     GLTFMetallic_Roughness::MaterialConstants *sceneMaterialConstants = (GLTFMetallic_Roughness::MaterialConstants *)
@@ -575,6 +579,39 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
 
         data_index++;
     }
+
+    if (materials.empty())
+    {
+        std::shared_ptr<GLTFMaterial> default_mat = std::make_shared<GLTFMaterial>();
+        materials.push_back(default_mat);
+        file.materials["__default__"] = default_mat;
+        default_mat->constants_index = 0u;
+
+        GLTFMetallic_Roughness::MaterialConstants constants{};
+        constants.colorFactors = glm::vec4(1.0f);
+        constants.metal_rough_factors = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+        constants.extra[0].x = 1.0f;
+        sceneMaterialConstants[0] = constants;
+
+        GLTFMetallic_Roughness::MaterialResources material_resources;
+        material_resources.colorImage = engine->_whiteImage;
+        material_resources.colorSampler = engine->_samplerManager->defaultLinear();
+        material_resources.metalRoughImage = engine->_whiteImage;
+        material_resources.metalRoughSampler = engine->_samplerManager->defaultLinear();
+        material_resources.normalImage = engine->_flatNormalImage;
+        material_resources.normalSampler = engine->_samplerManager->defaultLinear();
+        material_resources.occlusionImage = engine->_whiteImage;
+        material_resources.occlusionSampler = engine->_samplerManager->defaultLinear();
+        material_resources.emissiveImage = engine->_blackImage;
+        material_resources.emissiveSampler = engine->_samplerManager->defaultLinear();
+        material_resources.dataBuffer = file.materialDataBuffer.buffer;
+        material_resources.dataBufferOffset = 0;
+
+        default_mat->data = engine->metalRoughMaterial.write_material(engine->_deviceManager->device(),
+                                                                      MaterialPass::MainColor,
+                                                                      material_resources,
+                                                                      file.descriptorPool);
+    }
     //< load_material
 
     // Rough progress after materials and texture requests
@@ -584,9 +621,9 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
     }
 
     // Flush material constants buffer so GPU sees updated data on non-coherent memory
-    if (!gltf.materials.empty())
+    if (material_count > 0)
     {
-        VkDeviceSize totalSize = sizeof(GLTFMetallic_Roughness::MaterialConstants) * gltf.materials.size();
+        VkDeviceSize totalSize = sizeof(GLTFMetallic_Roughness::MaterialConstants) * material_count;
         vmaFlushAllocation(engine->_deviceManager->allocator(), file.materialDataBuffer.allocation, 0, totalSize);
     }
 
@@ -1100,6 +1137,41 @@ void LoadedGLTF::build_mesh_colliders_from_sidecar(const LoadedGLTF &sidecar, bo
     }
 
     Physics::build_mesh_colliders_from_sidecar(collider_mesh_instances, sidecar, dst_names, clear_existing);
+}
+
+void LoadedGLTF::apply_collider_child_mass_overrides(const std::unordered_map<std::string, float> &overrides)
+{
+    if (overrides.empty())
+    {
+        return;
+    }
+
+    for (auto &[owner_name, compound] : collider_compounds)
+    {
+        (void) owner_name;
+        for (Physics::CompoundShapeChild &child : compound.children)
+        {
+            if (child.name.empty())
+            {
+                continue;
+            }
+
+            auto it = overrides.find(child.name);
+            if (it == overrides.end())
+            {
+                continue;
+            }
+
+            const float mass = it->second;
+            if (!std::isfinite(mass) || mass <= 0.0f)
+            {
+                Logger::warn("[GLTF][Colliders] override for '{}' has invalid mass {}; ignoring", child.name, mass);
+                continue;
+            }
+
+            child.mass = mass;
+        }
+    }
 }
 
 void LoadedGLTF::ensureRestTransformsCached()

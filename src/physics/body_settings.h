@@ -57,6 +57,7 @@ namespace Physics
 
         // Physical properties
         float mass = 1.0f; // Only used for dynamic bodies
+        bool has_explicit_mass = false; // true when the caller intentionally overrides total body mass
         float friction = 0.5f;
         float restitution = 0.0f; // Bounciness (0 = no bounce, 1 = perfect bounce)
         float linear_damping = 0.0f;
@@ -134,6 +135,7 @@ namespace Physics
         BodySettings &set_mass(float m)
         {
             mass = m;
+            has_explicit_mass = true;
             return *this;
         }
 

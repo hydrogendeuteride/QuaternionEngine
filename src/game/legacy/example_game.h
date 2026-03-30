@@ -72,6 +72,9 @@ private:
     // World-owned static collider for the ground. Not bound to the ground entity,
     // because the render plane sits at y=0 while the physics box is centered at y=-1.
     Physics::BodyId _ground_collider_body;
+    Physics::BodyId _mirage_body;
+    std::string _ground_mesh_instance_name{"example.ground"};
+    std::string _mirage_instance_name{"example.mirage_c"};
 
     // Timing
     float _elapsed{0.0f};
