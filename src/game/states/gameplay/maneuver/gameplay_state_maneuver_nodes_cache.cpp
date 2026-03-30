@@ -152,36 +152,6 @@ namespace Game
             return finite3(glm::dvec3(out_world));
         }
 
-        // Sample a position from a chunk assembly's frame_samples at the given time.
-        template<typename HermiteSamplerFn, typename PositionSamplerFn>
-        bool sample_chunk_world_at(HermiteSamplerFn &&hermite_fn,
-                                   PositionSamplerFn &&position_fn,
-                                   const PredictionChunkAssembly *chunk_assembly,
-                                   const double sample_time_s,
-                                   const WorldVec3 &align_delta,
-                                   WorldVec3 &out_world)
-        {
-            out_world = WorldVec3(0.0, 0.0, 0.0);
-            if (!chunk_assembly || !std::isfinite(sample_time_s))
-            {
-                return false;
-            }
-
-            for (const OrbitChunk &chunk : chunk_assembly->chunks)
-            {
-                if (!chunk.valid || chunk.frame_samples.size() < 2 ||
-                    sample_time_s < chunk.t0_s || sample_time_s > chunk.t1_s)
-                {
-                    continue;
-                }
-
-                return sample_traj_world_at(hermite_fn, position_fn, chunk.frame_samples,
-                                            sample_time_s, align_delta, out_world);
-            }
-
-            return false;
-        }
-
         // Unified tangent sampling: computes a finite-difference tangent from two nearby position samples.
         // PosSampler: (double time_s, WorldVec3 &out) -> bool
         template<typename PosSampler>
@@ -265,22 +235,8 @@ namespace Game
         const bool hold_cached_release_state =
                 player_track && interaction_idle &&
                 (player_track->request_pending || player_track->derived_request_pending);
-        const PredictionChunkAssembly *preview_chunk_assembly =
-                (player_track &&
-                 player_track->preview_overlay.chunk_assembly.valid &&
-                 !player_track->preview_overlay.chunk_assembly.chunks.empty())
-                        ? &player_track->preview_overlay.chunk_assembly
-                        : nullptr;
         const OrbitPredictionCache *display_cache = effective_cache;
-        const OrbitPredictionCache *preview_cache =
-                (player_track && player_track->preview_overlay.cache.valid)
-                        ? &player_track->preview_overlay.cache
-                        : nullptr;
-        const bool chunk_only_preview_overlay =
-                preview_chunk_assembly && preview_cache &&
-                !player_track->preview_overlay.has_flat_planned_cache();
-        const OrbitPredictionCache *pred_cache =
-                chunk_only_preview_overlay ? preview_cache : display_cache;
+        const OrbitPredictionCache *pred_cache = display_cache;
         if (!display_cache || !display_cache->valid || display_cache->trajectory_frame.size() < 2)
         {
             return;
@@ -331,26 +287,20 @@ namespace Game
                         ? &stable_cache->trajectory_inertial_planned
                         : nullptr;
         const bool allow_base_fallback = _maneuver_state.nodes.size() <= 1;
-        const double preview_anchor_time_s =
-                (player_track && player_track->preview_anchor.valid &&
-                 std::isfinite(player_track->preview_anchor.anchor_time_s))
-                        ? player_track->preview_anchor.anchor_time_s
-                        : std::numeric_limits<double>::quiet_NaN();
         const bool stable_planned_prefix_available =
-                stable_cache && stable_cache != pred_cache &&
-                stable_traj_node_world != nullptr && stable_traj_node_inertial != nullptr;
+                false;
         const orbitsim::TrajectoryFrameSpec display_frame_spec =
                 display_cache->resolved_frame_spec_valid
                     ? display_cache->resolved_frame_spec
                     : resolve_prediction_display_frame_spec(*display_cache, now_s);
-        const bool display_frame_uses_preview_anchor =
+        const bool display_frame_uses_drag_snapshot_time =
                 display_frame_spec.type == orbitsim::TrajectoryFrameType::Inertial ||
                 display_frame_spec.type == orbitsim::TrajectoryFrameType::BodyCenteredInertial;
         const bool drag_snapshots_available =
                 _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis &&
                 !_maneuver_gizmo_interaction.drag_display_snapshots.empty();
         const bool freeze_nonrotating_drag_snapshots =
-                display_frame_uses_preview_anchor && drag_snapshots_available;
+                display_frame_uses_drag_snapshot_time && drag_snapshots_available;
         bool display_player_lookup_attempted = false;
         orbitsim::SpacecraftStateLookup display_player_lookup{};
         const auto get_display_player_lookup = [&]() -> const orbitsim::SpacecraftStateLookup * {
@@ -519,8 +469,7 @@ namespace Game
             // --- Resolve which cache/trajectory source to use for this node ---
             const bool use_stable_prefix =
                     stable_planned_prefix_available &&
-                    std::isfinite(preview_anchor_time_s) &&
-                    node.time_s < (preview_anchor_time_s - _prediction_draw_config.node_time_tolerance_s);
+                    false;
             const OrbitPredictionCache *node_pred_cache = use_stable_prefix ? stable_cache : pred_cache;
             const OrbitPredictionCache *node_disp_cache = use_stable_prefix ? stable_cache : display_cache;
             const PreviewMap *node_preview_map = use_stable_prefix ? &stable_preview_by_node_id : &preview_by_node_id;
@@ -540,9 +489,6 @@ namespace Game
                                        : (stable_traj_node_inertial
                                                   ? stable_traj_node_inertial
                                                   : (allow_base_fallback ? &pred_cache->trajectory_inertial : nullptr)));
-            const PredictionChunkAssembly *node_chunk_assembly =
-                    use_stable_prefix ? nullptr : preview_chunk_assembly;
-
             auto preview_it = node_preview_map->find(node.id);
             const OrbitPredictionCache::ManeuverNodePreview *preview =
                     (preview_it != node_preview_map->end()) ? preview_it->second : nullptr;
@@ -564,7 +510,6 @@ namespace Game
                     node_preview_map = &stable_preview_by_node_id;
                     node_traj_world = stable_traj_node_world;
                     node_traj_inertial = stable_traj_node_inertial;
-                    node_chunk_assembly = nullptr;
                     preview_it = node_preview_map->find(node.id);
                     preview = (preview_it != node_preview_map->end()) ? preview_it->second : nullptr;
                 }
@@ -599,11 +544,7 @@ namespace Game
                                               glm::dvec3(preview->inertial_position_m),
                                               glm::dvec3(preview->inertial_velocity_mps),
                                               node_position_world);
-            const bool have_chunk_pos =
-                    !have_preview_pos &&
-                    sample_chunk_world_at(hermite_sampler, position_sampler, node_chunk_assembly,
-                                          node.time_s, align_delta, node_position_world);
-            if (!have_preview_pos && !have_chunk_pos &&
+            if (!have_preview_pos &&
                 (!node_traj_world ||
                  !sample_traj_world_at(hermite_sampler, position_sampler, *node_traj_world,
                                         node.time_s, align_delta, node_position_world)))
@@ -720,21 +661,12 @@ namespace Game
                     }
                     else if (node_traj_world)
                     {
-                        // Unified tangent: try chunks first, then direct trajectory
-                        const auto chunk_pos_sampler = [&](double t, WorldVec3 &out) {
-                            return sample_chunk_world_at(hermite_sampler, position_sampler, node_chunk_assembly,
-                                                         t, align_delta, out);
-                        };
                         const auto traj_pos_sampler = [&](double t, WorldVec3 &out) {
                             return sample_traj_world_at(hermite_sampler, position_sampler, *node_traj_world,
                                                         t, align_delta, out);
                         };
 
-                        if (sample_tangent_world_from(*node_traj_world, node.time_s, chunk_pos_sampler, tangent_world))
-                        {
-                            prograde_world = tangent_world;
-                        }
-                        else if (sample_tangent_world_from(*node_traj_world, basis_time_s, traj_pos_sampler, tangent_world))
+                        if (sample_tangent_world_from(*node_traj_world, basis_time_s, traj_pos_sampler, tangent_world))
                         {
                             prograde_world = tangent_world;
                         }

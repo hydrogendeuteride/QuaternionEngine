@@ -42,8 +42,7 @@ namespace Game::PredictionDrawDetail
         }
 
         std::vector<orbitsim::TrajectorySegment> &world_basis_segments =
-                (&cache == track_ctx.preview_planned_cache) ? track_ctx.traj_preview_planned_segments_world_basis
-                                                            : track_ctx.traj_stable_planned_segments_world_basis;
+                track_ctx.traj_stable_planned_segments_world_basis;
         if (world_basis_segments.empty() && !cache.trajectory_segments_frame_planned.empty())
         {
             world_basis_segments =
@@ -82,71 +81,6 @@ namespace Game::PredictionDrawDetail
             }
         }
         return true;
-    }
-
-    ChunkAssemblyDrawResult draw_chunk_assembly_planned(
-            const OrbitDrawWindowContext &draw_ctx,
-            const OrbitPredictionDrawConfig &draw_config,
-            OrbitPlotPerfStats &perf,
-            PredictionChunkAssembly &assembly,
-            const double t_start_s,
-            const double t_end_s,
-            const glm::vec4 &color,
-            const bool dashed)
-    {
-        ChunkAssemblyDrawResult result{};
-        if (!assembly.valid || assembly.chunks.empty() || !(t_end_s > t_start_s))
-        {
-            return result;
-        }
-
-        for (OrbitChunk &chunk : assembly.chunks)
-        {
-            if (!chunk.valid || chunk.frame_segments.empty())
-            {
-                continue;
-            }
-
-            if (chunk.t1_s <= t_start_s || chunk.t0_s >= t_end_s)
-            {
-                continue;
-            }
-
-            const double draw_t0 = std::max(chunk.t0_s, t_start_s);
-            const double draw_t1 = std::min(chunk.t1_s, t_end_s);
-            if (!(draw_t1 > draw_t0))
-            {
-                continue;
-            }
-
-            if (!chunk.render_curve.empty())
-            {
-                draw_adaptive_curve_window(draw_ctx,
-                                           draw_config,
-                                           perf,
-                                           chunk.render_curve,
-                                           draw_t0,
-                                           draw_t1,
-                                           color,
-                                           dashed);
-            }
-            else
-            {
-                draw_orbit_window(draw_ctx,
-                                  draw_config,
-                                  perf,
-                                  chunk.frame_segments,
-                                  draw_t0,
-                                  draw_t1,
-                                  color,
-                                  dashed);
-            }
-
-            ++result.chunks_drawn;
-            result.covered_ranges.emplace_back(draw_t0, draw_t1);
-        }
-
-        return result;
     }
 
     std::vector<std::pair<double, double>> compute_uncovered_ranges(
@@ -342,69 +276,4 @@ namespace Game::PredictionDrawDetail
                std::abs(cached_t1_s - t1_s) <= kPickWindowRebuildEpsilonS;
     }
 
-    bool same_pick_ranges(const std::vector<std::pair<double, double>> &a,
-                          const std::vector<std::pair<double, double>> &b)
-    {
-        if (a.size() != b.size())
-        {
-            return false;
-        }
-
-        for (std::size_t i = 0; i < a.size(); ++i)
-        {
-            if (!same_pick_time_window(a[i].first, a[i].second, b[i].first, b[i].second))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    const PredictionLinePickCache::PreviewChunkEntry *find_preview_pick_chunk_entry(
-            const PredictionLinePickCache &cache,
-            const uint32_t chunk_id)
-    {
-        const auto it = std::find_if(cache.preview_chunk_entries.begin(),
-                                     cache.preview_chunk_entries.end(),
-                                     [chunk_id](const PredictionLinePickCache::PreviewChunkEntry &entry) {
-                                         return entry.chunk_id == chunk_id;
-                                     });
-        return (it != cache.preview_chunk_entries.end()) ? &(*it) : nullptr;
-    }
-
-    bool preview_pick_chunk_entry_matches(const PredictionLinePickCache::PreviewChunkEntry &entry,
-                                          const OrbitChunk &chunk,
-                                          const double t0_s,
-                                          const double t1_s,
-                                          const std::size_t max_segments,
-                                          const bool use_adaptive_curve)
-    {
-        return entry.chunk_id == chunk.chunk_id &&
-               entry.generation_id == chunk.generation_id &&
-               entry.quality_state == chunk.quality_state &&
-               entry.max_segments == max_segments &&
-               entry.use_adaptive_curve == use_adaptive_curve &&
-               same_pick_time_window(entry.t0_s, entry.t1_s, t0_s, t1_s);
-    }
-
-    bool preview_pick_fallback_matches(const PredictionLinePickCache::PreviewFallbackCache &fallback,
-                                       const uint64_t source_generation_id,
-                                       const std::vector<std::pair<double, double>> &uncovered_ranges,
-                                       const std::size_t max_segments,
-                                       const bool use_adaptive_curve)
-    {
-        return fallback.valid &&
-               fallback.source_generation_id == source_generation_id &&
-               fallback.max_segments == max_segments &&
-               fallback.use_adaptive_curve == use_adaptive_curve &&
-               same_pick_ranges(fallback.uncovered_ranges, uncovered_ranges);
-    }
-
-    void clear_preview_pick_chunk_cache(PredictionLinePickCache &cache)
-    {
-        cache.preview_chunk_cache_valid = false;
-        cache.preview_chunk_entries.clear();
-        cache.preview_fallback.clear();
-    }
 } // namespace Game::PredictionDrawDetail

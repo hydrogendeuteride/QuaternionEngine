@@ -156,7 +156,7 @@ namespace Game
         double prediction_display_window_s(PredictionSubjectKey key,
                                            double now_s,
                                            bool with_maneuvers) const;
-        double prediction_preview_exact_window_s(const PredictionTrackState &track,
+        double prediction_planned_exact_window_s(const PredictionTrackState &track,
                                                  double now_s,
                                                  bool with_maneuvers) const;
         double prediction_required_window_s(const PredictionTrackState &track,
@@ -165,9 +165,6 @@ namespace Game
         double prediction_required_window_s(PredictionSubjectKey key,
                                             double now_s,
                                             bool with_maneuvers) const;
-        void refresh_prediction_preview_anchor(PredictionTrackState &track,
-                                               double now_s,
-                                               bool with_maneuvers);
         PredictionTrackState *find_prediction_track(PredictionSubjectKey key);
         const PredictionTrackState *find_prediction_track(PredictionSubjectKey key) const;
         PredictionTrackState *active_prediction_track();
@@ -226,6 +223,15 @@ namespace Game
         WorldVec3 prediction_world_reference_body_world() const;
         WorldVec3 prediction_frame_origin_world(const OrbitPredictionCache &cache,
                                                 double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
+        void mark_prediction_derived_request_submitted(
+                PredictionTrackState &track,
+                const OrbitPredictionDerivedService::Request &request);
+        bool request_prediction_derived_refresh(
+                PredictionTrackState &track,
+                double display_time_s = std::numeric_limits<double>::quiet_NaN());
+        bool prediction_track_has_current_derived_cache(
+                const PredictionTrackState &track,
+                double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
         void refresh_prediction_derived_cache(PredictionTrackState &track,
                                               double display_time_s = std::numeric_limits<double>::quiet_NaN());
         void refresh_all_prediction_derived_caches();

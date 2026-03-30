@@ -475,12 +475,8 @@ namespace Game
         _maneuver_gizmo_interaction.applied_delta = false;
         if (PredictionTrackState *track = active_prediction_track())
         {
-            track->preview_anchor.clear();
             track->invalidated_while_pending = track->request_pending || track->derived_request_pending;
-            if (!std::isfinite(track->preview_entered_at_s))
-            {
-                track->preview_entered_at_s = drag_display_reference_time_s;
-            }
+            (void) drag_display_reference_time_s;
 
             PredictionDragDebugTelemetry &debug = track->drag_debug;
             const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
@@ -605,10 +601,7 @@ namespace Game
                 const orbitsim::TrajectoryFrameSpec display_frame_spec =
                         track->cache.resolved_frame_spec_valid ? track->cache.resolved_frame_spec
                                                                : _prediction_frame_selection.spec;
-                if (prediction_frame_is_lagrange_sensitive(display_frame_spec))
-                {
-                    track->preview_anchor.clear();
-                }
+                (void) display_frame_spec;
             }
         }
 

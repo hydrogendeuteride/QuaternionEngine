@@ -60,17 +60,6 @@ namespace Game
         mark_prediction_dirty();
     }
 
-    void GameplayState::refresh_prediction_preview_anchor(PredictionTrackState &track,
-                                                          const double now_s,
-                                                          const bool with_maneuvers)
-    {
-        (void) now_s;
-        (void) with_maneuvers;
-        track.preview_state = PredictionPreviewRuntimeState::Idle;
-        track.preview_anchor.clear();
-        track.preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
-    }
-
     void GameplayState::clear_prediction_runtime()
     {
         // Drop every cached artifact when the feature is disabled.
@@ -126,7 +115,7 @@ namespace Game
         return required_ahead_s;
     }
 
-    double GameplayState::prediction_preview_exact_window_s(const PredictionTrackState &track,
+    double GameplayState::prediction_planned_exact_window_s(const PredictionTrackState &track,
                                                             const double now_s,
                                                             const bool with_maneuvers) const
     {
@@ -165,10 +154,8 @@ namespace Game
                                                        const bool with_maneuvers) const
     {
         const double display_window_s = prediction_display_window_s(track.key, now_s, with_maneuvers);
-        const double preview_exact_window_s = prediction_preview_exact_window_s(track, now_s, with_maneuvers);
-        return std::max({display_window_s,
-                         preview_exact_window_s,
-                         std::max(0.0, track.preview_anchor.request_window_s)});
+        const double planned_exact_window_s = prediction_planned_exact_window_s(track, now_s, with_maneuvers);
+        return std::max(display_window_s, planned_exact_window_s);
     }
 
     double GameplayState::prediction_required_window_s(const PredictionSubjectKey key,
@@ -278,7 +265,6 @@ namespace Game
                     !_maneuver_state.nodes.empty();
             const bool thrusting = prediction_subject_thrust_applied_this_tick(track.key);
             const double track_reference_time_s = now_s;
-            refresh_prediction_preview_anchor(track, track_reference_time_s, with_maneuvers);
             const bool rebuild =
                     should_rebuild_prediction_track(track, track_reference_time_s, fixed_dt, thrusting, with_maneuvers);
             if (!rebuild)
