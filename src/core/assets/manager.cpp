@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
 
 #include <core/engine.h>
 #include <core/device/resource.h>
@@ -15,6 +16,7 @@
 #include <fastgltf/parser.hpp>
 #include <fastgltf/util.hpp>
 #include <fastgltf/tools.hpp>
+#include <nlohmann/json.hpp>
 
 using std::filesystem::path;
 
@@ -42,6 +44,100 @@ namespace
         const std::string stem = p.stem().string();
         const std::string ext = p.extension().string();
         return (p.parent_path() / (stem + ".colliders" + ext)).string();
+    }
+
+    static std::string derive_gltf_collider_json_path(const std::string &model_path)
+    {
+        if (model_path.empty())
+        {
+            return {};
+        }
+
+        const path p = path(model_path);
+        if (!p.has_extension())
+        {
+            return {};
+        }
+
+        const std::string stem = p.stem().string();
+        return (p.parent_path() / (stem + ".colliders.json")).string();
+    }
+
+    static std::optional<std::unordered_map<std::string, float>> load_collider_mass_overrides_json(const std::string &json_path)
+    {
+        using json = nlohmann::json;
+
+        std::ifstream file(json_path);
+        if (!file)
+        {
+            return {};
+        }
+
+        try
+        {
+            json root;
+            file >> root;
+
+            const json *masses = &root;
+            if (root.is_object())
+            {
+                auto it = root.find("masses");
+                if (it != root.end())
+                {
+                    masses = &(*it);
+                }
+            }
+
+            if (!masses->is_object())
+            {
+                Logger::warn("[AssetManager] collider mass json '{}' must be an object or contain an object 'masses'",
+                             json_path);
+                return {};
+            }
+
+            std::unordered_map<std::string, float> out;
+            for (auto it = masses->begin(); it != masses->end(); ++it)
+            {
+                float mass = 0.0f;
+                if (it->is_number())
+                {
+                    mass = it->get<float>();
+                }
+                else if (it->is_object())
+                {
+                    auto mass_it = it->find("mass");
+                    if (mass_it == it->end() || !mass_it->is_number())
+                    {
+                        Logger::warn("[AssetManager] collider mass entry '{}' in '{}' must be a number or object with numeric 'mass'",
+                                     it.key(), json_path);
+                        continue;
+                    }
+                    mass = mass_it->get<float>();
+                }
+                else
+                {
+                    Logger::warn("[AssetManager] collider mass entry '{}' in '{}' must be numeric",
+                                 it.key(), json_path);
+                    continue;
+                }
+
+                if (!std::isfinite(mass) || mass <= 0.0f)
+                {
+                    Logger::warn("[AssetManager] collider mass entry '{}' in '{}' has invalid mass {}",
+                                 it.key(), json_path, mass);
+                    continue;
+                }
+
+                out[it.key()] = mass;
+            }
+
+            return out;
+        }
+        catch (const std::exception &e)
+        {
+            Logger::warn("[AssetManager] failed to parse collider mass json '{}': {}", json_path, e.what());
+            return {};
+        }
     }
     static void clamp_blackbody_settings(AssetManager::BlackbodySettings &s)
     {
@@ -238,6 +334,15 @@ std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_v
             (*loaded)->build_mesh_colliders_from_markers(true);
             (*loaded)->colliders_from_sidecar = false;
             (*loaded)->collider_source_path.clear();
+        }
+
+        const std::string collider_json_path = derive_gltf_collider_json_path(resolved);
+        if (!collider_json_path.empty() && file_exists_nothrow(collider_json_path))
+        {
+            if (auto mass_overrides = load_collider_mass_overrides_json(collider_json_path); mass_overrides.has_value())
+            {
+                (*loaded)->apply_collider_child_mass_overrides(*mass_overrides);
+            }
         }
 
         Logger::info("[AssetManager] loadGLTF loaded new scene key='{}' path='{}' ptr={}", key, resolved,

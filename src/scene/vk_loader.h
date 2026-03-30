@@ -173,6 +173,9 @@ struct LoadedGLTF : public IRenderable
     // Mesh colliders are mapped to this scene's nodes by matching ancestor node names.
     void build_mesh_colliders_from_sidecar(const LoadedGLTF &sidecar, bool clear_existing = true);
 
+    // Apply child-mass overrides keyed by collider node name.
+    void apply_collider_child_mass_overrides(const std::unordered_map<std::string, float> &overrides);
+
     ~LoadedGLTF()
     {
         const char *name = debugName.empty() ? "<unnamed>" : debugName.c_str();

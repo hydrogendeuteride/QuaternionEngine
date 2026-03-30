@@ -67,6 +67,8 @@ namespace Physics
             scaled.position = child.position * s;
             scaled.rotation = child.rotation;
             scaled.user_data = child.user_data;
+            scaled.mass = child.mass;
+            scaled.name = child.name;
             out.children.push_back(std::move(scaled));
         }
 

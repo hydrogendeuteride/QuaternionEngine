@@ -4,6 +4,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <variant>
 #include <vector>
 #include <utility>
@@ -134,17 +135,23 @@ namespace Physics
         glm::vec3 position{0.0f};
         glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
         uint32_t user_data{0};
+        float mass{0.0f}; // <= 0 means "use backend default mass contribution for this shape"
+        std::string name; // Optional stable identifier for authoring/runtime overrides
 
         CompoundShapeChild() = default;
 
         CompoundShapeChild(const PrimitiveShapeVariant &s,
                            const glm::vec3 &p = glm::vec3(0.0f),
                            const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-                           uint32_t ud = 0)
+                           uint32_t ud = 0,
+                           float m = 0.0f,
+                           std::string n = {})
             : shape(s)
               , position(p)
               , rotation(r)
               , user_data(ud)
+              , mass(m)
+              , name(std::move(n))
         {
         }
     };
@@ -162,44 +169,54 @@ namespace Physics
         CompoundShape &add_child(const PrimitiveShapeVariant &s,
                                  const glm::vec3 &p = glm::vec3(0.0f),
                                  const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-                                 uint32_t ud = 0)
+                                 uint32_t ud = 0,
+                                 float mass = 0.0f,
+                                 std::string name = {})
         {
-            children.emplace_back(s, p, r, ud);
+            children.emplace_back(s, p, r, ud, mass, std::move(name));
             return *this;
         }
 
         CompoundShape &add_box(const glm::vec3 &half_extents,
                                const glm::vec3 &p = glm::vec3(0.0f),
                                const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-                               uint32_t ud = 0)
+                               uint32_t ud = 0,
+                               float mass = 0.0f,
+                               std::string name = {})
         {
-            return add_child(BoxShape{half_extents}, p, r, ud);
+            return add_child(BoxShape{half_extents}, p, r, ud, mass, std::move(name));
         }
 
         CompoundShape &add_sphere(float radius,
                                   const glm::vec3 &p = glm::vec3(0.0f),
                                   const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-                                  uint32_t ud = 0)
+                                  uint32_t ud = 0,
+                                  float mass = 0.0f,
+                                  std::string name = {})
         {
-            return add_child(SphereShape{radius}, p, r, ud);
+            return add_child(SphereShape{radius}, p, r, ud, mass, std::move(name));
         }
 
         CompoundShape &add_capsule(float radius,
                                    float half_height,
                                    const glm::vec3 &p = glm::vec3(0.0f),
                                    const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-                                   uint32_t ud = 0)
+                                   uint32_t ud = 0,
+                                   float mass = 0.0f,
+                                   std::string name = {})
         {
-            return add_child(CapsuleShape{radius, half_height}, p, r, ud);
+            return add_child(CapsuleShape{radius, half_height}, p, r, ud, mass, std::move(name));
         }
 
         CompoundShape &add_cylinder(float radius,
                                     float half_height,
                                     const glm::vec3 &p = glm::vec3(0.0f),
                                     const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-                                    uint32_t ud = 0)
+                                    uint32_t ud = 0,
+                                    float mass = 0.0f,
+                                    std::string name = {})
         {
-            return add_child(CylinderShape{radius, half_height}, p, r, ud);
+            return add_child(CylinderShape{radius, half_height}, p, r, ud, mass, std::move(name));
         }
 
         CompoundShape &add_tapered_cylinder(float half_height,
@@ -207,9 +224,11 @@ namespace Physics
                                             float bottom_radius,
                                             const glm::vec3 &p = glm::vec3(0.0f),
                                             const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-                                            uint32_t ud = 0)
+                                            uint32_t ud = 0,
+                                            float mass = 0.0f,
+                                            std::string name = {})
         {
-            return add_child(TaperedCylinderShape{half_height, top_radius, bottom_radius}, p, r, ud);
+            return add_child(TaperedCylinderShape{half_height, top_radius, bottom_radius}, p, r, ud, mass, std::move(name));
         }
 
         // Cone convenience: tip_up=true means tip is along +Y in the shape's local space.
@@ -218,10 +237,12 @@ namespace Physics
                                 bool tip_up = true,
                                 const glm::vec3 &p = glm::vec3(0.0f),
                                 const glm::quat &r = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-                                uint32_t ud = 0)
+                                uint32_t ud = 0,
+                                float mass = 0.0f,
+                                std::string name = {})
         {
-            return tip_up ? add_tapered_cylinder(half_height, 0.0f, radius, p, r, ud)
-                          : add_tapered_cylinder(half_height, radius, 0.0f, p, r, ud);
+            return tip_up ? add_tapered_cylinder(half_height, 0.0f, radius, p, r, ud, mass, std::move(name))
+                          : add_tapered_cylinder(half_height, radius, 0.0f, p, r, ud, mass, std::move(name));
         }
     };
 
