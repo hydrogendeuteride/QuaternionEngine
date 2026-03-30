@@ -18,14 +18,6 @@ namespace Game::PredictionRuntimeDetail
         return state == ManeuverGizmoInteraction::State::DragAxis;
     }
 
-    inline bool maneuver_live_preview(const bool with_maneuvers,
-                                      const bool plan_live_preview_active,
-                                      const ManeuverGizmoInteraction::State gizmo_state)
-    {
-        return with_maneuvers &&
-               (plan_live_preview_active || maneuver_drag_active(gizmo_state));
-    }
-
     inline double elapsed_ms(const PredictionDragDebugTelemetry::TimePoint &start_tp,
                              const PredictionDragDebugTelemetry::TimePoint &end_tp)
     {
@@ -36,5 +28,15 @@ namespace Game::PredictionRuntimeDetail
     {
         last_value = std::max(0.0, sample);
         peak_value = std::max(peak_value, last_value);
+    }
+
+    inline uint64_t visible_generation_id(const PredictionTrackState &track)
+    {
+        return track.cache.valid ? track.cache.generation_id : 0u;
+    }
+
+    inline bool latest_solver_generation_published(const PredictionTrackState &track)
+    {
+        return track.latest_requested_generation_id <= visible_generation_id(track);
     }
 } // namespace Game::PredictionRuntimeDetail

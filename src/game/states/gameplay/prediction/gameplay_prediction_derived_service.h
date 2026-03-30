@@ -45,15 +45,15 @@ namespace Game
 
             uint64_t track_id{0};
             uint64_t generation_id{0};
+            uint64_t display_frame_key{0};
+            uint64_t display_frame_revision{0};
+            orbitsim::BodyId analysis_body_id{orbitsim::kInvalidBodyId};
             bool valid{false};
             bool base_frame_reused{false};
-            bool generation_complete{true};
             OrbitPredictionService::SolveQuality solve_quality{OrbitPredictionService::SolveQuality::Full};
-            OrbitPredictionService::PublishStage publish_stage{OrbitPredictionService::PublishStage::Full};
             TimingStats timings{};
             OrbitPredictionDerivedDiagnostics diagnostics{};
             OrbitPredictionCache cache{};
-            PredictionChunkAssembly chunk_assembly{};
         };
 
         OrbitPredictionDerivedService();

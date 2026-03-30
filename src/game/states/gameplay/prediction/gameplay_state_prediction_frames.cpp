@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_cache_internal.h"
+#include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_prediction_tuning.h"
@@ -18,6 +19,26 @@ namespace Game
 {
     namespace
     {
+        OrbitPredictionService::Result build_prediction_solver_result_from_cache(
+                const uint64_t track_id,
+                const OrbitPredictionCache &cache)
+        {
+            OrbitPredictionService::Result result{};
+            result.track_id = track_id;
+            result.generation_id = cache.generation_id;
+            result.valid = cache.trajectory_inertial.size() >= 2 && !cache.trajectory_segments_inertial.empty();
+            result.solve_quality = OrbitPredictionService::SolveQuality::Full;
+            result.build_time_s = cache.build_time_s;
+            result.shared_ephemeris = cache.shared_ephemeris;
+            result.massive_bodies = cache.massive_bodies;
+            result.trajectory_inertial = cache.trajectory_inertial;
+            result.trajectory_inertial_planned = cache.trajectory_inertial_planned;
+            result.trajectory_segments_inertial = cache.trajectory_segments_inertial;
+            result.trajectory_segments_inertial_planned = cache.trajectory_segments_inertial_planned;
+            result.maneuver_previews = cache.maneuver_previews;
+            return result;
+        }
+
         bool same_frame_spec(const orbitsim::TrajectoryFrameSpec &a, const orbitsim::TrajectoryFrameSpec &b)
         {
             return a.type == b.type &&
@@ -843,10 +864,120 @@ namespace Game
         return _scenario_config.system_center;
     }
 
+    void GameplayState::mark_prediction_derived_request_submitted(
+            PredictionTrackState &track,
+            const OrbitPredictionDerivedService::Request &request)
+    {
+        track.derived_request_pending = true;
+        track.latest_requested_derived_generation_id = request.generation_id;
+        track.latest_requested_derived_display_frame_key = request.display_frame_key;
+        track.latest_requested_derived_display_frame_revision = request.display_frame_revision;
+        track.latest_requested_derived_analysis_body_id = request.analysis_body_id;
+    }
+
+    bool GameplayState::request_prediction_derived_refresh(PredictionTrackState &track, double display_time_s)
+    {
+        if (track.cache.trajectory_inertial.size() < 2 || track.cache.trajectory_segments_inertial.empty())
+        {
+            return false;
+        }
+
+        if (!PredictionRuntimeDetail::latest_solver_generation_published(track))
+        {
+            return false;
+        }
+
+        const orbitsim::TrajectoryFrameSpec resolved_frame_spec =
+                resolve_prediction_display_frame_spec(track.cache, display_time_s);
+        const uint64_t display_frame_key = prediction_display_frame_key(resolved_frame_spec);
+        const uint64_t display_frame_revision = _prediction_display_frame_revision;
+        double analysis_time_s = display_time_s;
+        if (!std::isfinite(analysis_time_s))
+        {
+            analysis_time_s = _orbitsim ? _orbitsim->sim.time_s() : track.cache.build_time_s;
+        }
+
+        const orbitsim::BodyId analysis_body_id =
+                resolve_prediction_analysis_body_id(track.cache, track.key, analysis_time_s, track.auto_primary_body_id);
+        if (track.derived_request_pending &&
+            track.latest_requested_derived_generation_id == track.cache.generation_id &&
+            track.latest_requested_derived_display_frame_key == display_frame_key &&
+            track.latest_requested_derived_display_frame_revision == display_frame_revision &&
+            track.latest_requested_derived_analysis_body_id == analysis_body_id)
+        {
+            return false;
+        }
+
+        WorldVec3 build_pos_world = track.cache.build_pos_world;
+        glm::dvec3 build_vel_world = track.cache.build_vel_world;
+        glm::vec3 build_vel_local{0.0f};
+        (void) get_prediction_subject_world_state(track.key, build_pos_world, build_vel_world, build_vel_local);
+
+        std::vector<orbitsim::TrajectorySegment> player_lookup_segments;
+        if (prediction_subject_is_player(track.key))
+        {
+            if (!track.cache.trajectory_segments_inertial_planned.empty())
+            {
+                player_lookup_segments = track.cache.trajectory_segments_inertial_planned;
+            }
+            else
+            {
+                player_lookup_segments = track.cache.trajectory_segments_inertial;
+            }
+        }
+        else if (const PredictionTrackState *player_track = player_prediction_track())
+        {
+            if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track))
+            {
+                if (!player_cache->trajectory_segments_inertial_planned.empty())
+                {
+                    player_lookup_segments = player_cache->trajectory_segments_inertial_planned;
+                }
+                else if (!player_cache->trajectory_segments_inertial.empty())
+                {
+                    player_lookup_segments = player_cache->trajectory_segments_inertial;
+                }
+            }
+        }
+
+        OrbitPredictionDerivedService::Request derived_request{};
+        derived_request.track_id = track.key.track_id();
+        derived_request.generation_id = track.cache.generation_id;
+        derived_request.solver_result = build_prediction_solver_result_from_cache(track.key.track_id(), track.cache);
+        derived_request.build_pos_world = build_pos_world;
+        derived_request.build_vel_world = build_vel_world;
+        derived_request.sim_config = _orbitsim ? _orbitsim->sim.config() : orbitsim::GameSimulation::Config{};
+        derived_request.resolved_frame_spec = resolved_frame_spec;
+        derived_request.display_frame_key = display_frame_key;
+        derived_request.display_frame_revision = display_frame_revision;
+        derived_request.analysis_body_id = analysis_body_id;
+        derived_request.player_lookup_segments_inertial = std::move(player_lookup_segments);
+        _prediction_derived_service.request(derived_request);
+        mark_prediction_derived_request_submitted(track, derived_request);
+        return true;
+    }
+
+    bool GameplayState::prediction_track_has_current_derived_cache(const PredictionTrackState &track,
+                                                                   double display_time_s) const
+    {
+        if (!track.cache.valid || track.cache.trajectory_frame.size() < 2 || track.cache.trajectory_segments_frame.empty())
+        {
+            return false;
+        }
+
+        const orbitsim::TrajectoryFrameSpec resolved_frame_spec =
+                resolve_prediction_display_frame_spec(track.cache, display_time_s);
+        const uint64_t display_frame_key = prediction_display_frame_key(resolved_frame_spec);
+        const uint64_t display_frame_revision = _prediction_display_frame_revision;
+        return track.cache.resolved_frame_spec_valid &&
+               track.cache.display_frame_key == display_frame_key &&
+               track.cache.display_frame_revision == display_frame_revision;
+    }
+
     void GameplayState::refresh_prediction_derived_cache(PredictionTrackState &track,
                                                          double display_time_s)
     {
-        if (!track.cache.valid || track.cache.trajectory_inertial.size() < 2)
+        if (track.cache.trajectory_inertial.size() < 2)
         {
             return;
         }
@@ -859,101 +990,42 @@ namespace Game
             return cache.display_frame_key == display_frame_key &&
                    cache.display_frame_revision == display_frame_revision;
         };
-        const auto chunk_frame_matches = [&](const PredictionChunkAssembly &assembly) {
-            return assembly.display_frame_key == display_frame_key &&
-                   assembly.display_frame_revision == display_frame_revision;
-        };
-        if ((track.preview_overlay.cache.valid && !cache_frame_matches(track.preview_overlay.cache)) ||
-            (track.preview_overlay.chunk_assembly.valid && !chunk_frame_matches(track.preview_overlay.chunk_assembly)))
-        {
-            track.preview_overlay.clear();
-            track.pick_cache.clear();
-            track.preview_pick_cache.clear();
-        }
         if ((track.pick_cache.generation_id != 0u || track.pick_cache.base_valid || track.pick_cache.planned_valid) &&
             !cache_frame_matches(track.cache))
         {
             track.pick_cache.clear();
         }
-        if ((track.preview_pick_cache.generation_id != 0u || track.preview_pick_cache.preview_chunk_cache_valid) &&
-            (track.preview_pick_cache.display_frame_key != display_frame_key ||
-             track.preview_pick_cache.display_frame_revision != display_frame_revision))
-        {
-            track.preview_pick_cache.clear();
-        }
-        const bool rebuild_frame_cache =
-                !track.cache.resolved_frame_spec_valid ||
-                !same_frame_spec(track.cache.resolved_frame_spec, resolved_frame_spec) ||
-                track.cache.trajectory_frame.size() < 2;
-
-        if (rebuild_frame_cache)
-        {
-            std::vector<orbitsim::TrajectorySegment> player_lookup_segments;
-            if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_prediction_track()))
-            {
-                if (!player_cache->trajectory_segments_inertial_planned.empty())
-                {
-                    player_lookup_segments = player_cache->trajectory_segments_inertial_planned;
-                }
-                else if (!player_cache->trajectory_segments_inertial.empty())
-                {
-                    player_lookup_segments = player_cache->trajectory_segments_inertial;
-                }
-            }
-
-            if (!PredictionCacheInternal::rebuild_prediction_frame_cache(
-                        track.cache,
-                        resolved_frame_spec,
-                        player_lookup_segments,
-                        {},
-                        &track.derived_diagnostics))
-            {
-                track.cache.valid = false;
-                track.cache.resolved_frame_spec_valid = false;
-                track.cache.display_frame_key = 0;
-                track.cache.display_frame_revision = 0;
-                track.cache.metrics_valid = false;
-                track.preview_overlay.clear();
-                track.pick_cache.clear();
-                track.preview_pick_cache.clear();
-                return;
-            }
-        }
-
-        track.cache.resolved_frame_spec = resolved_frame_spec;
-        track.cache.resolved_frame_spec_valid = true;
-        track.cache.display_frame_key = display_frame_key;
-        track.cache.display_frame_revision = display_frame_revision;
-
-        double analysis_time_s = display_time_s;
-        if (!std::isfinite(analysis_time_s))
-        {
-            analysis_time_s = _orbitsim ? _orbitsim->sim.time_s() : track.cache.build_time_s;
-        }
-        const orbitsim::BodyId analysis_body_id =
-                resolve_prediction_analysis_body_id(track.cache, track.key, analysis_time_s);
-        const bool rebuild_metrics =
-                rebuild_frame_cache ||
-                !track.cache.metrics_valid ||
-                track.cache.metrics_body_id != analysis_body_id;
-        if (!rebuild_metrics)
+        if (prediction_track_has_current_derived_cache(track, display_time_s))
         {
             return;
         }
 
-        PredictionCacheInternal::rebuild_prediction_metrics(
-                track.cache,
-                _orbitsim ? _orbitsim->sim.config() : orbitsim::GameSimulation::Config{},
-                analysis_body_id);
+        const double analysis_time_s =
+                std::isfinite(display_time_s) ? display_time_s : (_orbitsim ? _orbitsim->sim.time_s() : track.cache.build_time_s);
+        const orbitsim::BodyId analysis_body_id =
+                resolve_prediction_analysis_body_id(track.cache, track.key, analysis_time_s, track.auto_primary_body_id);
+        if (analysis_body_id != orbitsim::kInvalidBodyId)
+        {
+            track.auto_primary_body_id = analysis_body_id;
+        }
+        (void) resolved_frame_spec;
+        (void) request_prediction_derived_refresh(track, display_time_s);
     }
 
     void GameplayState::refresh_all_prediction_derived_caches()
     {
         rebuild_prediction_frame_options();
         rebuild_prediction_analysis_options();
+        _prediction_derived_service.reset();
         for (PredictionTrackState &track : _prediction_tracks)
         {
-            refresh_prediction_derived_cache(track);
+            track.derived_request_pending = false;
+            track.latest_requested_derived_generation_id = 0;
+            track.latest_requested_derived_display_frame_key = 0;
+            track.latest_requested_derived_display_frame_revision = 0;
+            track.latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
+            track.pick_cache.clear();
+            (void) request_prediction_derived_refresh(track);
         }
     }
 

@@ -18,27 +18,13 @@ namespace Game
         out.track = &track;
 
         refresh_prediction_derived_cache(track, global_ctx.display_time_s);
-        if (!track.cache.valid || track.cache.trajectory_frame.size() < 2)
+        if (!prediction_track_has_current_derived_cache(track, global_ctx.display_time_s))
         {
             return false;
         }
 
         out.stable_cache = &track.cache;
-        out.planned_chunk_assembly =
-                track.preview_overlay.chunk_assembly.valid ? &track.preview_overlay.chunk_assembly : nullptr;
-        out.has_preview_planned_overlay = track.preview_overlay.valid();
-        const bool prefer_chunk_overlay =
-                out.planned_chunk_assembly &&
-                out.planned_chunk_assembly->valid &&
-                !out.planned_chunk_assembly->chunks.empty() &&
-                (track.request_pending || track.derived_request_pending);
-        out.preview_planned_cache =
-                (!prefer_chunk_overlay && track.preview_overlay.has_flat_planned_cache())
-                        ? &track.preview_overlay.cache
-                        : nullptr;
-        out.has_chunk_planned_overlay = prefer_chunk_overlay;
-        out.planned_cache = out.preview_planned_cache ? out.preview_planned_cache : out.stable_cache;
-        const bool preview_chunk_authoritative = out.has_chunk_planned_overlay;
+        out.planned_cache = out.stable_cache;
 
         out.traj_base = &out.stable_cache->trajectory_frame;
         out.traj_planned = &out.planned_cache->trajectory_frame_planned;
@@ -95,39 +81,20 @@ namespace Game
         out.planned_window_segments =
                 !out.stable_cache->trajectory_segments_frame_planned.empty()
                         ? &out.stable_cache->trajectory_segments_frame_planned
-                        : (out.preview_planned_cache &&
-                                   !out.preview_planned_cache->trajectory_segments_frame_planned.empty()
-                                   ? &out.preview_planned_cache->trajectory_segments_frame_planned
-                                   : (!out.planned_cache->trajectory_segments_frame_planned.empty()
-                                              ? &out.planned_cache->trajectory_segments_frame_planned
-                                              : (preview_chunk_authoritative ? nullptr : out.traj_planned_segments)));
+                        : (!out.planned_cache->trajectory_segments_frame_planned.empty()
+                                   ? &out.planned_cache->trajectory_segments_frame_planned
+                                   : out.traj_planned_segments);
 
         out.is_active = track.key == _prediction_selection.active_subject;
         out.active_player_track = out.is_active && prediction_subject_is_player(track.key);
         out.maneuver_drag_active =
                 out.active_player_track &&
                 _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
-        out.suppress_stale_planned_preview = false;
-        out.drag_anchor_valid = false;
-        out.drag_anchor_time_s =
-                out.drag_anchor_valid ? track.preview_anchor.anchor_time_s : std::numeric_limits<double>::quiet_NaN();
 
         if (out.is_active)
         {
             _orbit_plot_perf.solver_segments_base = static_cast<uint32_t>(out.traj_base_segments->size());
-            if (preview_chunk_authoritative)
-            {
-                uint32_t planned_segment_count = 0u;
-                for (const OrbitChunk &chunk : out.planned_chunk_assembly->chunks)
-                {
-                    planned_segment_count += static_cast<uint32_t>(chunk.frame_segments.size());
-                }
-                _orbit_plot_perf.solver_segments_planned = planned_segment_count;
-            }
-            else
-            {
-                _orbit_plot_perf.solver_segments_planned = static_cast<uint32_t>(out.traj_planned_segments->size());
-            }
+            _orbit_plot_perf.solver_segments_planned = static_cast<uint32_t>(out.traj_planned_segments->size());
         }
 
         out.i_hi = Draw::lower_bound_sample_index(*out.traj_base, out.now_s);
@@ -184,19 +151,10 @@ namespace Game
         out.world_basis_draw_ctx.line_overlay_boost = out.draw_ctx.line_overlay_boost;
 
         out.future_window_s = prediction_future_window_s(track.key);
-        if (out.active_player_track && track.preview_anchor.valid)
-        {
-            out.planned_visual_window_s = std::max(0.0, track.preview_anchor.visual_window_s);
-            out.planned_exact_window_s = std::max(0.0, track.preview_anchor.exact_window_s);
-            out.planned_pick_window_s = std::max(0.0, track.preview_anchor.pick_window_s);
-        }
-        else
-        {
-            const double default_planned_window_s = maneuver_plan_preview_window_s();
-            out.planned_visual_window_s = default_planned_window_s;
-            out.planned_exact_window_s = default_planned_window_s;
-            out.planned_pick_window_s = default_planned_window_s;
-        }
+        const double default_planned_window_s = maneuver_plan_preview_window_s();
+        out.planned_visual_window_s = default_planned_window_s;
+        out.planned_exact_window_s = default_planned_window_s;
+        out.planned_pick_window_s = default_planned_window_s;
         return true;
     }
 } // namespace Game

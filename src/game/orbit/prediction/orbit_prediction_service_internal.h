@@ -40,12 +40,6 @@ namespace Game
                !request.maneuver_impulses.empty();
     }
 
-    inline bool request_uses_interactive_chunk_streaming(const OrbitPredictionService::Request &request)
-    {
-        return request_can_reuse_spacecraft_baseline(request) &&
-               request.priority == OrbitPredictionService::RequestPriority::ActiveInteractiveTrack;
-    }
-
     inline std::size_t prediction_sample_budget(const OrbitPredictionService::Request &request,
                                                 const std::size_t segment_count)
     {
@@ -620,13 +614,6 @@ namespace Game
     void append_planned_chunk_packet(PlannedSolveOutput &planned, PlannedChunkPacket packet);
     void apply_planned_range_summary(PlannedSolveOutput &planned, const PlannedSolveRangeSummary &summary);
 
-    std::vector<OrbitPredictionService::PublishedChunk> collect_published_chunks(
-            const OrbitPredictionService::PredictionSolvePlan &solve_plan,
-            std::size_t chunk_begin_index,
-            std::size_t chunk_end_index,
-            OrbitPredictionService::ChunkQualityState quality_state,
-            const std::vector<bool> *chunk_reused = nullptr);
-
     PlannedSolveRangeSummary solve_planned_chunk_range(
             PlannedTrajectoryContext &ctx,
             const OrbitPredictionService::PredictionSolvePlan &solve_plan,
@@ -634,16 +621,5 @@ namespace Game
             std::size_t chunk_end_index,
             const orbitsim::State &range_start_state,
             std::function<bool(PlannedChunkPacket &&)> chunk_sink);
-
-    PlannedSolveRangeSummary stream_chunk_stage(
-            PlannedTrajectoryContext &ctx,
-            const OrbitPredictionService::PredictionSolvePlan &solve_plan,
-            std::size_t chunk_begin_index,
-            std::size_t chunk_end_index,
-            const orbitsim::State &range_start_state,
-            OrbitPredictionService::ChunkQualityState quality_state,
-            OrbitPredictionService::PublishStage publish_stage,
-            bool generation_complete_on_last_publish,
-            PlannedSolveOutput &streamed_prefix);
 
 } // namespace Game

@@ -467,32 +467,6 @@ namespace Game
                 return;
             }
 
-            if (reused_baseline &&
-                request_uses_interactive_chunk_streaming(planned_request))
-            {
-                PlannedSolveOutput streamed_prefix{};
-                const PlannedSolveRangeSummary streaming_summary =
-                        stream_chunk_stage(ctx,
-                                           solve_plan,
-                                           0u,
-                                           solve_plan.chunks.size(),
-                                           ship_sc.state,
-                                           ChunkQualityState::Final,
-                                           PublishStage::PreviewStreaming,
-                                           true,
-                                           streamed_prefix);
-                if (streaming_summary.status != Status::Success)
-                {
-                    if (streaming_summary.status == Status::Cancelled)
-                    {
-                        return;
-                    }
-                    fail(streaming_summary.status);
-                    return;
-                }
-                return;
-            }
-
             PlannedSolveOutput planned{};
             const PlannedSolveRangeSummary planned_summary =
                     solve_planned_chunk_range(ctx,
@@ -517,12 +491,6 @@ namespace Game
             out.trajectory_segments_inertial_planned = planned.segments;
             out.trajectory_inertial_planned = planned.samples;
             out.maneuver_previews = planned.previews;
-            out.published_chunks =
-                    collect_published_chunks(solve_plan,
-                                             0u,
-                                             solve_plan.chunks.size(),
-                                             ChunkQualityState::Final,
-                                             &planned.chunk_reused);
         }
 
         store_reusable_baseline(request.track_id,

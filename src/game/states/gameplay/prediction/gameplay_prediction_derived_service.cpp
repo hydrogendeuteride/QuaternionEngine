@@ -57,8 +57,7 @@ namespace Game
                     continue;
                 }
 
-                if (it->generation_id == request.generation_id &&
-                    it->request.solver_result.publish_stage == request.solver_result.publish_stage)
+                if (it->generation_id == request.generation_id)
                 {
                     it->request_epoch = _request_epoch;
                     it->generation_id = request.generation_id;
@@ -141,6 +140,9 @@ namespace Game
         Result out{};
         out.track_id = job.track_id;
         out.generation_id = job.generation_id;
+        out.display_frame_key = job.request.display_frame_key;
+        out.display_frame_revision = job.request.display_frame_revision;
+        out.analysis_body_id = job.request.analysis_body_id;
 
         const auto cancel_requested = [this,
                                        track_id = job.track_id,
@@ -152,10 +154,7 @@ namespace Game
         Request &request = job.request;
         OrbitPredictionService::Result &solver = request.solver_result;
         out.solve_quality = solver.solve_quality;
-        out.publish_stage = solver.publish_stage;
-        out.generation_complete = solver.generation_complete;
-        const bool staged_solver_result = !solver.generation_complete;
-        const bool build_preview_planned_render_curve = true;
+        const bool build_planned_render_curve = true;
         if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
         {
             out.diagnostics.status = PredictionDerivedStatus::MissingSolverData;
@@ -188,36 +187,9 @@ namespace Game
             cache.metrics_body_id = request.analysis_body_id;
         }
 
-        const bool use_chunk_path =
-                reuse_existing_base_frame &&
-                !solver.published_chunks.empty() &&
-                staged_solver_result;
         bool frame_cache_built = false;
         const auto frame_build_start_tp = std::chrono::steady_clock::now();
-        if (use_chunk_path)
-        {
-            frame_cache_built = PredictionCacheInternal::rebuild_prediction_patch_chunks(
-                    out.chunk_assembly,
-                    cache,
-                    solver.published_chunks,
-                    job.generation_id,
-                    resolved_frame_spec,
-                    request.display_frame_key,
-                    request.display_frame_revision,
-                    request.player_lookup_segments_inertial,
-                    cancel_requested,
-                    &out.diagnostics);
-            out.timings.frame_build_ms =
-                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frame_build_start_tp)
-                            .count();
-            if (frame_cache_built)
-            {
-                cache.resolved_frame_spec = resolved_frame_spec;
-                cache.resolved_frame_spec_valid = true;
-                out.diagnostics.status = PredictionDerivedStatus::Success;
-            }
-        }
-        else if (reuse_existing_base_frame)
+        if (reuse_existing_base_frame)
         {
             frame_cache_built = PredictionCacheInternal::rebuild_prediction_planned_frame_cache(
                     cache,
@@ -225,7 +197,7 @@ namespace Game
                     request.player_lookup_segments_inertial,
                     cancel_requested,
                     &out.diagnostics,
-                    build_preview_planned_render_curve);
+                    build_planned_render_curve);
             out.timings.frame_build_ms =
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frame_build_start_tp)
                             .count();
@@ -238,7 +210,7 @@ namespace Game
                     request.player_lookup_segments_inertial,
                     cancel_requested,
                     &out.diagnostics,
-                    build_preview_planned_render_curve);
+                    build_planned_render_curve);
             out.timings.frame_build_ms =
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frame_build_start_tp)
                             .count();

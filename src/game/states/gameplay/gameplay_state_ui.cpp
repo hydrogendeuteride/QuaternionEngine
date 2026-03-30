@@ -76,44 +76,12 @@ namespace Game
             return "Unknown";
         }
 
-        const char *prediction_preview_state_label(const PredictionPreviewRuntimeState state)
-        {
-            switch (state)
-            {
-                case PredictionPreviewRuntimeState::Idle:
-                    return "Idle";
-                case PredictionPreviewRuntimeState::EnterDrag:
-                    return "EnterDrag";
-                case PredictionPreviewRuntimeState::DragPreviewPending:
-                    return "DragPreviewPending";
-                case PredictionPreviewRuntimeState::PreviewStreaming:
-                    return "PreviewStreaming";
-                case PredictionPreviewRuntimeState::AwaitFullRefine:
-                    return "AwaitFullRefine";
-            }
-
-            return "Unknown";
-        }
-
         const char *prediction_solve_quality_label(const OrbitPredictionService::SolveQuality quality)
         {
             switch (quality)
             {
                 case OrbitPredictionService::SolveQuality::Full:
                     return "Full";
-            }
-
-            return "Unknown";
-        }
-
-        const char *prediction_publish_stage_label(const OrbitPredictionService::PublishStage stage)
-        {
-            switch (stage)
-            {
-                case OrbitPredictionService::PublishStage::Full:
-                    return "Full";
-                case OrbitPredictionService::PublishStage::PreviewStreaming:
-                    return "PreviewStreaming";
             }
 
             return "Unknown";
@@ -1020,18 +988,16 @@ namespace Game
         const bool have_build_time = active_track->cache.valid && have_sim_now;
         const double sim_since_build_s = have_build_time ? std::max(0.0, sim_now_s - active_track->cache.build_time_s) : 0.0;
         const double drag_gate_remaining_ms =
-                PredictionDragDebugTelemetry::has_time(debug.last_preview_request_tp)
+                PredictionDragDebugTelemetry::has_time(debug.last_request_tp)
                         ? std::max(0.0,
                                    OrbitPredictionTuning::kDragRebuildMinIntervalS -
-                                           std::chrono::duration<double>(now_tp - debug.last_preview_request_tp).count()) *
+                                           std::chrono::duration<double>(now_tp - debug.last_request_tp).count()) *
                                   1000.0
                         : 0.0;
 
         ImGui::Text("Subject: %s", subject_label.c_str());
-        ImGui::Text("Preview state: %s", prediction_preview_state_label(active_track->preview_state));
-        ImGui::Text("Result quality/stage: %s / %s",
-                    prediction_solve_quality_label(debug.last_result_solve_quality),
-                    prediction_publish_stage_label(debug.last_publish_stage));
+        ImGui::Text("Result quality: %s",
+                    prediction_solve_quality_label(debug.last_result_solve_quality));
         ImGui::Text("Pending solver/derived/dirty: %s / %s / %s",
                     active_track->request_pending ? "yes" : "no",
                     active_track->derived_request_pending ? "yes" : "no",
@@ -1045,33 +1011,22 @@ namespace Game
         }
 
         ImGui::SeparatorText("Cadence");
-        ImGui::Text("Drag session / updates / preview requests: %llu / %llu / %llu",
+        ImGui::Text("Drag session / updates / requests: %llu / %llu / %llu",
                     static_cast<unsigned long long>(debug.drag_session_id),
                     static_cast<unsigned long long>(debug.drag_update_count),
-                    static_cast<unsigned long long>(debug.preview_request_count));
-        ImGui::Text("Solver results / derived results / preview publishes: %llu / %llu / %llu",
+                    static_cast<unsigned long long>(debug.request_count));
+        ImGui::Text("Solver results / derived results / publishes: %llu / %llu / %llu",
                     static_cast<unsigned long long>(debug.solver_result_count),
                     static_cast<unsigned long long>(debug.derived_result_count),
-                    static_cast<unsigned long long>(debug.preview_publish_count));
+                    static_cast<unsigned long long>(debug.publish_count));
         draw_age_text("Drag start", timestamp_age_ms(debug.drag_started_tp, now_tp));
         draw_age_text("Last drag update", timestamp_age_ms(debug.last_drag_update_tp, now_tp));
-        draw_age_text("Last preview request", timestamp_age_ms(debug.last_preview_request_tp, now_tp));
+        draw_age_text("Last request", timestamp_age_ms(debug.last_request_tp, now_tp));
         draw_age_text("Last solver result", timestamp_age_ms(debug.last_solver_result_tp, now_tp));
         draw_age_text("Last derived apply", timestamp_age_ms(debug.last_derived_result_tp, now_tp));
         if (PredictionDragDebugTelemetry::has_time(debug.last_drag_end_tp))
         {
             draw_age_text("Last drag end", timestamp_age_ms(debug.last_drag_end_tp, now_tp));
-        }
-        if (active_track->preview_anchor.valid)
-        {
-            ImGui::Text("Preview anchor node/time: %d / %.3f s",
-                        active_track->preview_anchor.anchor_node_id,
-                        active_track->preview_anchor.anchor_time_s);
-            ImGui::Text("Preview windows visual/exact/pick/request: %.3f / %.3f / %.3f / %.3f s",
-                        active_track->preview_anchor.visual_window_s,
-                        active_track->preview_anchor.exact_window_s,
-                        active_track->preview_anchor.pick_window_s,
-                        active_track->preview_anchor.request_window_s);
         }
         if (have_build_time)
         {
@@ -1092,10 +1047,7 @@ namespace Game
                     debug.derived_worker_ms_last,
                     debug.derived_frame_build_ms_last,
                     debug.derived_flatten_ms_last);
-        ImGui::Text("Preview merge/chunk merge/apply: %.3f / %.3f / %.3f",
-                    debug.preview_merge_ms_last,
-                    debug.chunk_merge_ms_last,
-                    debug.derived_apply_ms_last);
+        ImGui::Text("Derived apply: %.3f ms", debug.derived_apply_ms_last);
         ImGui::Text("Render LOD/chunk enqueue/fallback/pick: %.3f / %.3f / %.3f / %.3f",
                     _orbit_plot_perf.render_lod_ms_last,
                     _orbit_plot_perf.planned_chunk_enqueue_ms_last,
@@ -1112,11 +1064,7 @@ namespace Game
         ImGui::Text("Flattened planned seg/samples: %zu / %zu",
                     debug.flattened_planned_segments_last,
                     debug.flattened_planned_samples_last);
-        ImGui::Text("Merged planned segs after preview merge: %zu", debug.planned_segments_after_preview_merge);
-        ImGui::Text("Incoming/merged/drawn chunks: %u / %u / %u",
-                    debug.incoming_chunk_count_last,
-                    debug.merged_chunk_count_last,
-                    _orbit_plot_perf.planned_chunks_drawn);
+        ImGui::Text("Drawn planned chunks: %u", _orbit_plot_perf.planned_chunks_drawn);
         ImGui::Text("Fallback ranges / pick segs before-after: %u / %u -> %u",
                     _orbit_plot_perf.planned_fallback_range_count,
                     _orbit_plot_perf.pick_segments_before_cull,

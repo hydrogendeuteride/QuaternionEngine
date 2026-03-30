@@ -92,18 +92,16 @@ namespace Game
         {
             PredictionDragDebugTelemetry &debug = track.drag_debug;
             debug.last_result_solve_quality = result.solve_quality;
-            debug.last_publish_stage = result.publish_stage;
-            debug.last_generation_complete = result.generation_complete;
             debug.last_solver_result_tp = solver_result_tp;
             debug.last_solver_result_generation_id = result.generation_id;
             ++debug.solver_result_count;
-            if (debug.last_preview_request_generation_id == result.generation_id &&
-                PredictionDragDebugTelemetry::has_time(debug.last_preview_request_tp))
+            if (debug.last_request_generation_id == result.generation_id &&
+                PredictionDragDebugTelemetry::has_time(debug.last_request_tp))
             {
                 PredictionRuntimeDetail::update_last_and_peak(
                         debug.request_to_solver_ms_last,
                         debug.request_to_solver_ms_peak,
-                        PredictionRuntimeDetail::elapsed_ms(debug.last_preview_request_tp, solver_result_tp));
+                        PredictionRuntimeDetail::elapsed_ms(debug.last_request_tp, solver_result_tp));
             }
         }
     } // namespace
@@ -148,11 +146,13 @@ namespace Game
 
         if (!result.valid || result.trajectory_inertial.size() < 2)
         {
-            track->request_pending = !result.generation_complete;
+            track->request_pending = false;
             track->derived_request_pending = false;
-            track->pending_solve_quality = result.generation_complete
-                                                   ? OrbitPredictionService::SolveQuality::Full
-                                                   : result.solve_quality;
+            track->latest_requested_derived_generation_id = 0;
+            track->latest_requested_derived_display_frame_key = 0;
+            track->latest_requested_derived_display_frame_revision = 0;
+            track->latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
+            track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             track->dirty = true;
             return;
         }
@@ -226,11 +226,10 @@ namespace Game
         derived_request.display_frame_revision = _prediction_display_frame_revision;
         derived_request.analysis_body_id = analysis_body_id;
         derived_request.player_lookup_segments_inertial = std::move(player_lookup_segments);
-        _prediction_derived_service.request(std::move(derived_request));
+        _prediction_derived_service.request(derived_request);
+        mark_prediction_derived_request_submitted(*track, derived_request);
 
-        // Keep request_pending set until the solver publishes the final staged preview result for this generation.
-        track->request_pending = !result.generation_complete;
-        track->derived_request_pending = true;
+        track->request_pending = false;
 
         // If the input changed while this solve was in-flight, promote straight to dirty so the
         // next update tick can submit a fresh solver request without waiting for derived to finish.
@@ -239,8 +238,6 @@ namespace Game
             track->dirty = true;
             track->invalidated_while_pending = false;
         }
-        track->pending_solve_quality = result.generation_complete
-                                               ? OrbitPredictionService::SolveQuality::Full
-                                               : result.solve_quality;
+        track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
     }
 } // namespace Game

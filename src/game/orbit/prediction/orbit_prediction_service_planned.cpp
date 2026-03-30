@@ -101,23 +101,6 @@ namespace Game
             return seed;
         }
 
-        OrbitPredictionService::PublishedChunk make_published_chunk(const uint32_t chunk_id,
-                                                                    const OrbitPredictionService::ChunkQualityState quality_state,
-                                                                    const double t0_s,
-                                                                    const double t1_s,
-                                                                    const bool includes_planned_path,
-                                                                    const bool reused_from_cache = false)
-        {
-            OrbitPredictionService::PublishedChunk chunk{};
-            chunk.chunk_id = chunk_id;
-            chunk.quality_state = quality_state;
-            chunk.t0_s = t0_s;
-            chunk.t1_s = t1_s;
-            chunk.includes_planned_path = includes_planned_path;
-            chunk.reused_from_cache = reused_from_cache;
-            return chunk;
-        }
-
         void accumulate_stage_diagnostics(OrbitPredictionService::AdaptiveStageDiagnostics &dst,
                                           const OrbitPredictionService::AdaptiveStageDiagnostics &src,
                                           double &dt_sum_s,
@@ -397,43 +380,6 @@ namespace Game
         planned.end_state = summary.end_state;
         planned.diagnostics = summary.diagnostics;
         planned.status = summary.status;
-    }
-
-    std::vector<OrbitPredictionService::PublishedChunk> collect_published_chunks(
-            const OrbitPredictionService::PredictionSolvePlan &solve_plan,
-            const std::size_t chunk_begin_index,
-            const std::size_t chunk_end_index,
-            const OrbitPredictionService::ChunkQualityState quality_state,
-            const std::vector<bool> *chunk_reused)
-    {
-        std::vector<OrbitPredictionService::PublishedChunk> chunks;
-        if (!solve_plan.valid || chunk_begin_index >= chunk_end_index ||
-            chunk_end_index > solve_plan.chunks.size())
-        {
-            return chunks;
-        }
-
-        chunks.reserve(chunk_end_index - chunk_begin_index);
-        for (std::size_t chunk_index = chunk_begin_index; chunk_index < chunk_end_index; ++chunk_index)
-        {
-            const OrbitPredictionService::PredictionChunkPlan &chunk = solve_plan.chunks[chunk_index];
-            bool reused_from_cache = false;
-            if (chunk_reused)
-            {
-                const std::size_t local_index = chunk_index - chunk_begin_index;
-                if (local_index < chunk_reused->size())
-                {
-                    reused_from_cache = (*chunk_reused)[local_index];
-                }
-            }
-            chunks.push_back(make_published_chunk(chunk.chunk_id,
-                                                  quality_state,
-                                                  chunk.t0_s,
-                                                  chunk.t1_s,
-                                                  true,
-                                                  reused_from_cache));
-        }
-        return chunks;
     }
 
     PlannedSolveRangeSummary solve_planned_chunk_range(
@@ -1041,105 +987,6 @@ namespace Game
         }
 
         return summary;
-    }
-
-    PlannedSolveRangeSummary stream_chunk_stage(
-            PlannedTrajectoryContext &ctx,
-            const OrbitPredictionService::PredictionSolvePlan &solve_plan,
-            const std::size_t chunk_begin_index,
-            const std::size_t chunk_end_index,
-            const orbitsim::State &range_start_state,
-            const OrbitPredictionService::ChunkQualityState quality_state,
-            const OrbitPredictionService::PublishStage publish_stage,
-            const bool generation_complete_on_last_publish,
-            PlannedSolveOutput &streamed_prefix)
-    {
-        streamed_prefix = {};
-        double prefix_dt_sum_s = 0.0;
-        bool prefix_have_dt = false;
-        constexpr std::size_t kChunkPublishBatchSize = 2u;
-        const std::size_t chunk_publish_batch_size =
-                request_uses_interactive_chunk_streaming(ctx.request) ? 1u : kChunkPublishBatchSize;
-        std::vector<OrbitPredictionService::PublishedChunk> published_batch;
-        published_batch.reserve(std::min(chunk_publish_batch_size, chunk_end_index - chunk_begin_index));
-        std::size_t streamed_chunk_count = 0u;
-        const std::size_t total_chunk_count = chunk_end_index - chunk_begin_index;
-
-        return solve_planned_chunk_range(
-                ctx,
-                solve_plan,
-                chunk_begin_index,
-                chunk_end_index,
-                range_start_state,
-                [&](PlannedChunkPacket &&chunk_packet) {
-                    const uint32_t chunk_id = chunk_packet.chunk.chunk_id;
-                    const double chunk_t0_s = chunk_packet.chunk.t0_s;
-                    const double chunk_t1_s = chunk_packet.chunk.t1_s;
-                    const bool reused_from_cache = chunk_packet.reused_from_cache;
-
-                    // append to prefix
-                    const auto chunk_diag = chunk_packet.diagnostics;
-                    const auto chunk_end_state = chunk_packet.end_state;
-                    append_planned_chunk_packet(streamed_prefix, std::move(chunk_packet));
-                    accumulate_stage_diagnostics(streamed_prefix.diagnostics,
-                                                 chunk_diag,
-                                                 prefix_dt_sum_s,
-                                                 prefix_have_dt);
-                    if (streamed_prefix.diagnostics.accepted_segments > 0u)
-                    {
-                        streamed_prefix.diagnostics.avg_dt_s =
-                                prefix_dt_sum_s /
-                                static_cast<double>(streamed_prefix.diagnostics.accepted_segments);
-                    }
-                    streamed_prefix.end_state = chunk_end_state;
-                    streamed_prefix.status = OrbitPredictionService::Status::Success;
-
-                    published_batch.push_back(make_published_chunk(chunk_id,
-                                                                  quality_state,
-                                                                  chunk_t0_s,
-                                                                  chunk_t1_s,
-                                                                  true,
-                                                                  reused_from_cache));
-
-                    ++streamed_chunk_count;
-                    const bool stage_complete = streamed_chunk_count >= total_chunk_count;
-                    const bool should_flush =
-                            published_batch.size() >= chunk_publish_batch_size ||
-                            stage_complete;
-                    if (!should_flush)
-                    {
-                        return true;
-                    }
-
-                    // publish batch
-                    if (!published_batch.empty() &&
-                        !streamed_prefix.segments.empty() &&
-                        streamed_prefix.samples.size() >= 2u)
-                    {
-                        const bool generation_complete = generation_complete_on_last_publish && stage_complete;
-                        OrbitPredictionService::Result preview_result = ctx.out;
-                        preview_result.generation_complete = generation_complete;
-                        preview_result.publish_stage = publish_stage;
-                        preview_result.diagnostics.trajectory_planned = streamed_prefix.diagnostics;
-                        preview_result.diagnostics.trajectory_sample_count_planned = streamed_prefix.samples.size();
-                        preview_result.diagnostics.trajectory_segment_count_planned =
-                                preview_result.diagnostics.trajectory_planned.accepted_segments;
-                        preview_result.trajectory_segments_inertial_planned = streamed_prefix.segments;
-                        preview_result.trajectory_inertial_planned = streamed_prefix.samples;
-                        preview_result.maneuver_previews = streamed_prefix.previews;
-                        preview_result.published_chunks = std::move(published_batch);
-                        preview_result.valid = true;
-                        preview_result.diagnostics.status = OrbitPredictionService::Status::Success;
-                        if (!ctx.publish(std::move(preview_result)))
-                        {
-                            return false;
-                        }
-                    }
-
-                    published_batch.clear();
-                    published_batch.reserve(std::min(chunk_publish_batch_size, total_chunk_count));
-                    return true;
-                });
     }
 
 } // namespace Game
