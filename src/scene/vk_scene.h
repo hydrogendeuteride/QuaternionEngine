@@ -12,6 +12,7 @@
 
 #include "scene/vk_loader.h"
 #include "physics/physics_body.h"
+#include "physics/body_settings.h"
 
 class EngineContext;
 class PlanetSystem;
@@ -188,6 +189,7 @@ public:
         // Per-instance local-space pose offsets for nodes in this glTF scene.
         // The offset matrix is post-multiplied onto the node's localTransform.
         std::unordered_map<const Node*, glm::mat4> nodeLocalOverrides;
+        std::unordered_map<std::string, float> dynamicRootChildMassOverrides;
     };
 
     void addGLTFInstance(const std::string &name, std::shared_ptr<LoadedGLTF> scene,
@@ -335,6 +337,49 @@ public:
     // Debug: get body IDs for a synced instance (empty if not synced).
     std::vector<Physics::BodyId> getColliderSyncBodies(const std::string &instanceName) const;
 
+    // Creates one dynamic rigid body for the whole glTF instance by combining all primitive
+    // collider compounds into a single asset-local compound shape. The body drives the
+    // instance's root transform each frame. Mesh colliders are ignored for this path.
+    // When mass_override is not set, total body mass comes from the sum/backend-derived child masses.
+    Physics::BodyId enableDynamicRootColliderBody(const std::string &instanceName,
+                                                  Physics::PhysicsWorld *world,
+                                                  uint32_t layer = Physics::Layer::Dynamic,
+                                                  uint64_t user_data = 0,
+                                                  std::optional<float> mass_override = std::nullopt);
+
+    // Destroys the dynamic root collider body for an instance.
+    bool disableDynamicRootColliderBody(const std::string &instanceName);
+
+    // Returns true if a dynamic root collider body is active for the instance.
+    bool isDynamicRootColliderBodyEnabled(const std::string &instanceName) const;
+
+    // Returns the dynamic root collider body for an instance, or an invalid ID when absent.
+    Physics::BodyId getDynamicRootColliderBody(const std::string &instanceName) const;
+
+    // Override total body mass for a dynamic-root glTF instance.
+    // If the body is active it will be rebuilt immediately while preserving pose and velocities.
+    bool setDynamicRootColliderMass(const std::string &instanceName, float mass);
+
+    // Clear explicit total-mass override and fall back to summed/backend-derived child mass.
+    bool clearDynamicRootColliderMassOverride(const std::string &instanceName);
+
+    // Override one child mass by collider node name for a dynamic-root glTF instance.
+    // If the body is active it will be rebuilt immediately while preserving pose and velocities.
+    bool setDynamicRootColliderChildMassOverride(const std::string &instanceName,
+                                                 const std::string &colliderName,
+                                                 float mass);
+
+    // Replace all child-mass overrides for a dynamic-root glTF instance.
+    bool setDynamicRootColliderChildMassOverrides(const std::string &instanceName,
+                                                  const std::unordered_map<std::string, float> &overrides);
+
+    // Remove one child-mass override.
+    bool clearDynamicRootColliderChildMassOverride(const std::string &instanceName,
+                                                   const std::string &colliderName);
+
+    // Clear all child-mass overrides.
+    bool clearDynamicRootColliderChildMassOverrides(const std::string &instanceName);
+
 private:
     EngineContext *_context = nullptr;
 
@@ -381,5 +426,27 @@ private:
     };
     std::unordered_map<std::string, ColliderSyncEntry> _colliderSyncEntries;
 
+    struct DynamicRootColliderBodyEntry
+    {
+        Physics::PhysicsWorld *world{nullptr};
+        Physics::BodyId body{};
+        glm::vec3 scale{1.0f, 1.0f, 1.0f};
+        uint32_t layer{Physics::Layer::Dynamic};
+        uint64_t user_data{0};
+        std::optional<float> mass_override;
+    };
+    std::unordered_map<std::string, DynamicRootColliderBodyEntry> _dynamicRootColliderBodies;
+
     void destroyColliderSyncEntry(ColliderSyncEntry &entry);
+    void destroyDynamicRootColliderBodyEntry(DynamicRootColliderBodyEntry &entry);
+    void syncDynamicRootColliderBodies();
+    Physics::BodyId createDynamicRootColliderBodyForInstance(const std::string &instanceName,
+                                                             const GLTFInstance &inst,
+                                                             Physics::PhysicsWorld *world,
+                                                             uint32_t layer,
+                                                             uint64_t user_data,
+                                                             std::optional<float> mass_override) const;
+    bool rebuildDynamicRootColliderBody(const std::string &instanceName,
+                                        DynamicRootColliderBodyEntry &entry,
+                                        bool preserve_instance_transform = false);
 };

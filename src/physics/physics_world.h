@@ -346,6 +346,7 @@ namespace Physics
         BodyBuilder &mass(float m)
         {
             _settings.mass = m;
+            _settings.has_explicit_mass = true;
             return *this;
         }
 

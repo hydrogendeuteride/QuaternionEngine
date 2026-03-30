@@ -7,6 +7,7 @@
 #include <fmt/core.h>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <optional>
 
 namespace Physics
@@ -36,6 +37,70 @@ namespace Physics
         bool is_mesh_collider_marker(std::string_view node_name)
         {
             return starts_with_icase(node_name, "COL_MESH");
+        }
+
+        std::optional<float> parse_collider_mass_override(std::string_view node_name)
+        {
+            std::string upper(node_name);
+            std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c) {
+                return static_cast<char>(std::toupper(c));
+            });
+
+            constexpr std::string_view kTokens[] = {"__MASS_", "__M_"};
+            for (std::string_view token : kTokens)
+            {
+                const size_t pos = upper.rfind(token);
+                if (pos == std::string::npos)
+                {
+                    continue;
+                }
+
+                const std::string raw(node_name.substr(pos + token.size()));
+                if (raw.empty())
+                {
+                    continue;
+                }
+
+                char *end = nullptr;
+                const float value = std::strtof(raw.c_str(), &end);
+                if (end == raw.c_str() || *end != '\0')
+                {
+                    Logger::warn("[GLTF][Colliders] node '{}' has invalid mass suffix '{}'; expected e.g. '__MASS_1200'",
+                                 node_name, raw);
+                    return {};
+                }
+                if (!std::isfinite(value) || value <= 0.0f)
+                {
+                    Logger::warn("[GLTF][Colliders] node '{}' has non-positive mass {}; ignoring override",
+                                 node_name, value);
+                    return {};
+                }
+
+                return value;
+            }
+
+            return {};
+        }
+
+        std::string canonical_collider_name(std::string_view node_name)
+        {
+            std::string upper(node_name);
+            std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c) {
+                return static_cast<char>(std::toupper(c));
+            });
+
+            constexpr std::string_view kTokens[] = {"__MASS_", "__M_"};
+            size_t cut = std::string::npos;
+            for (std::string_view token : kTokens)
+            {
+                const size_t pos = upper.rfind(token);
+                if (pos != std::string::npos)
+                {
+                    cut = std::min(cut, pos);
+                }
+            }
+
+            return cut == std::string::npos ? std::string(node_name) : std::string(node_name.substr(0, cut));
         }
 
         bool is_any_collider_marker(std::string_view node_name)
@@ -232,7 +297,8 @@ namespace Physics
                     continue;
                 }
 
-                out[owner_name].add_child(*shape, t, r, 0);
+                const float child_mass = parse_collider_mass_override(node_name).value_or(0.0f);
+                out[owner_name].add_child(*shape, t, r, 0, child_mass, canonical_collider_name(node_name));
             }
         }
 

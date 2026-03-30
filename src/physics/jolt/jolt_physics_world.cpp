@@ -9,6 +9,7 @@
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/IssueReporting.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/MassProperties.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Body/BodyLockMulti.h>
@@ -23,6 +24,7 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
+#include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
 #include <Jolt/Physics/Collision/Shape/TaperedCylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
@@ -74,6 +76,134 @@ namespace Physics
                 return 0.0;
             }
             return std::min(distance, static_cast<double>(FLT_MAX));
+        }
+
+        JPH::RefConst<JPH::Shape> create_jolt_compound_child_shape(const PrimitiveShapeVariant &shape)
+        {
+            return std::visit([](const auto &s) -> JPH::RefConst<JPH::Shape> {
+                using T = std::decay_t<decltype(s)>;
+
+                if constexpr (std::is_same_v<T, BoxShape>)
+                {
+                    return new JPH::BoxShape(JPH::Vec3(s.half_extents.x, s.half_extents.y, s.half_extents.z));
+                }
+                else if constexpr (std::is_same_v<T, SphereShape>)
+                {
+                    return new JPH::SphereShape(s.radius);
+                }
+                else if constexpr (std::is_same_v<T, CapsuleShape>)
+                {
+                    return new JPH::CapsuleShape(s.half_height, s.radius);
+                }
+                else if constexpr (std::is_same_v<T, CylinderShape>)
+                {
+                    return new JPH::CylinderShape(s.half_height, s.radius);
+                }
+                else if constexpr (std::is_same_v<T, TaperedCylinderShape>)
+                {
+                    if (s.half_height <= 0.0f || s.top_radius < 0.0f || s.bottom_radius < 0.0f)
+                    {
+                        return new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
+                    }
+
+                    JPH::TaperedCylinderShapeSettings settings(s.half_height, s.top_radius, s.bottom_radius);
+                    JPH::ShapeSettings::ShapeResult result = settings.Create();
+                    return result.IsValid() ? result.Get() : JPH::RefConst<JPH::Shape>(new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f)));
+                }
+                else if constexpr (std::is_same_v<T, PlaneShape>)
+                {
+                    return new JPH::BoxShape(JPH::Vec3(1000.0f, 0.01f, 1000.0f));
+                }
+                else
+                {
+                    return new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
+                }
+            }, shape);
+        }
+
+        struct CompoundMassPropertiesOverride
+        {
+            JPH::MassProperties mass_properties;
+            JPH::Vec3 center_of_mass = JPH::Vec3::sZero();
+        };
+
+        bool compound_has_custom_child_mass(const CompoundShape &shape)
+        {
+            for (const CompoundShapeChild &child : shape.children)
+            {
+                if (std::isfinite(child.mass) && child.mass > 0.0f)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        std::optional<CompoundMassPropertiesOverride> build_compound_mass_properties_override(const CompoundShape &shape)
+        {
+            if (shape.children.empty() || !compound_has_custom_child_mass(shape))
+            {
+                return {};
+            }
+
+            struct ChildMassInfo
+            {
+                JPH::MassProperties mass_properties;
+                JPH::Vec3 center_of_mass = JPH::Vec3::sZero();
+            };
+
+            std::vector<ChildMassInfo> child_infos;
+            child_infos.reserve(shape.children.size());
+
+            float total_mass = 0.0f;
+            JPH::Vec3 weighted_center = JPH::Vec3::sZero();
+
+            for (const CompoundShapeChild &child : shape.children)
+            {
+                JPH::RefConst<JPH::Shape> child_shape = create_jolt_compound_child_shape(child.shape);
+                JPH::MassProperties child_props = child_shape->GetMassProperties();
+                if (std::isfinite(child.mass) && child.mass > 0.0f)
+                {
+                    child_props.ScaleToMass(child.mass);
+                }
+
+                if (!std::isfinite(child_props.mMass) || child_props.mMass <= 0.0f)
+                {
+                    continue;
+                }
+
+                const JPH::Quat rotation(child.rotation.x, child.rotation.y, child.rotation.z, child.rotation.w);
+                child_props.Rotate(JPH::Mat44::sRotation(rotation));
+
+                const JPH::Vec3 child_origin(child.position.x, child.position.y, child.position.z);
+                const JPH::Vec3 child_center = child_origin + rotation * child_shape->GetCenterOfMass();
+
+                total_mass += child_props.mMass;
+                weighted_center += child_props.mMass * child_center;
+                child_infos.push_back(ChildMassInfo{child_props, child_center});
+            }
+
+            if (child_infos.empty() || !std::isfinite(total_mass) || total_mass <= 0.0f)
+            {
+                return {};
+            }
+
+            const JPH::Vec3 compound_center = weighted_center / total_mass;
+
+            CompoundMassPropertiesOverride out{};
+            out.center_of_mass = compound_center;
+            out.mass_properties.mMass = 0.0f;
+            out.mass_properties.mInertia = JPH::Mat44::sZero();
+
+            for (ChildMassInfo &info : child_infos)
+            {
+                info.mass_properties.Translate(info.center_of_mass - compound_center);
+                out.mass_properties.mMass += info.mass_properties.mMass;
+                out.mass_properties.mInertia += info.mass_properties.mInertia;
+            }
+
+            out.mass_properties.mInertia.SetColumn4(3, JPH::Vec4(0, 0, 0, 1));
+            return out;
         }
     } // namespace
 
@@ -897,7 +1027,7 @@ namespace Physics
                 JPH::StaticCompoundShapeSettings compound_settings;
                 for (const CompoundShapeChild &child : s.children)
                 {
-                    JPH::RefConst<JPH::Shape> child_shape = std::visit(create_primitive, child.shape);
+                    JPH::RefConst<JPH::Shape> child_shape = create_jolt_compound_child_shape(child.shape);
                     compound_settings.AddShape(
                         JPH::Vec3(child.position.x, child.position.y, child.position.z),
                         JPH::Quat(child.rotation.x, child.rotation.y, child.rotation.z, child.rotation.w),
@@ -908,7 +1038,16 @@ namespace Physics
                 JPH::ShapeSettings::ShapeResult result = compound_settings.Create();
                 if (result.IsValid())
                 {
-                    return result.Get();
+                    JPH::RefConst<JPH::Shape> compound_shape = result.Get();
+                    if (auto custom_mass = build_compound_mass_properties_override(s); custom_mass.has_value())
+                    {
+                        const JPH::Vec3 offset = custom_mass->center_of_mass - compound_shape->GetCenterOfMass();
+                        if (offset.LengthSq() > 1.0e-12f)
+                        {
+                            return new JPH::OffsetCenterOfMassShape(compound_shape.GetPtr(), offset);
+                        }
+                    }
+                    return compound_shape;
                 }
 
                 if (result.HasError())
@@ -1000,10 +1139,27 @@ namespace Physics
         // Mass / inertia
         // Jolt shapes default to a density of 1000 kg/m^3, so for large shapes the resulting
         // mass/inertia can be enormous. If the caller provided an explicit mass, use it.
-        if (motion == MotionType::Dynamic && std::isfinite(settings.mass) && settings.mass > 0.0f)
+        if (motion == MotionType::Dynamic)
         {
-            body_settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
-            body_settings.mMassPropertiesOverride.mMass = settings.mass;
+            const CompoundShape *compound = std::get_if<CompoundShape>(&settings.shape.shape);
+            std::optional<CompoundMassPropertiesOverride> custom_mass_properties =
+                compound ? build_compound_mass_properties_override(*compound) : std::optional<CompoundMassPropertiesOverride>{};
+
+            if (custom_mass_properties.has_value())
+            {
+                if (settings.has_explicit_mass && std::isfinite(settings.mass) && settings.mass > 0.0f)
+                {
+                    custom_mass_properties->mass_properties.ScaleToMass(settings.mass);
+                }
+
+                body_settings.mOverrideMassProperties = JPH::EOverrideMassProperties::MassAndInertiaProvided;
+                body_settings.mMassPropertiesOverride = custom_mass_properties->mass_properties;
+            }
+            else if (std::isfinite(settings.mass) && settings.mass > 0.0f)
+            {
+                body_settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+                body_settings.mMassPropertiesOverride.mMass = settings.mass;
+            }
         }
 
         // Activation

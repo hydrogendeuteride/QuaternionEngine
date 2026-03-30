@@ -71,7 +71,8 @@ inline void decompose_trs_matrix(const glm::mat4 &m,
     do {                                                                \
         VkResult err = x;                                               \
         if (err) {                                                      \
-            Logger::error("Detected Vulkan error: {}", string_VkResult(err)); \
+            Logger::error("Detected Vulkan error at {}:{} in {}: {} [{}]", \
+                          __FILE__, __LINE__, __func__, string_VkResult(err), #x); \
             abort();                                                    \
         }                                                               \
     } while (0)

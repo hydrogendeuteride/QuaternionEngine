@@ -312,6 +312,7 @@ namespace Game
                     child_path(path, "motion_type"));
 
             bs.mass = json_required_finite<float>(j, "mass", path);
+            bs.has_explicit_mass = true;
             if (bs.mass < 0.0f)
             {
                 fail(child_path(path, "mass") + " must be >= 0");
