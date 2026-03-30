@@ -16,19 +16,6 @@ namespace Game
     {
         using namespace ManeuverUtil;
 
-        const char *prediction_publish_stage_label(const OrbitPredictionService::PublishStage stage)
-        {
-            switch (stage)
-            {
-                case OrbitPredictionService::PublishStage::Full:
-                    return "Full";
-                case OrbitPredictionService::PublishStage::PreviewStreaming:
-                    return "PreviewStreaming";
-                default:
-                    return "Unknown";
-            }
-        }
-
         const char *prediction_derived_status_label(const PredictionDerivedStatus status)
         {
             switch (status)
@@ -188,9 +175,6 @@ namespace Game
             const bool has_plan = !_maneuver_state.nodes.empty();
             const bool solver_pending = player_track->request_pending;
             const bool derived_pending = player_track->derived_request_pending;
-            const bool has_chunk_overlay =
-                    player_track->preview_overlay.chunk_assembly.valid &&
-                    !player_track->preview_overlay.chunk_assembly.chunks.empty();
             const bool has_ready_plan =
                     player_track->cache.valid &&
                     player_track->cache.has_planned_frame_draw_data();
@@ -205,12 +189,6 @@ namespace Game
                 status_detail = "Plan preview is marked dirty and will rebuild on the next prediction tick.";
                 status_color = ImVec4(0.95f, 0.78f, 0.24f, 1.0f);
             }
-            else if (solver_pending && has_chunk_overlay)
-            {
-                status_label = "Streaming";
-                status_detail = "Solved chunks are being published and rendered while the remaining horizon is processed.";
-                status_color = ImVec4(0.29f, 0.76f, 1.00f, 1.0f);
-            }
             else if (solver_pending)
             {
                 status_label = "Solving";
@@ -219,10 +197,8 @@ namespace Game
             }
             else if (derived_pending)
             {
-                status_label = has_chunk_overlay ? "Finalizing" : "Preparing";
-                status_detail = has_chunk_overlay
-                                        ? "The final publish arrived; frame-space render data is still being merged."
-                                        : "Solver output is being converted into frame-space render data.";
+                status_label = "Preparing";
+                status_detail = "Solver output is being converted into frame-space render data.";
                 status_color = ImVec4(0.98f, 0.66f, 0.26f, 1.0f);
             }
             else if (has_plan && has_ready_plan)
@@ -243,25 +219,14 @@ namespace Game
 
             if (has_plan)
             {
-                const std::size_t streamed_chunk_count =
-                        has_chunk_overlay ? player_track->preview_overlay.chunk_assembly.chunks.size() : 0u;
                 const double requested_window_s = std::max(
                         prediction_required_window_s(*player_track, now_s, true),
                         maneuver_plan_preview_window_s());
                 float progress = 1.0f;
                 if (solver_pending || derived_pending)
                 {
-                    if (has_chunk_overlay && requested_window_s > 0.0)
-                    {
-                        const double covered_window_s =
-                                std::max(0.0, player_track->preview_overlay.chunk_assembly.end_time_s() - now_s);
-                        progress = static_cast<float>(std::clamp(covered_window_s / requested_window_s, 0.0, 1.0));
-                    }
-                    else
-                    {
-                        const double pulse = 0.5 + 0.5 * std::sin(ImGui::GetTime() * 3.0);
-                        progress = static_cast<float>(0.20 + 0.60 * pulse);
-                    }
+                    const double pulse = 0.5 + 0.5 * std::sin(ImGui::GetTime() * 3.0);
+                    progress = static_cast<float>(0.20 + 0.60 * pulse);
                 }
 
                 char progress_label[128];
@@ -269,8 +234,7 @@ namespace Game
                 {
                     std::snprintf(progress_label,
                                   sizeof(progress_label),
-                                  has_chunk_overlay ? "%zu chunks streamed" : "Calculating preview...",
-                                  streamed_chunk_count);
+                                  "Calculating plan...");
                 }
                 else
                 {
@@ -278,16 +242,7 @@ namespace Game
                 }
                 ImGui::ProgressBar(progress, ImVec2(ImGui::GetContentRegionAvail().x, 0.0f), progress_label);
 
-                ImGui::Text("Last publish: %s", prediction_publish_stage_label(player_track->drag_debug.last_publish_stage));
-                ImGui::SameLine();
                 ImGui::Text("Solver: %.1f ms", player_track->solver_ms_last);
-
-                if (has_chunk_overlay)
-                {
-                    ImGui::Text("Streamed chunks: %zu  Visible merged chunks: %u",
-                                streamed_chunk_count,
-                                player_track->drag_debug.merged_chunk_count_last);
-                }
             }
             else
             {
@@ -430,48 +385,6 @@ namespace Game
 
             const bool is_planned = (pick.ownerName == "OrbitPlot/Planned");
             const double display_time_s = current_sim_time_s();
-            const auto sample_preview_chunk_world = [&](WorldVec3 &out_world) {
-                out_world = WorldVec3(0.0);
-                if (!player_track ||
-                    !player_track->preview_overlay.chunk_assembly.valid ||
-                    player_track->preview_overlay.chunk_assembly.chunks.empty())
-                {
-                    return false;
-                }
-
-                for (const OrbitChunk &chunk : player_track->preview_overlay.chunk_assembly.chunks)
-                {
-                    if (!chunk.valid || chunk.frame_samples.size() < 2 ||
-                        pick.time_s < chunk.t0_s || pick.time_s > chunk.t1_s)
-                    {
-                        continue;
-                    }
-
-                    auto it_hi = std::lower_bound(chunk.frame_samples.cbegin(),
-                                                  chunk.frame_samples.cend(),
-                                                  pick.time_s,
-                                                  [](const orbitsim::TrajectorySample &s, double t) { return s.t_s < t; });
-                    const size_t i_hi = static_cast<size_t>(std::distance(chunk.frame_samples.cbegin(), it_hi));
-                    if (i_hi >= chunk.frame_samples.size())
-                    {
-                        continue;
-                    }
-
-                    out_world = (i_hi > 0)
-                                        ? prediction_sample_hermite_world(*cache,
-                                                                          chunk.frame_samples[i_hi - 1],
-                                                                          chunk.frame_samples[i_hi],
-                                                                          pick.time_s,
-                                                                          display_time_s)
-                                        : prediction_sample_position_world(*cache,
-                                                                            chunk.frame_samples.front(),
-                                                                            display_time_s);
-                    out_world += compute_maneuver_align_delta(ctx, *cache, cache->trajectory_frame);
-                    return true;
-                }
-
-                return false;
-            };
             const auto &traj = is_planned
                                    ? (cache->trajectory_frame_planned.size() >= 2
                                               ? cache->trajectory_frame_planned
@@ -481,14 +394,6 @@ namespace Game
                                    : cache->trajectory_frame;
             if (traj.size() < 2)
             {
-                if (is_planned)
-                {
-                    WorldVec3 preview_chunk_world{0.0};
-                    if (sample_preview_chunk_world(preview_chunk_world))
-                    {
-                        return preview_chunk_world;
-                    }
-                }
                 return pick.worldPos;
             }
 
@@ -496,14 +401,6 @@ namespace Game
             const double traj_t1 = traj.back().t_s;
             if (pick.time_s < traj_t0 || pick.time_s > traj_t1)
             {
-                if (is_planned)
-                {
-                    WorldVec3 preview_chunk_world{0.0};
-                    if (sample_preview_chunk_world(preview_chunk_world))
-                    {
-                        return preview_chunk_world;
-                    }
-                }
                 return pick.worldPos;
             }
 
@@ -512,14 +409,6 @@ namespace Game
             const size_t i_hi = static_cast<size_t>(std::distance(traj.cbegin(), it_hi));
             if (i_hi >= traj.size())
             {
-                if (is_planned)
-                {
-                    WorldVec3 preview_chunk_world{0.0};
-                    if (sample_preview_chunk_world(preview_chunk_world))
-                    {
-                        return preview_chunk_world;
-                    }
-                }
                 return pick.worldPos;
             }
 
