@@ -13,8 +13,8 @@ namespace Game::OrbitPredictionTuning
     // 2.0 means "about two periods" for closed orbits (unless clamped by other limits).
     inline constexpr double kBaseHorizonFromPeriodScale = 2.0;
 
-    // How many orbital periods to draw when full-orbit visualization is enabled.
-    inline constexpr double kFullOrbitDrawPeriodScale = 2.0;
+    // Draw slightly less than one full period to avoid visibly overlapping the seam.
+    inline constexpr double kFullOrbitDrawPeriodScale = 0.99;
 
     // Fallback orbital period used when orbit elements cannot be estimated reliably.
     inline constexpr double kEscapeDefaultPeriodS = 7'200.0;

@@ -241,13 +241,13 @@ namespace Game
         }
 
         // There is no dedicated subject/overlay picker in the current UI yet, so keep
-        // other live orbiters visible by default even after narrowing prediction work
-        // to the active/overlay set.
+        // other live prediction subjects visible by default even after narrowing
+        // prediction work to the active/overlay set.
         if (_prediction_selection.overlay_subjects.empty())
         {
             for (const PredictionTrackState &track : _prediction_tracks)
             {
-                if (track.is_celestial || track.key == _prediction_selection.active_subject)
+                if (track.key == _prediction_selection.active_subject)
                 {
                     continue;
                 }
