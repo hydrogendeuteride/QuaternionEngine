@@ -355,8 +355,8 @@ struct PlanetCloudSettings
     float densityScale{1.0f};
     float coverage{0.45f};
 
-    // Overlay texture (cloud texture wrapped on sphere)
-    std::string overlayTexturePath{"planets/earth/cloud/earth_clouds_4k.ktx2"};
+    // Overlay texture (single-channel cloud coverage map wrapped on sphere)
+    std::string overlayTexturePath{"planets/earth/cloud/earth_clouds_8k_bc4.ktx2"};
     float overlayRotationRad{0.0f};
     bool overlayFlipV{false};
 

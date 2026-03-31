@@ -4,6 +4,8 @@
 #include "input_structures.glsl"
 
 layout(location = 0) in vec2 inUV;
+layout(location = 1) in vec3 inWorldRay;
+layout(location = 2) flat in vec3 inCamLocal;
 layout(location = 0) out vec4 outColor;
 
 layout(set = 1, binding = 0) uniform sampler2D hdrInput;
@@ -18,7 +20,7 @@ layout(push_constant) uniform AtmospherePush
     vec4 atmosphere_params;// x: atmosphere radius (m), y: rayleigh H (m), z: mie H (m), w: mie g
     vec4 beta_rayleigh;// rgb: betaR (1/m), w: atmosphere intensity
     vec4 beta_mie;// rgb: betaM (1/m), w: absorption strength (1/m)
-    vec4 jitter_params;// x: jitter strength (0..1), y: planet snap (m), z: time_sec, w: cloud overlay rotation (rad)
+    vec4 jitter_params;// x: jitter strength (0..1), y: planet snap (m), z: cloud overlay sin, w: cloud overlay cos
     vec4 cloud_layer;// x: base height (m), y: thickness (m), z: densityScale, w: coverage
     vec4 cloud_params;// x: noiseScale, y: detailScale, z: windSpeed, w: windAngleRad
     ivec4 misc;// x: view steps, y: packed absorption color (RGBA8), z: cloud steps, w: packed flags/noise params
@@ -46,16 +48,6 @@ const float CLOUD_HEIGHT_SHIFT = 0.30;
 const float CLOUD_THICKNESS_MIN = 0.55;
 const float CLOUD_THICKNESS_MAX = 1.35;
 
-// ── Utility ──────────────────────────────────────────────────────────
-
-vec3 getCameraLocalPosition()
-{
-    mat3 rotT = mat3(sceneData.view);
-    mat3 rot  = transpose(rotT);
-    vec3 T    = sceneData.view[3].xyz;
-    return -rot * T;
-}
-
 // ── Hash ─────────────────────────────────────────────────────────────
 
 float hash12(vec2 p)
@@ -72,10 +64,10 @@ float luminance(vec3 c)
 
 // ── Geometry / Mapping ───────────────────────────────────────────────
 
-vec3 rotate_y(vec3 v, float angleRad)
+vec3 rotate_y_sc(vec3 v, vec2 sc)
 {
-    float s = sin(angleRad);
-    float c = cos(angleRad);
+    float s = sc.x;
+    float c = sc.y;
     return vec3(c * v.x + s * v.z, v.y, -s * v.x + c * v.z);
 }
 
@@ -104,8 +96,57 @@ bool ray_sphere_intersect(vec3 ro, vec3 rd, vec3 center, float radius, out float
 float sample_cloud_noise(vec2 uvE, float scale, vec2 offset)
 {
     vec2 uv = fract(uvE * scale + offset);
-    vec3 n = textureLod(cloudNoiseTex, uv, 0.0).rgb;
-    return luminance(n);
+    return textureLod(cloudNoiseTex, uv, 0.0).r;
+}
+
+float sample_cloud_noise_grad(vec2 uvE, vec2 uvDx, vec2 uvDy, float scale, vec2 offset)
+{
+    vec2 uv = uvE * scale + offset;
+    return textureGrad(cloudNoiseTex, fract(uv), uvDx * scale, uvDy * scale).r;
+}
+
+void build_local_cloud_frame(vec3 dir, out vec3 east, out vec3 north)
+{
+    vec3 refAxis = mix(vec3(0.0, 1.0, 0.0),
+                       vec3(1.0, 0.0, 0.0),
+                       step(0.999, abs(dir.y)));
+    east = normalize(cross(refAxis, dir));
+    north = cross(dir, east);
+}
+
+vec3 differentiate_normalized(vec3 v, vec3 dv)
+{
+    float vLen2 = max(dot(v, v), 1e-8);
+    float invLen = inversesqrt(vLen2);
+    vec3 n = v * invLen;
+    return (dv - n * dot(n, dv)) * invLen;
+}
+
+void dir_to_equirect_grad(vec3 d,
+                          vec3 ddx,
+                          vec3 ddy,
+                          bool flipV,
+                          out vec2 uv,
+                          out vec2 uvDx,
+                          out vec2 uvDy)
+{
+    d = normalize(d);
+    uv = dir_to_equirect(d, flipV);
+
+    float xz2 = max(dot(d.xz, d.xz), 1e-6);
+    float invXZ2 = 1.0 / xz2;
+    float invSqrtOneMinusY2 = inversesqrt(max(1.0 - d.y * d.y, 1e-6));
+
+    uvDx.x = (d.x * ddx.z - d.z * ddx.x) * invXZ2 * INV_TWO_PI;
+    uvDy.x = (d.x * ddy.z - d.z * ddy.x) * invXZ2 * INV_TWO_PI;
+    uvDx.y = -ddx.y * invSqrtOneMinusY2 * INV_PI;
+    uvDy.y = -ddy.y * invSqrtOneMinusY2 * INV_PI;
+
+    if (flipV)
+    {
+        uvDx.y = -uvDx.y;
+        uvDy.y = -uvDy.y;
+    }
 }
 
 // ── Phase Functions ──────────────────────────────────────────────────
@@ -124,10 +165,12 @@ float phase_mie_hg(float cosTheta, float g)
 // ── Cloud Density ────────────────────────────────────────────────────
 
 float cloud_density(vec3 dir,
+                    vec3 dirDx,
+                    vec3 dirDy,
                     float height,
                     bool cloudsActive,
                     bool flipV,
-                    float overlayRotRad,
+                    vec2 overlayRotSC,
                     vec2 windHeading,
                     vec2 windSC)
 {
@@ -144,17 +187,9 @@ float cloud_density(vec3 dir,
     vec3 dirW = dir;
     if (cloudsActive)
     {
-        // Build a stable local tangent frame and advect along it.
-        vec3 east = cross(vec3(0.0, 1.0, 0.0), dir);
-        float eLen2 = dot(east, east);
-        if (eLen2 < 1e-6)
-        {
-            east = cross(vec3(1.0, 0.0, 0.0), dir);
-            eLen2 = dot(east, east);
-        }
-        east *= inversesqrt(max(eLen2, 1e-6));
-
-        vec3 north = cross(dir, east);
+        vec3 east;
+        vec3 north;
+        build_local_cloud_frame(dir, east, north);
         vec3 windT = east * windHeading.x + north * windHeading.y;
 
         // Move along a great-circle arc by angle = (windSpeed*time)/R.
@@ -164,12 +199,15 @@ float cloud_density(vec3 dir,
     }
 
     // Rotate texture-space orientation around +Y to align the overlay seam.
-    dirW = rotate_y(dirW, overlayRotRad);
+    dirW = rotate_y_sc(dirW, overlayRotSC);
+    vec3 dirWdx = rotate_y_sc(dirDx, overlayRotSC);
+    vec3 dirWdy = rotate_y_sc(dirDy, overlayRotSC);
 
-    vec2 uvE = dir_to_equirect(dirW, flipV);
-    vec4 ov = textureLod(cloudOverlayTex, uvE, 0.0);
-    float lum = luminance(ov.rgb);
-    float localCov = clamp(lum * ov.a, 0.0, 1.0);
+    vec2 uvE;
+    vec2 uvDx;
+    vec2 uvDy;
+    dir_to_equirect_grad(dirW, dirWdx, dirWdy, flipV, uvE, uvDx, uvDy);
+    float localCov = clamp(textureGrad(cloudOverlayTex, uvE, uvDx, uvDy).r, 0.0, 1.0);
 
     uint miscPacked = uint(pc.misc.w);
     float weatherBlend = float((miscPacked >> MISC_NOISE_BLEND_SHIFT) & 0xFFu) * (1.0 / 255.0);
@@ -177,8 +215,7 @@ float cloud_density(vec3 dir,
 
     float lowScale = max(pc.cloud_params.x, 0.001);
     float detailScale = max(pc.cloud_params.y, 0.001);
-    float weatherNoise = sample_cloud_noise(uvE, lowScale, vec2(0.173, 0.547));
-    float detailNoise = sample_cloud_noise(uvE, detailScale, vec2(0.619, 0.281));
+    float weatherNoise = sample_cloud_noise_grad(uvE, uvDx, uvDy, lowScale, vec2(0.173, 0.547));
 
     // Weather field drives local cloud deck height/thickness variation.
     weatherNoise = clamp((weatherNoise - 0.5) * 1.25 + 0.5, 0.0, 1.0);
@@ -207,6 +244,7 @@ float cloud_density(vec3 dir,
     if (cov <= 0.0) return 0.0;
 
     // High-frequency erosion for less "painted" cloud edges.
+    float detailNoise = sample_cloud_noise_grad(uvE, uvDx, uvDy, detailScale, vec2(0.619, 0.281));
     detailNoise = clamp((detailNoise - 0.5) * 1.55 + 0.5, 0.0, 1.0);
     float erosion = smoothstep(0.25, 0.85, detailNoise);
     float erosionMask = mix(0.40, 1.00, erosion);
@@ -245,14 +283,15 @@ struct MarchParams
     float phaseM;
     float phaseC;
     float jitter;
-    float timeSec;
     bool  atmActive;
     bool  cloudsActive;
     bool  cloudFlipV;
     vec2  cloudWindHeading;
     vec2  cloudWindSC;
     float cloudRTop;
-    float cloudOverlayRotRad;
+    vec2  cloudOverlayRotSC;
+    vec3  rayDx;
+    vec3  rayDy;
 };
 
 struct MarchState
@@ -288,6 +327,8 @@ MarchParams mp, inout MarchState s)
         vec3 radial = p - mp.center;
         float r = length(radial);
         vec3 dir = (r > 0.0) ? (radial / r) : vec3(0.0, 1.0, 0.0);
+        vec3 dirDx = differentiate_normalized(radial, mp.rayDx * ts);
+        vec3 dirDy = differentiate_normalized(radial, mp.rayDy * ts);
         float height = max(r - mp.planetRadius, 0.0);
 
         // Atmosphere density
@@ -305,10 +346,12 @@ MarchParams mp, inout MarchState s)
         if (doCloud)
         {
             densC = cloud_density(dir,
+                                  dirDx,
+                                  dirDy,
                                   height,
                                   mp.cloudsActive,
                                   mp.cloudFlipV,
-                                  mp.cloudOverlayRotRad,
+                                  mp.cloudOverlayRotSC,
                                   mp.cloudWindHeading,
                                   mp.cloudWindSC);
             if (densC > 0.0) s.odC += densC * dt;
@@ -468,11 +511,10 @@ void main()
 
     if (!atmActive && !cloudsActive) { outColor = vec4(baseColor, 1.0); return; }
 
-    vec3 camLocal = getCameraLocalPosition();
-
-    vec2 ndc = inUV * 2.0 - 1.0;
-    vec3 viewDir = normalize(vec3(ndc.x / sceneData.proj[0][0], ndc.y / sceneData.proj[1][1], -1.0));
-    vec3 rd = transpose(mat3(sceneData.view)) * viewDir;
+    vec3 camLocal = inCamLocal;
+    vec3 rd = normalize(inWorldRay);
+    vec3 rdDx = dFdx(rd);
+    vec3 rdDy = dFdy(rd);
 
     vec3 center = pc.planet_center_radius.xyz;
 
@@ -556,14 +598,15 @@ void main()
     mp.phaseM       = phase_mie_hg(cosTheta, mieG);
     mp.phaseC       = phase_mie_hg(cosTheta, CLOUD_PHASE_G);
     mp.jitter       = jitter;
-    mp.timeSec      = max(pc.jitter_params.z, 0.0);
     mp.atmActive    = atmActive;
     mp.cloudsActive = cloudsActive;
     mp.cloudFlipV = cloudFlipV;
     mp.cloudWindHeading = vec2(1.0, 0.0);
     mp.cloudWindSC = vec2(0.0, 1.0);
     mp.cloudRTop = rTop;
-    mp.cloudOverlayRotRad = cloudsActive ? pc.jitter_params.w : 0.0;
+    mp.cloudOverlayRotSC = cloudsActive ? pc.jitter_params.zw : vec2(0.0, 1.0);
+    mp.rayDx = rdDx;
+    mp.rayDy = rdDy;
 
     // Precompute wind parameters (advected in cloud_density via local tangent basis).
     if (cloudsActive)
@@ -575,7 +618,7 @@ void main()
         float windAngle = pc.cloud_params.w;
         mp.cloudWindHeading = vec2(cos(windAngle), sin(windAngle));
 
-        float arc = (windSpeedMps * mp.timeSec) / max(cloudR, 1.0);
+        float arc = (windSpeedMps * max(sceneData.timeParams.x, 0.0)) / max(cloudR, 1.0);
         mp.cloudWindSC = vec2(sin(arc), cos(arc));
     }
 

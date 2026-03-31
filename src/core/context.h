@@ -246,11 +246,11 @@ struct PlanetCloudSettings
     // Coverage threshold (0..1). Higher = emptier.
     float coverage = 0.45f;
 
-    // Relative to assets/ (KTX2 recommended). If empty or missing, the cloud layer is disabled.
-    std::string overlayTexturePath = "planets/earth/cloud/earth_clouds_4k.ktx2";
+    // Relative to assets/ (KTX2 recommended). Prefer a single-channel BC4 coverage map here.
+    std::string overlayTexturePath = "planets/earth/cloud/earth_clouds_8k_bc4.ktx2";
 
-    // Relative to assets/ (KTX2 recommended). 2D tiled noise map used to break up uniform cloud shells.
-    std::string noiseTexturePath = "vfx/perlin.ktx2";
+    // Relative to assets/ (KTX2 recommended). Prefer a single-channel BC4 noise map here.
+    std::string noiseTexturePath = "vfx/perlin_bc4.ktx2";
 
     // Rotate the overlay around +Y (radians) to align the texture seam/orientation.
     float overlayRotationRad = 0.0f;
