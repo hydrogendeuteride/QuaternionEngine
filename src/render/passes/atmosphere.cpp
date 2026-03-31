@@ -40,7 +40,7 @@ namespace
         glm::vec4 atmosphere_params;    // x: atmosphere radius (m), y: rayleigh H (m), z: mie H (m), w: mie g
         glm::vec4 beta_rayleigh;        // rgb: betaR (1/m), w: atmosphere intensity
         glm::vec4 beta_mie;             // rgb: betaM (1/m), w: absorption strength (1/m)
-        glm::vec4 jitter_params;        // x: jitter strength (0..1), y: planet snap (m), z: time (sec), w: cloud overlay rotation (rad)
+        glm::vec4 jitter_params;        // x: jitter strength (0..1), y: planet snap (m), z: cloud overlay sin, w: cloud overlay cos
         glm::vec4 cloud_layer;          // x: base height (m), y: thickness (m), z: densityScale, w: coverage
         glm::vec4 cloud_params;         // x: noiseScale, y: detailScale, z: windSpeedMps, w: windAngleRad
         glm::ivec4 misc;                // x: view steps, y: packed absorption color (RGBA8), z: cloud steps, w: packed flags/noise params
@@ -151,7 +151,7 @@ void AtmospherePass::init(EngineContext *context)
     }
 
     GraphicsPipelineCreateInfo info{};
-    info.vertexShaderPath = _context->getAssets()->shaderPath("fullscreen.vert.spv");
+    info.vertexShaderPath = _context->getAssets()->shaderPath("atmosphere.vert.spv");
     info.fragmentShaderPath = _context->getAssets()->shaderPath("atmosphere.frag.spv");
     info.setLayouts = {
         _context->getDescriptorLayouts()->gpuSceneDataLayout(), // set = 0
@@ -479,20 +479,6 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
     const AtmosphereSettings &s = ctxLocal->atmosphere;
     const PlanetCloudSettings &c = ctxLocal->planetClouds;
 
-    const float dt_sec = (ctxLocal->scene) ? std::clamp(ctxLocal->scene->getDeltaTime(), 0.0f, 0.1f) : 0.0f;
-    if (std::isfinite(dt_sec) && dt_sec > 0.0f)
-    {
-        _time_sec += dt_sec;
-        if (!std::isfinite(_time_sec))
-        {
-            _time_sec = 0.0f;
-        }
-        else if (_time_sec > 1.0e6f)
-        {
-            _time_sec = std::fmod(_time_sec, 1.0e6f);
-        }
-    }
-
     float atm_height = std::max(0.0f, s.atmosphereHeightM);
     const bool atmosphereEnabled = ctxLocal->enableAtmosphere;
     float atm_radius = (atmosphereEnabled && planet_radius_m > 0.0f && atm_height > 0.0f) ? (planet_radius_m + atm_height) : 0.0f;
@@ -517,6 +503,8 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
     float cloudDensityScale = std::max(0.0f, c.densityScale);
     float cloudCoverage = std::clamp(c.coverage, 0.0f, 0.999f);
     float cloudOverlayRot = cloudsEnabled ? c.overlayRotationRad : 0.0f;
+    float cloudOverlaySin = std::sin(cloudOverlayRot);
+    float cloudOverlayCos = std::cos(cloudOverlayRot);
     float cloudNoiseScale = std::max(0.001f, c.noiseScale);
     float cloudDetailScale = std::max(0.001f, c.detailScale);
     float cloudNoiseBlend = (cloudsEnabled && cloudNoiseAvailable) ? std::clamp(c.noiseBlend, 0.0f, 1.0f) : 0.0f;
@@ -559,7 +547,7 @@ void AtmospherePass::draw_atmosphere(VkCommandBuffer cmd,
     pc.atmosphere_params = glm::vec4(atm_radius, Hr, Hm, mieG);
     pc.beta_rayleigh = glm::vec4(betaR, intensity);
     pc.beta_mie = glm::vec4(betaM, absorptionStrength);
-    pc.jitter_params = glm::vec4(jitterStrength, planetSnapM, _time_sec, cloudOverlayRot);
+    pc.jitter_params = glm::vec4(jitterStrength, planetSnapM, cloudOverlaySin, cloudOverlayCos);
     pc.cloud_layer = glm::vec4(cloudBaseM, cloudThicknessM, cloudDensityScale, cloudCoverage);
     pc.cloud_params = glm::vec4(cloudNoiseScale, cloudDetailScale, cloudWindSpeed, cloudWindAngle);
     pc.misc = glm::ivec4(viewSteps, packed_absorption_color_bits, cloudSteps, std::bit_cast<int32_t>(packed_misc_w));
