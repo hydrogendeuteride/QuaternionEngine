@@ -204,7 +204,9 @@ namespace Game
         tr.rotation = rot_world;
         tr.scale = scale;
 
-        api.set_mesh_instance_transform(entity.render_name(), tr);
+        const std::string &render_name = entity.render_name();
+        (void) api.set_mesh_instance_transform(render_name, tr);
+        (void) api.set_gltf_instance_transform(render_name, tr);
 
         // Sync attachments
         Transform parent_transform{};
@@ -224,7 +226,8 @@ namespace Game
             att_tr.position = glm::dvec3(world_transform.position_world);
             att_tr.rotation = world_transform.rotation;
             att_tr.scale = world_transform.scale;
-            api.set_mesh_instance_transform(att.render_name, att_tr);
+            (void) api.set_mesh_instance_transform(att.render_name, att_tr);
+            (void) api.set_gltf_instance_transform(att.render_name, att_tr);
         }
     }
 

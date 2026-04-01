@@ -1394,6 +1394,21 @@ namespace Physics
         _physics_system.GetBodyInterface().SetUserData(jolt_id, user_data);
     }
 
+    void JoltPhysicsWorld::set_gravity_scale(BodyId id, float scale)
+    {
+        if (!_initialized || !id.is_valid())
+        {
+            return;
+        }
+
+        JPH::BodyID jolt_id(id.value);
+        JPH::BodyLockWrite lock(_physics_system.GetBodyLockInterface(), jolt_id);
+        if (lock.Succeeded())
+        {
+            lock.GetBody().GetMotionProperties()->SetGravityFactor(scale);
+        }
+    }
+
     bool JoltPhysicsWorld::set_motion_type(BodyId id, MotionType motion_type)
     {
         if (!_initialized || !id.is_valid())

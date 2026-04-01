@@ -264,6 +264,12 @@ namespace Game
         bool promote_orbiter_to_rails(OrbiterInfo &orbiter);
         bool demote_orbiter_from_rails(OrbiterInfo &orbiter);
         void sync_celestial_render_entities(GameStateContext &ctx);
+        Physics::BodyId create_orbiter_physics_body(bool render_is_gltf,
+                                                    Entity &entity,
+                                                    const Physics::BodySettings &settings,
+                                                    const WorldVec3 &position_world,
+                                                    const glm::quat &rotation);
+        bool destroy_orbiter_physics_body(bool render_is_gltf, Entity &entity);
 
         // Orbiter helpers
         OrbiterInfo *find_player_orbiter();
@@ -289,6 +295,7 @@ namespace Game
 
         // Game world (entities + resource lifetime)
         GameWorld _world;
+        VulkanEngine *_renderer{nullptr};
 
         // Physics
         std::unique_ptr<Physics::PhysicsWorld> _physics;
@@ -335,6 +342,9 @@ namespace Game
         bool _contact_log_print_console{false};
 
         bool _debug_draw_enabled{true};
+        bool _show_orbit_hud{true};
+        bool _show_orbit_drag_debug{true};
+        bool _show_frame_view{true};
         bool _reset_requested{false};
         bool _runtime_orbiter_rails_enabled{true};
         double _runtime_orbiter_rails_distance_m{kDefaultRuntimeOrbiterRailsDistanceM};

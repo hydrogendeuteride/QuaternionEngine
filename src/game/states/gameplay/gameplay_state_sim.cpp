@@ -277,8 +277,7 @@ namespace Game
             return false;
         }
 
-        _physics->destroy_body(body_id);
-        ent->clear_physics_body();
+        (void) destroy_orbiter_physics_body(orbiter.render_is_gltf, *ent);
 
         orbiter.rails.sc_id = handle.id;
         orbiter.rails.rotation = rot;
@@ -321,20 +320,23 @@ namespace Game
         {
             body_id = Physics::BodyId{ent->physics_body_value()};
         }
-        else
+        if (!body_id.is_valid() || !_physics->is_body_valid(body_id))
         {
-            Physics::BodySettings settings = orbiter.physics_settings;
-            settings.position = world_to_local_d(pos_world, _physics_context->origin_world());
-            settings.rotation = rot;
-            settings.user_data = static_cast<uint64_t>(ent->id().value);
-            body_id = _physics->create_body(settings);
-            if (!body_id.is_valid())
+            if (ent->has_physics())
+            {
+                ent->clear_physics_body();
+            }
+
+            body_id = create_orbiter_physics_body(orbiter.render_is_gltf,
+                                                  *ent,
+                                                  orbiter.physics_settings,
+                                                  pos_world,
+                                                  rot);
+            if (!body_id.is_valid() ||
+                !_world.bind_physics(ent->id(), body_id.value, orbiter.use_physics_interpolation, false))
             {
                 return false;
             }
-
-            ent->set_physics_body(body_id.value);
-            ent->set_use_interpolation(orbiter.use_physics_interpolation);
         }
 
         _physics->set_transform(body_id, world_to_local_d(pos_world, _physics_context->origin_world()), rot);
@@ -961,17 +963,24 @@ namespace Game
                 {
                     body_id = Physics::BodyId{ent->physics_body_value()};
                 }
-                else
+                if (!body_id.is_valid() || !_physics->is_body_valid(body_id))
                 {
-                    Physics::BodySettings settings = orbiter.physics_settings;
-                    settings.position = world_to_local_d(pos_world, _physics_context->origin_world());
-                    settings.rotation = rot;
-                    settings.user_data = static_cast<uint64_t>(ent->id().value);
-                    body_id = _physics->create_body(settings);
+                    if (ent->has_physics())
+                    {
+                        ent->clear_physics_body();
+                    }
+
+                    body_id = create_orbiter_physics_body(orbiter.render_is_gltf,
+                                                          *ent,
+                                                          orbiter.physics_settings,
+                                                          pos_world,
+                                                          rot);
                     if (body_id.is_valid())
                     {
-                        ent->set_physics_body(body_id.value);
-                        ent->set_use_interpolation(orbiter.use_physics_interpolation);
+                        (void) _world.bind_physics(ent->id(),
+                                                   body_id.value,
+                                                   orbiter.use_physics_interpolation,
+                                                   false);
                     }
                 }
 
