@@ -202,7 +202,8 @@ Control quadtree LOD behavior for terrain planets.
 struct PlanetQuadtreeSettings
 {
     uint32_t maxLevel{14};                 // Max quadtree depth
-    float targetScreenSpaceError{32.0f};   // Target SSE in pixels
+    float targetScreenSpaceError{20.0f};   // Target SSE in pixels
+    float lodHysteresisRatio{0.20f};       // Deadband around the SSE threshold
     uint32_t maxPatchesVisible{8192};      // Max patches to render
     bool frustumCull{true};                // Enable frustum culling
     bool horizonCull{true};                // Enable horizon culling
@@ -211,6 +212,7 @@ struct PlanetQuadtreeSettings
 GameAPI::PlanetQuadtreeSettings settings;
 settings.maxLevel = 16;
 settings.targetScreenSpaceError = 16.0f;  // Higher detail (lower SSE)
+settings.lodHysteresisRatio = 0.25f;      // Hold LODs a bit longer near threshold
 settings.maxPatchesVisible = 16384;
 api.set_planet_quadtree_settings(settings);
 
@@ -353,16 +355,21 @@ struct PlanetCloudSettings
     float baseHeightM{2000.0f};
     float thicknessM{8000.0f};
     float densityScale{1.0f};
+    glm::vec3 color{1.0f, 1.0f, 1.0f};
     float coverage{0.45f};
 
-    // Overlay texture (cloud texture wrapped on sphere)
-    std::string overlayTexturePath{"planets/earth/cloud/earth_clouds_4k.ktx2"};
+    // Macro cloud/weather map wrapped over the sphere
+    std::string overlayTexturePath{"planets/earth/cloud/earth_clouds_8k_bc4.ktx2"};
+    // Tileable noise reused for weather modulation and internal breakup
+    std::string noiseTexturePath{"vfx/perlin_bc4.ktx2"};
     float overlayRotationRad{0.0f};
     bool overlayFlipV{false};
 
-    // Procedural noise
+    // Macro weather frequency + internal pseudo-volume breakup
     float noiseScale{1.5f};
     float detailScale{12.0f};
+    float noiseBlend{0.65f};
+    float detailErode{0.75f};
 
     // Animation
     float windSpeed{0.0f};
@@ -384,6 +391,7 @@ bool enabled = api.get_planet_clouds_enabled();
 GameAPI::PlanetCloudSettings clouds;
 clouds.baseHeightM = 3000.0f;
 clouds.thicknessM = 10000.0f;
+clouds.color = glm::vec3(0.95f, 0.80f, 0.55f);
 clouds.coverage = 0.5f;
 clouds.windSpeed = 5.0f;
 clouds.cloudSteps = 48;

@@ -144,6 +144,12 @@ struct PlanetTerrain
     std::string emission_dir;
     // Emission intensity multiplier (vec3 factor applied to texture RGB).
     glm::vec3 emission_factor{0.0f, 0.0f, 0.0f};
+
+    // Optional cube-face specular mask root relative to assets/ (e.g. "planets/earth/specular/L0").
+    // Expected files: {px,nx,py,ny,pz,nz}.ktx2 or .png in linear space.
+    std::string specular_dir;
+    float specular_strength{1.0f};
+    float specular_roughness{0.06f};
 };
 
 struct PlanetInfo
@@ -212,17 +218,20 @@ struct PlanetCloudSettings
     float thicknessM{8000.0f};
 
     float densityScale{1.0f};
+    glm::vec3 color{1.0f, 1.0f, 1.0f};
     float coverage{0.45f};
 
-    std::string overlayTexturePath{"planets/earth/cloud/earth_clouds_4k.ktx2"};
-    std::string noiseTexturePath{"vfx/perlin.ktx2"};
+    // Macro cloud/weather map wrapped over the sphere.
+    std::string overlayTexturePath{"planets/earth/cloud/earth_clouds_8k_bc4.ktx2"};
+    // Tileable noise reused for weather modulation and internal breakup.
+    std::string noiseTexturePath{"vfx/perlin_bc4.ktx2"};
     float overlayRotationRad{0.0f};
     bool overlayFlipV{false};
 
-    float noiseScale{1.5f};
-    float detailScale{12.0f};
-    float noiseBlend{0.65f};
-    float detailErode{0.75f};
+    float noiseScale{1.5f};     // macro weather frequency
+    float detailScale{12.0f};   // internal pseudo-volume detail frequency
+    float noiseBlend{0.65f};    // weather-field influence from the noise texture
+    float detailErode{0.75f};   // height-aware internal erosion strength
 
     float windSpeed{0.0f};
     float windAngleRad{0.0f};
@@ -234,7 +243,8 @@ struct PlanetCloudSettings
 struct PlanetQuadtreeSettings
 {
     uint32_t maxLevel{14};
-    float targetScreenSpaceError{32.0f};
+    float targetScreenSpaceError{20.0f};
+    float lodHysteresisRatio{0.20f};
     uint32_t maxPatchesVisible{8192};
     bool frustumCull{true};
     bool horizonCull{true};

@@ -42,7 +42,8 @@ namespace planet
         struct Settings
         {
             uint32_t max_level = 14;
-            float target_sse_px = 32.0f;    // screen space error pixel
+            float target_sse_px = 20.0f;    // screen space error pixel
+            float lod_hysteresis_ratio = 0.20f;
             uint32_t max_patches_visible = 8192;
             bool frustum_cull = true;
             bool horizon_cull = true;

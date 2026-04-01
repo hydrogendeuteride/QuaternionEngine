@@ -64,6 +64,9 @@ bool Engine::add_planet_terrain(const PlanetTerrain &planet)
     info.height_max_m = planet.height_max_m;
     info.emission_dir = planet.emission_dir;
     info.emission_factor = planet.emission_factor;
+    info.specular_dir = planet.specular_dir;
+    info.specular_strength = planet.specular_strength;
+    info.specular_roughness = planet.specular_roughness;
 
     return planets->create_terrain_planet(info) != nullptr;
 }
@@ -243,6 +246,7 @@ void Engine::set_planet_quadtree_settings(const PlanetQuadtreeSettings &settings
     planet::PlanetQuadtree::Settings s = planets->earth_quadtree_settings();
     s.max_level = settings.maxLevel;
     s.target_sse_px = settings.targetScreenSpaceError;
+    s.lod_hysteresis_ratio = settings.lodHysteresisRatio;
     s.max_patches_visible = settings.maxPatchesVisible;
     s.frustum_cull = settings.frustumCull;
     s.horizon_cull = settings.horizonCull;
@@ -259,6 +263,7 @@ PlanetQuadtreeSettings Engine::get_planet_quadtree_settings() const
     const auto &s = planets->earth_quadtree_settings();
     out.maxLevel = s.max_level;
     out.targetScreenSpaceError = s.target_sse_px;
+    out.lodHysteresisRatio = s.lod_hysteresis_ratio;
     out.maxPatchesVisible = s.max_patches_visible;
     out.frustumCull = s.frustum_cull;
     out.horizonCull = s.horizon_cull;
@@ -500,6 +505,7 @@ void Engine::set_planet_clouds_settings(const PlanetCloudSettings &settings)
     dst.baseHeightM = settings.baseHeightM;
     dst.thicknessM = settings.thicknessM;
     dst.densityScale = settings.densityScale;
+    dst.color = settings.color;
     dst.coverage = settings.coverage;
     dst.overlayTexturePath = settings.overlayTexturePath;
     dst.noiseTexturePath = settings.noiseTexturePath;
@@ -523,6 +529,7 @@ PlanetCloudSettings Engine::get_planet_clouds_settings() const
     out.baseHeightM = src.baseHeightM;
     out.thicknessM = src.thicknessM;
     out.densityScale = src.densityScale;
+    out.color = src.color;
     out.coverage = src.coverage;
     out.overlayTexturePath = src.overlayTexturePath;
     out.noiseTexturePath = src.noiseTexturePath;
