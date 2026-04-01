@@ -177,6 +177,7 @@ void SceneManager::recenterFloatingOriginIfNeeded()
 
 void SceneManager::emitDynamicGLTFInstances(const WorldVec3 &origin_world, float dt)
 {
+    static int debug_gltf_emit_logs = 0;
     for (auto &kv : dynamicGLTFInstances)
     {
         GLTFInstance &inst = kv.second;
@@ -201,6 +202,27 @@ void SceneManager::emitDynamicGLTFInstances(const WorldVec3 &origin_world, float
         const glm::mat4 instance_transform = make_trs_matrix(t_local, inst.rotation, inst.scale);
         inst.scene->Draw(instance_transform, mainDrawContext);
         mainDrawContext.gltfNodeLocalOverrides = nullptr;
+
+        if (debug_gltf_emit_logs < 12)
+        {
+            const size_t opaque_added = mainDrawContext.OpaqueSurfaces.size() - opaque_start;
+            const size_t transparent_added = mainDrawContext.TransparentSurfaces.size() - transparent_start;
+            const size_t mesh_vfx_added = mainDrawContext.MeshVfxSurfaces.size() - mesh_vfx_start;
+            Logger::info("[SceneManager] emitDynamicGLTFInstances '{}' scene='{}' topNodes={} meshes={} materials={} "
+                         "localPos=({}, {}, {}) added opaque={} transparent={} vfx={}",
+                         kv.first,
+                         inst.scene->debugName.empty() ? "<unnamed>" : inst.scene->debugName.c_str(),
+                         inst.scene->topNodes.size(),
+                         inst.scene->meshes.size(),
+                         inst.scene->materials.size(),
+                         t_local.x,
+                         t_local.y,
+                         t_local.z,
+                         opaque_added,
+                         transparent_added,
+                         mesh_vfx_added);
+            ++debug_gltf_emit_logs;
+        }
 
         tag_owner_surfaces(mainDrawContext,
                            RenderObject::OwnerType::GLTFInstance,

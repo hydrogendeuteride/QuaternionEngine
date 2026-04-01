@@ -752,6 +752,7 @@ bool SceneManager::rebuildDynamicRootColliderBody(const std::string &instanceNam
 
 void SceneManager::syncDynamicRootColliderBodies()
 {
+    static int debug_dynamic_root_logs = 0;
     for (auto &[instanceName, entry] : _dynamicRootColliderBodies)
     {
         if (!entry.world || !entry.body.is_valid() || !entry.world->is_body_valid(entry.body))
@@ -771,5 +772,23 @@ void SceneManager::syncDynamicRootColliderBodies()
         inst_it->second.translation_world = local_to_world_d(entry.world->get_position(entry.body), physics_origin_world);
         inst_it->second.rotation = glm::normalize(entry.world->get_rotation(entry.body));
         inst_it->second.scale = entry.scale;
+
+        if (debug_dynamic_root_logs < 12)
+        {
+            const glm::dvec3 pos_local = entry.world->get_position(entry.body);
+            Logger::info("[SceneManager] syncDynamicRootColliderBodies '{}' body={} localPos=({}, {}, {}) worldPos=({}, {}, {}) scale=({}, {}, {})",
+                         instanceName,
+                         entry.body.value,
+                         pos_local.x,
+                         pos_local.y,
+                         pos_local.z,
+                         inst_it->second.translation_world.x,
+                         inst_it->second.translation_world.y,
+                         inst_it->second.translation_world.z,
+                         inst_it->second.scale.x,
+                         inst_it->second.scale.y,
+                         inst_it->second.scale.z);
+            ++debug_dynamic_root_logs;
+        }
     }
 }

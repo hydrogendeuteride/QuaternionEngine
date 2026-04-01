@@ -198,449 +198,462 @@ namespace Game
 
     void GameplayState::on_draw_ui(GameStateContext &ctx)
     {
-        const ImGuiViewport *viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + 10, viewport->WorkPos.y + 10));
-        ImGui::SetNextWindowBgAlpha(0.4f);
-
-        ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize;
-
-        if (ImGui::Begin("##GameplayHUD", nullptr, flags))
+        if (ImGui::BeginMainMenuBar())
         {
-            // ----------------------------------------------------------------
-            // Player HUD: sim time, warp, vessel, controls
-            // ----------------------------------------------------------------
-            const double sim_time_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
-            const int sim_hours = static_cast<int>(std::floor(sim_time_s / 3600.0));
-            const int sim_minutes = static_cast<int>(std::floor(std::fmod(sim_time_s, 3600.0) / 60.0));
-            const double sim_seconds = std::fmod(sim_time_s, 60.0);
-
-            const char *warp_mode = "Realtime";
-            switch (_time_warp.mode)
+            if (ImGui::BeginMenu("View"))
             {
-                case TimeWarpState::Mode::Realtime:
-                    warp_mode = "Realtime";
-                    break;
-                case TimeWarpState::Mode::PhysicsWarp:
-                    warp_mode = "Physics";
-                    break;
-                case TimeWarpState::Mode::RailsWarp:
-                    warp_mode = "Rails";
-                    break;
+                ImGui::MenuItem("Orbit HUD", nullptr, &_show_orbit_hud);
+                ImGui::MenuItem("Orbit Drag Debug", nullptr, &_show_orbit_drag_debug);
+                ImGui::MenuItem("Frame View", nullptr, &_show_frame_view);
+                ImGui::EndMenu();
             }
+            ImGui::EndMainMenuBar();
+        }
 
-            ImGui::Text("Sim: %dh %dm %.1fs", sim_hours, sim_minutes, sim_seconds);
-            const char *controlled_vessel = "None";
-            if (const OrbiterInfo *player_orbiter = find_player_orbiter())
+        if (_show_orbit_hud)
+        {
+            const ImGuiViewport *viewport = ImGui::GetMainViewport();
+            ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + 10, viewport->WorkPos.y + 10));
+            ImGui::SetNextWindowBgAlpha(0.4f);
+
+            ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize;
+
+            if (ImGui::Begin("##GameplayHUD", nullptr, flags))
             {
-                controlled_vessel = player_orbiter->name.c_str();
-            }
+                // ----------------------------------------------------------------
+                // Player HUD: sim time, warp, vessel, controls
+                // ----------------------------------------------------------------
+                const double sim_time_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+                const int sim_hours = static_cast<int>(std::floor(sim_time_s / 3600.0));
+                const int sim_minutes = static_cast<int>(std::floor(std::fmod(sim_time_s, 3600.0) / 60.0));
+                const double sim_seconds = std::fmod(sim_time_s, 60.0);
 
-            ImGui::Text("Warp: x%.0f (%s)  [,][.] change  [/]/[Backspace] x1", _time_warp.factor(), warp_mode);
-            ImGui::Text("Vessel: %s", controlled_vessel);
-            ImGui::TextUnformatted("Switch vessel: '[' previous, ']' next");
-            ImGui::Text("Real: %.1f s", _elapsed);
-            ImGui::Text("[ESC] Pause");
+                const char *warp_mode = "Realtime";
+                switch (_time_warp.mode)
+                {
+                    case TimeWarpState::Mode::Realtime:
+                        warp_mode = "Realtime";
+                        break;
+                    case TimeWarpState::Mode::PhysicsWarp:
+                        warp_mode = "Physics";
+                        break;
+                    case TimeWarpState::Mode::RailsWarp:
+                        warp_mode = "Rails";
+                        break;
+                }
+
+                ImGui::Text("Sim: %dh %dm %.1fs", sim_hours, sim_minutes, sim_seconds);
+                const char *controlled_vessel = "None";
+                if (const OrbiterInfo *player_orbiter = find_player_orbiter())
+                {
+                    controlled_vessel = player_orbiter->name.c_str();
+                }
+
+                ImGui::Text("Warp: x%.0f (%s)  [,][.] change  [/]/[Backspace] x1", _time_warp.factor(), warp_mode);
+                ImGui::Text("Vessel: %s", controlled_vessel);
+                ImGui::TextUnformatted("Switch vessel: '[' previous, ']' next");
+                ImGui::Text("Real: %.1f s", _elapsed);
+                ImGui::Text("[ESC] Pause");
 
 #if !(defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT)
-            ImGui::Separator();
-            ImGui::TextUnformatted(
-                "WARNING: Built without Jolt physics (collision test requires VULKAN_ENGINE_USE_JOLT=1).");
+                ImGui::Separator();
+                ImGui::TextUnformatted(
+                    "WARNING: Built without Jolt physics (collision test requires VULKAN_ENGINE_USE_JOLT=1).");
 #endif
 
-            // ----------------------------------------------------------------
-            // Scenario save/load
-            // ----------------------------------------------------------------
-            if (ImGui::Button("Reset scenario"))
-            {
-                _reset_requested = true;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Replay collision"))
-            {
-                _reset_requested = true;
-            }
-
-            const std::string scenario_slot_path = resolve_asset_rel_path(ctx, _scenario_slot_rel_path);
-
-            ImGui::SameLine();
-            if (ImGui::Button("Save scenario slot"))
-            {
-                if (save_scenario_config(scenario_slot_path, _scenario_config))
+                // ----------------------------------------------------------------
+                // Scenario save/load
+                // ----------------------------------------------------------------
+                if (ImGui::Button("Reset scenario"))
                 {
-                    _scenario_io_status = "Saved scenario: " + scenario_slot_path;
-                    _scenario_io_status_ok = true;
-                }
-                else
-                {
-                    _scenario_io_status = "Save failed: " + scenario_slot_path;
-                    _scenario_io_status_ok = false;
-                }
-            }
-
-            ImGui::SameLine();
-            if (ImGui::Button("Load scenario slot"))
-            {
-                if (auto loaded = load_scenario_config(scenario_slot_path))
-                {
-                    _scenario_config = std::move(*loaded);
-                    _scenario_io_status = "Loaded scenario: " + scenario_slot_path;
-                    _scenario_io_status_ok = true;
                     _reset_requested = true;
                 }
-                else
+                ImGui::SameLine();
+                if (ImGui::Button("Replay collision"))
                 {
-                    _scenario_io_status = "Load failed: " + scenario_slot_path;
-                    _scenario_io_status_ok = false;
+                    _reset_requested = true;
                 }
-            }
 
-            ImGui::Text("Scenario slot: %s", scenario_slot_path.c_str());
-            if (!_scenario_io_status.empty())
-            {
-                if (_scenario_io_status_ok)
-                {
-                    ImGui::TextUnformatted(_scenario_io_status.c_str());
-                }
-                else
-                {
-                    ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", _scenario_io_status.c_str());
-                }
-            }
+                const std::string scenario_slot_path = resolve_asset_rel_path(ctx, _scenario_slot_rel_path);
 
-            // ----------------------------------------------------------------
-            // Settings save/load
-            // ----------------------------------------------------------------
-            const std::string settings_path = resolve_asset_rel_path(ctx, _settings_rel_path);
-            if (ImGui::Button("Save settings"))
-            {
-                if (save_gameplay_settings(settings_path, extract_settings()))
+                ImGui::SameLine();
+                if (ImGui::Button("Save scenario slot"))
                 {
-                    _settings_io_status = "Saved: " + settings_path;
-                    _settings_io_status_ok = true;
+                    if (save_scenario_config(scenario_slot_path, _scenario_config))
+                    {
+                        _scenario_io_status = "Saved scenario: " + scenario_slot_path;
+                        _scenario_io_status_ok = true;
+                    }
+                    else
+                    {
+                        _scenario_io_status = "Save failed: " + scenario_slot_path;
+                        _scenario_io_status_ok = false;
+                    }
                 }
-                else
+
+                ImGui::SameLine();
+                if (ImGui::Button("Load scenario slot"))
                 {
-                    _settings_io_status = "Save failed: " + settings_path;
-                    _settings_io_status_ok = false;
+                    if (auto loaded = load_scenario_config(scenario_slot_path))
+                    {
+                        _scenario_config = std::move(*loaded);
+                        _scenario_io_status = "Loaded scenario: " + scenario_slot_path;
+                        _scenario_io_status_ok = true;
+                        _reset_requested = true;
+                    }
+                    else
+                    {
+                        _scenario_io_status = "Load failed: " + scenario_slot_path;
+                        _scenario_io_status_ok = false;
+                    }
                 }
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Load settings"))
-            {
-                if (auto loaded = load_gameplay_settings(settings_path))
+
+                ImGui::Text("Scenario slot: %s", scenario_slot_path.c_str());
+                if (!_scenario_io_status.empty())
                 {
-                    apply_settings(*loaded);
-                    if (ctx.api)
+                    if (_scenario_io_status_ok)
+                    {
+                        ImGui::TextUnformatted(_scenario_io_status.c_str());
+                    }
+                    else
+                    {
+                        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", _scenario_io_status.c_str());
+                    }
+                }
+
+                // ----------------------------------------------------------------
+                // Settings save/load
+                // ----------------------------------------------------------------
+                const std::string settings_path = resolve_asset_rel_path(ctx, _settings_rel_path);
+                if (ImGui::Button("Save settings"))
+                {
+                    if (save_gameplay_settings(settings_path, extract_settings()))
+                    {
+                        _settings_io_status = "Saved: " + settings_path;
+                        _settings_io_status_ok = true;
+                    }
+                    else
+                    {
+                        _settings_io_status = "Save failed: " + settings_path;
+                        _settings_io_status_ok = false;
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Load settings"))
+                {
+                    if (auto loaded = load_gameplay_settings(settings_path))
+                    {
+                        apply_settings(*loaded);
+                        if (ctx.api)
+                        {
+                            ctx.api->set_debug_draw_enabled(_debug_draw_enabled);
+                        }
+                        _settings_io_status = "Loaded: " + settings_path;
+                        _settings_io_status_ok = true;
+                    }
+                    else
+                    {
+                        _settings_io_status = "Load failed: " + settings_path;
+                        _settings_io_status_ok = false;
+                    }
+                }
+                if (!_settings_io_status.empty())
+                {
+                    if (_settings_io_status_ok)
+                    {
+                        ImGui::TextUnformatted(_settings_io_status.c_str());
+                    }
+                    else
+                    {
+                        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", _settings_io_status.c_str());
+                    }
+                }
+
+                // ----------------------------------------------------------------
+                // Debug toggles
+                // ----------------------------------------------------------------
+                ImGui::Checkbox("Contact log", &_contact_log_enabled);
+                ImGui::SameLine();
+                ImGui::Checkbox("Print console", &_contact_log_print_console);
+
+                if (ctx.api)
+                {
+                    if (ImGui::Checkbox("Debug draw", &_debug_draw_enabled))
                     {
                         ctx.api->set_debug_draw_enabled(_debug_draw_enabled);
                     }
-                    _settings_io_status = "Loaded: " + settings_path;
-                    _settings_io_status_ok = true;
                 }
-                else
+
+                if (ImGui::Checkbox("Runtime orbiter rails", &_runtime_orbiter_rails_enabled))
                 {
-                    _settings_io_status = "Load failed: " + settings_path;
-                    _settings_io_status_ok = false;
+                    mark_prediction_dirty();
                 }
-            }
-            if (!_settings_io_status.empty())
-            {
-                if (_settings_io_status_ok)
+                double runtime_rails_distance_m = _runtime_orbiter_rails_distance_m;
+                if (ImGui::DragScalar("Runtime rails distance (m)",
+                                      ImGuiDataType_Double,
+                                      &runtime_rails_distance_m,
+                                      100.0f,
+                                      nullptr,
+                                      nullptr,
+                                      "%.0f"))
                 {
-                    ImGui::TextUnformatted(_settings_io_status.c_str());
+                    _runtime_orbiter_rails_distance_m = std::max(0.0, runtime_rails_distance_m);
                 }
-                else
+
+                // ----------------------------------------------------------------
+                // Contact log
+                // ----------------------------------------------------------------
+                ImGui::Separator();
+                ImGui::Text("Contacts: %zu", _contact_log.size());
+
+                const int max_lines = 6;
+                const int n = static_cast<int>(std::min(_contact_log.size(), static_cast<size_t>(max_lines)));
+                for (int i = 0; i < n; ++i)
                 {
-                    ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", _settings_io_status.c_str());
+                    const ContactLogEntry &e = _contact_log[_contact_log.size() - 1 - static_cast<size_t>(i)];
+                    ImGui::Text("[%s][%.2fs] self=%u other=%u depth=%.3f p=(%.2f,%.2f,%.2f)",
+                                contact_event_type_name(e.type),
+                                e.time_s,
+                                e.self_body,
+                                e.other_body,
+                                e.penetration_depth,
+                                e.point.x, e.point.y, e.point.z);
                 }
-            }
 
-            // ----------------------------------------------------------------
-            // Debug toggles
-            // ----------------------------------------------------------------
-            ImGui::Checkbox("Contact log", &_contact_log_enabled);
-            ImGui::SameLine();
-            ImGui::Checkbox("Print console", &_contact_log_print_console);
-
-            if (ctx.api)
-            {
-                if (ImGui::Checkbox("Debug draw", &_debug_draw_enabled))
-                {
-                    ctx.api->set_debug_draw_enabled(_debug_draw_enabled);
-                }
-            }
-
-            if (ImGui::Checkbox("Runtime orbiter rails", &_runtime_orbiter_rails_enabled))
-            {
-                mark_prediction_dirty();
-            }
-            double runtime_rails_distance_m = _runtime_orbiter_rails_distance_m;
-            if (ImGui::DragScalar("Runtime rails distance (m)",
-                                  ImGuiDataType_Double,
-                                  &runtime_rails_distance_m,
-                                  100.0f,
-                                  nullptr,
-                                  nullptr,
-                                  "%.0f"))
-            {
-                _runtime_orbiter_rails_distance_m = std::max(0.0, runtime_rails_distance_m);
-            }
-
-            // ----------------------------------------------------------------
-            // Contact log
-            // ----------------------------------------------------------------
-            ImGui::Separator();
-            ImGui::Text("Contacts: %zu", _contact_log.size());
-
-            const int max_lines = 6;
-            const int n = static_cast<int>(std::min(_contact_log.size(), static_cast<size_t>(max_lines)));
-            for (int i = 0; i < n; ++i)
-            {
-                const ContactLogEntry &e = _contact_log[_contact_log.size() - 1 - static_cast<size_t>(i)];
-                ImGui::Text("[%s][%.2fs] self=%u other=%u depth=%.3f p=(%.2f,%.2f,%.2f)",
-                            contact_event_type_name(e.type),
-                            e.time_s,
-                            e.self_body,
-                            e.other_body,
-                            e.penetration_depth,
-                            e.point.x, e.point.y, e.point.z);
-            }
-
-            // ----------------------------------------------------------------
-            // Ship controller HUD
-            // ----------------------------------------------------------------
+                // ----------------------------------------------------------------
+                // Ship controller HUD
+                // ----------------------------------------------------------------
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-            {
-                const EntityId player_eid = player_entity();
-                if (player_eid.is_valid())
                 {
-                    Entity *player = _world.entities().find(player_eid);
-                    if (player)
+                    const EntityId player_eid = player_entity();
+                    if (player_eid.is_valid())
                     {
-                        auto *sc = player->get_component<ShipController>();
-                        if (sc)
+                        Entity *player = _world.entities().find(player_eid);
+                        if (player)
                         {
-                            ImGui::Separator();
-                            const bool rails_warp = _rails_warp_active && _time_warp.mode == TimeWarpState::Mode::RailsWarp;
-                            const glm::vec3 td = rails_warp ? _rails_last_thrust_dir_local : sc->last_thrust_dir();
-                            ImGui::Text("SAS: %s  [T] toggle", sc->sas_enabled() ? "ON " : "OFF");
-                            ImGui::Text("Thrust input: (%.1f, %.1f, %.1f)%s",
-                                        td.x, td.y, td.z,
-                                        (rails_warp && _rails_thrust_applied_this_tick) ? " [applied]" : "");
-
-                            if (rails_warp)
+                            auto *sc = player->get_component<ShipController>();
+                            if (sc)
                             {
-                                WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
-                                glm::dvec3 ship_vel_world(0.0);
-                                glm::vec3 ship_vel_local_f(0.0f);
-                                if (get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
+                                ImGui::Separator();
+                                const bool rails_warp = _rails_warp_active && _time_warp.mode == TimeWarpState::Mode::RailsWarp;
+                                const glm::vec3 td = rails_warp ? _rails_last_thrust_dir_local : sc->last_thrust_dir();
+                                ImGui::Text("SAS: %s  [T] toggle", sc->sas_enabled() ? "ON " : "OFF");
+                                ImGui::Text("Thrust input: (%.1f, %.1f, %.1f)%s",
+                                            td.x, td.y, td.z,
+                                            (rails_warp && _rails_thrust_applied_this_tick) ? " [applied]" : "");
+
+                                if (rails_warp)
                                 {
-                                    ImGui::Text("Speed(world): %.2f m/s", glm::length(ship_vel_world));
+                                    WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
+                                    glm::dvec3 ship_vel_world(0.0);
+                                    glm::vec3 ship_vel_local_f(0.0f);
+                                    if (get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
+                                    {
+                                        ImGui::Text("Speed(world): %.2f m/s", glm::length(ship_vel_world));
+                                    }
+                                }
+                                else if (player->has_physics() && _physics)
+                                {
+                                    const Physics::BodyId body_id{player->physics_body_value()};
+                                    if (_physics->is_body_valid(body_id))
+                                    {
+                                        const Physics::MotionType motion = _physics->get_motion_type(body_id);
+                                        const char *motion_str =
+                                                (motion == Physics::MotionType::Dynamic)
+                                                    ? "Dynamic"
+                                                    : (motion == Physics::MotionType::Kinematic) ? "Kinematic (forces ignored)" : "Static";
+                                        ImGui::Text("Motion: %s", motion_str);
+
+                                        float thrust = sc->thrust_force();
+                                        if (ImGui::DragFloat("Thrust force (N)", &thrust, 1000.0f, 0.0f, 1.0e9f, "%.1f"))
+                                        {
+                                            sc->set_thrust_force(thrust);
+                                        }
+
+                                        float torque = sc->torque_strength();
+                                        if (ImGui::DragFloat("Torque strength (N*m)", &torque, 1000.0f, 0.0f, 1.0e9f, "%.1f"))
+                                        {
+                                            sc->set_torque_strength(torque);
+                                        }
+
+                                        float sas = sc->sas_damping();
+                                        if (ImGui::DragFloat("SAS damping", &sas, 0.1f, 0.0f, 1.0e4f, "%.2f"))
+                                        {
+                                            sc->set_sas_damping(sas);
+                                        }
+
+                                        const glm::vec3 vel = _physics->get_linear_velocity(body_id);
+                                        ImGui::Text("Speed(local): %.2f m/s", glm::length(vel));
+                                        if (_physics_context)
+                                        {
+                                            const glm::dvec3 v_world = _physics_context->velocity_origin_world() + glm::dvec3(vel);
+                                            ImGui::Text("Speed(world): %.2f m/s", glm::length(v_world));
+                                        }
+                                    }
                                 }
                             }
-                            else if (player->has_physics() && _physics)
+                        }
+                    }
+                }
+#endif
+                // ================================================================
+                // Orbit section
+                // ================================================================
+                ImGui::Separator();
+                if (ImGui::CollapsingHeader("Orbit", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    OrbitPlotSystem *orbit_plot =
+                            (ctx.renderer && ctx.renderer->_context) ? ctx.renderer->_context->orbit_plot : nullptr;
+                    rebuild_prediction_subjects();
+                    rebuild_prediction_frame_options();
+                    rebuild_prediction_analysis_options();
+
+                    // --- Key orbital info (always visible) ---
+                    const PredictionTrackState *active_prediction = active_prediction_track();
+                    std::string active_prediction_label = active_prediction
+                                                                ? prediction_subject_label(active_prediction->key)
+                                                                : std::string("None");
+                    ImGui::Text("Focused subject: %s", active_prediction_label.c_str());
+
+                    // Display frame / Analysis frame combos
+                    const char *frame_label = (_prediction_frame_selection.selected_index >= 0 &&
+                                               _prediction_frame_selection.selected_index <
+                                                       static_cast<int>(_prediction_frame_selection.options.size()))
+                                                  ? _prediction_frame_selection.options[static_cast<size_t>(
+                                                            _prediction_frame_selection.selected_index)].label.c_str()
+                                                  : "Unknown";
+                    if (ImGui::BeginCombo("Display frame", frame_label))
+                    {
+                        for (std::size_t i = 0; i < _prediction_frame_selection.options.size(); ++i)
+                        {
+                            const PredictionFrameOption &option = _prediction_frame_selection.options[i];
+                            const bool selected =
+                                    option.spec.type == _prediction_frame_selection.spec.type &&
+                                    option.spec.primary_body_id == _prediction_frame_selection.spec.primary_body_id &&
+                                    option.spec.secondary_body_id == _prediction_frame_selection.spec.secondary_body_id &&
+                                    option.spec.target_spacecraft_id == _prediction_frame_selection.spec.target_spacecraft_id;
+                            if (ImGui::Selectable(option.label.c_str(), selected))
+                            {
+                                (void) set_prediction_frame_spec(option.spec);
+                            }
+                            if (selected)
+                            {
+                                ImGui::SetItemDefaultFocus();
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+
+                    const char *analysis_label =
+                            (_prediction_analysis_selection.selected_index >= 0 &&
+                             _prediction_analysis_selection.selected_index <
+                                     static_cast<int>(_prediction_analysis_selection.options.size()))
+                                ? _prediction_analysis_selection
+                                          .options[static_cast<size_t>(_prediction_analysis_selection.selected_index)]
+                                          .label.c_str()
+                                : "Unknown";
+                    if (ImGui::BeginCombo("Analysis frame", analysis_label))
+                    {
+                        for (std::size_t i = 0; i < _prediction_analysis_selection.options.size(); ++i)
+                        {
+                            const PredictionAnalysisOption &option = _prediction_analysis_selection.options[i];
+                            const bool selected =
+                                    option.spec.mode == _prediction_analysis_selection.spec.mode &&
+                                    option.spec.fixed_body_id == _prediction_analysis_selection.spec.fixed_body_id;
+                            if (ImGui::Selectable(option.label.c_str(), selected))
+                            {
+                                (void) set_prediction_analysis_spec(option.spec);
+                            }
+                            if (selected)
+                            {
+                                ImGui::SetItemDefaultFocus();
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+
+                    // Orbital metrics
+                    WorldVec3 subject_pos_world{0.0, 0.0, 0.0};
+                    glm::dvec3 subject_vel_world(0.0);
+                    glm::vec3 subject_vel_local_f(0.0f);
+
+                    active_prediction = active_prediction_track();
+                    active_prediction_label = active_prediction
+                                                  ? prediction_subject_label(active_prediction->key)
+                                                  : std::string("None");
+                    const bool have_subject =
+                            active_prediction &&
+                            get_prediction_subject_world_state(active_prediction->key,
+                                                               subject_pos_world,
+                                                               subject_vel_world,
+                                                               subject_vel_local_f);
+                    if (!have_subject)
+                    {
+                        ImGui::TextUnformatted("Prediction subject state unavailable.");
+                    }
+                    else
+                    {
+                        if (active_prediction && active_prediction->cache.valid)
+                        {
+                            if (!active_prediction->cache.altitude_km.empty())
+                            {
+                                ImGui::Text("Altitude: %.0f m", static_cast<double>(active_prediction->cache.altitude_km.front()) * 1000.0);
+                            }
+                            if (!active_prediction->cache.speed_kmps.empty())
+                            {
+                                ImGui::Text("Speed:    %.3f km/s", static_cast<double>(active_prediction->cache.speed_kmps.front()));
+                            }
+
+                            if (!active_prediction->is_celestial)
+                            {
+                                ImGui::Text("Predicted Pe: %.1f km", active_prediction->cache.periapsis_alt_km);
+                                if (std::isfinite(active_prediction->cache.apoapsis_alt_km))
+                                {
+                                    ImGui::Text("Predicted Ap: %.1f km", active_prediction->cache.apoapsis_alt_km);
+                                }
+                                else
+                                {
+                                    ImGui::TextUnformatted("Predicted Ap: escape");
+                                }
+
+                                if (active_prediction->cache.orbital_period_s > 0.0 &&
+                                    std::isfinite(active_prediction->cache.orbital_period_s))
+                                {
+                                    ImGui::Text("Predicted Period: %.2f min", active_prediction->cache.orbital_period_s / 60.0);
+                                }
+                            }
+                        }
+
+#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
+                        const EntityId player_eid = player_entity();
+                        if (_physics && _physics_context && player_eid.is_valid() &&
+                            active_prediction &&
+                            prediction_subject_is_player(active_prediction->key))
+                        {
+                            const glm::dvec3 v_origin_world = _physics_context->velocity_origin_world();
+                            ImGui::Text("v_origin: %.1f, %.1f, %.1f m/s", v_origin_world.x, v_origin_world.y,
+                                        v_origin_world.z);
+                            ImGui::Text("v_local:  %.2f, %.2f, %.2f m/s", subject_vel_local_f.x, subject_vel_local_f.y,
+                                        subject_vel_local_f.z);
+
+                            const Entity *player = _world.entities().find(player_eid);
+                            if (player && player->has_physics())
                             {
                                 const Physics::BodyId body_id{player->physics_body_value()};
                                 if (_physics->is_body_valid(body_id))
                                 {
-                                    const Physics::MotionType motion = _physics->get_motion_type(body_id);
-                                    const char *motion_str =
-                                            (motion == Physics::MotionType::Dynamic)
-                                                ? "Dynamic"
-                                                : (motion == Physics::MotionType::Kinematic) ? "Kinematic (forces ignored)" : "Static";
-                                    ImGui::Text("Motion: %s", motion_str);
-
-                                    float thrust = sc->thrust_force();
-                                    if (ImGui::DragFloat("Thrust force (N)", &thrust, 1000.0f, 0.0f, 1.0e9f, "%.1f"))
-                                    {
-                                        sc->set_thrust_force(thrust);
-                                    }
-
-                                    float torque = sc->torque_strength();
-                                    if (ImGui::DragFloat("Torque strength (N*m)", &torque, 1000.0f, 0.0f, 1.0e9f, "%.1f"))
-                                    {
-                                        sc->set_torque_strength(torque);
-                                    }
-
-                                    float sas = sc->sas_damping();
-                                    if (ImGui::DragFloat("SAS damping", &sas, 0.1f, 0.0f, 1.0e4f, "%.2f"))
-                                    {
-                                        sc->set_sas_damping(sas);
-                                    }
-
-                                    const glm::vec3 vel = _physics->get_linear_velocity(body_id);
-                                    ImGui::Text("Speed(local): %.2f m/s", glm::length(vel));
-                                    if (_physics_context)
-                                    {
-                                        const glm::dvec3 v_world = _physics_context->velocity_origin_world() + glm::dvec3(vel);
-                                        ImGui::Text("Speed(world): %.2f m/s", glm::length(v_world));
-                                    }
+                                    const glm::vec3 w_local_f = _physics->get_angular_velocity(body_id);
+                                    ImGui::Text("w_local:  %.3f, %.3f, %.3f rad/s (|w|=%.3f)",
+                                                w_local_f.x, w_local_f.y, w_local_f.z, glm::length(w_local_f));
                                 }
                             }
                         }
-                    }
-                }
-            }
 #endif
-
-            // ================================================================
-            // Orbit section
-            // ================================================================
-            ImGui::Separator();
-            if (ImGui::CollapsingHeader("Orbit", ImGuiTreeNodeFlags_DefaultOpen))
-            {
-                OrbitPlotSystem *orbit_plot =
-                        (ctx.renderer && ctx.renderer->_context) ? ctx.renderer->_context->orbit_plot : nullptr;
-                rebuild_prediction_subjects();
-                rebuild_prediction_frame_options();
-                rebuild_prediction_analysis_options();
-
-                // --- Key orbital info (always visible) ---
-                const PredictionTrackState *active_prediction = active_prediction_track();
-                std::string active_prediction_label = active_prediction
-                                                            ? prediction_subject_label(active_prediction->key)
-                                                            : std::string("None");
-                ImGui::Text("Focused subject: %s", active_prediction_label.c_str());
-
-                // Display frame / Analysis frame combos
-                const char *frame_label = (_prediction_frame_selection.selected_index >= 0 &&
-                                           _prediction_frame_selection.selected_index <
-                                                   static_cast<int>(_prediction_frame_selection.options.size()))
-                                              ? _prediction_frame_selection.options[static_cast<size_t>(
-                                                        _prediction_frame_selection.selected_index)].label.c_str()
-                                              : "Unknown";
-                if (ImGui::BeginCombo("Display frame", frame_label))
-                {
-                    for (std::size_t i = 0; i < _prediction_frame_selection.options.size(); ++i)
-                    {
-                        const PredictionFrameOption &option = _prediction_frame_selection.options[i];
-                        const bool selected =
-                                option.spec.type == _prediction_frame_selection.spec.type &&
-                                option.spec.primary_body_id == _prediction_frame_selection.spec.primary_body_id &&
-                                option.spec.secondary_body_id == _prediction_frame_selection.spec.secondary_body_id &&
-                                option.spec.target_spacecraft_id == _prediction_frame_selection.spec.target_spacecraft_id;
-                        if (ImGui::Selectable(option.label.c_str(), selected))
-                        {
-                            (void) set_prediction_frame_spec(option.spec);
-                        }
-                        if (selected)
-                        {
-                            ImGui::SetItemDefaultFocus();
-                        }
-                    }
-                    ImGui::EndCombo();
-                }
-
-                const char *analysis_label =
-                        (_prediction_analysis_selection.selected_index >= 0 &&
-                         _prediction_analysis_selection.selected_index <
-                                 static_cast<int>(_prediction_analysis_selection.options.size()))
-                            ? _prediction_analysis_selection
-                                      .options[static_cast<size_t>(_prediction_analysis_selection.selected_index)]
-                                      .label.c_str()
-                            : "Unknown";
-                if (ImGui::BeginCombo("Analysis frame", analysis_label))
-                {
-                    for (std::size_t i = 0; i < _prediction_analysis_selection.options.size(); ++i)
-                    {
-                        const PredictionAnalysisOption &option = _prediction_analysis_selection.options[i];
-                        const bool selected =
-                                option.spec.mode == _prediction_analysis_selection.spec.mode &&
-                                option.spec.fixed_body_id == _prediction_analysis_selection.spec.fixed_body_id;
-                        if (ImGui::Selectable(option.label.c_str(), selected))
-                        {
-                            (void) set_prediction_analysis_spec(option.spec);
-                        }
-                        if (selected)
-                        {
-                            ImGui::SetItemDefaultFocus();
-                        }
-                    }
-                    ImGui::EndCombo();
-                }
-
-                // Orbital metrics
-                WorldVec3 subject_pos_world{0.0, 0.0, 0.0};
-                glm::dvec3 subject_vel_world(0.0);
-                glm::vec3 subject_vel_local_f(0.0f);
-
-                active_prediction = active_prediction_track();
-                active_prediction_label = active_prediction
-                                              ? prediction_subject_label(active_prediction->key)
-                                              : std::string("None");
-                const bool have_subject =
-                        active_prediction &&
-                        get_prediction_subject_world_state(active_prediction->key,
-                                                           subject_pos_world,
-                                                           subject_vel_world,
-                                                           subject_vel_local_f);
-                if (!have_subject)
-                {
-                    ImGui::TextUnformatted("Prediction subject state unavailable.");
-                }
-                else
-                {
-                    if (active_prediction && active_prediction->cache.valid)
-                    {
-                        if (!active_prediction->cache.altitude_km.empty())
-                        {
-                            ImGui::Text("Altitude: %.0f m", static_cast<double>(active_prediction->cache.altitude_km.front()) * 1000.0);
-                        }
-                        if (!active_prediction->cache.speed_kmps.empty())
-                        {
-                            ImGui::Text("Speed:    %.3f km/s", static_cast<double>(active_prediction->cache.speed_kmps.front()));
-                        }
-
-                        if (!active_prediction->is_celestial)
-                        {
-                            ImGui::Text("Predicted Pe: %.1f km", active_prediction->cache.periapsis_alt_km);
-                            if (std::isfinite(active_prediction->cache.apoapsis_alt_km))
-                            {
-                                ImGui::Text("Predicted Ap: %.1f km", active_prediction->cache.apoapsis_alt_km);
-                            }
-                            else
-                            {
-                                ImGui::TextUnformatted("Predicted Ap: escape");
-                            }
-
-                            if (active_prediction->cache.orbital_period_s > 0.0 &&
-                                std::isfinite(active_prediction->cache.orbital_period_s))
-                            {
-                                ImGui::Text("Predicted Period: %.2f min", active_prediction->cache.orbital_period_s / 60.0);
-                            }
-                        }
                     }
 
-#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-                    const EntityId player_eid = player_entity();
-                    if (_physics && _physics_context && player_eid.is_valid() &&
-                        active_prediction &&
-                        prediction_subject_is_player(active_prediction->key))
+                    // --- Orbit View (collapsed by default) ---
+                    if (ImGui::CollapsingHeader("Orbit View"))
                     {
-                        const glm::dvec3 v_origin_world = _physics_context->velocity_origin_world();
-                        ImGui::Text("v_origin: %.1f, %.1f, %.1f m/s", v_origin_world.x, v_origin_world.y,
-                                    v_origin_world.z);
-                        ImGui::Text("v_local:  %.2f, %.2f, %.2f m/s", subject_vel_local_f.x, subject_vel_local_f.y,
-                                    subject_vel_local_f.z);
-
-                        const Entity *player = _world.entities().find(player_eid);
-                        if (player && player->has_physics())
-                        {
-                            const Physics::BodyId body_id{player->physics_body_value()};
-                            if (_physics->is_body_valid(body_id))
-                            {
-                                const glm::vec3 w_local_f = _physics->get_angular_velocity(body_id);
-                                ImGui::Text("w_local:  %.3f, %.3f, %.3f rad/s (|w|=%.3f)",
-                                            w_local_f.x, w_local_f.y, w_local_f.z, glm::length(w_local_f));
-                            }
-                        }
-                    }
-#endif
-                }
-
-                // --- Orbit View (collapsed by default) ---
-                if (ImGui::CollapsingHeader("Orbit View"))
-                {
                     ImGui::Checkbox("Prediction full orbit", &_prediction_draw_full_orbit);
                     ImGui::Checkbox("Prediction future segment", &_prediction_draw_future_segment);
                     ImGui::Checkbox("Prediction velocity ray", &_prediction_draw_velocity_ray);
@@ -670,9 +683,9 @@ namespace Game
                     ImGui::TextUnformatted("(0 = depth-only)");
                 }
 
-                // --- Orbit Debug (collapsed by default) ---
-                if (ImGui::CollapsingHeader("Orbit Debug"))
-                {
+                    // --- Orbit Debug (collapsed by default) ---
+                    if (ImGui::CollapsingHeader("Orbit Debug"))
+                    {
                     ImGui::TextUnformatted("Planner preview / solve margin live in Maneuver Nodes.");
 
                     float refresh_s = static_cast<float>(_prediction_periodic_refresh_s);
@@ -775,9 +788,9 @@ namespace Game
                     }
                 }
 
-                // --- Orbit Performance (collapsed by default) ---
-                if (orbit_plot && ImGui::CollapsingHeader("Orbit Performance"))
-                {
+                    // --- Orbit Performance (collapsed by default) ---
+                    if (orbit_plot && ImGui::CollapsingHeader("Orbit Performance"))
+                    {
                     const OrbitPlotSystem::Stats &plot_stats = orbit_plot->stats();
                     const OrbitPlotPerfStats &perf = _orbit_plot_perf;
                     const PredictionTrackState *active_track = active_prediction_track();
@@ -869,10 +882,10 @@ namespace Game
                     }
                 }
 
-                // --- Physics Debug (collapsed by default) ---
+                    // --- Physics Debug (collapsed by default) ---
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-                if (_physics && _physics_context && ImGui::CollapsingHeader("Physics Debug"))
-                {
+                    if (_physics && _physics_context && ImGui::CollapsingHeader("Physics Debug"))
+                    {
                     int mode_idx = (_velocity_origin_mode == VelocityOriginMode::PerStepAnchorSync) ? 0 : 1;
                     const char *modes[] = {"Per-step anchor sync", "Free-fall anchor frame"};
                     if (ImGui::Combo("Velocity origin mode", &mode_idx, modes, IM_ARRAYSIZE(modes)))
@@ -916,16 +929,23 @@ namespace Game
                             }
                         }
                     }
-                }
+                    }
 #endif
-            } // end Orbit CollapsingHeader
+                } // end Orbit CollapsingHeader
+            }
+            ImGui::End();
         }
-        ImGui::End();
 
         draw_maneuver_nodes_panel(ctx);
         draw_maneuver_imgui_gizmo(ctx);
-        draw_orbit_drag_debug_window(ctx);
-        _frame_monitor.draw_ui();
+        if (_show_orbit_drag_debug)
+        {
+            draw_orbit_drag_debug_window(ctx);
+        }
+        if (_show_frame_view)
+        {
+            _frame_monitor.draw_ui();
+        }
     }
 
     void GameplayState::draw_orbit_drag_debug_window(GameStateContext &ctx)
