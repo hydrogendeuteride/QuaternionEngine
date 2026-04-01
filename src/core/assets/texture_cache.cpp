@@ -690,7 +690,15 @@ void TextureCache::workerLoop()
                 {
                     if (ktxTexture2_NeedsTranscoding(ktex))
                     {
-                        ktx_transcode_fmt_e target = (rq.key.channels == TextureKey::ChannelsHint::RG) ? KTX_TTF_BC5_RG : KTX_TTF_BC7_RGBA;
+                        ktx_transcode_fmt_e target = KTX_TTF_BC7_RGBA;
+                        if (rq.key.channels == TextureKey::ChannelsHint::R)
+                        {
+                            target = KTX_TTF_BC4_R;
+                        }
+                        else if (rq.key.channels == TextureKey::ChannelsHint::RG)
+                        {
+                            target = KTX_TTF_BC5_RG;
+                        }
                         kres = ktxTexture2_TranscodeBasis(ktex, target, 0);
                         if (kres != KTX_SUCCESS)
                         {

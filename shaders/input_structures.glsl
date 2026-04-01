@@ -97,10 +97,12 @@ layout(set = 1, binding = 0) uniform GLTFMaterialData{
 // - extra[1].rgb: emissiveFactor
 // - extra[2].x: alphaCutoff (>0 enables alpha test for MASK materials)
 // - extra[2].y: gbuffer flags (planet-style: >0 => force clipmap receiver shadows in RT-only)
-// - extra[3].x: mesh VFX opacity multiplier (0..1)
-// - extra[3].y: mesh VFX fresnel power
-// - extra[3].z: mesh VFX fresnel strength
-// - extra[4].rgb: mesh VFX tint
+// - Planet materials:
+//   extra[2].z = cube-face specular enabled (1/0), extra[2].w = specular strength
+//   extra[3].w = target ocean roughness
+// - Mesh VFX materials:
+//   extra[3].x = opacity multiplier, extra[3].y = fresnel power, extra[3].z = fresnel strength
+//   extra[4].rgb = tint
 // - extra[5]: (scrollVelocity1.xy, scrollVelocity2.xy) — noise UV scroll speeds
 // - extra[6]: (distortionStrength, noiseBlend, gradientAxis, emissionStrength)
 // - extra[7]: (coreColor.rgb, gradientStart)
@@ -116,3 +118,4 @@ layout(set = 1, binding = 2) uniform sampler2D metalRoughTex;
 layout(set = 1, binding = 3) uniform sampler2D normalMap;   // tangent-space normal, UNORM
 layout(set = 1, binding = 4) uniform sampler2D occlusionTex; // occlusion (R channel)
 layout(set = 1, binding = 5) uniform sampler2D emissiveTex;  // emissive (RGB, sRGB)
+layout(set = 1, binding = 6) uniform sampler2D planetSpecularTex; // per-face planet specular mask (R, linear)

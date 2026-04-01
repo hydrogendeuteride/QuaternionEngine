@@ -448,6 +448,9 @@ PlanetSystem::PlanetBody *PlanetSystem::create_terrain_planet(const TerrainPlane
     body.terrain_height_max_m = (!info.height_dir.empty()) ? std::max(0.0, info.height_max_m) : 0.0;
     body.terrain_emission_dir = info.emission_dir;
     body.emission_factor = info.emission_factor;
+    body.terrain_specular_dir = info.specular_dir;
+    body.specular_strength = info.specular_strength;
+    body.specular_roughness = info.specular_roughness;
 
     if (_context && _context->assets)
     {

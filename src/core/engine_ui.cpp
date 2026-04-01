@@ -2010,6 +2010,7 @@ namespace
         {
             clouds.noiseTexturePath = noisePathBuf;
         }
+        ImGui::TextUnformatted("Overlay drives macro coverage; noise adds height-aware internal breakup.");
 
         float rotDeg = glm::degrees(clouds.overlayRotationRad);
         if (ImGui::SliderFloat("Overlay Rotation (deg)", &rotDeg, -180.0f, 180.0f, "%.1f"))
@@ -2031,17 +2032,19 @@ namespace
 
         ImGui::SliderFloat("Density Scale", &clouds.densityScale, 0.0f, 8.0f, "%.2f");
         clouds.densityScale = std::max(0.0f, clouds.densityScale);
+        ImGui::ColorEdit3("Cloud Color", &clouds.color.x);
+        clouds.color = glm::clamp(clouds.color, glm::vec3(0.0f), glm::vec3(1.0f));
 
         ImGui::SliderFloat("Coverage", &clouds.coverage, 0.0f, 0.99f, "%.3f");
         clouds.coverage = std::clamp(clouds.coverage, 0.0f, 0.999f);
 
-        ImGui::SliderFloat("Noise Scale", &clouds.noiseScale, 0.05f, 16.0f, "%.3f");
+        ImGui::SliderFloat("Weather Scale", &clouds.noiseScale, 0.05f, 16.0f, "%.3f");
         clouds.noiseScale = std::max(0.001f, clouds.noiseScale);
-        ImGui::SliderFloat("Detail Scale", &clouds.detailScale, 0.25f, 64.0f, "%.3f");
+        ImGui::SliderFloat("Internal Detail Scale", &clouds.detailScale, 0.25f, 64.0f, "%.3f");
         clouds.detailScale = std::max(0.001f, clouds.detailScale);
         ImGui::SliderFloat("Noise Blend", &clouds.noiseBlend, 0.0f, 1.0f, "%.3f");
         clouds.noiseBlend = std::clamp(clouds.noiseBlend, 0.0f, 1.0f);
-        ImGui::SliderFloat("Detail Erode", &clouds.detailErode, 0.0f, 1.0f, "%.3f");
+        ImGui::SliderFloat("Internal Erosion", &clouds.detailErode, 0.0f, 1.0f, "%.3f");
         clouds.detailErode = std::clamp(clouds.detailErode, 0.0f, 1.0f);
 
         ImGui::SliderFloat("Wind Speed (m/s)", &clouds.windSpeed, -200.0f, 200.0f, "%.1f");
@@ -3003,6 +3006,12 @@ namespace
                 if (ImGui::SliderFloat("Target SSE (px)", &settings.target_sse_px, 4.0f, 128.0f, "%.1f"))
                 {
                     settings.target_sse_px = std::max(settings.target_sse_px, 0.1f);
+                    changed = true;
+                }
+
+                if (ImGui::SliderFloat("LOD hysteresis", &settings.lod_hysteresis_ratio, 0.0f, 0.75f, "%.2f"))
+                {
+                    settings.lod_hysteresis_ratio = std::clamp(settings.lod_hysteresis_ratio, 0.0f, 0.95f);
                     changed = true;
                 }
 

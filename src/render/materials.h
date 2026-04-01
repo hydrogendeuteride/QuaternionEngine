@@ -35,6 +35,8 @@ struct GLTFMetallic_Roughness
         VkSampler occlusionSampler;
         AllocatedImage emissiveImage;
         VkSampler emissiveSampler;
+        AllocatedImage planetSpecularImage;
+        VkSampler planetSpecularSampler;
         VkBuffer dataBuffer;
         uint32_t dataBufferOffset;
     };

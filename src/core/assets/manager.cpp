@@ -488,6 +488,8 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const MeshCreateInfo &info)
         res.occlusionSampler = _engine->_samplerManager->defaultLinear();
         res.emissiveImage = _engine->_blackImage;
         res.emissiveSampler = _engine->_samplerManager->defaultLinear();
+        res.planetSpecularImage = _engine->_blackImage;
+        res.planetSpecularSampler = _engine->_samplerManager->defaultLinear();
         res.dataBuffer = matBuffer.buffer;
         res.dataBufferOffset = 0;
 
@@ -843,6 +845,8 @@ std::shared_ptr<MeshAsset> AssetManager::createMesh(const std::string &name,
         matResources.occlusionSampler = _engine->_samplerManager->defaultLinear();
         matResources.emissiveImage = _engine->_blackImage;
         matResources.emissiveSampler = _engine->_samplerManager->defaultLinear();
+        matResources.planetSpecularImage = _engine->_blackImage;
+        matResources.planetSpecularSampler = _engine->_samplerManager->defaultLinear();
 
         AllocatedBuffer matBuffer = createMaterialBufferWithConstants({});
         matResources.dataBuffer = matBuffer.buffer;
@@ -894,6 +898,8 @@ std::shared_ptr<GLTFMaterial> AssetManager::createMaterialFromConstants(
     res.occlusionSampler = _engine->_samplerManager->defaultLinear();
     res.emissiveImage = _engine->_blackImage;
     res.emissiveSampler = _engine->_samplerManager->defaultLinear();
+    res.planetSpecularImage = _engine->_blackImage;
+    res.planetSpecularSampler = _engine->_samplerManager->defaultLinear();
 
     AllocatedBuffer buf = createMaterialBufferWithConstants(constants);
     res.dataBuffer = buf.buffer;
@@ -1009,6 +1015,8 @@ bool AssetManager::createOrUpdateMeshVfxMaterial(const std::string &name, const 
     res.occlusionSampler = _engine->_samplerManager->defaultLinear();
     res.emissiveImage = _engine->_blackImage;
     res.emissiveSampler = _engine->_samplerManager->defaultLinear();
+    res.planetSpecularImage = _engine->_blackImage;
+    res.planetSpecularSampler = _engine->_samplerManager->defaultLinear();
 
     AllocatedBuffer constantsBuffer = createMaterialBufferWithConstants(constants);
     res.dataBuffer = constantsBuffer.buffer;
@@ -1238,6 +1246,8 @@ bool AssetManager::createOrUpdateBlackbodyMaterial(const std::string &name, cons
     res.occlusionSampler = _engine->_samplerManager->defaultLinear();
     res.emissiveImage = _engine->_blackImage;
     res.emissiveSampler = _engine->_samplerManager->defaultLinear();
+    res.planetSpecularImage = _engine->_blackImage;
+    res.planetSpecularSampler = _engine->_samplerManager->defaultLinear();
 
     AllocatedBuffer constantsBuffer = createMaterialBufferWithConstants(constants);
     res.dataBuffer = constantsBuffer.buffer;
