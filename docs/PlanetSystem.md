@@ -95,6 +95,7 @@ api.camera_look_at(glm::dvec3(0.0, 0.0, 0.0));
 GameAPI::PlanetQuadtreeSettings qt{};
 qt.maxLevel = 14;                   // Maximum LOD level (2^14 subdivisions)
 qt.targetScreenSpaceError = 32.0f;  // Target screen space error in pixels
+qt.lodHysteresisRatio = 0.20f;      // Reduce sensitivity near the split threshold
 qt.maxPatchesVisible = 8192;        // Maximum visible patches
 qt.frustumCull = true;              // Enable frustum culling
 qt.horizonCull = true;              // Enable horizon culling

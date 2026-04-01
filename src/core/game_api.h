@@ -212,6 +212,7 @@ struct PlanetCloudSettings
     float thicknessM{8000.0f};
 
     float densityScale{1.0f};
+    glm::vec3 color{1.0f, 1.0f, 1.0f};
     float coverage{0.45f};
 
     std::string overlayTexturePath{"planets/earth/cloud/earth_clouds_8k_bc4.ktx2"};
@@ -234,7 +235,8 @@ struct PlanetCloudSettings
 struct PlanetQuadtreeSettings
 {
     uint32_t maxLevel{14};
-    float targetScreenSpaceError{32.0f};
+    float targetScreenSpaceError{20.0f};
+    float lodHysteresisRatio{0.20f};
     uint32_t maxPatchesVisible{8192};
     bool frustumCull{true};
     bool horizonCull{true};

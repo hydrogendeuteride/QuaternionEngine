@@ -45,6 +45,7 @@ namespace
         glm::vec4 jitter_params;
         glm::vec4 cloud_layer;
         glm::vec4 cloud_params;
+        glm::vec4 cloud_color;
         glm::ivec4 misc;
     };
 
@@ -62,7 +63,7 @@ namespace
         glm::ivec4 misc;
     };
 
-    static_assert(sizeof(AtmospherePush) == 128);
+    static_assert(sizeof(AtmospherePush) == 144);
     static_assert(sizeof(CloudTemporalPush) == 112);
 
     static bool vec3_finite(const glm::vec3 &v)
@@ -209,6 +210,9 @@ namespace
         const float cloud_base_m = std::max(0.0f, c.baseHeightM);
         const float cloud_thickness_m = std::max(0.0f, c.thicknessM);
         const float cloud_density_scale = std::max(0.0f, c.densityScale);
+        const glm::vec3 cloud_color = vec3_finite(c.color)
+            ? glm::clamp(c.color, glm::vec3(0.0f), glm::vec3(1.0f))
+            : glm::vec3(1.0f);
         const float cloud_coverage = std::clamp(c.coverage, 0.0f, 0.999f);
         const float cloud_overlay_rot = clouds_enabled ? c.overlayRotationRad : 0.0f;
         const float cloud_overlay_sin = std::sin(cloud_overlay_rot);
@@ -258,6 +262,7 @@ namespace
         push.jitter_params = glm::vec4(jitter_strength, planet_snap_m, cloud_overlay_sin, cloud_overlay_cos);
         push.cloud_layer = glm::vec4(cloud_base_m, cloud_thickness_m, cloud_density_scale, cloud_coverage);
         push.cloud_params = glm::vec4(cloud_noise_scale, cloud_detail_scale, cloud_wind_speed, cloud_wind_angle);
+        push.cloud_color = glm::vec4(cloud_color, 1.0f);
         push.misc = glm::ivec4(view_steps, packed_absorption_color_bits, cloud_steps, std::bit_cast<int32_t>(packed_misc_w));
         return push;
     }
@@ -722,6 +727,7 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
     next_snapshot.cloudBaseM = _context->planetClouds.baseHeightM;
     next_snapshot.cloudThicknessM = _context->planetClouds.thicknessM;
     next_snapshot.cloudDensityScale = _context->planetClouds.densityScale;
+    next_snapshot.cloudColor = glm::vec4(_context->planetClouds.color, 1.0f);
     next_snapshot.cloudCoverage = _context->planetClouds.coverage;
     next_snapshot.cloudNoiseScale = _context->planetClouds.noiseScale;
     next_snapshot.cloudDetailScale = _context->planetClouds.detailScale;
@@ -751,6 +757,7 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
                         !nearly_equal(_historySnapshot.cloudBaseM, next_snapshot.cloudBaseM) ||
                         !nearly_equal(_historySnapshot.cloudThicknessM, next_snapshot.cloudThicknessM) ||
                         !nearly_equal(_historySnapshot.cloudDensityScale, next_snapshot.cloudDensityScale) ||
+                        !nearly_equal_vec4(_historySnapshot.cloudColor, next_snapshot.cloudColor, 2.0e-3f) ||
                         !nearly_equal(_historySnapshot.cloudCoverage, next_snapshot.cloudCoverage) ||
                         !nearly_equal(_historySnapshot.cloudNoiseScale, next_snapshot.cloudNoiseScale) ||
                         !nearly_equal(_historySnapshot.cloudDetailScale, next_snapshot.cloudDetailScale) ||

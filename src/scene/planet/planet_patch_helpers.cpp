@@ -563,6 +563,30 @@ namespace planet_helpers
             const uint32_t right_inner = j * res + right_inner_col;
             place_skirt_vertex(right_edge, right_inner, right_skirt_start + j);
         }
+
+        auto seal_corner = [&](uint32_t base_index, uint32_t skirt_a, uint32_t skirt_b) {
+            const glm::dvec3 a_abs = absolute_from_local(vertices[skirt_a].position);
+            const glm::dvec3 b_abs = absolute_from_local(vertices[skirt_b].position);
+            const glm::vec3 sealed_position =
+                    (glm::dot(a_abs, a_abs) <= glm::dot(b_abs, b_abs))
+                            ? vertices[skirt_a].position
+                            : vertices[skirt_b].position;
+
+            const Vertex corner = vertices[base_index];
+            vertices[skirt_a] = corner;
+            vertices[skirt_b] = corner;
+            vertices[skirt_a].position = sealed_position;
+            vertices[skirt_b].position = sealed_position;
+        };
+
+        // Corner skirt vertices are duplicated per edge strip. Keep each pair at the same
+        // position so the adjacent skirt quads share a single edge instead of leaving a slit.
+        seal_corner(0u, top_skirt_start + 0u, left_skirt_start + 0u);
+        seal_corner(res - 1u, top_skirt_start + (res - 1u), right_skirt_start + 0u);
+        seal_corner((res - 1u) * res + 0u, bottom_skirt_start + 0u, left_skirt_start + (res - 1u));
+        seal_corner(res * res - 1u,
+                    bottom_skirt_start + (res - 1u),
+                    right_skirt_start + (res - 1u));
     }
 
     uint8_t compute_patch_edge_stitch_mask(const planet::PatchKey &key,
