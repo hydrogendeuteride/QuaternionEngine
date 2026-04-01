@@ -9,7 +9,9 @@
 
 namespace
 {
-    float sample_height_from_direction(const std::array<planet::HeightFace, 6> &height_faces, const glm::dvec3 &dir)
+    float sample_height_from_direction(const std::array<planet::HeightFace, 6> &height_faces,
+                                       const glm::dvec3 &dir,
+                                       uint32_t mip_level)
     {
         planet::CubeFace face = planet::CubeFace::PosX;
         double u01 = 0.0;
@@ -31,13 +33,14 @@ namespace
             return 0.0f;
         }
 
-        return planet::sample_height(hf, static_cast<float>(u01), static_cast<float>(v01));
+        return planet::sample_height(hf, static_cast<float>(u01), static_cast<float>(v01), mip_level);
     }
 
     glm::dvec3 sample_surface_position_from_direction(const std::array<planet::HeightFace, 6> &height_faces,
                                                       const glm::dvec3 &dir,
                                                       double radius_m,
-                                                      double height_scale_m)
+                                                      double height_scale_m,
+                                                      uint32_t mip_level)
     {
         glm::dvec3 d = dir;
         const double len2 = glm::dot(d, d);
@@ -50,7 +53,7 @@ namespace
             d *= (1.0 / std::sqrt(len2));
         }
 
-        const double h = static_cast<double>(sample_height_from_direction(height_faces, d)) * height_scale_m;
+        const double h = static_cast<double>(sample_height_from_direction(height_faces, d, mip_level)) * height_scale_m;
         return d * (radius_m + h);
     }
 
@@ -284,6 +287,7 @@ namespace planet_helpers
                                                const glm::dvec3 &patch_center_dir,
                                                double radius_m,
                                                uint32_t level,
+                                               uint32_t height_mip_level,
                                                uint8_t edge_stitch_mask,
                                                double height_scale_m,
                                                const std::array<planet::HeightFace, 6> &height_faces)
@@ -378,10 +382,14 @@ namespace planet_helpers
                 }
                 b *= (1.0 / std::sqrt(b_len2));
 
-                const glm::dvec3 pL = sample_surface_position_from_direction(height_faces, dir - t * sample_angle, radius_m, height_scale_m);
-                const glm::dvec3 pR = sample_surface_position_from_direction(height_faces, dir + t * sample_angle, radius_m, height_scale_m);
-                const glm::dvec3 pU = sample_surface_position_from_direction(height_faces, dir - b * sample_angle, radius_m, height_scale_m);
-                const glm::dvec3 pD = sample_surface_position_from_direction(height_faces, dir + b * sample_angle, radius_m, height_scale_m);
+                const glm::dvec3 pL = sample_surface_position_from_direction(
+                    height_faces, dir - t * sample_angle, radius_m, height_scale_m, height_mip_level);
+                const glm::dvec3 pR = sample_surface_position_from_direction(
+                    height_faces, dir + t * sample_angle, radius_m, height_scale_m, height_mip_level);
+                const glm::dvec3 pU = sample_surface_position_from_direction(
+                    height_faces, dir - b * sample_angle, radius_m, height_scale_m, height_mip_level);
+                const glm::dvec3 pD = sample_surface_position_from_direction(
+                    height_faces, dir + b * sample_angle, radius_m, height_scale_m, height_mip_level);
 
                 glm::dvec3 n = glm::cross(pD - pU, pR - pL);
                 const double n_len2 = glm::dot(n, n);
