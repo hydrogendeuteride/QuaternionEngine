@@ -313,6 +313,17 @@ std::optional<std::shared_ptr<LoadedGLTF> > AssetManager::loadGLTF(std::string_v
                 (*loaded)->build_mesh_colliders_from_sidecar(*(*sidecar), true);
                 (*loaded)->colliders_from_sidecar = true;
                 (*loaded)->collider_source_path = sidecar_path;
+
+                // Collider sidecars are temporary CPU-side data sources, but they are loaded
+                // through the normal glTF path, which queues GPU buffer uploads for their meshes.
+                // Flush those uploads before the sidecar is destroyed so the pending upload pass
+                // never targets buffers that clearAll() has already freed.
+                if (_engine->_resourceManager &&
+                    _engine->_resourceManager->deferred_uploads() &&
+                    _engine->_resourceManager->has_pending_uploads())
+                {
+                    _engine->_resourceManager->process_queued_uploads_immediate();
+                }
             }
             else
             {

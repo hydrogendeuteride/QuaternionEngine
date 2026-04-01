@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
+# Usage: python3 build_earth_specular_faces.py --source path/to/input.png
+#        [--name job] [--output path/to/L0]
 
-from __future__ import annotations
-
-import argparse
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,164 +11,85 @@ from PIL import Image
 
 
 FACE_NAMES = ("nx", "ny", "nz", "px", "py", "pz")
-NUMBERED_FACE_NAMES = {
-    1: "nx",
-    2: "ny",
-    3: "nz",
-    4: "px",
-    5: "py",
-    6: "pz",
+REMAP = {
+    "nx": ("nx", False),
+    "ny": ("px", True),
+    "nz": ("py", False),
+    "px": ("ny", False),
+    "py": ("nz", True),
+    "pz": ("pz", False),
 }
 
 
-def repo_root() -> Path:
-    return Path(__file__).resolve().parent
-
-
-def default_source() -> Path:
-    return repo_root() / "assets/planets/earth/specular/earth_landocean_16K.png"
-
-
-def default_output() -> Path:
-    return repo_root() / "assets/planets/earth/specular/L0"
-
-
-def run(cmd: list[str]) -> None:
-    subprocess.run(cmd, check=True)
-
-
-def require_tool(name: str) -> None:
-    if shutil.which(name) is None:
-        raise SystemExit(f"required tool not found: {name}")
-
-
-def build_strip(source: Path, strip_path: Path) -> None:
-    run([
-        "ffmpeg",
-        "-y",
-        "-hide_banner",
-        "-i",
-        str(source),
-        "-vf",
-        "v360=input=equirect:output=c6x1:out_forder=rludfb",
-        "-frames:v",
-        "1",
-        "-update",
-        "1",
-        str(strip_path),
-    ])
-
-
-def untile_strip(strip_path: Path, numbered_dir: Path) -> None:
-    run([
-        "ffmpeg",
-        "-y",
-        "-hide_banner",
-        "-i",
-        str(strip_path),
-        "-vf",
-        "untile=6x1",
-        str(numbered_dir / "%d.png"),
-    ])
-
-
-def load_initial_faces(numbered_dir: Path) -> dict[str, Image.Image]:
-    loaded: dict[str, Image.Image] = {}
-    for index, face_name in NUMBERED_FACE_NAMES.items():
-        with Image.open(numbered_dir / f"{index}.png") as image:
-            loaded[face_name] = image.convert("L").copy()
-    return loaded
-
-
-def remap_faces(initial: dict[str, Image.Image]) -> dict[str, Image.Image]:
-    rotate180 = Image.Transpose.ROTATE_180
-    return {
-        "nx": initial["nx"].copy(),
-        "ny": initial["px"].transpose(rotate180),
-        "nz": initial["py"].copy(),
-        "px": initial["ny"].copy(),
-        "py": initial["nz"].transpose(rotate180),
-        "pz": initial["pz"].copy(),
-    }
-
-
-def write_faces(output_dir: Path, faces: dict[str, Image.Image]) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for face_name in FACE_NAMES:
-        png_path = output_dir / f"{face_name}.png"
-        ktx_path = output_dir / f"{face_name}.ktx2"
-        if png_path.exists():
-            png_path.unlink()
-        if ktx_path.exists():
-            ktx_path.unlink()
-        faces[face_name].save(png_path, optimize=True)
-
-
-def encode_ktx2(output_dir: Path) -> None:
-    for face_name in FACE_NAMES:
-        png_path = output_dir / f"{face_name}.png"
-        ktx_path = output_dir / f"{face_name}.ktx2"
-        run([
-            "toktx",
-            "--t2",
-            "--genmipmap",
-            "--assign_oetf",
-            "linear",
-            "--target_type",
-            "R",
-            "--encode",
-            "uastc",
-            "--uastc_quality",
-            "2",
-            "--zcmp",
-            "3",
-            str(ktx_path),
-            str(png_path),
-        ])
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Build the Earth terrain specular cube faces and KTX2 outputs.",
-    )
-    parser.add_argument(
-        "--source",
-        type=Path,
-        default=default_source(),
-        help="Source equirect grayscale texture.",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=default_output(),
-        help="Output directory for px/nx/py/ny/pz/nz PNG + KTX2 files.",
-    )
-    return parser.parse_args()
-
-
 def main() -> int:
-    args = parse_args()
-    source = args.source.resolve()
-    output_dir = args.output.resolve()
+    name = None
+    source = None
+    output_dir = None
 
+    args = iter(sys.argv[1:])
+    for arg in args:
+        if arg == "--name":
+            name = next(args, "").strip()
+        elif arg == "--source":
+            source = Path(next(args, ""))
+        elif arg == "--output":
+            output_dir = Path(next(args, ""))
+        else:
+            raise SystemExit(f"unknown argument: {arg}")
+
+    if source is None:
+        raise SystemExit("--source is required")
+
+    source = source.expanduser().resolve()
     if not source.is_file():
         raise SystemExit(f"source file not found: {source}")
+    name = (name or "faces").strip() or "faces"
+    output_dir = (output_dir or source.parent / "L0").expanduser().resolve()
 
-    require_tool("ffmpeg")
-    require_tool("toktx")
-
-    with tempfile.TemporaryDirectory(prefix="earth-specular-") as temp_dir_str:
-        temp_dir = Path(temp_dir_str)
-        strip_path = temp_dir / "earth_specular_c6x1.png"
+    with tempfile.TemporaryDirectory(prefix=f"{name.lower()}-specular-") as temp_dir:
+        temp_dir = Path(temp_dir)
+        strip_path = temp_dir / "specular_c6x1.png"
         numbered_dir = temp_dir / "faces"
         numbered_dir.mkdir(parents=True, exist_ok=True)
 
-        build_strip(source, strip_path)
-        untile_strip(strip_path, numbered_dir)
-        initial = load_initial_faces(numbered_dir)
-        faces = remap_faces(initial)
-        write_faces(output_dir, faces)
-        encode_ktx2(output_dir)
+        subprocess.run([
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-i",
+            str(source),
+            "-vf",
+            "v360=input=equirect:output=c6x1:out_forder=rludfb",
+            "-frames:v",
+            "1",
+            "-update",
+            "1",
+            str(strip_path),
+        ], check=True)
+        subprocess.run([
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-i",
+            str(strip_path),
+            "-vf",
+            "untile=6x1",
+            str(numbered_dir / "%d.png"),
+        ], check=True)
+
+        numbered_faces = {}
+        for index, face_name in enumerate(FACE_NAMES, start=1):
+            with Image.open(numbered_dir / f"{index}.png") as image:
+                numbered_faces[face_name] = image.convert("L").copy()
+
+        rotate180 = Image.Transpose.ROTATE_180
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for face_name, (source_face, rotate) in REMAP.items():
+            png_path = output_dir / f"{face_name}.png"
+            png_path.unlink(missing_ok=True)
+
+            face_image = numbered_faces[source_face].transpose(rotate180) if rotate else numbered_faces[source_face]
+            face_image.save(png_path, optimize=True)
 
     return 0
 

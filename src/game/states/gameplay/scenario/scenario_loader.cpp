@@ -516,9 +516,20 @@ namespace Game
                                                       child_path(path, "prediction_orbit_color"));
                 o.has_prediction_orbit_color = true;
             }
-            o.primitive = parse_primitive_type(
-                    json_required<std::string>(j, "primitive", path),
-                    child_path(path, "primitive"));
+            if (const auto it = j.find("gltf_path"); it != j.end() && !it->is_null())
+            {
+                o.gltf_path = json_required<std::string>(j, "gltf_path", path);
+            }
+            if (const auto it = j.find("primitive"); it != j.end() && !it->is_null())
+            {
+                o.primitive = parse_primitive_type(
+                        json_required<std::string>(j, "primitive", path),
+                        child_path(path, "primitive"));
+            }
+            else if (o.gltf_path.empty())
+            {
+                fail(child_path(path, "primitive") + " is required when gltf_path is not set");
+            }
             o.render_scale = parse_vec3(
                     *json_required_object(j, "render_scale", path),
                     child_path(path, "render_scale"));
@@ -531,6 +542,13 @@ namespace Game
             if (o.name.empty())
             {
                 fail(child_path(path, "name") + " must not be empty");
+            }
+            if (const auto has_gltf = !o.gltf_path.empty(); has_gltf)
+            {
+                if (o.gltf_path.front() == '/' || o.gltf_path.front() == '\\')
+                {
+                    fail(child_path(path, "gltf_path") + " must be relative to the assets directory");
+                }
             }
             if (o.orbit_altitude_m < 0.0)
             {
@@ -582,7 +600,14 @@ namespace Game
                         {"y", o.prediction_orbit_color.y},
                         {"z", o.prediction_orbit_color.z}};
             }
-            j["primitive"] = primitive_type_string(o.primitive);
+            if (!o.gltf_path.empty())
+            {
+                j["gltf_path"] = o.gltf_path;
+            }
+            else
+            {
+                j["primitive"] = primitive_type_string(o.primitive);
+            }
             j["render_scale"] = {{"x", o.render_scale.x}, {"y", o.render_scale.y}, {"z", o.render_scale.z}};
             j["body_settings"] = serialize_body_settings(o.body_settings);
             j["is_player"] = o.is_player;

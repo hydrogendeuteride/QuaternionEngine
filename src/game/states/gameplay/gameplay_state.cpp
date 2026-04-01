@@ -26,6 +26,7 @@ namespace Game
     void GameplayState::on_enter(GameStateContext &ctx)
     {
         _world.set_api(ctx.api);
+        _renderer = ctx.renderer;
         _elapsed = 0.0f;
         _fixed_time_s = 0.0;
         reset_time_warp_state();
@@ -106,6 +107,7 @@ namespace Game
         _prediction_service.reset();
         _prediction_derived_service.reset();
         _orbit_plot_perf = {};
+        _renderer = nullptr;
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
         {
             ctx.renderer->_context->orbit_plot->clear_all();

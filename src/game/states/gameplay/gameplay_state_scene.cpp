@@ -4,6 +4,8 @@
 #include "core/engine.h"
 #include "core/game_api.h"
 #include "core/util/logger.h"
+#include "render/passes/auto_exposure.h"
+#include "render/passes/tonemap.h"
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
 #include "physics/jolt/jolt_physics_world.h"
@@ -11,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -93,12 +96,12 @@ namespace Game
             ship.has_prediction_orbit_color = true;
             ship.is_player = true;
             ship.is_rebase_anchor = true;
+            ship.gltf_path = "orion/scene.gltf";
             ship.primitive = GameAPI::PrimitiveType::Capsule;
 
             constexpr float ship_radius_m = 2.0f;
             constexpr float ship_half_height_m = 2.0f;
-            constexpr float ship_uniform_scale = ship_radius_m / 0.5f;
-            ship.render_scale = glm::vec3(ship_uniform_scale);
+            ship.render_scale = glm::vec3(1.0f);
 
             ship.body_settings
                     .set_shape(Physics::CollisionShape::Capsule(ship_radius_m, ship_half_height_m))
@@ -172,6 +175,109 @@ namespace Game
         }
 
         return cfg;
+    }
+
+    Physics::BodyId GameplayState::create_orbiter_physics_body(const bool render_is_gltf,
+                                                               Entity &entity,
+                                                               const Physics::BodySettings &settings_template,
+                                                               const WorldVec3 &position_world,
+                                                               const glm::quat &rotation)
+    {
+#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
+        if (!_physics || !_physics_context)
+        {
+            return {};
+        }
+
+        const uint64_t user_data = static_cast<uint64_t>(entity.id().value);
+
+        if (render_is_gltf)
+        {
+            if (!_renderer || !_renderer->_sceneManager || entity.render_name().empty())
+            {
+                Logger::error("[GameplayState] Cannot create glTF collider body for '{}'", entity.name());
+                return {};
+            }
+
+            (void) _renderer->_sceneManager->setGLTFInstanceTRSWorld(entity.render_name(),
+                                                                     position_world,
+                                                                     rotation,
+                                                                     entity.scale());
+
+            std::optional<float> mass_override;
+            if (settings_template.has_explicit_mass &&
+                std::isfinite(settings_template.mass) &&
+                settings_template.mass > 0.0f)
+            {
+                mass_override = settings_template.mass;
+            }
+
+            Physics::BodyId body_id = _renderer->_sceneManager->enableDynamicRootColliderBody(entity.render_name(),
+                                                                                              _physics.get(),
+                                                                                              settings_template.layer,
+                                                                                              user_data,
+                                                                                              mass_override);
+            if (!body_id.is_valid())
+            {
+                return {};
+            }
+
+            _physics->set_gravity_scale(body_id, settings_template.gravity_scale);
+            if (settings_template.motion_type != Physics::MotionType::Dynamic)
+            {
+                (void) _physics->set_motion_type(body_id, settings_template.motion_type);
+            }
+            if (!settings_template.start_active)
+            {
+                _physics->deactivate(body_id);
+            }
+            return body_id;
+        }
+
+        Physics::BodySettings settings = settings_template;
+        settings.position = world_to_local_d(position_world, _physics_context->origin_world());
+        settings.rotation = rotation;
+        settings.user_data = user_data;
+        return _physics->create_body(settings);
+#else
+        (void) render_is_gltf;
+        (void) entity;
+        (void) settings_template;
+        (void) position_world;
+        (void) rotation;
+        return {};
+#endif
+    }
+
+    bool GameplayState::destroy_orbiter_physics_body(const bool render_is_gltf, Entity &entity)
+    {
+#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
+        if (!_physics || !entity.has_physics())
+        {
+            return false;
+        }
+
+        const Physics::BodyId body_id{entity.physics_body_value()};
+        bool destroyed = false;
+
+        if (render_is_gltf && _renderer && _renderer->_sceneManager && !entity.render_name().empty())
+        {
+            destroyed = _renderer->_sceneManager->disableDynamicRootColliderBody(entity.render_name());
+        }
+
+        if (!destroyed && _physics->is_body_valid(body_id))
+        {
+            _physics->destroy_body(body_id);
+            destroyed = true;
+        }
+
+        entity.clear_physics_body();
+        return destroyed;
+#else
+        (void) render_is_gltf;
+        (void) entity;
+        return false;
+#endif
     }
 
     // ---- Scene setup ----
@@ -257,38 +363,30 @@ namespace Game
                 _physics_context ? _physics_context->velocity_origin_world() : glm::dvec3(0.0);
 
         // Spawn orbiter entities from config
-        auto spawn_orbiter = [&](const std::string &name,
+        auto spawn_orbiter = [&](const ScenarioConfig::OrbiterDef &orbiter_def,
                                  const WorldVec3 &pos_world,
                                  const glm::vec3 &vel_local_f,
-                                 GameAPI::PrimitiveType prim,
-                                 const glm::vec3 &render_scale,
-                                 const Physics::BodySettings &settings,
                                  bool is_player,
                                  EntityId &out_id) {
             Transform tr{};
             tr.position_world = pos_world;
             tr.rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-            tr.scale = render_scale;
+            tr.scale = orbiter_def.render_scale;
 
             Entity *ent = nullptr;
+            const bool render_is_gltf = !orbiter_def.gltf_path.empty();
 
-#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-            if (_physics)
+            auto builder = _world.builder(orbiter_def.name).transform(tr);
+            if (render_is_gltf)
             {
-                ent = _world.builder(name)
-                        .transform(tr)
-                        .render_primitive(prim)
-                        .physics(settings)
-                        .build();
+                builder.render_gltf(orbiter_def.gltf_path);
             }
             else
-#endif
             {
-                ent = _world.builder(name)
-                        .transform(tr)
-                        .render_primitive(prim)
-                        .build();
+                builder.render_primitive(orbiter_def.primitive);
             }
+
+            ent = builder.build();
 
             if (!ent)
             {
@@ -296,16 +394,23 @@ namespace Game
                 return;
             }
 
-            out_id = ent->id();
-
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-            if (_physics && ent->has_physics())
+            if (_physics)
             {
-                const Physics::BodyId body_id{ent->physics_body_value()};
-                if (_physics->is_body_valid(body_id))
+                const Physics::BodyId body_id = create_orbiter_physics_body(render_is_gltf,
+                                                                            *ent,
+                                                                            orbiter_def.body_settings,
+                                                                            pos_world,
+                                                                            tr.rotation);
+                if (!body_id.is_valid() ||
+                    !_world.bind_physics(ent->id(), body_id.value, true, false))
                 {
-                    _physics->set_linear_velocity(body_id, vel_local_f);
+                    (void) _world.destroy_entity(ent->id());
+                    out_id = EntityId{};
+                    return;
                 }
+
+                _physics->set_linear_velocity(body_id, vel_local_f);
             }
 
             if (is_player)
@@ -314,6 +419,8 @@ namespace Game
                 ent->add_component<ShipController>();
             }
 #endif
+
+            out_id = ent->id();
         };
 
         // Spawn all orbiters from config
@@ -335,12 +442,9 @@ namespace Game
             const glm::vec3 vel_local_f = glm::vec3(vel_world - v_origin_world);
 
             EntityId entity_id{};
-            spawn_orbiter(orbiter_def.name,
+            spawn_orbiter(orbiter_def,
                           pos_world,
                           vel_local_f,
-                          orbiter_def.primitive,
-                          orbiter_def.render_scale,
-                          orbiter_def.body_settings,
                           is_primary_player,
                           entity_id);
 
@@ -350,6 +454,7 @@ namespace Game
             info.apply_gravity = true;
             info.is_player = is_primary_player;
             info.is_rebase_anchor = orbiter_def.is_rebase_anchor;
+            info.render_is_gltf = !orbiter_def.gltf_path.empty();
             info.mass_kg = std::max(0.0, static_cast<double>(orbiter_def.body_settings.mass));
             info.physics_settings = orbiter_def.body_settings;
             info.use_physics_interpolation = true;
@@ -455,7 +560,20 @@ namespace Game
 
                     auto atmo = ctx.api->get_atmosphere_settings();
                     atmo.bodyName = cdef.name;
+                    atmo.viewSteps = 32;
+                    atmo.lightSteps = 16;
+                    atmo.sunHaloIntensity = 0.30f;
+                    atmo.sunHaloRadiusDeg = 3.30f;
+                    atmo.sunStarburstIntensity = 0.01f;
+                    atmo.sunStarburstRadiusDeg = 6.0f;
+                    atmo.sunStarburstSpikes = 14;
+                    atmo.sunStarburstSharpness = 12.0f;
                     ctx.api->set_atmosphere_settings(atmo);
+
+                    ctx.api->set_planet_clouds_enabled(true);
+                    ctx.api->reset_planet_clouds_defaults();
+                    auto clouds = ctx.api->get_planet_clouds_settings();
+                    ctx.api->set_planet_clouds_settings(clouds);
                     atmosphere_set = true;
                 }
                 continue;
@@ -478,6 +596,17 @@ namespace Game
         if (any_planets_added)
         {
             ctx.api->set_planet_system_enabled(true);
+        }
+
+        if (ctx.renderer && ctx.renderer->_renderPassManager)
+        {
+            if (auto *tm = ctx.renderer->_renderPassManager->getPass<TonemapPass>())
+            {
+                if (auto *ae = ctx.renderer->_renderPassManager->getPass<AutoExposurePass>())
+                {
+                    ae->set_enabled(true, tm->exposure());
+                }
+            }
         }
     }
 
@@ -769,7 +898,9 @@ namespace Game
         }
 
         GameAPI::CameraTarget target{};
-        target.type = GameAPI::CameraTargetType::MeshInstance;
+        target.type = player_orbiter->render_is_gltf
+                          ? GameAPI::CameraTargetType::GLTFInstance
+                          : GameAPI::CameraTargetType::MeshInstance;
         target.name = player_orbiter->name;
 
         GameAPI::OrbitCameraSettings orbit = ctx.api->get_orbit_camera_settings();

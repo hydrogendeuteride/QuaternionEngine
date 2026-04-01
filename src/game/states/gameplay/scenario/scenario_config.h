@@ -52,6 +52,7 @@ namespace Game
             std::string prediction_group;       // optional authored orbit overlay group
             glm::vec3 prediction_orbit_color{1.0f, 0.25f, 0.25f};
             bool has_prediction_orbit_color{false};
+            std::string gltf_path;             // optional visual model path under assets/
             GameAPI::PrimitiveType primitive{GameAPI::PrimitiveType::Capsule};
             glm::vec3 render_scale{1.0f};
             Physics::BodySettings body_settings{};

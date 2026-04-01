@@ -90,6 +90,8 @@ namespace Physics
 
         void set_user_data(BodyId id, uint64_t user_data) override;
 
+        void set_gravity_scale(BodyId id, float scale) override;
+
         bool set_motion_type(BodyId id, MotionType motion_type) override;
         MotionType get_motion_type(BodyId id) const override;
 
