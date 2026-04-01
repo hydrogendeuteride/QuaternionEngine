@@ -131,6 +131,12 @@ namespace Physics
 
         virtual void set_user_data(BodyId id, uint64_t user_data) = 0;
 
+        virtual void set_gravity_scale(BodyId id, float scale)
+        {
+            (void) id;
+            (void) scale;
+        }
+
         // Runtime motion-type control.
         // Default implementations are no-op/unknown for backends that do not support this.
         virtual bool set_motion_type(BodyId id, MotionType motion_type)

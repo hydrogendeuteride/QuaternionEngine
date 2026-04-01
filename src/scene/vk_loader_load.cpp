@@ -261,7 +261,7 @@ void initialize_material_descriptor_pool(VulkanEngine *engine,
                  material_set_capacity);
 
     std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> pool_sizes = {
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 5},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6},
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
     };
 
@@ -298,7 +298,7 @@ GLTFMetallic_Roughness::MaterialResources make_default_material_resources(Vulkan
                                                                           const LoadedGLTF &file,
                                                                           size_t data_buffer_offset)
 {
-    GLTFMetallic_Roughness::MaterialResources material_resources;
+    GLTFMetallic_Roughness::MaterialResources material_resources{};
     material_resources.colorImage = engine->_whiteImage;
     material_resources.colorSampler = engine->_samplerManager->defaultLinear();
     material_resources.metalRoughImage = engine->_whiteImage;
@@ -309,6 +309,8 @@ GLTFMetallic_Roughness::MaterialResources make_default_material_resources(Vulkan
     material_resources.occlusionSampler = engine->_samplerManager->defaultLinear();
     material_resources.emissiveImage = engine->_blackImage;
     material_resources.emissiveSampler = engine->_samplerManager->defaultLinear();
+    material_resources.planetSpecularImage = engine->_blackImage;
+    material_resources.planetSpecularSampler = engine->_samplerManager->defaultLinear();
     material_resources.dataBuffer = file.materialDataBuffer.buffer;
     material_resources.dataBufferOffset = data_buffer_offset;
     return material_resources;
