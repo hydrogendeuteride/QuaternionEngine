@@ -54,6 +54,7 @@ private:
         float cloudBaseM = 0.0f;
         float cloudThicknessM = 0.0f;
         float cloudDensityScale = 0.0f;
+        glm::vec4 cloudColor{1.0f};
         float cloudCoverage = 0.0f;
         float cloudNoiseScale = 0.0f;
         float cloudDetailScale = 0.0f;

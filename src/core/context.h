@@ -243,6 +243,9 @@ struct PlanetCloudSettings
     // Density scale (unitless). Higher = thicker clouds.
     float densityScale = 1.0f;
 
+    // Cloud lighting tint.
+    glm::vec3 color = glm::vec3(1.0f);
+
     // Coverage threshold (0..1). Higher = emptier.
     float coverage = 0.45f;
 

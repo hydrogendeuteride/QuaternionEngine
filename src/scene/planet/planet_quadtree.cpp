@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <unordered_map>
 #include <unordered_set>
 
 #include <glm/gtc/constants.hpp>
@@ -218,6 +219,21 @@ namespace planet
 
             return false;
         }
+
+        PatchKey patch_parent(const PatchKey &key)
+        {
+            if (key.level == 0u)
+            {
+                return key;
+            }
+
+            return PatchKey{
+                key.face,
+                key.level - 1u,
+                key.x >> 1u,
+                key.y >> 1u,
+            };
+        }
     } // namespace
 
     void PlanetQuadtree::update(const WorldVec3 &body_center_world,
@@ -229,6 +245,7 @@ namespace planet
                                 VkExtent2D logical_extent,
                                 uint32_t patch_resolution)
     {
+        const std::vector<PatchKey> previous_visible_leaves = _visible_leaves;
         _visible_leaves.clear();
         _stats = {};
 
@@ -258,6 +275,31 @@ namespace planet
         {
             return;
         }
+
+        std::unordered_map<PatchKey, uint32_t, PatchKeyHash> previous_max_levels;
+        previous_max_levels.reserve(previous_visible_leaves.size() * 3u + 16u);
+        for (const PatchKey &leaf : previous_visible_leaves)
+        {
+            PatchKey current = leaf;
+            while (true)
+            {
+                auto [it, inserted] = previous_max_levels.emplace(current, leaf.level);
+                if (!inserted)
+                {
+                    it->second = std::max(it->second, leaf.level);
+                }
+
+                if (current.level == 0u)
+                {
+                    break;
+                }
+                current = patch_parent(current);
+            }
+        }
+
+        const float hysteresis = glm::clamp(_settings.lod_hysteresis_ratio, 0.0f, 0.95f);
+        const float split_threshold = _settings.target_sse_px * (1.0f + hysteresis);
+        const float keep_threshold = _settings.target_sse_px * std::max(0.0f, 1.0f - hysteresis);
 
         thread_local std::vector<Node> stack;
         stack.clear();
@@ -344,7 +386,14 @@ namespace planet
             const double error_m = 0.5 * patch_edge_m / segments;
             const float sse_px = static_cast<float>((error_m / dist_m) * static_cast<double>(proj_scale));
 
-            bool refine = (k.level < _settings.max_level) && (sse_px > _settings.target_sse_px);
+            bool was_refined_last_frame = false;
+            if (const auto previous_it = previous_max_levels.find(k); previous_it != previous_max_levels.end())
+            {
+                was_refined_last_frame = previous_it->second > k.level;
+            }
+
+            const float refine_threshold = was_refined_last_frame ? keep_threshold : split_threshold;
+            bool refine = (k.level < _settings.max_level) && (sse_px > refine_threshold);
             if (!refine && rt_guardrail_active && (k.level < _settings.max_level) && (
                     patch_edge_m > _settings.max_patch_edge_rt_m))
             {

@@ -583,13 +583,14 @@ vec3 render_atmosphere_monolithic(vec3 baseColor)
     vec3 sunDir = normalize(-sceneData.sunlightDirection.xyz);
     vec3 sunCol = sceneData.sunlightColor.rgb * sceneData.sunlightColor.a;
     vec3 ambCol = sceneData.ambientColor.rgb;
+    vec3 cloudTint = max(pc.cloud_color.rgb, vec3(0.0));
 
     float sunLuma = luminance(sunCol);
-    vec3 cloudSunCol = mix(sunCol, vec3(max(sunLuma, 1e-3)), CLOUD_SUN_WHITEN);
+    vec3 cloudSunCol = mix(sunCol, vec3(max(sunLuma, 1e-3)), CLOUD_SUN_WHITEN) * cloudTint;
 
     float ambLuma = luminance(ambCol);
     vec3 cloudAmbNeutral = vec3(max(ambLuma, CLOUD_AMBIENT_MIN_LUMA));
-    vec3 cloudAmbCol = mix(ambCol, cloudAmbNeutral, CLOUD_AMBIENT_WHITEN);
+    vec3 cloudAmbCol = mix(ambCol, cloudAmbNeutral, CLOUD_AMBIENT_WHITEN) * cloudTint;
 
     float cosTheta = dot(rd, sunDir);
 

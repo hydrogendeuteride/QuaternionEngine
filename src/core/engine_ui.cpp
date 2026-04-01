@@ -2031,6 +2031,8 @@ namespace
 
         ImGui::SliderFloat("Density Scale", &clouds.densityScale, 0.0f, 8.0f, "%.2f");
         clouds.densityScale = std::max(0.0f, clouds.densityScale);
+        ImGui::ColorEdit3("Cloud Color", &clouds.color.x);
+        clouds.color = glm::clamp(clouds.color, glm::vec3(0.0f), glm::vec3(1.0f));
 
         ImGui::SliderFloat("Coverage", &clouds.coverage, 0.0f, 0.99f, "%.3f");
         clouds.coverage = std::clamp(clouds.coverage, 0.0f, 0.999f);
@@ -3003,6 +3005,12 @@ namespace
                 if (ImGui::SliderFloat("Target SSE (px)", &settings.target_sse_px, 4.0f, 128.0f, "%.1f"))
                 {
                     settings.target_sse_px = std::max(settings.target_sse_px, 0.1f);
+                    changed = true;
+                }
+
+                if (ImGui::SliderFloat("LOD hysteresis", &settings.lod_hysteresis_ratio, 0.0f, 0.75f, "%.2f"))
+                {
+                    settings.lod_hysteresis_ratio = std::clamp(settings.lod_hysteresis_ratio, 0.0f, 0.95f);
                     changed = true;
                 }
 

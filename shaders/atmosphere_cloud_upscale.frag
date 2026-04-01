@@ -23,6 +23,7 @@ layout(push_constant) uniform AtmospherePush
     vec4 jitter_params;
     vec4 cloud_layer;
     vec4 cloud_params;
+    vec4 cloud_color;
     ivec4 misc;
 } pc;
 
@@ -164,6 +165,11 @@ bool segment_valid(vec2 seg)
     return seg.x < seg.y;
 }
 
+float segment_error(vec2 lhs, vec2 rhs)
+{
+    return abs(lhs.x - rhs.x) + abs(lhs.y - rhs.y);
+}
+
 void main()
 {
     outCloudLighting = vec4(0.0, 0.0, 0.0, 1.0);
@@ -210,8 +216,11 @@ void main()
     ivec2 lowSize = textureSize(cloudSegmentLowResTex, 0);
     ivec2 baseCoord = clamp(ivec2(gl_FragCoord.xy) / 2, ivec2(0), lowSize - ivec2(1));
 
-    float bestScore = 1e30;
-    vec4 bestLighting = vec4(0.0, 0.0, 0.0, 1.0);
+    float analyticLen = max(analyticSeg0.y - analyticSeg0.x, 1e-3);
+    float rejectThreshold = max(2500.0, analyticLen * 0.45);
+    float blendThreshold = max(900.0, analyticLen * 0.14);
+    vec4 accumulatedLighting = vec4(0.0);
+    float accumulatedWeight = 0.0;
     bool found = false;
 
     for (int y = -1; y <= 1; ++y)
@@ -225,21 +234,32 @@ void main()
                 continue;
             }
 
-            float score = abs(candidateSeg.x - analyticSeg0.x) + abs(candidateSeg.y - analyticSeg0.y);
-            if (score < bestScore)
+            float score = segment_error(candidateSeg, analyticSeg0);
+            if (score > rejectThreshold)
             {
-                bestScore = score;
-                bestLighting = texelFetch(cloudLightingLowResTex, coord, 0);
-                found = true;
+                continue;
             }
+
+            float scoreNorm = score / max(blendThreshold, 1e-3);
+            float segmentWeight = exp(-scoreNorm * scoreNorm);
+            float spatialWeight = 1.0 / (1.0 + float(x * x + y * y));
+            float weight = segmentWeight * spatialWeight;
+            if (weight <= 1e-4)
+            {
+                continue;
+            }
+
+            accumulatedLighting += texelFetch(cloudLightingLowResTex, coord, 0) * weight;
+            accumulatedWeight += weight;
+            found = true;
         }
     }
 
-    if (!found)
+    if (!found || accumulatedWeight <= 1e-4)
     {
         return;
     }
 
-    outCloudLighting = bestLighting;
+    outCloudLighting = accumulatedLighting / accumulatedWeight;
     outCloudSegment = analyticSeg0;
 }

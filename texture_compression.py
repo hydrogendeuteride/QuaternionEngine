@@ -200,7 +200,10 @@ def main():
     p.add_argument("--albedo-target", choices=["auto", "bc1", "bc3", "bc7"], default="bc7",
                    help="albedo BC format(auto=non alpha BC1, alpha BC3)")
     p.add_argument("--uastc-quality", type=int, default=2, help="UASTC quality(0~4)")
-    p.add_argument("--mipmaps", action="store_true", help="mipmap generation")
+    p.add_argument("--mipmaps", dest="mipmaps", action="store_true", default=True,
+                   help="generate mipmaps (default: enabled)")
+    p.add_argument("--no-mipmaps", dest="mipmaps", action="store_false",
+                   help="disable mipmap generation")
     p.add_argument("--flip-y", action="store_true", help="Y flip(t0 to bottom)")
     p.add_argument("--keep-temp", action="store_true", help="Preserve temporal UASTC")
     p.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 4, help="Concurrent task size")

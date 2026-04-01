@@ -25,6 +25,7 @@ layout(push_constant) uniform AtmospherePush
     vec4 jitter_params;
     vec4 cloud_layer;
     vec4 cloud_params;
+    vec4 cloud_color;
     ivec4 misc;
 } pc;
 
@@ -127,7 +128,9 @@ void main()
 
     float analyticLen = max(analyticSeg0.y - analyticSeg0.x, 1e-3);
     float resolvedError = abs(resolvedSegment.x - analyticSeg0.x) + abs(resolvedSegment.y - analyticSeg0.y);
-    if (resolvedError > max(2500.0, analyticLen * 0.35))
+    float resolvedSoftReject = max(900.0, analyticLen * 0.14);
+    float resolvedHardReject = max(2500.0, analyticLen * 0.35);
+    if (resolvedError > resolvedHardReject)
     {
         outColor = vec4(render_atmosphere_monolithic(baseColor), 1.0);
         return;
@@ -196,6 +199,13 @@ void main()
     if (atmActive)
     {
         outRgb += state.scatterAtm * (sunCol * atmIntensity);
+    }
+
+    float resolvedTrust = 1.0 - smoothstep(resolvedSoftReject, resolvedHardReject, resolvedError);
+    if (resolvedTrust < 0.999)
+    {
+        vec3 fallbackRgb = render_atmosphere_monolithic(baseColor);
+        outRgb = mix(fallbackRgb, outRgb, resolvedTrust);
     }
 
     outColor = vec4(outRgb, 1.0);
