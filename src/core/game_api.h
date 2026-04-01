@@ -215,15 +215,17 @@ struct PlanetCloudSettings
     glm::vec3 color{1.0f, 1.0f, 1.0f};
     float coverage{0.45f};
 
+    // Macro cloud/weather map wrapped over the sphere.
     std::string overlayTexturePath{"planets/earth/cloud/earth_clouds_8k_bc4.ktx2"};
+    // Tileable noise reused for weather modulation and internal breakup.
     std::string noiseTexturePath{"vfx/perlin_bc4.ktx2"};
     float overlayRotationRad{0.0f};
     bool overlayFlipV{false};
 
-    float noiseScale{1.5f};
-    float detailScale{12.0f};
-    float noiseBlend{0.65f};
-    float detailErode{0.75f};
+    float noiseScale{1.5f};     // macro weather frequency
+    float detailScale{12.0f};   // internal pseudo-volume detail frequency
+    float noiseBlend{0.65f};    // weather-field influence from the noise texture
+    float detailErode{0.75f};   // height-aware internal erosion strength
 
     float windSpeed{0.0f};
     float windAngleRad{0.0f};

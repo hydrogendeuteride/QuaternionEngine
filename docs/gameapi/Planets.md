@@ -358,14 +358,18 @@ struct PlanetCloudSettings
     glm::vec3 color{1.0f, 1.0f, 1.0f};
     float coverage{0.45f};
 
-    // Overlay texture (single-channel cloud coverage map wrapped on sphere)
+    // Macro cloud/weather map wrapped over the sphere
     std::string overlayTexturePath{"planets/earth/cloud/earth_clouds_8k_bc4.ktx2"};
+    // Tileable noise reused for weather modulation and internal breakup
+    std::string noiseTexturePath{"vfx/perlin_bc4.ktx2"};
     float overlayRotationRad{0.0f};
     bool overlayFlipV{false};
 
-    // Procedural noise
+    // Macro weather frequency + internal pseudo-volume breakup
     float noiseScale{1.5f};
     float detailScale{12.0f};
+    float noiseBlend{0.65f};
+    float detailErode{0.75f};
 
     // Animation
     float windSpeed{0.0f};
