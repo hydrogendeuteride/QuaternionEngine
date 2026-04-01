@@ -39,6 +39,7 @@ namespace planet_helpers
                                                const glm::dvec3 &patch_center_dir,
                                                double radius_m,
                                                uint32_t level,
+                                               uint32_t height_mip_level,
                                                uint8_t edge_stitch_mask,
                                                double height_scale_m,
                                                const std::array<planet::HeightFace, 6> &height_faces);

@@ -11,10 +11,86 @@ namespace planet
 {
     namespace
     {
+        struct HeightView
+        {
+            uint32_t width = 0;
+            uint32_t height = 0;
+            const std::vector<uint8_t> *texels = nullptr;
+        };
+
         bool file_exists(const std::string &path)
         {
             std::error_code ec;
             return std::filesystem::exists(path, ec) && !ec;
+        }
+
+        HeightView height_view_for_mip(const HeightFace &face, uint32_t mip_level)
+        {
+            if (mip_level == 0u)
+            {
+                return HeightView{face.width, face.height, &face.texels};
+            }
+
+            const uint32_t index = mip_level - 1u;
+            if (index >= face.mips.size())
+            {
+                return HeightView{};
+            }
+
+            const HeightMip &mip = face.mips[index];
+            return HeightView{mip.width, mip.height, &mip.texels};
+        }
+
+        uint32_t height_level_count(const HeightFace &face)
+        {
+            return 1u + static_cast<uint32_t>(face.mips.size());
+        }
+
+        void build_height_mips(HeightFace &face)
+        {
+            face.mips.clear();
+            if (face.width == 0u || face.height == 0u || face.texels.empty())
+            {
+                return;
+            }
+
+            uint32_t src_w = face.width;
+            uint32_t src_h = face.height;
+            std::vector<uint8_t> src = face.texels;
+
+            while (src_w > 1u || src_h > 1u)
+            {
+                const uint32_t dst_w = std::max(1u, (src_w + 1u) >> 1u);
+                const uint32_t dst_h = std::max(1u, (src_h + 1u) >> 1u);
+
+                HeightMip mip{};
+                mip.width = dst_w;
+                mip.height = dst_h;
+                mip.texels.resize(static_cast<size_t>(dst_w) * dst_h);
+
+                for (uint32_t y = 0; y < dst_h; ++y)
+                {
+                    const uint32_t y0 = std::min(src_h - 1u, y * 2u);
+                    const uint32_t y1 = std::min(src_h - 1u, y0 + 1u);
+                    for (uint32_t x = 0; x < dst_w; ++x)
+                    {
+                        const uint32_t x0 = std::min(src_w - 1u, x * 2u);
+                        const uint32_t x1 = std::min(src_w - 1u, x0 + 1u);
+
+                        const uint32_t a = src[static_cast<size_t>(y0) * src_w + x0];
+                        const uint32_t b = src[static_cast<size_t>(y0) * src_w + x1];
+                        const uint32_t c = src[static_cast<size_t>(y1) * src_w + x0];
+                        const uint32_t d = src[static_cast<size_t>(y1) * src_w + x1];
+                        mip.texels[static_cast<size_t>(y) * dst_w + x] =
+                                static_cast<uint8_t>((a + b + c + d + 2u) >> 2u);
+                    }
+                }
+
+                src_w = dst_w;
+                src_h = dst_h;
+                src = mip.texels;
+                face.mips.push_back(std::move(mip));
+            }
         }
 
         void decode_bc4_unorm_block(const uint8_t *block, uint8_t out_texels[16])
@@ -151,12 +227,14 @@ namespace planet
         }
 
         ktxTexture_Destroy(ktxTexture(ktex));
+        build_height_mips(out_face);
         return true;
     }
 
-    float sample_height(const HeightFace &face, float u, float v)
+    float sample_height(const HeightFace &face, float u, float v, uint32_t mip_level)
     {
-        if (face.width == 0 || face.height == 0 || face.texels.empty())
+        const HeightView view = height_view_for_mip(face, mip_level);
+        if (view.width == 0 || view.height == 0 || !view.texels || view.texels->empty())
         {
             return 0.0f;
         }
@@ -164,20 +242,20 @@ namespace planet
         const float uu = glm::clamp(u, 0.0f, 1.0f);
         const float vv = glm::clamp(v, 0.0f, 1.0f);
 
-        const float x = uu * static_cast<float>(face.width - 1u);
-        const float y = vv * static_cast<float>(face.height - 1u);
+        const float x = uu * static_cast<float>(view.width - 1u);
+        const float y = vv * static_cast<float>(view.height - 1u);
 
         const uint32_t x0 = static_cast<uint32_t>(std::floor(x));
         const uint32_t y0 = static_cast<uint32_t>(std::floor(y));
-        const uint32_t x1 = std::min(x0 + 1u, face.width - 1u);
-        const uint32_t y1 = std::min(y0 + 1u, face.height - 1u);
+        const uint32_t x1 = std::min(x0 + 1u, view.width - 1u);
+        const uint32_t y1 = std::min(y0 + 1u, view.height - 1u);
 
         const float tx = x - static_cast<float>(x0);
         const float ty = y - static_cast<float>(y0);
 
         auto texel = [&](uint32_t xi, uint32_t yi) -> float
         {
-            const uint8_t v8 = face.texels[static_cast<size_t>(yi) * face.width + xi];
+            const uint8_t v8 = (*view.texels)[static_cast<size_t>(yi) * view.width + xi];
             return static_cast<float>(v8) * (1.0f / 255.0f);
         };
 
@@ -189,6 +267,26 @@ namespace planet
         const float hx0 = glm::mix(h00, h10, tx);
         const float hx1 = glm::mix(h01, h11, tx);
         return glm::mix(hx0, hx1, ty);
+    }
+
+    uint32_t choose_height_mip_level(const HeightFace &face, uint32_t patch_level, uint32_t patch_resolution)
+    {
+        if (face.width == 0u || face.height == 0u || face.texels.empty())
+        {
+            return 0u;
+        }
+
+        const uint32_t safe_res = std::max(2u, patch_resolution);
+        const double texels_per_patch = std::max(1.0, std::ldexp(static_cast<double>(face.width), -static_cast<int>(patch_level)));
+        const double texels_per_segment = texels_per_patch / static_cast<double>(safe_res - 1u);
+        if (!(texels_per_segment > 1.0))
+        {
+            return 0u;
+        }
+
+        const uint32_t max_mip = height_level_count(face) - 1u;
+        const double mip_f = std::floor(std::log2(texels_per_segment));
+        return std::min(max_mip, static_cast<uint32_t>(std::max(0.0, mip_f)));
     }
 
 } // namespace planet
