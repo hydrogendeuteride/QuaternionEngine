@@ -436,9 +436,9 @@ namespace Game
             {
                 fail(child_path(path, "render_scale") + " must be > 0");
             }
-            if (c.has_terrain && (c.albedo_dir.empty() || c.height_dir.empty()))
+            if (c.has_terrain && c.albedo_dir.empty())
             {
-                fail(path + " has_terrain=true requires non-empty albedo_dir and height_dir");
+                fail(path + " has_terrain=true requires non-empty albedo_dir");
             }
 
             return c;
