@@ -955,6 +955,8 @@ bool PlanetSystem::build_terrain_patch_cpu(const TerrainBuildRequest &request, T
             if (height_face.width > 0 && height_face.height > 0 && !height_face.texels.empty())
             {
                 const float scale = static_cast<float>(request.snapshot.height_max_m);
+                const uint32_t height_mip_level =
+                        planet::choose_height_mip_level(height_face, request.key.level, safe_res);
                 constexpr float kFaceEdgeEpsilon = 1e-6f;
                 for (Vertex &vertex: scratch_vertices)
                 {
@@ -986,26 +988,31 @@ bool PlanetSystem::build_terrain_patch_cpu(const TerrainBuildRequest &request, T
                                 {
                                     h01 = planet::sample_height(sample_height_face,
                                                                 static_cast<float>(sample_u),
-                                                                static_cast<float>(sample_v));
+                                                                static_cast<float>(sample_v),
+                                                                height_mip_level);
                                 }
                                 else
                                 {
-                                    h01 = planet::sample_height(height_face, vertex.uv_x, vertex.uv_y);
+                                    h01 = planet::sample_height(
+                                        height_face, vertex.uv_x, vertex.uv_y, height_mip_level);
                                 }
                             }
                             else
                             {
-                                h01 = planet::sample_height(height_face, vertex.uv_x, vertex.uv_y);
+                                h01 = planet::sample_height(
+                                    height_face, vertex.uv_x, vertex.uv_y, height_mip_level);
                             }
                         }
                         else
                         {
-                            h01 = planet::sample_height(height_face, vertex.uv_x, vertex.uv_y);
+                            h01 = planet::sample_height(
+                                height_face, vertex.uv_x, vertex.uv_y, height_mip_level);
                         }
                     }
                     else
                     {
-                        h01 = planet::sample_height(height_face, vertex.uv_x, vertex.uv_y);
+                        h01 = planet::sample_height(
+                            height_face, vertex.uv_x, vertex.uv_y, height_mip_level);
                     }
 
                     vertex.position += vertex.normal * (h01 * scale);
@@ -1019,6 +1026,7 @@ bool PlanetSystem::build_terrain_patch_cpu(const TerrainBuildRequest &request, T
                                                                       patch_center_dir,
                                                                       request.snapshot.radius_m,
                                                                       request.key.level,
+                                                                      height_mip_level,
                                                                       request.edge_stitch_mask,
                                                                       request.snapshot.height_max_m,
                                                                       *height_faces);

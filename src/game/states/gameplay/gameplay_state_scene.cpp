@@ -70,7 +70,12 @@ namespace Game
             ScenarioConfig::CelestialDef moon{};
             moon.name = "moon";
             moon.mass_kg = 7.342e22;
-            moon.radius_m = 1'737'400.0;
+            moon.radius_m = 1'728'418.5;
+            moon.has_terrain = true;
+            moon.terrain_max_m = 19'667.0;
+            moon.albedo_dir = "planets/moon/albedo/L0";
+            moon.height_dir = "planets/moon/height/L0";
+            moon.height_max_m = 19'667.0;
             moon.soi_radius_m = 6.61e7;
             moon.orbit_distance_m = 384'400'000.0;
             moon.prediction_orbit_color = glm::vec3(0.84f, 0.84f, 0.87f);
