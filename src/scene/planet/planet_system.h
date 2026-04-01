@@ -73,6 +73,12 @@ public:
         std::string emission_dir;
         // Emission intensity multiplier (vec3 factor applied to texture RGB).
         glm::vec3 emission_factor{0.0f, 0.0f, 0.0f};
+
+        // Optional cube-face specular mask root (relative to assets/). If empty, no ocean-specular override.
+        // Expected files: {px,nx,py,ny,pz,nz}.ktx2 or .png (linear).
+        std::string specular_dir;
+        float specular_strength = 1.0f;
+        float specular_roughness = 0.06f;
     };
 
     struct EarthDebugStats
@@ -119,6 +125,10 @@ public:
         std::string terrain_emission_dir;
         // Emission intensity multiplier (vec3 factor applied to texture RGB).
         glm::vec3 emission_factor{0.0f, 0.0f, 0.0f};
+        // Terrain-only: cube-face specular mask root, relative to assets/.
+        std::string terrain_specular_dir;
+        float specular_strength = 1.0f;
+        float specular_roughness = 0.06f;
 
         std::shared_ptr<MeshAsset> mesh;
         std::shared_ptr<GLTFMaterial> material;
@@ -241,9 +251,13 @@ private:
         float bound_metallic = 0.0f;
         float bound_roughness = 1.0f;
         glm::vec3 bound_emission_factor{0.0f, 0.0f, 0.0f};
+        bool bound_specular_enabled = false;
+        float bound_specular_strength = 1.0f;
+        float bound_specular_roughness = 0.06f;
         std::string bound_albedo_dir;
         std::string bound_height_dir;
         std::string bound_emission_dir;
+        std::string bound_specular_dir;
         double bound_height_max_m = 0.0;
         std::array<planet::HeightFace, 6> height_faces{};
         std::shared_ptr<const std::array<planet::HeightFace, 6>> height_faces_snapshot{};
@@ -358,9 +372,11 @@ private:
 
     void ensure_earth_patch_material_layout();
 
-    void ensure_terrain_material_constants_buffer(TerrainState &state, const PlanetBody &body);
+    void ensure_terrain_material_constants_buffer(TerrainState &state,
+                                                  const PlanetBody &body);
 
-    void ensure_terrain_face_materials(TerrainState &state, const PlanetBody &body);
+    void ensure_terrain_face_materials(TerrainState &state,
+                                       const PlanetBody &body);
 
     void ensure_terrain_height_maps(TerrainState &state, const PlanetBody &body);
 

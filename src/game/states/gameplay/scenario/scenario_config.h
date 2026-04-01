@@ -32,6 +32,9 @@ namespace Game
             double height_max_m{0.0};
             std::string emission_dir;
             glm::vec3 emission_factor{0.0f};
+            std::string specular_dir;
+            float specular_strength{1.0f};
+            float specular_roughness{0.06f};
             float render_scale{1.0f}; // legacy fallback scale for non-planet-system celestial rendering
             glm::vec3 prediction_orbit_color{0.75f, 0.75f, 0.75f};
             bool has_prediction_orbit_color{false};

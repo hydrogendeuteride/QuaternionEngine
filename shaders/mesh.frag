@@ -30,6 +30,24 @@ vec3 getCameraLocalPosition() // Derived from sceneData.view (render-local coord
     return -rot * T;
 }
 
+void apply_planet_water_override(inout vec3 albedo, inout float roughness, vec2 uv)
+{
+    if (materialData.extra[2].z <= 0.5)
+    {
+        return;
+    }
+
+    float mask = texture(planetSpecularTex, uv).r;
+    float strength = clamp(materialData.extra[2].w, 0.0, 1.0);
+    float oceanRoughness = clamp(materialData.extra[3].w, 0.04, 1.0);
+    float waterMask = clamp(mask * strength, 0.0, 1.0);
+    roughness = mix(roughness, oceanRoughness, waterMask);
+
+    float luma = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
+    vec3 oceanTarget = max(mix(vec3(luma), vec3(0.08, 0.11, 0.15), 0.6), vec3(0.05, 0.06, 0.07));
+    albedo = mix(albedo, oceanTarget, waterMask * 0.45);
+}
+
 void main()
 {
     // Base color with material factor and texture
@@ -47,6 +65,7 @@ void main()
     vec2 mrTex = texture(metalRoughTex, inUV).gb;
     float roughness = clamp(mrTex.x * materialData.metal_rough_factors.y, 0.04, 1.0);
     float metallic  = clamp(mrTex.y * materialData.metal_rough_factors.x, 0.0, 1.0);
+    apply_planet_water_override(albedo, roughness, inUV);
 
     // Normal mapping path for forward/transparent pipeline
     // Expect UNORM normal map; support BC5 (RG) by reconstructing Z from XY.

@@ -144,6 +144,12 @@ struct PlanetTerrain
     std::string emission_dir;
     // Emission intensity multiplier (vec3 factor applied to texture RGB).
     glm::vec3 emission_factor{0.0f, 0.0f, 0.0f};
+
+    // Optional cube-face specular mask root relative to assets/ (e.g. "planets/earth/specular/L0").
+    // Expected files: {px,nx,py,ny,pz,nz}.ktx2 or .png in linear space.
+    std::string specular_dir;
+    float specular_strength{1.0f};
+    float specular_roughness{0.06f};
 };
 
 struct PlanetInfo
