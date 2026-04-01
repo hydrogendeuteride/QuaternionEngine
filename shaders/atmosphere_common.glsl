@@ -19,6 +19,9 @@ const float CLOUD_AMBIENT_MIN_LUMA = 0.30;
 const float CLOUD_HEIGHT_SHIFT = 0.30;
 const float CLOUD_THICKNESS_MIN = 0.55;
 const float CLOUD_THICKNESS_MAX = 1.35;
+const float CLOUD_SLICE_HEIGHT_FREQ = 1.65;
+const float CLOUD_SHEAR_MIN = 0.018;
+const float CLOUD_SHEAR_MAX = 0.080;
 
 float hash12(vec2 p)
 {
@@ -62,6 +65,12 @@ bool ray_sphere_intersect(vec3 ro, vec3 rd, vec3 center, float radius, out float
 }
 
 float sample_cloud_noise_grad(vec2 uvE, vec2 uvDx, vec2 uvDy, float scale, vec2 offset)
+{
+    vec2 uv = uvE * scale + offset;
+    return textureGrad(cloudNoiseTex, fract(uv), uvDx * scale, uvDy * scale).r;
+}
+
+float sample_cloud_noise_grad_aniso(vec2 uvE, vec2 uvDx, vec2 uvDy, vec2 scale, vec2 offset)
 {
     vec2 uv = uvE * scale + offset;
     return textureGrad(cloudNoiseTex, fract(uv), uvDx * scale, uvDy * scale).r;
@@ -126,6 +135,8 @@ float cloud_density(vec3 dir,
                     vec3 dirDx,
                     vec3 dirDy,
                     float height,
+                    float heightDx,
+                    float heightDy,
                     bool cloudsActive,
                     bool flipV,
                     vec2 overlayRotSC,
@@ -196,11 +207,43 @@ float cloud_density(vec3 dir,
     cov = pow(cov, mix(1.45, 0.75, weatherField));
     if (cov <= 0.0) return 0.0;
 
-    float detailNoise = sample_cloud_noise_grad(uvE, uvDx, uvDy, detailScale, vec2(0.619, 0.281));
-    detailNoise = clamp((detailNoise - 0.5) * 1.55 + 0.5, 0.0, 1.0);
-    float erosion = smoothstep(0.25, 0.85, detailNoise);
-    float erosionMask = mix(0.40, 1.00, erosion);
-    float detailMask = mix(1.0, erosionMask, detailErode);
+    float hLocalDx = heightDx / max(thicknessM * localSpan, 1e-3);
+    float hLocalDy = heightDy / max(thicknessM * localSpan, 1e-3);
+
+    vec2 shearDir = windHeading;
+    float shearLen2 = dot(shearDir, shearDir);
+    if (shearLen2 < 1e-6)
+    {
+        shearDir = normalize(vec2(0.8660254, 0.5));
+    }
+    else
+    {
+        shearDir *= inversesqrt(shearLen2);
+    }
+
+    float shearAmount = mix(CLOUD_SHEAR_MIN, CLOUD_SHEAR_MAX, weatherField);
+    vec2 shearUv = shearDir * ((hLocal - 0.5) * shearAmount);
+
+    // Reuse the 2D noise texture as two orthogonal height slices to fake internal depth.
+    float sliceU = sample_cloud_noise_grad_aniso(vec2(uvE.x + shearUv.x, hLocal),
+                                                 vec2(uvDx.x, hLocalDx),
+                                                 vec2(uvDy.x, hLocalDy),
+                                                 vec2(detailScale, CLOUD_SLICE_HEIGHT_FREQ),
+                                                 vec2(0.619, 0.281));
+    float sliceV = sample_cloud_noise_grad_aniso(vec2(uvE.y + shearUv.y, hLocal),
+                                                 vec2(uvDx.y, hLocalDx),
+                                                 vec2(uvDy.y, hLocalDy),
+                                                 vec2(detailScale * 0.85, CLOUD_SLICE_HEIGHT_FREQ * 1.13),
+                                                 vec2(0.113, 0.763));
+    sliceU = clamp((sliceU - 0.5) * 1.55 + 0.5, 0.0, 1.0);
+    sliceV = clamp((sliceV - 0.5) * 1.55 + 0.5, 0.0, 1.0);
+
+    float column = smoothstep(0.18, 0.82, mix(sliceU, sliceV, 0.45));
+    if (column <= 0.0) return 0.0;
+
+    float erosion = smoothstep(0.14, 0.72, min(sliceU, sliceV));
+    float detailMask = mix(column, column * erosion, detailErode);
+    if (detailMask <= 0.0) return 0.0;
 
     float d = cov * profile * detailMask;
     return max(d, 0.0) * densityScale;
@@ -271,9 +314,13 @@ void integrate_segment(float t0, float t1, int steps, bool doCloud, MarchParams 
         vec3 radial = p - mp.center;
         float r = length(radial);
         vec3 dir = (r > 0.0) ? (radial / r) : vec3(0.0, 1.0, 0.0);
-        vec3 dirDx = differentiate_normalized(radial, mp.rayDx * ts);
-        vec3 dirDy = differentiate_normalized(radial, mp.rayDy * ts);
+        vec3 radialDx = mp.rayDx * ts;
+        vec3 radialDy = mp.rayDy * ts;
+        vec3 dirDx = differentiate_normalized(radial, radialDx);
+        vec3 dirDy = differentiate_normalized(radial, radialDy);
         float height = max(r - mp.planetRadius, 0.0);
+        float heightDx = dot(dir, radialDx);
+        float heightDy = dot(dir, radialDy);
 
         float densR = 0.0;
         float densM = 0.0;
@@ -292,6 +339,8 @@ void integrate_segment(float t0, float t1, int steps, bool doCloud, MarchParams 
                                   dirDx,
                                   dirDy,
                                   height,
+                                  heightDx,
+                                  heightDy,
                                   mp.cloudsActive,
                                   mp.cloudFlipV,
                                   mp.cloudOverlayRotSC,
