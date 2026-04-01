@@ -64,6 +64,9 @@ bool Engine::add_planet_terrain(const PlanetTerrain &planet)
     info.height_max_m = planet.height_max_m;
     info.emission_dir = planet.emission_dir;
     info.emission_factor = planet.emission_factor;
+    info.specular_dir = planet.specular_dir;
+    info.specular_strength = planet.specular_strength;
+    info.specular_roughness = planet.specular_roughness;
 
     return planets->create_terrain_planet(info) != nullptr;
 }

@@ -394,6 +394,18 @@ namespace Game
             c.height_max_m = json_required_finite<double>(j, "height_max_m", path);
             c.emission_dir = json_required<std::string>(j, "emission_dir", path);
             c.emission_factor = parse_vec3(*json_required_object(j, "emission_factor", path), child_path(path, "emission_factor"));
+            if (const auto it = j.find("specular_dir"); it != j.end() && !it->is_null())
+            {
+                c.specular_dir = json_required<std::string>(j, "specular_dir", path);
+            }
+            if (const auto it = j.find("specular_strength"); it != j.end() && !it->is_null())
+            {
+                c.specular_strength = json_required_finite<float>(j, "specular_strength", path);
+            }
+            if (const auto it = j.find("specular_roughness"); it != j.end() && !it->is_null())
+            {
+                c.specular_roughness = json_required_finite<float>(j, "specular_roughness", path);
+            }
             c.render_scale = json_required_finite<float>(j, "render_scale", path);
             if (const auto it = j.find("prediction_orbit_color"); it != j.end() && !it->is_null())
             {
@@ -415,7 +427,8 @@ namespace Game
                 fail(child_path(path, "radius_m") + " must be > 0");
             }
             if (c.atmosphere_top_m < 0.0 || c.terrain_max_m < 0.0 || c.soi_radius_m < 0.0 ||
-                c.orbit_distance_m < 0.0 || c.height_max_m < 0.0)
+                c.orbit_distance_m < 0.0 || c.height_max_m < 0.0 ||
+                c.specular_strength < 0.0f || c.specular_roughness < 0.0f)
             {
                 fail(path + " numeric distances/heights must be >= 0");
             }
@@ -447,6 +460,9 @@ namespace Game
             j["height_max_m"] = c.height_max_m;
             j["emission_dir"] = c.emission_dir;
             j["emission_factor"] = {{"x", c.emission_factor.x}, {"y", c.emission_factor.y}, {"z", c.emission_factor.z}};
+            j["specular_dir"] = c.specular_dir;
+            j["specular_strength"] = c.specular_strength;
+            j["specular_roughness"] = c.specular_roughness;
             j["render_scale"] = c.render_scale;
             if (c.has_prediction_orbit_color)
             {

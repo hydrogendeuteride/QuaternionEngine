@@ -22,6 +22,7 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine *engine)
     layoutBuilder.add_binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     layoutBuilder.add_binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     layoutBuilder.add_binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    layoutBuilder.add_binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
     materialLayout = layoutBuilder.build(engine->_deviceManager->device(),
                                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -165,6 +166,8 @@ MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, Materia
     writer.write_image(4, resources.occlusionImage.imageView, resources.occlusionSampler,
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     writer.write_image(5, resources.emissiveImage.imageView, resources.emissiveSampler,
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    writer.write_image(6, resources.planetSpecularImage.imageView, resources.planetSpecularSampler,
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
     writer.update_set(device, matData.materialSet);

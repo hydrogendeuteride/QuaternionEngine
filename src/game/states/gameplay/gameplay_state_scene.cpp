@@ -57,6 +57,9 @@ namespace Game
             earth.height_max_m = 8000.0;
             earth.emission_dir = "planets/earth/emission/L0";
             earth.emission_factor = glm::vec3(2.0f, 2.0f, 2.0f);
+            earth.specular_dir = "planets/earth/specular/L0";
+            earth.specular_strength = 1.0f;
+            earth.specular_roughness = 0.06f;
             earth.prediction_orbit_color = glm::vec3(0.60f, 0.68f, 0.82f);
             earth.has_prediction_orbit_color = true;
             cfg.celestials.push_back(std::move(earth));
@@ -433,6 +436,9 @@ namespace Game
                 planet.height_max_m = cdef.height_max_m;
                 planet.emission_dir = cdef.emission_dir;
                 planet.emission_factor = cdef.emission_factor;
+                planet.specular_dir = cdef.specular_dir;
+                planet.specular_strength = cdef.specular_strength;
+                planet.specular_roughness = cdef.specular_roughness;
 
                 any_planets_added |= ctx.api->add_planet_terrain(planet);
 
