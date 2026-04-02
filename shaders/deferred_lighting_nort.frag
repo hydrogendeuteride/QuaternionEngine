@@ -12,13 +12,13 @@ layout(set=1, binding=0) uniform sampler2D posTex;
 layout(set=1, binding=1) uniform sampler2D normalTex;
 layout(set=1, binding=2) uniform sampler2D albedoTex;
 layout(set=1, binding=3) uniform sampler2D extraTex;
-layout(set=2, binding=0) uniform sampler2D shadowTex[4];
+layout(set=2, binding=0) uniform sampler2DShadow shadowTex[4];
 layout(set=4, binding=0) uniform sampler2D spotShadowTex[MAX_SHADOWED_SPOT_LIGHTS];
 layout(set=5, binding=0) uniform sampler2D pointShadowTex[MAX_POINT_SHADOW_FACES];
 
 // Tunables for shadow quality and blending
 // Border smoothing width in light-space NDC (0..1). Larger = wider cross-fade.
-const float SHADOW_BORDER_SMOOTH_NDC = 0.08;
+const float SHADOW_BORDER_SMOOTH_NDC = 0.12;
 // Base PCF radius in texels for cascade 0; higher cascades scale this up slightly.
 const float SHADOW_PCF_BASE_RADIUS = 1.05;
 // Additional per-cascade radius scale for coarser cascades (0..1 factor added across levels)
@@ -30,6 +30,13 @@ const float SHADOW_RPDB_SCALE = 1.0;
 // Minimum clamp to keep a tiny bias even on perpendicular receivers
 const float SHADOW_MIN_BIAS = 1e-5;
 
+const vec2 CASCADE_KERNEL_ROTATION[4] = vec2[4](
+vec2(1.0, 0.0),
+vec2(0.9659258, 0.2588190),
+vec2(0.8660254, 0.5),
+vec2(0.7071068, 0.7071068)
+);
+
 vec3 getCameraLocalPosition() // Derived from sceneData.view (render-local coordinates).
 {
     // view = [ R^T  -R^T*C ]
@@ -39,12 +46,6 @@ vec3 getCameraLocalPosition() // Derived from sceneData.view (render-local coord
     mat3 rot  = transpose(rotT);
     vec3 T    = sceneData.view[3].xyz;
     return -rot * T;
-}
-
-float hash12(vec2 p)
-{
-    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z);
 }
 
 const vec2 POISSON_16[16] = vec2[16](
@@ -172,8 +173,7 @@ float sampleCascadeShadow(uint ci, vec3 localPos, vec3 N, vec3 L)
     float baseRadius = SHADOW_PCF_BASE_RADIUS;
     float radius     = mix(baseRadius, baseRadius + SHADOW_PCF_CASCADE_GAIN, float(ci) / 3.0);
 
-    float ang = hash12(suv * 4096.0) * 6.2831853;
-    vec2  r   = vec2(cos(ang), sin(ang));
+    vec2  r   = CASCADE_KERNEL_ROTATION[min(ci, 3u)];
     mat2  rot = mat2(r.x, -r.y, r.y, r.x);
 
     const int TAP_COUNT = 16;
@@ -187,13 +187,10 @@ float sampleCascadeShadow(uint ci, vec3 localPos, vec3 N, vec3 L)
 
         float w    = POISSON_16_WEIGHT[i];
 
-        float mapD = texture(shadowTex[ci], suv + off).r;
-
         // Receiver-plane depth bias: conservative depth delta over this tap's offset
         // Approximate |Δz| ≈ |dz/du|*|Δu| + |dz/dv|*|Δv|
         float rpdb = dot(abs_dz_duv, abs(off));
-
-        float vis  = step(mapD, currentBias + rpdb);
+        float vis  = texture(shadowTex[ci], vec3(suv + off, currentBias + rpdb));
 
         visible += vis * w;
         wsum    += w;
