@@ -501,8 +501,8 @@ namespace Game
         if (ctx.renderer && ctx.renderer->_assetManager)
         {
             GameAPI::IBLPaths ibl{};
-            ibl.specularCube = ctx.renderer->_assetManager->assetPath("ibl/darkstar.ktx2");
-            ibl.diffuseCube = ctx.renderer->_assetManager->assetPath("ibl/darkstar.ktx2");
+            ibl.specularCube = ctx.renderer->_assetManager->assetPath("ibl/blue_nebula_4k.ktx2");
+            ibl.diffuseCube = ctx.renderer->_assetManager->assetPath("ibl/blue_nebula_4k.ktx2");
             ibl.brdfLut = ctx.renderer->_assetManager->assetPath("ibl/brdf_lut.ktx2");
             ibl.background = ctx.renderer->_assetManager->assetPath("ibl/darkstar.ktx2");
             ctx.api->load_global_ibl(ibl);
