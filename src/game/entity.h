@@ -117,6 +117,12 @@ namespace Game
     class Entity
     {
     public:
+        enum class RenderSyncMode : uint8_t
+        {
+            Interpolated,
+            Authoritative
+        };
+
         Entity() = default;
 
         explicit Entity(EntityId id, const std::string &name = "");
@@ -175,7 +181,21 @@ namespace Game
 
         uint32_t physics_body_value() const { return _physics_body_value.value_or(0); }
         void set_physics_body(uint32_t body_value) { _physics_body_value = body_value; }
-        void clear_physics_body() { _physics_body_value.reset(); }
+        void clear_physics_body()
+        {
+            _physics_body_value.reset();
+            _physics_origin_offset_local = glm::vec3(0.0f);
+        }
+        const glm::vec3 &physics_origin_offset_local() const { return _physics_origin_offset_local; }
+        void set_physics_origin_offset_local(const glm::vec3 &offset) { _physics_origin_offset_local = offset; }
+        WorldVec3 physics_body_position_world(const WorldVec3 &entity_position_world, const glm::quat &rotation) const
+        {
+            return entity_position_world + WorldVec3(rotation * _physics_origin_offset_local);
+        }
+        WorldVec3 entity_position_from_physics_body_world(const WorldVec3 &body_position_world, const glm::quat &rotation) const
+        {
+            return body_position_world - WorldVec3(rotation * _physics_origin_offset_local);
+        }
 
         // ------------------------------------------------------------------------
         // Render binding
@@ -185,6 +205,8 @@ namespace Game
 
         const std::string &render_name() const { return _render_name; }
         void set_render_name(const std::string &name) { _render_name = name; }
+        RenderSyncMode render_sync_mode() const { return _render_sync_mode; }
+        void set_render_sync_mode(RenderSyncMode mode) { _render_sync_mode = mode; }
 
         // ------------------------------------------------------------------------
         // Attachments
@@ -256,9 +278,11 @@ namespace Game
 
         // Physics binding (stores BodyId::value)
         std::optional<uint32_t> _physics_body_value;
+        glm::vec3 _physics_origin_offset_local{0.0f, 0.0f, 0.0f};
 
         // Render binding (SceneManager instance name)
         std::string _render_name;
+        RenderSyncMode _render_sync_mode{RenderSyncMode::Interpolated};
 
         // Child attachments
         std::vector<Attachment> _attachments;

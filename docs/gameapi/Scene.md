@@ -79,9 +79,10 @@ Returns a job ID (0 on failure). The instance will appear in the scene when load
 
 ```cpp
 bool removed = api.remove_gltf_instance("player");
+bool removedAny = api.remove_render_instance("player");
 ```
 
-Returns `false` if instance doesn't exist.
+`remove_render_instance()` uses the runtime instance name and works across dynamic mesh/glTF backends. Both return `false` if the instance doesn't exist.
 
 ### Transform Queries
 
@@ -111,6 +112,9 @@ api.set_gltf_instance_transform("player", newTransform);
 GameAPI::TransformD newTransformD;
 newTransformD.position = glm::dvec3(2000000.0, 0.0, 1000000.0);
 api.set_gltf_instance_transform("spaceship", newTransformD);
+
+// Generic routing by instance name
+api.set_render_instance_transform("spaceship", newTransformD);
 ```
 
 Returns `false` if instance doesn't exist.
@@ -238,6 +242,9 @@ api.set_mesh_instance_transform("platform", newT);
 GameAPI::TransformD newTD;
 newTD.position = glm::dvec3(1000010.0, 0.0, 0.0);
 api.set_mesh_instance_transform("asteroid", newTD);
+
+// Generic routing by instance name
+api.set_render_instance_transform("asteroid", newTD);
 ```
 
 ## Clearing All Instances
