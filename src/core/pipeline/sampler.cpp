@@ -59,6 +59,12 @@ void SamplerManager::init(DeviceManager *deviceManager)
     sh.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
     vkCreateSampler(_deviceManager->device(), &sh, nullptr, &_shadowLinearClamp);
 
+    // Shadow compare sampler for directional maps.
+    VkSamplerCreateInfo shCompare = sh;
+    shCompare.compareEnable = VK_TRUE;
+    shCompare.compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+    vkCreateSampler(_deviceManager->device(), &shCompare, nullptr, &_shadowCompareClamp);
+
 }
 
 void SamplerManager::cleanup()
@@ -80,6 +86,11 @@ void SamplerManager::cleanup()
     {
         vkDestroySampler(_deviceManager->device(), _shadowLinearClamp, nullptr);
         _shadowLinearClamp = VK_NULL_HANDLE;
+    }
+    if (_shadowCompareClamp)
+    {
+        vkDestroySampler(_deviceManager->device(), _shadowCompareClamp, nullptr);
+        _shadowCompareClamp = VK_NULL_HANDLE;
     }
 
     if (_linearClampEdge)
