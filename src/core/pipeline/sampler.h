@@ -14,6 +14,7 @@ public:
     VkSampler defaultLinear() const { return _defaultSamplerLinear; }
     VkSampler defaultNearest() const { return _defaultSamplerNearest; }
     VkSampler shadowLinearClamp() const { return _shadowLinearClamp; }
+    VkSampler shadowCompareClamp() const { return _shadowCompareClamp; }
     VkSampler linearClampEdge() const { return _linearClampEdge; }
     VkSampler nearestClampEdge() const { return _nearestClampEdge; }
     VkSampler linearRepeatClampEdge() const { return _linearRepeatClampEdge; }
@@ -24,6 +25,7 @@ private:
     VkSampler _defaultSamplerLinear = VK_NULL_HANDLE;
     VkSampler _defaultSamplerNearest = VK_NULL_HANDLE;
     VkSampler _shadowLinearClamp = VK_NULL_HANDLE;
+    VkSampler _shadowCompareClamp = VK_NULL_HANDLE;
     VkSampler _linearClampEdge = VK_NULL_HANDLE;
     VkSampler _nearestClampEdge = VK_NULL_HANDLE;
     VkSampler _linearRepeatClampEdge = VK_NULL_HANDLE;
