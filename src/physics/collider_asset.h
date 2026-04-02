@@ -18,4 +18,9 @@ namespace Physics
     // - Supports primitives, compound shapes, and triangle meshes (scale applied to mesh scale vector).
     // - Returns nullopt if scale is non-finite or <= 0.
     std::optional<CollisionShape> scale_collision_shape_uniform(const CollisionShape &shape, float uniform_scale);
+
+    // Returns the local-space center of mass of a compound shape.
+    // - Explicit child masses override the analytic primitive-volume weighting.
+    // - Returns zero when the shape has no positive-mass contribution.
+    glm::vec3 compound_center_of_mass(const CompoundShape &compound);
 } // namespace Physics

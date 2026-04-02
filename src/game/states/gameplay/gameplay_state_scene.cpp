@@ -181,12 +181,18 @@ namespace Game
                                                                Entity &entity,
                                                                const Physics::BodySettings &settings_template,
                                                                const WorldVec3 &position_world,
-                                                               const glm::quat &rotation)
+                                                               const glm::quat &rotation,
+                                                               glm::vec3 *out_origin_offset_local)
     {
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (!_physics || !_physics_context)
         {
             return {};
+        }
+
+        if (out_origin_offset_local)
+        {
+            *out_origin_offset_local = glm::vec3(0.0f);
         }
 
         const uint64_t user_data = static_cast<uint64_t>(entity.id().value);
@@ -222,6 +228,15 @@ namespace Game
                 return {};
             }
 
+            if (out_origin_offset_local)
+            {
+                glm::vec3 origin_offset_local{0.0f, 0.0f, 0.0f};
+                if (_renderer->_sceneManager->getDynamicRootColliderCenterOfMassLocal(entity.render_name(), origin_offset_local))
+                {
+                    *out_origin_offset_local = origin_offset_local;
+                }
+            }
+
             _physics->set_gravity_scale(body_id, settings_template.gravity_scale);
             if (settings_template.motion_type != Physics::MotionType::Dynamic)
             {
@@ -231,6 +246,7 @@ namespace Game
             {
                 _physics->deactivate(body_id);
             }
+            entity.set_render_sync_mode(Entity::RenderSyncMode::Authoritative);
             return body_id;
         }
 
@@ -245,6 +261,7 @@ namespace Game
         (void) settings_template;
         (void) position_world;
         (void) rotation;
+        (void) out_origin_offset_local;
         return {};
 #endif
     }
@@ -272,6 +289,10 @@ namespace Game
         }
 
         entity.clear_physics_body();
+        if (render_is_gltf)
+        {
+            entity.set_render_sync_mode(Entity::RenderSyncMode::Interpolated);
+        }
         return destroyed;
 #else
         (void) render_is_gltf;
@@ -397,13 +418,15 @@ namespace Game
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
             if (_physics)
             {
+                glm::vec3 origin_offset_local{0.0f, 0.0f, 0.0f};
                 const Physics::BodyId body_id = create_orbiter_physics_body(render_is_gltf,
                                                                             *ent,
                                                                             orbiter_def.body_settings,
                                                                             pos_world,
-                                                                            tr.rotation);
+                                                                            tr.rotation,
+                                                                            &origin_offset_local);
                 if (!body_id.is_valid() ||
-                    !_world.bind_physics(ent->id(), body_id.value, true, false))
+                    !_world.bind_physics(ent->id(), body_id.value, true, false, origin_offset_local))
                 {
                     (void) _world.destroy_entity(ent->id());
                     out_id = EntityId{};

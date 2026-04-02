@@ -155,7 +155,9 @@ namespace Game
 
             Physics::BodyTransform transform = physics.get_transform(body_id);
 
-            const WorldVec3 position_world = local_to_world_d(transform.position, physics_origin_world);
+            const WorldVec3 body_position_world = local_to_world_d(transform.position, physics_origin_world);
+            const WorldVec3 position_world =
+                entity.entity_position_from_physics_body_world(body_position_world, transform.rotation);
 
             // Update entity transform (world-space)
             entity.set_position_world(position_world);
@@ -194,9 +196,14 @@ namespace Game
             return;
         }
 
-        // Get render transform (interpolated if using interpolation), in world space (double precision)
-        const WorldVec3 pos_world = entity.get_render_position_world(alpha);
-        const glm::quat rot_world = entity.get_render_rotation(alpha);
+        // The render backend now decides how a named instance is routed. The entity only chooses
+        // whether rendering should use the interpolated pose or the current authoritative transform.
+        const bool use_interpolated_pose =
+            entity.render_sync_mode() == Entity::RenderSyncMode::Interpolated;
+        const WorldVec3 pos_world =
+            use_interpolated_pose ? entity.get_render_position_world(alpha) : entity.position_world();
+        const glm::quat rot_world =
+            use_interpolated_pose ? entity.get_render_rotation(alpha) : entity.rotation();
         const glm::vec3 scale = entity.scale();
 
         GameAPI::TransformD tr;
@@ -205,8 +212,7 @@ namespace Game
         tr.scale = scale;
 
         const std::string &render_name = entity.render_name();
-        (void) api.set_mesh_instance_transform(render_name, tr);
-        (void) api.set_gltf_instance_transform(render_name, tr);
+        (void) api.set_render_instance_transform(render_name, tr);
 
         // Sync attachments
         Transform parent_transform{};
@@ -226,8 +232,7 @@ namespace Game
             att_tr.position = glm::dvec3(world_transform.position_world);
             att_tr.rotation = world_transform.rotation;
             att_tr.scale = world_transform.scale;
-            (void) api.set_mesh_instance_transform(att.render_name, att_tr);
-            (void) api.set_gltf_instance_transform(att.render_name, att_tr);
+            (void) api.set_render_instance_transform(att.render_name, att_tr);
         }
     }
 
@@ -341,7 +346,8 @@ namespace Game
             Physics::BodyId body_id{entity->physics_body_value()};
             if (physics.is_body_valid(body_id))
             {
-                const glm::dvec3 position_local = world_to_local_d(position_world, physics_origin_world);
+                const WorldVec3 body_position_world = entity->physics_body_position_world(position_world, rotation);
+                const glm::dvec3 position_local = world_to_local_d(body_position_world, physics_origin_world);
                 physics.set_transform(body_id, position_local, rotation);
                 physics.set_linear_velocity(body_id, glm::vec3(0.0f));
                 physics.set_angular_velocity(body_id, glm::vec3(0.0f));

@@ -187,6 +187,25 @@ void SceneManager::clearMeshInstances()
     dynamicMeshInstances.clear();
 }
 
+bool SceneManager::setDynamicInstanceTransform(const std::string &name, const glm::mat4 &transform)
+{
+    return setMeshInstanceTransform(name, transform) || setGLTFInstanceTransform(name, transform);
+}
+
+bool SceneManager::setDynamicInstanceTRSWorld(const std::string &name,
+                                              const WorldVec3 &translationWorld,
+                                              const glm::quat &rotation,
+                                              const glm::vec3 &scale)
+{
+    return setMeshInstanceTRSWorld(name, translationWorld, rotation, scale) ||
+           setGLTFInstanceTRSWorld(name, translationWorld, rotation, scale);
+}
+
+bool SceneManager::removeDynamicInstance(const std::string &name)
+{
+    return removeMeshInstance(name) || removeGLTFInstance(name);
+}
+
 bool SceneManager::setDecal(const std::string &name, const DecalInstance &decal)
 {
     if (name.empty())
@@ -434,7 +453,9 @@ bool SceneManager::setGLTFInstanceTransform(const std::string &name, const glm::
         {
             const WorldVec3 physics_origin_world =
                 (_context && _context->physics_context) ? _context->physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
-            entry.world->set_transform(entry.body, world_to_local_d(inst.translation_world, physics_origin_world), inst.rotation);
+            const WorldVec3 body_position_world =
+                inst.translation_world + WorldVec3(inst.rotation * entry.center_of_mass_local);
+            entry.world->set_transform(entry.body, world_to_local_d(body_position_world, physics_origin_world), inst.rotation);
         }
     }
 
@@ -486,7 +507,9 @@ bool SceneManager::setGLTFInstanceTransformLocal(const std::string &name, const 
         {
             const WorldVec3 physics_origin_world =
                 (_context && _context->physics_context) ? _context->physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
-            entry.world->set_transform(entry.body, world_to_local_d(inst.translation_world, physics_origin_world), inst.rotation);
+            const WorldVec3 body_position_world =
+                inst.translation_world + WorldVec3(inst.rotation * entry.center_of_mass_local);
+            entry.world->set_transform(entry.body, world_to_local_d(body_position_world, physics_origin_world), inst.rotation);
         }
     }
 
@@ -546,7 +569,9 @@ bool SceneManager::setGLTFInstanceTRSWorld(const std::string &name,
         {
             const WorldVec3 physics_origin_world =
                 (_context && _context->physics_context) ? _context->physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
-            entry.world->set_transform(entry.body, world_to_local_d(inst.translation_world, physics_origin_world), inst.rotation);
+            const WorldVec3 body_position_world =
+                inst.translation_world + WorldVec3(inst.rotation * entry.center_of_mass_local);
+            entry.world->set_transform(entry.body, world_to_local_d(body_position_world, physics_origin_world), inst.rotation);
         }
     }
 

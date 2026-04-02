@@ -88,10 +88,15 @@ namespace Game
         // Binding existing resources (for incremental adoption)
         // ------------------------------------------------------------------------
 
-        bool bind_render(EntityId id, const std::string &render_name);
+        bool bind_render(EntityId id,
+                         const std::string &render_name,
+                         Entity::RenderSyncMode sync_mode = Entity::RenderSyncMode::Interpolated);
 
-        bool bind_physics(EntityId id, uint32_t body_value, bool use_interpolation = true,
-                          bool override_user_data = true);
+        bool bind_physics(EntityId id,
+                          uint32_t body_value,
+                          bool use_interpolation = true,
+                          bool override_user_data = true,
+                          const glm::vec3 &origin_offset_local = glm::vec3(0.0f));
 
     private:
         EntityManager _entities;
@@ -114,6 +119,8 @@ namespace Game
         EntityBuilder &render_primitive(GameAPI::PrimitiveType type);
 
         EntityBuilder &render_gltf(const std::string &path, bool preload_textures = true);
+
+        EntityBuilder &render_sync_mode(Entity::RenderSyncMode mode);
 
         EntityBuilder &physics(const Physics::BodySettings &settings,
                                bool use_interpolation = true,
@@ -140,6 +147,7 @@ namespace Game
         GameAPI::PrimitiveType _primitive_type{};
         std::string _gltf_path{};
         bool _gltf_preload{true};
+        Entity::RenderSyncMode _render_sync_mode{Entity::RenderSyncMode::Interpolated};
 
         bool _wants_physics{false};
         Physics::BodySettings _physics_settings{};
