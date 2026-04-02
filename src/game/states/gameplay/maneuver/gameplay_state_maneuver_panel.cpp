@@ -94,11 +94,14 @@ namespace Game
                                  ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowBgAlpha(0.92f);
 
-        if (!ImGui::Begin("Maneuver Nodes"))
+        bool panel_open = _show_maneuver_nodes_panel;
+        if (!ImGui::Begin("Maneuver Nodes", &panel_open))
         {
+            _show_maneuver_nodes_panel = panel_open;
             ImGui::End();
             return;
         }
+        _show_maneuver_nodes_panel = panel_open;
 
         if (ImGui::Checkbox("Maneuver Nodes", &_maneuver_nodes_enabled))
         {
