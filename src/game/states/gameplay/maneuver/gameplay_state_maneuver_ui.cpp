@@ -241,12 +241,14 @@ namespace Game
         {
             if (hovered_handle_idx >= 0)
             {
+                _show_maneuver_nodes_panel = true;
                 _maneuver_state.selected_node_id = handles[hovered_handle_idx].node_id;
                 refresh_after_interaction =
                         begin_maneuver_axis_drag(ctx, handles[hovered_handle_idx].node_id, handles[hovered_handle_idx].axis);
             }
             else if (hovered_hub_idx >= 0)
             {
+                _show_maneuver_nodes_panel = true;
                 _maneuver_state.selected_node_id = hubs[hovered_hub_idx].node_id;
                 refresh_after_interaction = true;
             }

@@ -345,6 +345,7 @@ namespace Game
         bool _show_orbit_hud{true};
         bool _show_orbit_drag_debug{true};
         bool _show_frame_view{true};
+        bool _show_maneuver_nodes_panel{false};
         bool _reset_requested{false};
         bool _runtime_orbiter_rails_enabled{true};
         double _runtime_orbiter_rails_distance_m{kDefaultRuntimeOrbiterRailsDistanceM};
