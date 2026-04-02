@@ -382,7 +382,7 @@ void LightingPass::draw_lighting(VkCommandBuffer cmd,
         std::array<VkDescriptorImageInfo, kShadowCascadeCount> infos{};
         for (uint32_t i = 0; i < cascadeCount; ++i)
         {
-            infos[i].sampler = ctxLocal->getSamplers()->shadowCompareClamp();
+            infos[i].sampler = ctxLocal->getSamplers()->shadowLinearClamp();
             infos[i].imageView = resources.image_view(shadowCascades[i]);
             infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         }

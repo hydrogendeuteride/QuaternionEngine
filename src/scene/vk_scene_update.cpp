@@ -354,24 +354,33 @@ void SceneManager::updateViewProjectionData()
 
 void SceneManager::updateDirectionalShadowData()
 {
+    static const float kAheadBlend[kShadowCascadeCount] = {0.2f, 0.5f, 0.75f, 1.0f};
+
     const glm::vec3 cam_pos = _camera_position_local;
-    const glm::vec3 light_dir =
-        normalize_or_fallback(-glm::vec3(sceneData.sunlightDirection), glm::vec3(0.0f, -1.0f, 0.0f));
+    const glm::mat4 cam_rot = mainCamera.getRotationMatrix();
+    const glm::vec3 cam_fwd = -glm::vec3(cam_rot[2]);
+
+    glm::vec3 light_dir = glm::normalize(-glm::vec3(sceneData.sunlightDirection));
+    if (glm::length(light_dir) < 1.0e-5f)
+    {
+        light_dir = glm::vec3(0.0f, -1.0f, 0.0f);
+    }
 
     const glm::vec3 world_up(0.0f, 1.0f, 0.0f);
     const glm::vec3 ref_up =
         (std::abs(glm::dot(light_dir, world_up)) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : world_up;
-    const glm::vec3 right =
-        normalize_or_fallback(glm::cross(light_dir, ref_up), glm::vec3(1.0f, 0.0f, 0.0f));
-    const glm::vec3 up =
-        normalize_or_fallback(glm::cross(right, light_dir), glm::vec3(0.0f, 0.0f, 1.0f));
+    glm::vec3 right = glm::cross(light_dir, ref_up);
+    if (glm::length2(right) < 1.0e-6f)
+    {
+        right = glm::vec3(1.0f, 0.0f, 0.0f);
+    }
+    right = glm::normalize(right);
+    const glm::vec3 up = glm::normalize(glm::cross(right, light_dir));
 
     auto level_radius = [](int level)
     {
         return std::ldexp(kShadowClipBaseRadius, level);
     };
-
-    const uint32_t shadow_res = _context ? _context->getShadowMapResolution() : kShadowMapResolution;
 
     sceneData.cascadeSplitsView = glm::vec4(
         level_radius(0), level_radius(1), level_radius(2), level_radius(3));
@@ -380,13 +389,17 @@ void SceneManager::updateDirectionalShadowData()
     {
         const float radius = level_radius(ci);
         const float cover = radius * kShadowCascadeRadiusScale + kShadowCascadeRadiusMargin;
-        // Keep clipmap centers camera-locked. Forward bias improves look-ahead
-        // coverage a bit, but it also makes cascades slide when the camera yaws
-        // or pitches, which shows up as shadow shimmer.
-        const glm::vec3 center_target = cam_pos;
+
+        const float ahead = radius * 0.5f;
+        const float fu = glm::dot(cam_fwd, right);
+        const float fv = glm::dot(cam_fwd, up);
+        const glm::vec3 ahead_xy = (right * fu + up * fv) * (ahead * kAheadBlend[ci]);
+
+        const glm::vec3 center_target = cam_pos + ahead_xy;
         const float u = glm::dot(center_target, right);
         const float v = glm::dot(center_target, up);
 
+        const uint32_t shadow_res = _context ? _context->getShadowMapResolution() : kShadowMapResolution;
         const float texel = (2.0f * cover) / static_cast<float>(shadow_res);
         const float u_snapped = std::round(u / texel) * texel;
         const float v_snapped = std::round(v / texel) * texel;
