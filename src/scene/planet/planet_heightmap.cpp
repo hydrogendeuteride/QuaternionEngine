@@ -2,6 +2,9 @@
 
 #include <cmath>
 #include <filesystem>
+#include <mutex>
+#include <unordered_map>
+#include <utility>
 
 #include <glm/glm.hpp>
 #include <ktx.h>
@@ -23,6 +26,9 @@ namespace planet
             std::error_code ec;
             return std::filesystem::exists(path, ec) && !ec;
         }
+
+        std::mutex g_preloaded_heightmap_mutex;
+        std::unordered_map<std::string, HeightFaceSet> g_preloaded_heightmaps;
 
         HeightView height_view_for_mip(const HeightFace &face, uint32_t mip_level)
         {
@@ -229,6 +235,67 @@ namespace planet
         ktxTexture_Destroy(ktxTexture(ktex));
         build_height_mips(out_face);
         return true;
+    }
+
+    bool load_heightmap_cube_faces_bc4(const std::string &directory_path, HeightFaceSet &out_faces)
+    {
+        out_faces = {};
+        if (directory_path.empty() || !file_exists(directory_path))
+        {
+            return false;
+        }
+
+        HeightFaceSet loaded_faces{};
+        for (size_t face_index = 0; face_index < loaded_faces.size(); ++face_index)
+        {
+            const CubeFace face = static_cast<CubeFace>(face_index);
+            const std::string path =
+                    directory_path + "/" + std::string(cube_face_name(face)) + ".ktx2";
+            if (!load_heightmap_bc4(path, loaded_faces[face_index]))
+            {
+                return false;
+            }
+        }
+
+        out_faces = std::move(loaded_faces);
+        return true;
+    }
+
+    void retain_preloaded_heightmap_faces(const std::string &height_dir_key, HeightFaceSet faces)
+    {
+        if (height_dir_key.empty())
+        {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(g_preloaded_heightmap_mutex);
+        g_preloaded_heightmaps[height_dir_key] = std::move(faces);
+    }
+
+    bool take_preloaded_heightmap_faces(const std::string &height_dir_key, HeightFaceSet &out_faces)
+    {
+        out_faces = {};
+        if (height_dir_key.empty())
+        {
+            return false;
+        }
+
+        std::lock_guard<std::mutex> lock(g_preloaded_heightmap_mutex);
+        const auto it = g_preloaded_heightmaps.find(height_dir_key);
+        if (it == g_preloaded_heightmaps.end())
+        {
+            return false;
+        }
+
+        out_faces = std::move(it->second);
+        g_preloaded_heightmaps.erase(it);
+        return true;
+    }
+
+    void clear_preloaded_heightmap_faces()
+    {
+        std::lock_guard<std::mutex> lock(g_preloaded_heightmap_mutex);
+        g_preloaded_heightmaps.clear();
     }
 
     float sample_height(const HeightFace &face, float u, float v, uint32_t mip_level)

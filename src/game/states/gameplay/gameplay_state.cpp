@@ -1,4 +1,5 @@
 #include "gameplay_state.h"
+#include "gameplay_preload_cache.h"
 #include "orbit_helpers.h"
 #include "game/states/gameplay/gameplay_settings.h"
 #include "game/states/gameplay/scenario/scenario_loader.h"
@@ -18,6 +19,12 @@ namespace Game
 
     GameplayState::GameplayState()
         : _scenario_config(default_earth_moon_config())
+    {
+    }
+
+    GameplayState::GameplayState(ScenarioConfig scenario_config)
+        : _scenario_preloaded(true)
+        , _scenario_config(std::move(scenario_config))
     {
     }
 
@@ -58,20 +65,22 @@ namespace Game
             ctx.renderer->_context->orbit_plot->clear_all();
         }
 
-        // Try loading scenario from JSON; fall back to compiled default.
-        // NOTE: JSON data is authoritative when present, including orbiter body mass.
+        // Load scenario from JSON if not already provided by the loading state.
         if (ctx.renderer && ctx.renderer->_assetManager)
         {
-            const std::string scenario_path =
-                    ctx.renderer->_assetManager->assetPath("scenarios/default_gameplay.json");
-            if (auto loaded = load_scenario_config(scenario_path))
+            if (!_scenario_preloaded)
             {
-                _scenario_config = std::move(*loaded);
-            }
-            else
-            {
-                Logger::warn("Falling back to compiled default scenario config.");
-                _scenario_config = default_earth_moon_config();
+                const std::string scenario_path =
+                        ctx.renderer->_assetManager->assetPath("scenarios/default_gameplay.json");
+                if (auto loaded = load_scenario_config(scenario_path))
+                {
+                    _scenario_config = std::move(*loaded);
+                }
+                else
+                {
+                    Logger::warn("Falling back to compiled default scenario config.");
+                    _scenario_config = default_earth_moon_config();
+                }
             }
 
             // Auto-load gameplay settings if present.
@@ -84,6 +93,7 @@ namespace Game
         }
 
         setup_scene(ctx);
+        clear_preloaded_gltf_scenes();
     }
 
     void GameplayState::on_exit(GameStateContext &ctx)

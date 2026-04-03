@@ -719,22 +719,28 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
     }
 
     AssetManager *assets = _context->assets;
-    std::array<planet::HeightFace, 6> loaded_faces{};
-    bool ok = true;
-    for (size_t face_index = 0; face_index < loaded_faces.size(); ++face_index)
-    {
-        const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
-        const std::string rel = fmt::format("{}/{}.ktx2", desired_dir, planet::cube_face_name(face));
-        const std::string abs = assets->assetPath(rel);
+    planet::HeightFaceSet loaded_faces{};
+    bool ok = planet::take_preloaded_heightmap_faces(desired_dir, loaded_faces);
 
-        planet::HeightFace face_data{};
-        if (!planet::load_heightmap_bc4(abs, face_data))
+    if (!ok)
+    {
+        for (size_t face_index = 0; face_index < loaded_faces.size(); ++face_index)
         {
-            Logger::error("[PlanetSystem] Failed to load height face '{}'", abs);
-            ok = false;
-            break;
+            const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
+            const std::string rel = fmt::format("{}/{}.ktx2", desired_dir, planet::cube_face_name(face));
+            const std::string abs = assets->assetPath(rel);
+
+            planet::HeightFace face_data{};
+            if (!planet::load_heightmap_bc4(abs, face_data))
+            {
+                Logger::error("[PlanetSystem] Failed to load height face '{}'", abs);
+                ok = false;
+                break;
+            }
+
+            ok = true;
+            loaded_faces[face_index] = std::move(face_data);
         }
-        loaded_faces[face_index] = std::move(face_data);
     }
 
     if (!ok)
