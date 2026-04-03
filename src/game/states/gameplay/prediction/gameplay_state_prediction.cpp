@@ -34,7 +34,7 @@ namespace Game
             return false;
         }
 
-        out_pos_world = entity->position_world();
+        out_pos_world = entity->physics_center_of_mass_world();
         out_vel_world = glm::dvec3(0.0);
         out_vel_local = glm::vec3(0.0f);
 
@@ -62,6 +62,10 @@ namespace Game
             const Physics::BodyId body_id{entity->physics_body_value()};
             if (_physics->is_body_valid(body_id))
             {
+                const glm::quat rotation = _physics->get_rotation(body_id);
+                const WorldVec3 body_origin_world =
+                        local_to_world_d(_physics->get_position(body_id), _physics_context->origin_world());
+                out_pos_world = entity->physics_center_of_mass_world(body_origin_world, rotation);
                 out_vel_local = _physics->get_linear_velocity(body_id);
                 out_vel_world = _physics_context->velocity_origin_world() + glm::dvec3(out_vel_local);
             }

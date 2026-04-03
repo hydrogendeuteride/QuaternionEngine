@@ -39,11 +39,11 @@ namespace Physics
 
     // Build compound shapes from a separate collider-only glTF sidecar.
     // Colliders are mapped to dst_scene's nodes by matching ancestor node names.
-    // dst_node_names provides the set of valid node names in the destination scene.
+    // Child transforms are canonicalized into the matched destination owner's local frame.
     void build_colliders_from_sidecar(
         std::unordered_map<std::string, CompoundShape>& out_compounds,
         const LoadedGLTF& sidecar_scene,
-        const std::unordered_set<std::string_view>& dst_node_names,
+        const LoadedGLTF& dst_scene,
         bool clear_existing = true);
 
     // Build triangle-mesh collider instances (COL_MESH nodes) from COL_* marker nodes within a glTF scene.
@@ -56,11 +56,11 @@ namespace Physics
 
     // Build triangle-mesh collider instances from a separate collider-only glTF sidecar.
     // Mesh colliders are mapped to dst_scene's nodes by matching ancestor node names.
-    // dst_node_names provides the set of valid node names in the destination scene.
+    // Relative transforms are canonicalized into the matched destination owner's local frame.
     void build_mesh_colliders_from_sidecar(
         std::unordered_map<std::string, std::vector<ColliderMeshInstance>>& out_instances,
         const LoadedGLTF& sidecar_scene,
-        const std::unordered_set<std::string_view>& dst_node_names,
+        const LoadedGLTF& dst_scene,
         bool clear_existing = true);
 
 } // namespace Physics

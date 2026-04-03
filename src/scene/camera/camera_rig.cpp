@@ -135,12 +135,17 @@ bool CameraRig::resolve_target(SceneManager &scene,
                                WorldVec3 &out_position_world,
                                glm::quat &out_rotation) const
 {
+    const auto apply_target_offset = [&](const WorldVec3 &base_position_world, const glm::quat &base_rotation) {
+        out_position_world = base_position_world + WorldVec3(base_rotation * target.local_offset);
+        out_rotation = base_rotation;
+    };
+
     out_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 
     switch (target.type)
     {
         case CameraTargetType::WorldPoint:
-            out_position_world = target.world_point;
+            apply_target_offset(target.world_point, out_rotation);
             return true;
         case CameraTargetType::MeshInstance:
         {
@@ -153,14 +158,13 @@ bool CameraRig::resolve_target(SceneManager &scene,
                 {
                     if (PlanetSystem::PlanetBody *body = planets->find_body_by_name(target.name))
                     {
-                        out_position_world = body->center_world;
+                        apply_target_offset(body->center_world, out_rotation);
                         return true;
                     }
                 }
                 return false;
             }
-            out_position_world = t;
-            out_rotation = r;
+            apply_target_offset(t, r);
             return true;
         }
         case CameraTargetType::GLTFInstance:
@@ -172,8 +176,7 @@ bool CameraRig::resolve_target(SceneManager &scene,
             {
                 return false;
             }
-            out_position_world = t;
-            out_rotation = r;
+            apply_target_offset(t, r);
             return true;
         }
         default:
