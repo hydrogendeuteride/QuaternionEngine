@@ -80,6 +80,11 @@ bool Engine::remove_gltf_instance(const std::string& name)
     return _engine->_sceneManager ? _engine->_sceneManager->removeGLTFInstance(name) : false;
 }
 
+bool Engine::remove_render_instance(const std::string& name)
+{
+    return _engine->_sceneManager ? _engine->_sceneManager->removeDynamicInstance(name) : false;
+}
+
 bool Engine::get_gltf_instance_transform(const std::string& name, Transform& out) const
 {
     if (!_engine->_sceneManager) return false;
@@ -350,6 +355,23 @@ bool Engine::set_mesh_instance_transform(const std::string& name, const Transfor
                                                             WorldVec3(transform.position),
                                                             transform.rotation,
                                                             transform.scale)
+           : false;
+}
+
+bool Engine::set_render_instance_transform(const std::string& name, const Transform& transform)
+{
+    return _engine->_sceneManager
+           ? _engine->_sceneManager->setDynamicInstanceTransform(name, transform.to_matrix())
+           : false;
+}
+
+bool Engine::set_render_instance_transform(const std::string& name, const TransformD& transform)
+{
+    return _engine->_sceneManager
+           ? _engine->_sceneManager->setDynamicInstanceTRSWorld(name,
+                                                                WorldVec3(transform.position),
+                                                                transform.rotation,
+                                                                transform.scale)
            : false;
 }
 

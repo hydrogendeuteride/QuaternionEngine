@@ -158,6 +158,15 @@ public:
     bool removeMeshInstance(const std::string &name);
     void clearMeshInstances();
 
+    // Generic routing helpers for runtime render instances. These centralize name-based
+    // dispatch so higher-level gameplay code does not need to know the concrete instance type.
+    bool setDynamicInstanceTransform(const std::string &name, const glm::mat4 &transform);
+    bool setDynamicInstanceTRSWorld(const std::string &name,
+                                    const WorldVec3 &translationWorld,
+                                    const glm::quat &rotation,
+                                    const glm::vec3 &scale);
+    bool removeDynamicInstance(const std::string &name);
+
     struct DecalInstance
     {
         DecalShape shape = DecalShape::Box;
@@ -356,6 +365,9 @@ public:
     // Returns the dynamic root collider body for an instance, or an invalid ID when absent.
     Physics::BodyId getDynamicRootColliderBody(const std::string &instanceName) const;
 
+    // Returns the local-space offset from the instance origin to the dynamic root body's center of mass.
+    bool getDynamicRootColliderCenterOfMassLocal(const std::string &instanceName, glm::vec3 &outCenterOfMassLocal) const;
+
     // Override total body mass for a dynamic-root glTF instance.
     // If the body is active it will be rebuilt immediately while preserving pose and velocities.
     bool setDynamicRootColliderMass(const std::string &instanceName, float mass);
@@ -431,6 +443,7 @@ private:
         Physics::PhysicsWorld *world{nullptr};
         Physics::BodyId body{};
         glm::vec3 scale{1.0f, 1.0f, 1.0f};
+        glm::vec3 center_of_mass_local{0.0f, 0.0f, 0.0f};
         uint32_t layer{Physics::Layer::Dynamic};
         uint64_t user_data{0};
         std::optional<float> mass_override;
@@ -451,7 +464,8 @@ private:
                                                              Physics::PhysicsWorld *world,
                                                              uint32_t layer,
                                                              uint64_t user_data,
-                                                             std::optional<float> mass_override) const;
+                                                             std::optional<float> mass_override,
+                                                             glm::vec3 *out_center_of_mass_local = nullptr) const;
     bool rebuildDynamicRootColliderBody(const std::string &instanceName,
                                         DynamicRootColliderBodyEntry &entry,
                                         bool preserve_instance_transform = false);

@@ -27,8 +27,7 @@ namespace Game
             {
                 return;
             }
-            (void) api.remove_mesh_instance(name);
-            (void) api.remove_gltf_instance(name);
+            (void) api.remove_render_instance(name);
         }
     } // namespace
 
@@ -140,6 +139,12 @@ namespace Game
         return *this;
     }
 
+    GameWorld::EntityBuilder &GameWorld::EntityBuilder::render_sync_mode(const Entity::RenderSyncMode mode)
+    {
+        _render_sync_mode = mode;
+        return *this;
+    }
+
     GameWorld::EntityBuilder &GameWorld::EntityBuilder::physics(const Physics::BodySettings &settings,
                                                                 bool use_interpolation,
                                                                 bool override_user_data)
@@ -182,6 +187,7 @@ namespace Game
 
         Entity &entity = world._entities.create_entity(_name);
         entity.set_transform(_transform);
+        entity.set_render_sync_mode(_render_sync_mode);
 
         if (_render_kind == RenderKind::Primitive)
         {
@@ -262,7 +268,9 @@ namespace Game
         return &entity;
     }
 
-    bool GameWorld::bind_render(EntityId id, const std::string &render_name)
+    bool GameWorld::bind_render(EntityId id,
+                                const std::string &render_name,
+                                const Entity::RenderSyncMode sync_mode)
     {
         Entity *entity = _entities.find(id);
         if (!entity)
@@ -270,10 +278,15 @@ namespace Game
             return false;
         }
         entity->set_render_name(render_name);
+        entity->set_render_sync_mode(sync_mode);
         return true;
     }
 
-    bool GameWorld::bind_physics(EntityId id, uint32_t body_value, bool use_interpolation, bool override_user_data)
+    bool GameWorld::bind_physics(EntityId id,
+                                 uint32_t body_value,
+                                 bool use_interpolation,
+                                 bool override_user_data,
+                                 const glm::vec3 &origin_offset_local)
     {
         Entity *entity = _entities.find(id);
         if (!entity)
@@ -282,6 +295,7 @@ namespace Game
         }
 
         entity->set_physics_body(body_value);
+        entity->set_physics_origin_offset_local(origin_offset_local);
         entity->set_use_interpolation(use_interpolation);
 
         if (use_interpolation)

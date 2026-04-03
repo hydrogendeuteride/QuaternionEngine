@@ -81,6 +81,9 @@ The scene uses a **reversed infinite‑Z perspective** projection (right‑hande
 
 All instances store position as `WorldVec3` (double‑precision) with separate `rotation` (quat) and `scale` (vec3) internally. The `glm::mat4 transform` parameter in add/set helpers is decomposed into TRS on input and recomposed (with floating‑origin shift) for rendering.
 
+- Generic routing helpers:
+  `setDynamicInstanceTransform`, `setDynamicInstanceTRSWorld`, and `removeDynamicInstance` dispatch by runtime instance name so gameplay code can update/remove a bound render object without hard-coding whether it is a mesh or glTF instance.
+
 #### Mesh Instances
 
 - `MeshInstance` struct: `mesh`, `translation_world` (WorldVec3), `rotation`, `scale`, optional `boundsTypeOverride`.

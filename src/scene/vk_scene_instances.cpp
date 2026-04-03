@@ -187,6 +187,25 @@ void SceneManager::clearMeshInstances()
     dynamicMeshInstances.clear();
 }
 
+bool SceneManager::setDynamicInstanceTransform(const std::string &name, const glm::mat4 &transform)
+{
+    return setMeshInstanceTransform(name, transform) || setGLTFInstanceTransform(name, transform);
+}
+
+bool SceneManager::setDynamicInstanceTRSWorld(const std::string &name,
+                                              const WorldVec3 &translationWorld,
+                                              const glm::quat &rotation,
+                                              const glm::vec3 &scale)
+{
+    return setMeshInstanceTRSWorld(name, translationWorld, rotation, scale) ||
+           setGLTFInstanceTRSWorld(name, translationWorld, rotation, scale);
+}
+
+bool SceneManager::removeDynamicInstance(const std::string &name)
+{
+    return removeMeshInstance(name) || removeGLTFInstance(name);
+}
+
 bool SceneManager::setDecal(const std::string &name, const DecalInstance &decal)
 {
     if (name.empty())

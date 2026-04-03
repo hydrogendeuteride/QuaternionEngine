@@ -497,6 +497,29 @@ namespace Game
                     }
                 }
 #endif
+
+                {
+                    const EntityId player_eid = player_entity();
+                    if (player_eid.is_valid())
+                    {
+                        const Entity *player = _world.entities().find(player_eid);
+                        if (player)
+                        {
+                            ImGui::Separator();
+                            const glm::vec3 com_local = player->physics_origin_offset_local();
+                            const float alpha_f = std::clamp(ctx.interpolation_alpha(), 0.0f, 1.0f);
+                            const WorldVec3 model_origin_world = player->get_render_position_world(alpha_f);
+                            const WorldVec3 com_world = player->get_render_physics_center_of_mass_world(alpha_f);
+                            ImGui::Text("Model origin(world): %.2f, %.2f, %.2f",
+                                        model_origin_world.x, model_origin_world.y, model_origin_world.z);
+                            ImGui::Text("COM local: %.3f, %.3f, %.3f",
+                                        com_local.x, com_local.y, com_local.z);
+                            ImGui::Text("COM world: %.2f, %.2f, %.2f",
+                                        com_world.x, com_world.y, com_world.z);
+                        }
+                    }
+                }
+
                 // ================================================================
                 // Orbit section
                 // ================================================================

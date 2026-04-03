@@ -67,7 +67,7 @@ namespace Game
         {
             if (const Entity *entity = _world.entities().find(EntityId{track.key.value}))
             {
-                out.subject_pos_world = entity->get_render_position_world(global_ctx.alpha_f);
+                out.subject_pos_world = entity->get_render_physics_center_of_mass_world(global_ctx.alpha_f);
             }
         }
 
