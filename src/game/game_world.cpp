@@ -131,6 +131,16 @@ namespace Game
         return *this;
     }
 
+    GameWorld::EntityBuilder &GameWorld::EntityBuilder::render_textured_primitive(
+            GameAPI::PrimitiveType type,
+            const GameAPI::PrimitiveMaterial &material)
+    {
+        _render_kind = RenderKind::TexturedPrimitive;
+        _primitive_type = type;
+        _primitive_material = material;
+        return *this;
+    }
+
     GameWorld::EntityBuilder &GameWorld::EntityBuilder::render_gltf(const std::string &path, bool preload_textures)
     {
         _render_kind = RenderKind::GLTF;
@@ -193,6 +203,15 @@ namespace Game
         {
             entity.set_render_name(_name);
             if (!world._api->add_primitive_instance(_name, _primitive_type, to_api_transform_d(_transform)))
+            {
+                world._entities.destroy_entity(entity.id());
+                return nullptr;
+            }
+        }
+        else if (_render_kind == RenderKind::TexturedPrimitive)
+        {
+            entity.set_render_name(_name);
+            if (!world._api->add_textured_primitive(_name, _primitive_type, _primitive_material, to_api_transform_d(_transform)))
             {
                 world._entities.destroy_entity(entity.id());
                 return nullptr;

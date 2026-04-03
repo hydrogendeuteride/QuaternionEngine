@@ -492,6 +492,11 @@ void AtmospherePass::execute(VkCommandBuffer)
     // Executed via render graph.
 }
 
+void AtmospherePass::preload_cloud_textures()
+{
+    ensure_cloud_textures(_context);
+}
+
 void AtmospherePass::ensure_cloud_textures(EngineContext *context)
 {
     EngineContext *ctx = context ? context : _context;

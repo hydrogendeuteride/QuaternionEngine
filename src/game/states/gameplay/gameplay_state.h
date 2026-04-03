@@ -71,6 +71,7 @@ namespace Game
         using ManeuverAxisMarker = Game::ManeuverAxisMarker;
 
         GameplayState();
+        explicit GameplayState(ScenarioConfig scenario_config);
 
         ~GameplayState() override;
 
@@ -310,6 +311,7 @@ namespace Game
         VelocityOriginMode _velocity_origin_mode{VelocityOriginMode::FreeFallAnchorFrame};
 
         // Scenario configuration
+        bool _scenario_preloaded{false};
         ScenarioConfig _scenario_config;
         std::string _scenario_slot_rel_path{"scenarios/user_gameplay.json"};
         std::string _settings_rel_path{"settings/gameplay.json"};

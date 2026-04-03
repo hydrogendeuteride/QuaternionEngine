@@ -174,6 +174,19 @@ namespace Game
             cfg.orbiters.push_back(std::move(collision_test));
         }
 
+        // Environment
+        {
+            ScenarioConfig::EnvironmentDef env{};
+            env.ibl_specular = "ibl/blue_nebula_4k.ktx2";
+            env.ibl_diffuse = "ibl/blue_nebula_4k.ktx2";
+            env.ibl_brdf_lut = "ibl/brdf_lut.ktx2";
+            env.ibl_background = "ibl/darkstar.ktx2";
+            env.has_atmosphere = true;
+            env.has_particles = true;
+            env.rocket_plume_noise = "vfx/simplex.ktx2";
+            cfg.environment = std::move(env);
+        }
+
         return cfg;
     }
 
@@ -402,6 +415,19 @@ namespace Game
             {
                 builder.render_gltf(orbiter_def.gltf_path);
             }
+            else if (orbiter_def.material.has_any_texture())
+            {
+                GameAPI::PrimitiveMaterial mat{};
+                mat.albedoPath = orbiter_def.material.albedo;
+                mat.normalPath = orbiter_def.material.normal;
+                mat.metalRoughPath = orbiter_def.material.metal_rough;
+                mat.occlusionPath = orbiter_def.material.occlusion;
+                mat.emissivePath = orbiter_def.material.emissive;
+                mat.colorFactor = orbiter_def.material.color_factor;
+                mat.metallic = orbiter_def.material.metallic;
+                mat.roughness = orbiter_def.material.roughness;
+                builder.render_textured_primitive(orbiter_def.primitive, mat);
+            }
             else
             {
                 builder.render_primitive(orbiter_def.primitive);
@@ -523,12 +549,30 @@ namespace Game
     {
         if (ctx.renderer && ctx.renderer->_assetManager)
         {
+            const auto &env = _scenario_config.environment;
             GameAPI::IBLPaths ibl{};
-            ibl.specularCube = ctx.renderer->_assetManager->assetPath("ibl/blue_nebula_4k.ktx2");
-            ibl.diffuseCube = ctx.renderer->_assetManager->assetPath("ibl/blue_nebula_4k.ktx2");
-            ibl.brdfLut = ctx.renderer->_assetManager->assetPath("ibl/brdf_lut.ktx2");
-            ibl.background = ctx.renderer->_assetManager->assetPath("ibl/darkstar.ktx2");
-            ctx.api->load_global_ibl(ibl);
+            ibl.specularCube = ctx.renderer->_assetManager->assetPath(env.ibl_specular);
+            ibl.diffuseCube = ctx.renderer->_assetManager->assetPath(env.ibl_diffuse);
+            ibl.brdfLut = ctx.renderer->_assetManager->assetPath(env.ibl_brdf_lut);
+            ibl.background = ctx.renderer->_assetManager->assetPath(env.ibl_background);
+
+            const bool same_global_ibl =
+                    ctx.renderer->_globalIBLPaths.specularCube == ibl.specularCube &&
+                    ctx.renderer->_globalIBLPaths.diffuseCube == ibl.diffuseCube &&
+                    ctx.renderer->_globalIBLPaths.brdfLut2D == ibl.brdfLut &&
+                    ctx.renderer->_globalIBLPaths.background2D == ibl.background;
+            const bool same_pending_ibl =
+                    ctx.renderer->_pendingIBLRequest.active &&
+                    ctx.renderer->_pendingIBLRequest.targetVolume < 0 &&
+                    ctx.renderer->_pendingIBLRequest.paths.specularCube == ibl.specularCube &&
+                    ctx.renderer->_pendingIBLRequest.paths.diffuseCube == ibl.diffuseCube &&
+                    ctx.renderer->_pendingIBLRequest.paths.brdfLut2D == ibl.brdfLut &&
+                    ctx.renderer->_pendingIBLRequest.paths.background2D == ibl.background;
+
+            if (!(same_global_ibl && (same_pending_ibl || (ctx.renderer->_iblManager && ctx.renderer->_iblManager->resident()))))
+            {
+                ctx.api->load_global_ibl(ibl);
+            }
         }
 
         const auto &cfg = _scenario_config;
