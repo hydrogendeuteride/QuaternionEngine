@@ -20,6 +20,7 @@ public:
     void init(EngineContext *context) override;
     void cleanup() override;
     void execute(VkCommandBuffer cmd) override;
+    void preload_cloud_textures();
 
     const char *getName() const override { return "Atmosphere"; }
 

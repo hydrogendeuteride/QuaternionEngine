@@ -218,5 +218,14 @@
       "is_player": false,
       "is_rebase_anchor": false
     }
-  ]
+  ],
+  "environment": {
+    "ibl_specular": "ibl/blue_nebula_4k.ktx2",
+    "ibl_diffuse": "ibl/blue_nebula_4k.ktx2",
+    "ibl_brdf_lut": "ibl/brdf_lut.ktx2",
+    "ibl_background": "ibl/darkstar.ktx2",
+    "has_atmosphere": true,
+    "has_particles": true,
+    "rocket_plume_noise": "vfx/simplex.ktx2"
+  }
 }

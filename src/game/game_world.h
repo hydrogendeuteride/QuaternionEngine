@@ -1,6 +1,7 @@
 #pragma once
 
 #include "entity_manager.h"
+#include "core/game_api.h"
 #include "physics/body_settings.h"
 
 #include <string>
@@ -13,12 +14,6 @@ namespace Physics
     class PhysicsWorld;
     class PhysicsContext;
 } // namespace Physics
-
-namespace GameAPI
-{
-    class Engine;
-    enum class PrimitiveType;
-} // namespace GameAPI
 
 namespace Game
 {
@@ -118,6 +113,9 @@ namespace Game
 
         EntityBuilder &render_primitive(GameAPI::PrimitiveType type);
 
+        EntityBuilder &render_textured_primitive(GameAPI::PrimitiveType type,
+                                                  const GameAPI::PrimitiveMaterial &material);
+
         EntityBuilder &render_gltf(const std::string &path, bool preload_textures = true);
 
         EntityBuilder &render_sync_mode(Entity::RenderSyncMode mode);
@@ -140,11 +138,13 @@ namespace Game
         {
             None,
             Primitive,
+            TexturedPrimitive,
             GLTF
         };
 
         RenderKind _render_kind{RenderKind::None};
         GameAPI::PrimitiveType _primitive_type{};
+        GameAPI::PrimitiveMaterial _primitive_material{};
         std::string _gltf_path{};
         bool _gltf_preload{true};
         Entity::RenderSyncMode _render_sync_mode{Entity::RenderSyncMode::Interpolated};
