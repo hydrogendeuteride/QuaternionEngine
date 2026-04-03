@@ -184,18 +184,40 @@ namespace Game
         void clear_physics_body()
         {
             _physics_body_value.reset();
-            _physics_origin_offset_local = glm::vec3(0.0f);
+            // Keep the render-origin to body-origin offset so rails/orbit gameplay can still
+            // interpret the entity pose around the same physical pivot while physics is detached.
         }
         const glm::vec3 &physics_origin_offset_local() const { return _physics_origin_offset_local; }
         void set_physics_origin_offset_local(const glm::vec3 &offset) { _physics_origin_offset_local = offset; }
+        WorldVec3 physics_body_position_world() const
+        {
+            return physics_body_position_world(_transform.position_world, _transform.rotation);
+        }
         WorldVec3 physics_body_position_world(const WorldVec3 &entity_position_world, const glm::quat &rotation) const
         {
-            return entity_position_world + WorldVec3(rotation * _physics_origin_offset_local);
+            (void) rotation;
+            return entity_position_world;
         }
         WorldVec3 entity_position_from_physics_body_world(const WorldVec3 &body_position_world, const glm::quat &rotation) const
         {
-            return body_position_world - WorldVec3(rotation * _physics_origin_offset_local);
+            (void) rotation;
+            return body_position_world;
         }
+        WorldVec3 physics_center_of_mass_world() const
+        {
+            return physics_center_of_mass_world(_transform.position_world, _transform.rotation);
+        }
+        WorldVec3 physics_center_of_mass_world(const WorldVec3 &entity_position_world, const glm::quat &rotation) const
+        {
+            return entity_position_world + WorldVec3(rotation * _physics_origin_offset_local);
+        }
+        WorldVec3 entity_position_from_physics_center_of_mass_world(const WorldVec3 &center_of_mass_world,
+                                                                    const glm::quat &rotation) const
+        {
+            return center_of_mass_world - WorldVec3(rotation * _physics_origin_offset_local);
+        }
+        WorldVec3 get_render_physics_body_position_world(float alpha) const;
+        WorldVec3 get_render_physics_center_of_mass_world(float alpha) const;
 
         // ------------------------------------------------------------------------
         // Render binding

@@ -18,20 +18,6 @@
 
 namespace
 {
-    WorldVec3 model_origin_to_dynamic_root_body_world(const WorldVec3 &model_origin_world,
-                                                      const glm::quat &rotation,
-                                                      const glm::vec3 &center_of_mass_local)
-    {
-        return model_origin_world + WorldVec3(rotation * center_of_mass_local);
-    }
-
-    WorldVec3 dynamic_root_body_to_model_origin_world(const WorldVec3 &body_position_world,
-                                                      const glm::quat &rotation,
-                                                      const glm::vec3 &center_of_mass_local)
-    {
-        return body_position_world - WorldVec3(rotation * center_of_mass_local);
-    }
-
     bool approx_equal_rel(float a, float b, float eps)
     {
         const float aa = std::abs(a);
@@ -472,7 +458,6 @@ Physics::BodyId SceneManager::createDynamicRootColliderBodyForInstance(const std
         return {};
     }
 
-    const glm::quat normalized_rotation = glm::normalize(inst.rotation);
     const glm::vec3 center_of_mass_local = Physics::compound_center_of_mass(scaled);
     if (out_center_of_mass_local)
     {
@@ -484,10 +469,8 @@ Physics::BodyId SceneManager::createDynamicRootColliderBodyForInstance(const std
 
     Physics::BodySettings settings{};
     settings.shape = Physics::CollisionShape::Compound(std::move(scaled));
-    settings.position = world_to_local_d(
-        model_origin_to_dynamic_root_body_world(inst.translation_world, normalized_rotation, center_of_mass_local),
-        physics_origin_world);
-    settings.rotation = normalized_rotation;
+    settings.position = world_to_local_d(inst.translation_world, physics_origin_world);
+    settings.rotation = glm::normalize(inst.rotation);
     settings.motion_type = Physics::MotionType::Dynamic;
     settings.layer = layer;
     settings.user_data = user_data;
@@ -754,10 +737,7 @@ bool SceneManager::rebuildDynamicRootColliderBody(const std::string &instanceNam
                 (_context && _context->physics_context) ? _context->physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
 
             inst.rotation = glm::normalize(entry.world->get_rotation(entry.body));
-            const WorldVec3 body_position_world = local_to_world_d(entry.world->get_position(entry.body), physics_origin_world);
-            inst.translation_world = dynamic_root_body_to_model_origin_world(body_position_world,
-                                                                             inst.rotation,
-                                                                             entry.center_of_mass_local);
+            inst.translation_world = local_to_world_d(entry.world->get_position(entry.body), physics_origin_world);
         }
 
         entry.world->destroy_body(entry.body);
@@ -816,10 +796,7 @@ void SceneManager::syncDynamicRootColliderBodies()
             (_context && _context->physics_context) ? _context->physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
 
         inst_it->second.rotation = glm::normalize(entry.world->get_rotation(entry.body));
-        const WorldVec3 body_position_world = local_to_world_d(entry.world->get_position(entry.body), physics_origin_world);
-        inst_it->second.translation_world = dynamic_root_body_to_model_origin_world(body_position_world,
-                                                                                    inst_it->second.rotation,
-                                                                                    entry.center_of_mass_local);
+        inst_it->second.translation_world = local_to_world_d(entry.world->get_position(entry.body), physics_origin_world);
         inst_it->second.scale = entry.scale;
 
         if (debug_dynamic_root_logs < 12)

@@ -453,9 +453,7 @@ bool SceneManager::setGLTFInstanceTransform(const std::string &name, const glm::
         {
             const WorldVec3 physics_origin_world =
                 (_context && _context->physics_context) ? _context->physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
-            const WorldVec3 body_position_world =
-                inst.translation_world + WorldVec3(inst.rotation * entry.center_of_mass_local);
-            entry.world->set_transform(entry.body, world_to_local_d(body_position_world, physics_origin_world), inst.rotation);
+            entry.world->set_transform(entry.body, world_to_local_d(inst.translation_world, physics_origin_world), inst.rotation);
         }
     }
 
@@ -507,9 +505,7 @@ bool SceneManager::setGLTFInstanceTransformLocal(const std::string &name, const 
         {
             const WorldVec3 physics_origin_world =
                 (_context && _context->physics_context) ? _context->physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
-            const WorldVec3 body_position_world =
-                inst.translation_world + WorldVec3(inst.rotation * entry.center_of_mass_local);
-            entry.world->set_transform(entry.body, world_to_local_d(body_position_world, physics_origin_world), inst.rotation);
+            entry.world->set_transform(entry.body, world_to_local_d(inst.translation_world, physics_origin_world), inst.rotation);
         }
     }
 
@@ -569,9 +565,7 @@ bool SceneManager::setGLTFInstanceTRSWorld(const std::string &name,
         {
             const WorldVec3 physics_origin_world =
                 (_context && _context->physics_context) ? _context->physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
-            const WorldVec3 body_position_world =
-                inst.translation_world + WorldVec3(inst.rotation * entry.center_of_mass_local);
-            entry.world->set_transform(entry.body, world_to_local_d(body_position_world, physics_origin_world), inst.rotation);
+            entry.world->set_transform(entry.body, world_to_local_d(inst.translation_world, physics_origin_world), inst.rotation);
         }
     }
 

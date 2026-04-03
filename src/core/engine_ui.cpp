@@ -961,6 +961,12 @@ namespace
                 target.name = name_buf;
             }
 
+            float local_offset[3] = {target.local_offset.x, target.local_offset.y, target.local_offset.z};
+            if (ImGui::InputFloat3("Local offset", local_offset))
+            {
+                target.local_offset = glm::vec3(local_offset[0], local_offset[1], local_offset[2]);
+            }
+
             WorldVec3 tpos{};
             glm::quat trot{};
             bool ok = rig.resolve_target(*sceneMgr, target, tpos, trot);

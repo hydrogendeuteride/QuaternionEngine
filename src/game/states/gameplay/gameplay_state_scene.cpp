@@ -925,6 +925,10 @@ namespace Game
                           ? GameAPI::CameraTargetType::GLTFInstance
                           : GameAPI::CameraTargetType::MeshInstance;
         target.name = player_orbiter->name;
+        if (const Entity *player_entity_ptr = _world.entities().find(player_orbiter->entity))
+        {
+            target.localOffset = player_entity_ptr->physics_origin_offset_local();
+        }
 
         GameAPI::OrbitCameraSettings orbit = ctx.api->get_orbit_camera_settings();
         orbit.target = target;

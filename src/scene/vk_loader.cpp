@@ -47,28 +47,12 @@ void LoadedGLTF::build_mesh_colliders_from_markers(bool clear_existing)
 
 void LoadedGLTF::build_colliders_from_sidecar(const LoadedGLTF &sidecar, bool clear_existing)
 {
-    std::unordered_set<std::string_view> dst_names;
-    dst_names.reserve(nodes.size());
-    for (const auto &[name, ptr] : nodes)
-    {
-        (void) ptr;
-        dst_names.insert(name);
-    }
-
-    Physics::build_colliders_from_sidecar(collider_compounds, sidecar, dst_names, clear_existing);
+    Physics::build_colliders_from_sidecar(collider_compounds, sidecar, *this, clear_existing);
 }
 
 void LoadedGLTF::build_mesh_colliders_from_sidecar(const LoadedGLTF &sidecar, bool clear_existing)
 {
-    std::unordered_set<std::string_view> dst_names;
-    dst_names.reserve(nodes.size());
-    for (const auto &[name, ptr] : nodes)
-    {
-        (void) ptr;
-        dst_names.insert(name);
-    }
-
-    Physics::build_mesh_colliders_from_sidecar(collider_mesh_instances, sidecar, dst_names, clear_existing);
+    Physics::build_mesh_colliders_from_sidecar(collider_mesh_instances, sidecar, *this, clear_existing);
 }
 
 void LoadedGLTF::apply_collider_child_mass_overrides(const std::unordered_map<std::string, float> &overrides)

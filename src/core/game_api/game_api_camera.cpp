@@ -251,6 +251,7 @@ namespace
         t.type = to_internal_target_type(target.type);
         t.name = target.name;
         t.world_point = WorldVec3(target.worldPoint);
+        t.local_offset = target.localOffset;
         return t;
     }
 
@@ -260,6 +261,7 @@ namespace
         t.type = to_api_target_type(target.type);
         t.name = target.name;
         t.worldPoint = glm::dvec3(target.world_point);
+        t.localOffset = target.local_offset;
         return t;
     }
 } // namespace

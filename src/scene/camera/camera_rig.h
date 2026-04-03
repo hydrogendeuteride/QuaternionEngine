@@ -34,6 +34,7 @@ struct CameraTarget
     CameraTargetType type{CameraTargetType::None};
     std::string name{};
     WorldVec3 world_point{0.0, 0.0, 0.0};
+    glm::vec3 local_offset{0.0f, 0.0f, 0.0f};
 };
 
 struct FreeCameraSettings
