@@ -413,7 +413,8 @@ Physics::BodyId SceneManager::createDynamicRootColliderBodyForInstance(const std
                                                                        Physics::PhysicsWorld *world,
                                                                        uint32_t layer,
                                                                        uint64_t user_data,
-                                                                       std::optional<float> mass_override) const
+                                                                       std::optional<float> mass_override,
+                                                                       glm::vec3 *out_center_of_mass_local) const
 {
     if (!world || !inst.scene)
     {
@@ -455,6 +456,12 @@ Physics::BodyId SceneManager::createDynamicRootColliderBodyForInstance(const std
         Logger::warn("[SceneManager] enableDynamicRootColliderBody: instance '{}' produced an empty scaled collider shape",
                      instanceName);
         return {};
+    }
+
+    const glm::vec3 center_of_mass_local = Physics::compound_center_of_mass(scaled);
+    if (out_center_of_mass_local)
+    {
+        *out_center_of_mass_local = center_of_mass_local;
     }
 
     const WorldVec3 physics_origin_world =
@@ -514,12 +521,14 @@ Physics::BodyId SceneManager::enableDynamicRootColliderBody(const std::string &i
         return {};
     }
 
+    glm::vec3 center_of_mass_local{0.0f, 0.0f, 0.0f};
     const Physics::BodyId body = createDynamicRootColliderBodyForInstance(instanceName,
                                                                           inst,
                                                                           world,
                                                                           layer,
                                                                           user_data,
-                                                                          mass_override);
+                                                                          mass_override,
+                                                                          &center_of_mass_local);
     if (!body.is_valid())
     {
         Logger::warn("[SceneManager] enableDynamicRootColliderBody: failed to create body for '{}'", instanceName);
@@ -530,6 +539,7 @@ Physics::BodyId SceneManager::enableDynamicRootColliderBody(const std::string &i
     entry.world = world;
     entry.body = body;
     entry.scale = inst.scale;
+    entry.center_of_mass_local = center_of_mass_local;
     entry.layer = layer;
     entry.user_data = user_data;
     entry.mass_override = mass_override.has_value() ? std::optional<float>(std::max(*mass_override, 0.001f))
@@ -563,6 +573,19 @@ Physics::BodyId SceneManager::getDynamicRootColliderBody(const std::string &inst
 {
     auto it = _dynamicRootColliderBodies.find(instanceName);
     return it != _dynamicRootColliderBodies.end() ? it->second.body : Physics::BodyId{};
+}
+
+bool SceneManager::getDynamicRootColliderCenterOfMassLocal(const std::string &instanceName,
+                                                           glm::vec3 &outCenterOfMassLocal) const
+{
+    const auto it = _dynamicRootColliderBodies.find(instanceName);
+    if (it == _dynamicRootColliderBodies.end())
+    {
+        return false;
+    }
+
+    outCenterOfMassLocal = it->second.center_of_mass_local;
+    return true;
 }
 
 bool SceneManager::setDynamicRootColliderMass(const std::string &instanceName, float mass)
@@ -713,20 +736,22 @@ bool SceneManager::rebuildDynamicRootColliderBody(const std::string &instanceNam
             const WorldVec3 physics_origin_world =
                 (_context && _context->physics_context) ? _context->physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
 
-            inst.translation_world = local_to_world_d(entry.world->get_position(entry.body), physics_origin_world);
             inst.rotation = glm::normalize(entry.world->get_rotation(entry.body));
+            inst.translation_world = local_to_world_d(entry.world->get_position(entry.body), physics_origin_world);
         }
 
         entry.world->destroy_body(entry.body);
         entry.body = {};
     }
 
+    glm::vec3 center_of_mass_local{0.0f, 0.0f, 0.0f};
     const Physics::BodyId new_body = createDynamicRootColliderBodyForInstance(instanceName,
                                                                               inst,
                                                                               entry.world,
                                                                               entry.layer,
                                                                               entry.user_data,
-                                                                              entry.mass_override);
+                                                                              entry.mass_override,
+                                                                              &center_of_mass_local);
     if (!new_body.is_valid())
     {
         Logger::warn("[SceneManager] rebuildDynamicRootColliderBody: failed to recreate body for '{}'",
@@ -736,6 +761,7 @@ bool SceneManager::rebuildDynamicRootColliderBody(const std::string &instanceNam
 
     entry.body = new_body;
     entry.scale = inst.scale;
+    entry.center_of_mass_local = center_of_mass_local;
     entry.world->set_linear_velocity(new_body, linear_velocity);
     entry.world->set_angular_velocity(new_body, angular_velocity);
     if (was_active)
@@ -769,8 +795,8 @@ void SceneManager::syncDynamicRootColliderBodies()
         const WorldVec3 physics_origin_world =
             (_context && _context->physics_context) ? _context->physics_context->origin_world() : WorldVec3{0.0, 0.0, 0.0};
 
-        inst_it->second.translation_world = local_to_world_d(entry.world->get_position(entry.body), physics_origin_world);
         inst_it->second.rotation = glm::normalize(entry.world->get_rotation(entry.body));
+        inst_it->second.translation_world = local_to_world_d(entry.world->get_position(entry.body), physics_origin_world);
         inst_it->second.scale = entry.scale;
 
         if (debug_dynamic_root_logs < 12)

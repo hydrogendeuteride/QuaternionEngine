@@ -193,7 +193,7 @@ namespace Game
         const EntityId player_eid = player_entity();
         if (const Entity *player = _world.entities().find(player_eid))
         {
-            ship_pos_world = player->get_render_position_world(alpha_f);
+            ship_pos_world = player->get_render_physics_center_of_mass_world(alpha_f);
         }
 
         WorldVec3 align_delta = ship_pos_world - predicted_now;

@@ -649,6 +649,7 @@ struct CameraTarget
     CameraTargetType type{CameraTargetType::None};
     std::string name{};
     glm::dvec3 worldPoint{0.0, 0.0, 0.0};
+    glm::vec3 localOffset{0.0f, 0.0f, 0.0f};
 };
 
 struct FreeCameraSettings
@@ -879,6 +880,9 @@ public:
     // Remove glTF instance
     bool remove_gltf_instance(const std::string& name);
 
+    // Remove any dynamic render instance registered under this name.
+    bool remove_render_instance(const std::string& name);
+
     // Get/set glTF instance transform
     bool get_gltf_instance_transform(const std::string& name, Transform& out) const;
     bool set_gltf_instance_transform(const std::string& name, const Transform& transform);
@@ -941,6 +945,10 @@ public:
     bool set_mesh_instance_transform(const std::string& name, const Transform& transform);
     bool get_mesh_instance_transform(const std::string& name, TransformD& out) const;
     bool set_mesh_instance_transform(const std::string& name, const TransformD& transform);
+
+    // Route a transform update to whichever runtime render instance owns this name.
+    bool set_render_instance_transform(const std::string& name, const Transform& transform);
+    bool set_render_instance_transform(const std::string& name, const TransformD& transform);
 
     // Preload textures for an instance (useful before it becomes visible)
     void preload_instance_textures(const std::string& name);

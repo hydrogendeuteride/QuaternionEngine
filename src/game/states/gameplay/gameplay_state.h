@@ -268,7 +268,8 @@ namespace Game
                                                     Entity &entity,
                                                     const Physics::BodySettings &settings,
                                                     const WorldVec3 &position_world,
-                                                    const glm::quat &rotation);
+                                                    const glm::quat &rotation,
+                                                    glm::vec3 *out_origin_offset_local = nullptr);
         bool destroy_orbiter_physics_body(bool render_is_gltf, Entity &entity);
 
         // Orbiter helpers

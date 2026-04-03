@@ -118,6 +118,16 @@ namespace Game
         return _transform.rotation;
     }
 
+    WorldVec3 Entity::get_render_physics_body_position_world(const float alpha) const
+    {
+        return physics_body_position_world(get_render_position_world(alpha), get_render_rotation(alpha));
+    }
+
+    WorldVec3 Entity::get_render_physics_center_of_mass_world(const float alpha) const
+    {
+        return physics_center_of_mass_world(get_render_position_world(alpha), get_render_rotation(alpha));
+    }
+
     glm::mat4 Entity::get_render_local_matrix(float alpha, const WorldVec3 &origin_world) const
     {
         const WorldVec3 pos_world = get_render_position_world(alpha);

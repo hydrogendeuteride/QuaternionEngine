@@ -20,6 +20,32 @@ namespace Game
 
     namespace
     {
+        WorldVec3 body_world_from_body_local(const glm::dvec3 &body_position_local,
+                                             const WorldVec3 &physics_origin_world)
+        {
+            return local_to_world_d(body_position_local, physics_origin_world);
+        }
+
+        glm::dvec3 body_local_from_body_world(const WorldVec3 &body_position_world,
+                                              const WorldVec3 &physics_origin_world)
+        {
+            return world_to_local_d(body_position_world, physics_origin_world);
+        }
+
+        WorldVec3 entity_world_from_body_world(const Entity &entity,
+                                               const WorldVec3 &body_position_world,
+                                               const glm::quat &rotation)
+        {
+            return entity.entity_position_from_physics_center_of_mass_world(body_position_world, rotation);
+        }
+
+        WorldVec3 body_world_from_entity_world(const Entity &entity,
+                                               const WorldVec3 &entity_position_world,
+                                               const glm::quat &rotation)
+        {
+            return entity.physics_center_of_mass_world(entity_position_world, rotation);
+        }
+
         // Integrates rails-warp angular velocity and orientation using gameplay-tuned torque/SAS rules.
         void update_rails_rotation(OrbiterInfo::RailsState &rs,
                                    const glm::vec3 &world_torque_dir,
@@ -134,7 +160,8 @@ namespace Game
 
         const EntityId anchor_eid = select_rebase_anchor_entity();
         const Entity *anchor_entity = _world.entities().find(anchor_eid);
-        const WorldVec3 anchor_pos_world = anchor_entity ? anchor_entity->position_world() : _scenario_config.system_center;
+        const WorldVec3 anchor_pos_world =
+                anchor_entity ? anchor_entity->physics_center_of_mass_world() : _scenario_config.system_center;
 
         const double promote_distance_m = std::max(0.0, _runtime_orbiter_rails_distance_m);
         const double return_distance_m = promote_distance_m * kRuntimeOrbiterRailsReturnDistanceRatio;
@@ -158,12 +185,12 @@ namespace Game
                 }
                 else if (const Entity *entity = _world.entities().find(orbiter.entity))
                 {
-                    orbiter_pos_world = entity->position_world();
+                    orbiter_pos_world = entity->physics_center_of_mass_world();
                 }
             }
             else if (const Entity *entity = _world.entities().find(orbiter.entity))
             {
-                orbiter_pos_world = entity->position_world();
+                orbiter_pos_world = entity->physics_center_of_mass_world();
             }
 
             const double distance_m = glm::length(glm::dvec3(orbiter_pos_world - anchor_pos_world));
@@ -227,14 +254,16 @@ namespace Game
                                   false,
                                   dt_s);
 
-            const WorldVec3 pos_world = _scenario_config.system_center +
+            const WorldVec3 body_pos_world = _scenario_config.system_center +
                     WorldVec3(sc->state.position_m - ref_sim->state.position_m);
+            const WorldVec3 entity_pos_world =
+                    entity_world_from_body_world(*ent, body_pos_world, orbiter.rails.rotation);
 
-            ent->set_position_world(pos_world);
+            ent->set_position_world(entity_pos_world);
             ent->set_rotation(orbiter.rails.rotation);
             if (ent->uses_interpolation())
             {
-                ent->interpolation().curr_position = pos_world;
+                ent->interpolation().curr_position = entity_pos_world;
                 ent->interpolation().curr_rotation = orbiter.rails.rotation;
             }
         }
@@ -260,14 +289,16 @@ namespace Game
             return false;
         }
 
-        const WorldVec3 pos_world = local_to_world_d(_physics->get_position(body_id), _physics_context->origin_world());
+        const glm::quat rot = _physics->get_rotation(body_id);
+        const WorldVec3 body_origin_world =
+                body_world_from_body_local(_physics->get_position(body_id), _physics_context->origin_world());
+        const WorldVec3 body_pos_world = body_world_from_entity_world(*ent, body_origin_world, rot);
         const glm::dvec3 vel_world = _physics_context->velocity_origin_world() +
                                      glm::dvec3(_physics->get_linear_velocity(body_id));
-        const glm::quat rot = _physics->get_rotation(body_id);
         const glm::vec3 ang_vel = _physics->get_angular_velocity(body_id);
 
         orbitsim::Spacecraft sc{};
-        sc.state = orbitsim::make_state(ref_sim->state.position_m + glm::dvec3(pos_world - _scenario_config.system_center),
+        sc.state = orbitsim::make_state(ref_sim->state.position_m + glm::dvec3(body_pos_world - _scenario_config.system_center),
                                         ref_sim->state.velocity_mps + vel_world);
         sc.dry_mass_kg = std::max(1.0, orbiter.mass_kg);
 
@@ -285,11 +316,11 @@ namespace Game
         orbiter.rails.sas_enabled = false;
         orbiter.rails.sas_toggle_prev_down = false;
 
-        ent->set_position_world(pos_world);
+        ent->set_position_world(entity_world_from_body_world(*ent, body_pos_world, rot));
         ent->set_rotation(rot);
         if (ent->uses_interpolation())
         {
-            ent->interpolation().set_immediate(pos_world, rot);
+            ent->interpolation().set_immediate(ent->position_world(), rot);
         }
         return true;
     }
@@ -310,10 +341,11 @@ namespace Game
             return false;
         }
 
-        const WorldVec3 pos_world = _scenario_config.system_center +
+        const WorldVec3 body_pos_world = _scenario_config.system_center +
                 WorldVec3(sc->state.position_m - ref_sim->state.position_m);
         const glm::dvec3 vel_world = sc->state.velocity_mps - ref_sim->state.velocity_mps;
         const glm::quat rot = orbiter.rails.rotation;
+        const WorldVec3 entity_pos_world = entity_world_from_body_world(*ent, body_pos_world, rot);
 
         Physics::BodyId body_id{};
         if (ent->has_physics())
@@ -327,28 +359,36 @@ namespace Game
                 ent->clear_physics_body();
             }
 
+            glm::vec3 origin_offset_local{0.0f, 0.0f, 0.0f};
             body_id = create_orbiter_physics_body(orbiter.render_is_gltf,
                                                   *ent,
                                                   orbiter.physics_settings,
-                                                  pos_world,
-                                                  rot);
+                                                  entity_pos_world,
+                                                  rot,
+                                                  &origin_offset_local);
             if (!body_id.is_valid() ||
-                !_world.bind_physics(ent->id(), body_id.value, orbiter.use_physics_interpolation, false))
+                !_world.bind_physics(ent->id(),
+                                     body_id.value,
+                                     orbiter.use_physics_interpolation,
+                                     false,
+                                     origin_offset_local))
             {
                 return false;
             }
         }
 
-        _physics->set_transform(body_id, world_to_local_d(pos_world, _physics_context->origin_world()), rot);
+        _physics->set_transform(body_id,
+                                body_local_from_body_world(entity_pos_world, _physics_context->origin_world()),
+                                rot);
         _physics->set_linear_velocity(body_id, glm::vec3(vel_world - _physics_context->velocity_origin_world()));
         _physics->set_angular_velocity(body_id, orbiter.rails.angular_velocity_radps);
         _physics->activate(body_id);
 
-        ent->set_position_world(pos_world);
+        ent->set_position_world(entity_pos_world);
         ent->set_rotation(rot);
         if (ent->uses_interpolation())
         {
-            ent->interpolation().set_immediate(pos_world, rot);
+            ent->interpolation().set_immediate(entity_pos_world, rot);
         }
 
         (void) _orbitsim->sim.remove_spacecraft(orbiter.rails.sc_id);
@@ -622,7 +662,10 @@ namespace Game
                     {
                         // Make the moving frame free-fall with the anchor so nearby objects see only relative gravity.
                         const glm::dvec3 p_local_anchor = _physics->get_position(anchor_body);
-                        const WorldVec3 p_world_anchor = physics_origin_world + WorldVec3(p_local_anchor);
+                        const glm::quat anchor_rotation = _physics->get_rotation(anchor_body);
+                        const WorldVec3 body_origin_world = physics_origin_world + WorldVec3(p_local_anchor);
+                        const WorldVec3 p_world_anchor =
+                                anchor->physics_center_of_mass_world(body_origin_world, anchor_rotation);
                         anchor_accel_world = gravity_accel_world_at(p_world_anchor);
                         have_anchor_accel = true;
 
@@ -652,7 +695,9 @@ namespace Game
             }
 
             const glm::dvec3 p_local = _physics->get_position(body_id);
-            const WorldVec3 p_world = local_to_world_d(p_local, physics_origin_world);
+            const glm::quat rotation = _physics->get_rotation(body_id);
+            const WorldVec3 body_origin_world = body_world_from_body_local(p_local, physics_origin_world);
+            const WorldVec3 p_world = ent->physics_center_of_mass_world(body_origin_world, rotation);
 
             // In a free-fall frame we subtract the frame acceleration so only relative/tidal acceleration remains.
             const glm::dvec3 a_local = gravity_accel_world_at(p_world) - frame_accel_world;
@@ -741,7 +786,7 @@ namespace Game
 
         for (auto &orbiter : _orbiters)
         {
-            WorldVec3 pos_world{0.0, 0.0, 0.0};
+            WorldVec3 body_pos_world{0.0, 0.0, 0.0};
             glm::dvec3 vel_world(0.0);
             glm::quat rot{1.0f, 0.0f, 0.0f, 0.0f};
             glm::vec3 ang_vel_world(0.0f);
@@ -751,7 +796,7 @@ namespace Game
             {
                 if (const orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id))
                 {
-                    pos_world = _scenario_config.system_center +
+                    body_pos_world = _scenario_config.system_center +
                             WorldVec3(sc->state.position_m - ref_sim->state.position_m);
                     vel_world = sc->state.velocity_mps - ref_sim->state.velocity_mps;
                     rot = orbiter.rails.rotation;
@@ -775,7 +820,7 @@ namespace Game
 
             if (!have_state_snapshot)
             {
-                pos_world = ent->position_world();
+                body_pos_world = body_world_from_entity_world(*ent, ent->position_world(), ent->rotation());
                 rot = ent->rotation();
             }
 
@@ -785,17 +830,19 @@ namespace Game
                 const Physics::BodyId body_id{ent->physics_body_value()};
                 if (_physics->is_body_valid(body_id))
                 {
-                    pos_world = local_to_world_d(_physics->get_position(body_id), _physics_context->origin_world());
+                    rot = _physics->get_rotation(body_id);
+                    const WorldVec3 body_origin_world =
+                            body_world_from_body_local(_physics->get_position(body_id), _physics_context->origin_world());
+                    body_pos_world = body_world_from_entity_world(*ent, body_origin_world, rot);
                     const glm::vec3 v_local_f = _physics->get_linear_velocity(body_id);
                     vel_world = _physics_context->velocity_origin_world() + glm::dvec3(v_local_f);
-                    rot = _physics->get_rotation(body_id);
                     ang_vel_world = _physics->get_angular_velocity(body_id);
                 }
             }
 #endif
 
             // Convert gameplay world state into barycentric spacecraft state relative to the reference body.
-            const glm::dvec3 rel_pos_m = glm::dvec3(pos_world - _scenario_config.system_center);
+            const glm::dvec3 rel_pos_m = glm::dvec3(body_pos_world - _scenario_config.system_center);
             const glm::dvec3 rel_vel_mps = vel_world;
 
             orbitsim::Spacecraft sc{};
@@ -939,19 +986,21 @@ namespace Game
                 continue;
             }
 
-            const WorldVec3 pos_world = _scenario_config.system_center +
+            const WorldVec3 body_pos_world = _scenario_config.system_center +
                     WorldVec3(sc->state.position_m - ref_sim->state.position_m);
             const glm::dvec3 vel_world = sc->state.velocity_mps - ref_sim->state.velocity_mps;
             const glm::quat rot = orbiter.rails.rotation;
 
             Entity *ent = _world.entities().find(orbiter.entity);
+            const WorldVec3 entity_pos_world =
+                    ent ? entity_world_from_body_world(*ent, body_pos_world, rot) : WorldVec3(0.0);
             if (ent)
             {
-                ent->set_position_world(pos_world);
+                ent->set_position_world(entity_pos_world);
                 ent->set_rotation(rot);
                 if (ent->uses_interpolation())
                 {
-                    ent->interpolation().set_immediate(pos_world, rot);
+                    ent->interpolation().set_immediate(entity_pos_world, rot);
                 }
             }
 
@@ -970,24 +1019,27 @@ namespace Game
                         ent->clear_physics_body();
                     }
 
+                    glm::vec3 origin_offset_local{0.0f, 0.0f, 0.0f};
                     body_id = create_orbiter_physics_body(orbiter.render_is_gltf,
                                                           *ent,
                                                           orbiter.physics_settings,
-                                                          pos_world,
-                                                          rot);
+                                                          entity_pos_world,
+                                                          rot,
+                                                          &origin_offset_local);
                     if (body_id.is_valid())
                     {
                         (void) _world.bind_physics(ent->id(),
                                                    body_id.value,
                                                    orbiter.use_physics_interpolation,
-                                                   false);
+                                                   false,
+                                                   origin_offset_local);
                     }
                 }
 
                 if (_physics->is_body_valid(body_id))
                 {
                     // Re-express world-space warp results in the local moving frame used by the physics world.
-                    const glm::dvec3 pos_local = world_to_local_d(pos_world, _physics_context->origin_world());
+                    const glm::dvec3 pos_local = body_local_from_body_world(entity_pos_world, _physics_context->origin_world());
                     _physics->set_transform(body_id, pos_local, rot);
 
                     const glm::dvec3 v_origin_world = _physics_context->velocity_origin_world();
@@ -1172,7 +1224,7 @@ namespace Game
                 continue;
             }
 
-            const WorldVec3 pos_world = _scenario_config.system_center +
+            const WorldVec3 body_pos_world = _scenario_config.system_center +
                     WorldVec3(sc->state.position_m - ref_sim->state.position_m);
 
             Entity *ent = _world.entities().find(orbiter.entity);
@@ -1181,14 +1233,17 @@ namespace Game
                 continue;
             }
 
+            const WorldVec3 entity_pos_world =
+                    entity_world_from_body_world(*ent, body_pos_world, orbiter.rails.rotation);
+
             if (ent->uses_interpolation())
             {
                 ent->interpolation().store_current_as_previous();
-                ent->interpolation().curr_position = pos_world;
+                ent->interpolation().curr_position = entity_pos_world;
                 ent->interpolation().curr_rotation = orbiter.rails.rotation;
             }
 
-            ent->set_position_world(pos_world);
+            ent->set_position_world(entity_pos_world);
             ent->set_rotation(orbiter.rails.rotation);
         }
     }
