@@ -49,6 +49,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   # game/states
   game/states/title_screen_state.h
   game/states/title_screen_state.cpp
+  game/states/gameplay_loading_state.h
+  game/states/gameplay_loading_state.cpp
   game/states/pause_state.h
   game/states/pause_state.cpp
   game/states/settings_state.h
@@ -57,6 +59,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   # game/states/gameplay
   game/states/gameplay/gameplay_state.h
   game/states/gameplay/gameplay_state.cpp
+  game/states/gameplay/gameplay_preload_cache.h
+  game/states/gameplay/gameplay_preload_cache.cpp
   game/states/gameplay/gameplay_state_ui.cpp
   game/states/gameplay/gameplay_state_scene.cpp
   game/states/gameplay/gameplay_state_sim.cpp

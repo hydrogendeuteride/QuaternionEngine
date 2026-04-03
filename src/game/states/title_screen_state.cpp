@@ -1,4 +1,5 @@
 #include "title_screen_state.h"
+#include "gameplay_loading_state.h"
 #include "gameplay/gameplay_state.h"
 #include "settings_state.h"
 
@@ -55,7 +56,7 @@ void TitleScreenState::on_draw_ui(GameStateContext &ctx)
 
         if (ImGui::Button("New Game", ImVec2(button_width, 40)))
         {
-            _pending = StateTransition::switch_to<GameplayState>();
+            _pending = StateTransition::switch_to<GameplayLoadingState>();
         }
 
         // TODO: Load game (needs save system)

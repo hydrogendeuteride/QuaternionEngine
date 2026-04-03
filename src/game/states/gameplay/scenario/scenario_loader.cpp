@@ -474,6 +474,73 @@ namespace Game
             return j;
         }
 
+        // ---- MaterialDef ----
+
+        ScenarioConfig::MaterialDef parse_material_def(const json &j, const std::string &path)
+        {
+            if (!j.is_object())
+            {
+                fail(path + " must be an object");
+            }
+
+            ScenarioConfig::MaterialDef m{};
+            if (const auto it = j.find("albedo"); it != j.end() && !it->is_null())
+            {
+                m.albedo = it->get<std::string>();
+            }
+            if (const auto it = j.find("normal"); it != j.end() && !it->is_null())
+            {
+                m.normal = it->get<std::string>();
+            }
+            if (const auto it = j.find("metal_rough"); it != j.end() && !it->is_null())
+            {
+                m.metal_rough = it->get<std::string>();
+            }
+            if (const auto it = j.find("occlusion"); it != j.end() && !it->is_null())
+            {
+                m.occlusion = it->get<std::string>();
+            }
+            if (const auto it = j.find("emissive"); it != j.end() && !it->is_null())
+            {
+                m.emissive = it->get<std::string>();
+            }
+            if (const auto it = j.find("color_factor"); it != j.end() && !it->is_null())
+            {
+                const glm::vec3 rgb = parse_vec3(*it, child_path(path, "color_factor"));
+                const float a = (j.contains("color_factor_a") && !j["color_factor_a"].is_null())
+                                    ? json_required_finite<float>(j, "color_factor_a", path)
+                                    : 1.0f;
+                m.color_factor = glm::vec4(rgb, a);
+            }
+            if (const auto it = j.find("metallic"); it != j.end() && !it->is_null())
+            {
+                m.metallic = json_required_finite<float>(j, "metallic", path);
+            }
+            if (const auto it = j.find("roughness"); it != j.end() && !it->is_null())
+            {
+                m.roughness = json_required_finite<float>(j, "roughness", path);
+            }
+            return m;
+        }
+
+        json serialize_material_def(const ScenarioConfig::MaterialDef &m)
+        {
+            json j;
+            if (!m.albedo.empty()) j["albedo"] = m.albedo;
+            if (!m.normal.empty()) j["normal"] = m.normal;
+            if (!m.metal_rough.empty()) j["metal_rough"] = m.metal_rough;
+            if (!m.occlusion.empty()) j["occlusion"] = m.occlusion;
+            if (!m.emissive.empty()) j["emissive"] = m.emissive;
+            if (m.color_factor != glm::vec4(1.0f))
+            {
+                j["color_factor"] = {{"x", m.color_factor.x}, {"y", m.color_factor.y}, {"z", m.color_factor.z}};
+                if (m.color_factor.w != 1.0f) j["color_factor_a"] = m.color_factor.w;
+            }
+            if (m.metallic != 0.0f) j["metallic"] = m.metallic;
+            if (m.roughness != 0.5f) j["roughness"] = m.roughness;
+            return j;
+        }
+
         // ---- OrbiterDef ----
 
         ScenarioConfig::OrbiterDef parse_orbiter_def(const json &j, const std::string &path)
@@ -519,6 +586,10 @@ namespace Game
             if (const auto it = j.find("gltf_path"); it != j.end() && !it->is_null())
             {
                 o.gltf_path = json_required<std::string>(j, "gltf_path", path);
+            }
+            if (const auto it = j.find("material"); it != j.end() && !it->is_null())
+            {
+                o.material = parse_material_def(*it, child_path(path, "material"));
             }
             if (const auto it = j.find("primitive"); it != j.end() && !it->is_null())
             {
@@ -608,10 +679,52 @@ namespace Game
             {
                 j["primitive"] = primitive_type_string(o.primitive);
             }
+            if (o.material.has_any_texture())
+            {
+                j["material"] = serialize_material_def(o.material);
+            }
             j["render_scale"] = {{"x", o.render_scale.x}, {"y", o.render_scale.y}, {"z", o.render_scale.z}};
             j["body_settings"] = serialize_body_settings(o.body_settings);
             j["is_player"] = o.is_player;
             j["is_rebase_anchor"] = o.is_rebase_anchor;
+            return j;
+        }
+        // ---- EnvironmentDef ----
+
+        ScenarioConfig::EnvironmentDef parse_environment_def(const json &j, const std::string &path)
+        {
+            if (!j.is_object())
+            {
+                fail(path + " must be an object");
+            }
+
+            ScenarioConfig::EnvironmentDef e{};
+            e.ibl_specular = json_required<std::string>(j, "ibl_specular", path);
+            e.ibl_diffuse = json_required<std::string>(j, "ibl_diffuse", path);
+            e.ibl_brdf_lut = json_required<std::string>(j, "ibl_brdf_lut", path);
+            e.ibl_background = json_required<std::string>(j, "ibl_background", path);
+            e.has_atmosphere = json_required<bool>(j, "has_atmosphere", path);
+            e.has_particles = json_required<bool>(j, "has_particles", path);
+            if (const auto it = j.find("rocket_plume_noise"); it != j.end() && !it->is_null())
+            {
+                e.rocket_plume_noise = it->get<std::string>();
+            }
+            return e;
+        }
+
+        json serialize_environment_def(const ScenarioConfig::EnvironmentDef &e)
+        {
+            json j;
+            j["ibl_specular"] = e.ibl_specular;
+            j["ibl_diffuse"] = e.ibl_diffuse;
+            j["ibl_brdf_lut"] = e.ibl_brdf_lut;
+            j["ibl_background"] = e.ibl_background;
+            j["has_atmosphere"] = e.has_atmosphere;
+            j["has_particles"] = e.has_particles;
+            if (!e.rocket_plume_noise.empty())
+            {
+                j["rocket_plume_noise"] = e.rocket_plume_noise;
+            }
             return j;
         }
     } // anonymous namespace
@@ -690,6 +803,11 @@ namespace Game
                         "root.orbiters[" + std::to_string(i) + "]"));
             }
 
+            if (const auto it = root.find("environment"); it != root.end() && !it->is_null())
+            {
+                cfg.environment = parse_environment_def(*it, "root.environment");
+            }
+
             Logger::info("Loaded scenario '{}': {} celestials, {} orbiters",
                          json_path, cfg.celestials.size(), cfg.orbiters.size());
             return cfg;
@@ -723,6 +841,8 @@ namespace Game
         {
             root["orbiters"].push_back(serialize_orbiter_def(o));
         }
+
+        root["environment"] = serialize_environment_def(config.environment);
 
         return root.dump(2);
     }
