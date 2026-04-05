@@ -75,9 +75,18 @@ struct DecalDraw
     float normalStrength = 1.0f;
 };
 
+struct OceanRenderObject
+{
+    RenderObject surface{};
+    glm::vec3 body_center_local{0.0f, 0.0f, 0.0f};
+    float sea_level_radius = 1.0f;
+    float shell_offset = 0.0f;
+};
+
 struct DrawContext
 {
     std::vector<RenderObject> OpaqueSurfaces;
+    std::vector<OceanRenderObject> OceanSurfaces;
     std::vector<RenderObject> TransparentSurfaces;
     std::vector<RenderObject> MeshVfxSurfaces;
     std::vector<DecalDraw> Decals;

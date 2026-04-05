@@ -6,6 +6,7 @@
 #include "passes/decal.h"
 #include "passes/imgui_pass.h"
 #include "passes/lighting.h"
+#include "passes/ocean.h"
 #include "passes/ssr.h"
 #include "passes/clouds.h"
 #include "passes/rocket_plume.h"
@@ -59,6 +60,10 @@ void RenderPassManager::init(EngineContext *context)
     auto ssrPass = std::make_unique<SSRPass>();
     ssrPass->init(context);
     addPass(std::move(ssrPass));
+
+    auto oceanPass = std::make_unique<OceanPass>();
+    oceanPass->init(context);
+    addPass(std::move(oceanPass));
 
     // Voxel volumetrics pass (cloud/smoke/flame via voxel density SSBO)
     auto cloudPass = std::make_unique<CloudPass>();
