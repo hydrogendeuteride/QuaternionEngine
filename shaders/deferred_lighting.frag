@@ -384,6 +384,7 @@ void main(){
 
     // Planet night emission: only show emission on the dark side of planet surfaces
     bool isPlanet = (posSample.w > 1.5);
+    float oceanMask = isPlanet ? clamp((posSample.w - 2.0) * 4.0, 0.0, 1.0) : 0.0;
     if (isPlanet)
     {
         float NdotL = max(dot(N, Lsun), 0.0);
@@ -560,8 +561,9 @@ void main(){
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 specIBL = prefiltered * (F0 * brdf.x + brdf.y);
     vec3 diffIBL = (1.0 - metallic) * albedo * sh_eval_irradiance(N);
+    float iblWeight = 1.0 - oceanMask;
 
-    vec3 indirect = diffIBL + specIBL;
+    vec3 indirect = (diffIBL + specIBL) * iblWeight;
     vec3 color = direct + indirect * ao + emissive;
 
     outColor = vec4(color, 1.0);

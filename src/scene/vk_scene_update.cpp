@@ -125,6 +125,7 @@ void SceneManager::releasePendingGLTFReleases()
 void SceneManager::resetMainDrawContext()
 {
     mainDrawContext.OpaqueSurfaces.clear();
+    mainDrawContext.OceanSurfaces.clear();
     mainDrawContext.TransparentSurfaces.clear();
     mainDrawContext.MeshVfxSurfaces.clear();
     mainDrawContext.Decals.clear();

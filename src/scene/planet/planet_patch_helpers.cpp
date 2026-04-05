@@ -95,11 +95,12 @@ namespace
         return false;
     }
 
-    int32_t sample_neighbor_level_across_edge(const planet::PatchKey &key,
-                                              double u_face,
-                                              double v_face,
-                                              const std::unordered_set<planet::PatchKey, planet::PatchKeyHash> &leaf_set,
-                                              uint32_t max_level_in_set)
+    bool sample_neighbor_patch_across_edge(const planet::PatchKey &key,
+                                           double u_face,
+                                           double v_face,
+                                           const std::unordered_set<planet::PatchKey, planet::PatchKeyHash> &leaf_set,
+                                           uint32_t max_level_in_set,
+                                           planet::PatchKey &out_neighbor)
     {
         const glm::dvec3 dir = planet::cubesphere_unit_direction(key.face, u_face, v_face);
         planet::CubeFace sample_face = planet::CubeFace::PosX;
@@ -107,16 +108,15 @@ namespace
         double sample_v01 = 0.0;
         if (!planet::cubesphere_direction_to_face_uv(dir, sample_face, sample_u01, sample_v01))
         {
-            return -1;
+            return false;
         }
 
-        planet::PatchKey neighbor{};
-        if (!find_leaf_containing(leaf_set, sample_face, sample_u01, sample_v01, max_level_in_set, neighbor))
+        if (!find_leaf_containing(leaf_set, sample_face, sample_u01, sample_v01, max_level_in_set, out_neighbor))
         {
-            return -1;
+            return false;
         }
 
-        return static_cast<int32_t>(neighbor.level);
+        return true;
     }
 } // namespace
 
@@ -620,8 +620,9 @@ namespace planet_helpers
             {
                 const double uf = horizontal ? glm::mix(u0, u1, t) : sample_u;
                 const double vf = horizontal ? sample_v : glm::mix(v0, v1, t);
-                const int32_t level = sample_neighbor_level_across_edge(key, uf, vf, leaf_set, max_level_in_set);
-                if (level >= 0 && level < static_cast<int32_t>(key.level))
+                planet::PatchKey neighbor{};
+                if (sample_neighbor_patch_across_edge(key, uf, vf, leaf_set, max_level_in_set, neighbor) &&
+                    neighbor.level < key.level)
                 {
                     return true;
                 }
@@ -667,8 +668,15 @@ namespace planet_helpers
             {
                 const double uf = horizontal ? glm::mix(u0, u1, t) : sample_u;
                 const double vf = horizontal ? sample_v : glm::mix(v0, v1, t);
-                const int32_t level = sample_neighbor_level_across_edge(key, uf, vf, leaf_set, max_level_in_set);
-                if (level > static_cast<int32_t>(key.level + 1u))
+                planet::PatchKey neighbor{};
+                if (!sample_neighbor_patch_across_edge(key, uf, vf, leaf_set, max_level_in_set, neighbor))
+                {
+                    continue;
+                }
+
+                const bool crosses_cube_face = (neighbor.face != key.face);
+                const uint32_t allowed_delta = crosses_cube_face ? 0u : 1u;
+                if (neighbor.level > key.level + allowed_delta)
                 {
                     return true;
                 }

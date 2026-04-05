@@ -93,6 +93,12 @@ namespace
         }
     }
 
+    float ocean_shell_offset_m(double radius_m)
+    {
+        const double scaled = radius_m * 1.0e-6;
+        return static_cast<float>(std::max(2.0, scaled));
+    }
+
     PatchLevelMap build_desired_max_levels(const std::vector<PatchKey> &desired_leaves)
     {
         PatchLevelMap desired_max_levels;
@@ -929,6 +935,17 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 obj.ownerName = body.name;
 
                 draw_context.OpaqueSurfaces.push_back(obj);
+
+                const bool ocean_enabled = !body.terrain_specular_dir.empty() && (body.specular_strength > 0.0f);
+                if (ocean_enabled)
+                {
+                    OceanRenderObject ocean{};
+                    ocean.surface = obj;
+                    ocean.body_center_local = world_to_local(body.center_world, origin_world);
+                    ocean.sea_level_radius = static_cast<float>(body.radius_m);
+                    ocean.shell_offset = ocean_shell_offset_m(body.radius_m);
+                    draw_context.OceanSurfaces.push_back(ocean);
+                }
             }
             const Clock::time_point t_emit1 = Clock::now();
 
