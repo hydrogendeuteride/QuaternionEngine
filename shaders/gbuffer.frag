@@ -38,17 +38,26 @@ layout(push_constant) uniform constants
     uint objectID;
 } PushConstants;
 
-void apply_planet_water_override(inout vec3 albedo, inout float roughness, vec2 uv)
+float sample_planet_water_mask(vec2 uv)
 {
     if (materialData.extra[2].z <= 0.5)
     {
-        return;
+        return 0.0;
     }
 
     float mask = texture(planetSpecularTex, uv).r;
     float strength = clamp(materialData.extra[2].w, 0.0, 1.0);
+    return clamp(mask * strength, 0.0, 1.0);
+}
+
+void apply_planet_water_override(inout vec3 albedo, inout float roughness, float waterMask)
+{
+    if (waterMask <= 0.0)
+    {
+        return;
+    }
+
     float oceanRoughness = clamp(materialData.extra[3].w, 0.04, 1.0);
-    float waterMask = clamp(mask * strength, 0.0, 1.0);
     roughness = mix(roughness, oceanRoughness, waterMask);
 
     float luma = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
@@ -72,7 +81,8 @@ void main() {
     vec2 mrTex = texture(metalRoughTex, inUV).gb;
     float roughness = clamp(mrTex.x * materialData.metal_rough_factors.y, 0.04, 1.0);
     float metallic  = clamp(mrTex.y * materialData.metal_rough_factors.x, 0.0, 1.0);
-    apply_planet_water_override(albedo, roughness, inUV);
+    float waterMask = sample_planet_water_mask(inUV);
+    apply_planet_water_override(albedo, roughness, waterMask);
 
     // Normal mapping: decode tangent-space normal and transform to world space
     // Expect UNORM normal map; support BC5 (RG) by reconstructing Z from XY.
@@ -97,7 +107,8 @@ void main() {
     // Keep 0.0 reserved for background/no-geometry, and encode small flags above 1.0.
     // Convention: materialData.extra[2].y > 0 => planet-style shadowing override.
     float gbuffer_flags = materialData.extra[2].y;
-    outPos = vec4(inWorldPos, 1.0 + clamp(gbuffer_flags, 0.0, 1.0));
+    // Encode ocean mask in the high end of pos.w so deferred lighting can suppress terrain IBL there.
+    outPos = vec4(inWorldPos, 1.0 + clamp(gbuffer_flags, 0.0, 1.0) + waterMask * 0.25);
     outNorm = vec4(Nw, roughness);
     outAlbedo = vec4(albedo, metallic);
     // Extra G-buffer: x = AO, yzw = emissive

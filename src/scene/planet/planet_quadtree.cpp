@@ -176,22 +176,21 @@ namespace planet
             const double eps_v = glm::max(1e-9, dv * 1e-3);
             constexpr std::array<double, 3> samples{0.2, 0.5, 0.8};
 
-            auto sample_neighbor = [&](double u, double v) -> int32_t {
+            auto sample_neighbor = [&](double u, double v, PatchKey &out_neighbor) -> bool {
                 const glm::dvec3 dir = cubesphere_unit_direction(key.face, u, v);
                 CubeFace face = CubeFace::PosX;
                 double su = 0.0;
                 double sv = 0.0;
                 if (!cubesphere_direction_to_face_uv(dir, face, su, sv))
                 {
-                    return -1;
+                    return false;
                 }
 
-                PatchKey neighbor{};
-                if (!find_leaf_containing(leaf_set, face, su, sv, max_level_in_set, neighbor))
+                if (!find_leaf_containing(leaf_set, face, su, sv, max_level_in_set, out_neighbor))
                 {
-                    return -1;
+                    return false;
                 }
-                return static_cast<int32_t>(neighbor.level);
+                return true;
             };
 
             for (const double t: samples)
@@ -199,21 +198,38 @@ namespace planet
                 const double vmid = glm::mix(v0, v1, t);
                 const double umid = glm::mix(u0, u1, t);
 
-                if (const int32_t l = sample_neighbor(u0 - eps_u, vmid); l > static_cast<int32_t>(key.level + 1u))
+                PatchKey neighbor{};
+                if (sample_neighbor(u0 - eps_u, vmid, neighbor))
                 {
-                    return true;
+                    const uint32_t allowed_delta = (neighbor.face != key.face) ? 0u : 1u;
+                    if (neighbor.level > key.level + allowed_delta)
+                    {
+                        return true;
+                    }
                 }
-                if (const int32_t l = sample_neighbor(u1 + eps_u, vmid); l > static_cast<int32_t>(key.level + 1u))
+                if (sample_neighbor(u1 + eps_u, vmid, neighbor))
                 {
-                    return true;
+                    const uint32_t allowed_delta = (neighbor.face != key.face) ? 0u : 1u;
+                    if (neighbor.level > key.level + allowed_delta)
+                    {
+                        return true;
+                    }
                 }
-                if (const int32_t l = sample_neighbor(umid, v0 - eps_v); l > static_cast<int32_t>(key.level + 1u))
+                if (sample_neighbor(umid, v0 - eps_v, neighbor))
                 {
-                    return true;
+                    const uint32_t allowed_delta = (neighbor.face != key.face) ? 0u : 1u;
+                    if (neighbor.level > key.level + allowed_delta)
+                    {
+                        return true;
+                    }
                 }
-                if (const int32_t l = sample_neighbor(umid, v1 + eps_v); l > static_cast<int32_t>(key.level + 1u))
+                if (sample_neighbor(umid, v1 + eps_v, neighbor))
                 {
-                    return true;
+                    const uint32_t allowed_delta = (neighbor.face != key.face) ? 0u : 1u;
+                    if (neighbor.level > key.level + allowed_delta)
+                    {
+                        return true;
+                    }
                 }
             }
 

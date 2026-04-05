@@ -19,6 +19,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   render/passes/decal.cpp
   render/passes/lighting.h
   render/passes/lighting.cpp
+  render/passes/ocean.h
+  render/passes/ocean.cpp
   render/passes/shadow.h
   render/passes/shadow.cpp
   render/passes/punctual_shadow.h

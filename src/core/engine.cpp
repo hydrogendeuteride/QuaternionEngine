@@ -49,6 +49,7 @@
 #include "render/passes/decal.h"
 #include "render/passes/imgui_pass.h"
 #include "render/passes/lighting.h"
+#include "render/passes/ocean.h"
 #include "render/passes/clouds.h"
 #include "render/passes/rocket_plume.h"
 #include "render/passes/atmosphere.h"
@@ -1466,6 +1467,11 @@ void VulkanEngine::draw()
 
             // Downstream passes draw on top of either the SSR output or the raw HDR draw.
             RGImageHandle hdrTarget = (ssrEnabled && hSSR.valid()) ? hSSR : hDraw;
+
+            if (auto *ocean = _renderPassManager->getPass<OceanPass>())
+            {
+                ocean->register_graph(_renderGraph.get(), hdrTarget, hDepth);
+            }
 
             // Optional voxel volumetrics pass: reads hdrTarget + gbufferPosition and outputs a new HDR target.
             if (_context && _context->enableVolumetrics)
