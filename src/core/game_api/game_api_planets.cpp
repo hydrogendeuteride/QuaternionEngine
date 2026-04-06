@@ -437,6 +437,7 @@ void Engine::set_atmosphere_settings(const AtmosphereSettings &settings)
     dst.sunStarburstSpikes = settings.sunStarburstSpikes;
     dst.sunStarburstSharpness = settings.sunStarburstSharpness;
     dst.jitterStrength = settings.jitterStrength;
+    dst.jitterTexturePath = settings.jitterTexturePath;
     dst.planetSurfaceSnapM = settings.planetSurfaceSnapM;
     dst.viewSteps = settings.viewSteps;
     dst.lightSteps = settings.lightSteps;
@@ -467,6 +468,7 @@ AtmosphereSettings Engine::get_atmosphere_settings() const
     out.sunStarburstSpikes = src.sunStarburstSpikes;
     out.sunStarburstSharpness = src.sunStarburstSharpness;
     out.jitterStrength = src.jitterStrength;
+    out.jitterTexturePath = src.jitterTexturePath;
     out.planetSurfaceSnapM = src.planetSurfaceSnapM;
     out.viewSteps = src.viewSteps;
     out.lightSteps = src.lightSteps;
@@ -509,6 +511,7 @@ void Engine::set_planet_clouds_settings(const PlanetCloudSettings &settings)
     dst.coverage = settings.coverage;
     dst.overlayTexturePath = settings.overlayTexturePath;
     dst.noiseTexturePath = settings.noiseTexturePath;
+    dst.noiseTexture3DPath = settings.noiseTexture3DPath;
     dst.overlayRotationRad = settings.overlayRotationRad;
     dst.overlayFlipV = settings.overlayFlipV;
     dst.noiseScale = settings.noiseScale;
@@ -533,6 +536,7 @@ PlanetCloudSettings Engine::get_planet_clouds_settings() const
     out.coverage = src.coverage;
     out.overlayTexturePath = src.overlayTexturePath;
     out.noiseTexturePath = src.noiseTexturePath;
+    out.noiseTexture3DPath = src.noiseTexture3DPath;
     out.overlayRotationRad = src.overlayRotationRad;
     out.overlayFlipV = src.overlayFlipV;
     out.noiseScale = src.noiseScale;

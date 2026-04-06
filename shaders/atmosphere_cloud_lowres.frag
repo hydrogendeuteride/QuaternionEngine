@@ -14,6 +14,8 @@ layout(set = 1, binding = 0) uniform sampler2D posTex;
 layout(set = 1, binding = 1) uniform sampler2D transmittanceLut;
 layout(set = 1, binding = 2) uniform sampler2D cloudOverlayTex;
 layout(set = 1, binding = 3) uniform sampler2D cloudNoiseTex;
+layout(set = 1, binding = 4) uniform sampler3D cloudNoiseTex3D;
+layout(set = 1, binding = 5) uniform sampler3D jitterNoiseTex;
 
 layout(push_constant) uniform AtmospherePush
 {
@@ -92,7 +94,7 @@ void main()
 
     vec3 rdDx = dFdx(rd);
     vec3 rdDy = dFdy(rd);
-    float jitter = mix(0.5, hash12(inUV * 1024.0), clamp(pc.jitter_params.x, 0.0, 1.0));
+    float jitter = resolve_jitter_sample(inUV);
 
     vec3 sunDir = normalize(-sceneData.sunlightDirection.xyz);
     vec3 sunCol = sceneData.sunlightColor.rgb * sceneData.sunlightColor.a;

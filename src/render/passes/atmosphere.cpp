@@ -35,6 +35,9 @@ namespace
     constexpr uint32_t k_misc_flags_mask = 0xFFu;
     constexpr uint32_t k_misc_noise_blend_shift = 8u;
     constexpr uint32_t k_misc_detail_erode_shift = 16u;
+    constexpr uint32_t k_misc_jitter_frame_shift = 24u;
+    constexpr uint32_t k_flag_cloud_noise_3d = 8u;
+    constexpr uint32_t k_flag_jitter_blue_noise = 16u;
 
     struct AtmospherePush
     {
@@ -177,8 +180,10 @@ namespace
     static AtmospherePush build_atmosphere_push(const EngineContext &ctx,
                                                 const glm::vec3 &planet_center_local,
                                                 float planet_radius_m,
+                                                bool jitter_noise_ready,
                                                 bool cloud_overlay_ready,
-                                                bool cloud_noise_ready)
+                                                bool cloud_noise_ready,
+                                                bool cloud_noise_3d_ready)
     {
         const AtmosphereSettings &s = ctx.atmosphere;
         const PlanetCloudSettings &c = ctx.planetClouds;
@@ -186,6 +191,7 @@ namespace
         const bool atmosphere_enabled = ctx.enableAtmosphere;
         const bool clouds_enabled = ctx.enablePlanetClouds && cloud_overlay_ready;
         const bool cloud_noise_available = cloud_noise_ready;
+        const bool cloud_detail_noise_available = cloud_noise_ready || cloud_noise_3d_ready;
 
         const float atm_height = std::max(0.0f, s.atmosphereHeightM);
         const float atm_radius = (atmosphere_enabled && planet_radius_m > 0.0f && atm_height > 0.0f)
@@ -220,7 +226,7 @@ namespace
         const float cloud_noise_scale = std::max(0.001f, c.noiseScale);
         const float cloud_detail_scale = std::max(0.001f, c.detailScale);
         const float cloud_noise_blend = (clouds_enabled && cloud_noise_available) ? std::clamp(c.noiseBlend, 0.0f, 1.0f) : 0.0f;
-        const float cloud_detail_erode = (clouds_enabled && cloud_noise_available) ? std::clamp(c.detailErode, 0.0f, 1.0f) : 0.0f;
+        const float cloud_detail_erode = (clouds_enabled && cloud_detail_noise_available) ? std::clamp(c.detailErode, 0.0f, 1.0f) : 0.0f;
         const float cloud_wind_speed = c.windSpeed;
         const float cloud_wind_angle = c.windAngleRad;
         const int cloud_steps = std::clamp(c.cloudSteps, 4, 128);
@@ -238,6 +244,14 @@ namespace
         {
             flags |= 4u;
         }
+        if (clouds_enabled && cloud_noise_3d_ready)
+        {
+            flags |= k_flag_cloud_noise_3d;
+        }
+        if (jitter_noise_ready)
+        {
+            flags |= k_flag_jitter_blue_noise;
+        }
 
         const glm::vec3 absorption_color = vec3_finite(s.absorptionColor)
             ? glm::clamp(s.absorptionColor, glm::vec3(0.0f), glm::vec3(1.0f))
@@ -250,9 +264,11 @@ namespace
         const int packed_absorption_color_bits = std::bit_cast<int32_t>(packed_absorption_color);
         const uint32_t packed_noise_blend = static_cast<uint32_t>(std::lround(cloud_noise_blend * 255.0f));
         const uint32_t packed_detail_erode = static_cast<uint32_t>(std::lround(cloud_detail_erode * 255.0f));
+        const uint32_t packed_jitter_frame = ctx.frameIndex & 0xFFu;
         uint32_t packed_misc_w = (flags & k_misc_flags_mask);
         packed_misc_w |= ((packed_noise_blend & 0xFFu) << k_misc_noise_blend_shift);
         packed_misc_w |= ((packed_detail_erode & 0xFFu) << k_misc_detail_erode_shift);
+        packed_misc_w |= ((packed_jitter_frame & 0xFFu) << k_misc_jitter_frame_shift);
 
         AtmospherePush push{};
         push.planet_center_radius = glm::vec4(planet_center_local, planet_radius_m);
@@ -285,6 +301,8 @@ void AtmospherePass::init(EngineContext *context)
         builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         _lowResSetLayout = builder.build(
             device,
             VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -326,6 +344,8 @@ void AtmospherePass::init(EngineContext *context)
         builder.add_binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         _compositeSetLayout = builder.build(
             device,
             VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -334,6 +354,18 @@ void AtmospherePass::init(EngineContext *context)
     }
 
     const std::string fullscreen_vertex = _context->getAssets()->shaderPath("atmosphere.vert.spv");
+
+    {
+        std::array<uint8_t, 8> white3d{};
+        white3d.fill(0xFFu);
+        _cloudNoiseFallback3D = _context->getResources()->create_image(
+            white3d.data(),
+            VkExtent3D{2, 2, 2},
+            VK_FORMAT_R8_UNORM,
+            VK_IMAGE_USAGE_SAMPLED_BIT,
+            false);
+    }
+
     const VkFormat hdr_format = _context->getSwapchain()
         ? _context->getSwapchain()->drawImage().imageFormat
         : VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -448,10 +480,27 @@ void AtmospherePass::cleanup()
             resources->destroy_image(_cloudNoiseTex);
             _cloudNoiseTex = {};
         }
+        if (_jitterNoiseTex.image != VK_NULL_HANDLE)
+        {
+            resources->destroy_image(_jitterNoiseTex);
+            _jitterNoiseTex = {};
+        }
+        if (_cloudNoiseTex3D.image != VK_NULL_HANDLE)
+        {
+            resources->destroy_image(_cloudNoiseTex3D);
+            _cloudNoiseTex3D = {};
+        }
+        if (_cloudNoiseFallback3D.image != VK_NULL_HANDLE)
+        {
+            resources->destroy_image(_cloudNoiseFallback3D);
+            _cloudNoiseFallback3D = {};
+        }
     }
 
     _cloudOverlayLoadedPath.clear();
     _cloudNoiseLoadedPath.clear();
+    _jitterNoiseLoadedPath.clear();
+    _cloudNoise3DLoadedPath.clear();
     _historySnapshot = {};
     _historyValid = false;
 
@@ -507,7 +556,7 @@ void AtmospherePass::ensure_cloud_textures(EngineContext *context)
 
     ResourceManager *resources = ctx->getResources();
 
-    auto reload_cloud_tex = [&](AllocatedImage &dst, std::string &loaded_path, const std::string &wanted_path)
+    auto reload_cloud_tex_2d = [&](AllocatedImage &dst, std::string &loaded_path, const std::string &wanted_path)
     {
         if (wanted_path == loaded_path)
         {
@@ -541,8 +590,78 @@ void AtmospherePass::ensure_cloud_textures(EngineContext *context)
         }
     };
 
-    reload_cloud_tex(_cloudOverlayTex, _cloudOverlayLoadedPath, ctx->planetClouds.overlayTexturePath);
-    reload_cloud_tex(_cloudNoiseTex, _cloudNoiseLoadedPath, ctx->planetClouds.noiseTexturePath);
+    auto reload_cloud_tex_3d = [&](AllocatedImage &dst, std::string &loaded_path, const std::string &wanted_path)
+    {
+        if (wanted_path == loaded_path)
+        {
+            return;
+        }
+
+        if (dst.image != VK_NULL_HANDLE)
+        {
+            resources->destroy_image(dst);
+            dst = {};
+        }
+
+        loaded_path = wanted_path;
+        if (wanted_path.empty())
+        {
+            return;
+        }
+
+        const std::string absolute_path = ctx->getAssets()->assetPath(wanted_path);
+        ktxutil::Ktx3D ktx{};
+        if (!absolute_path.empty() && ktxutil::load_ktx2_3d(absolute_path.c_str(), ktx))
+        {
+            dst = resources->create_image_compressed_layers(
+                ktx.bytes.data(),
+                ktx.bytes.size(),
+                ktx.fmt,
+                ktx.mipLevels,
+                1,
+                ktx.copies,
+                VK_IMAGE_USAGE_SAMPLED_BIT);
+        }
+    };
+
+    auto reload_jitter_tex_3d = [&](AllocatedImage &dst, std::string &loaded_path, const std::string &wanted_path)
+    {
+        if (wanted_path == loaded_path)
+        {
+            return;
+        }
+
+        if (dst.image != VK_NULL_HANDLE)
+        {
+            resources->destroy_image(dst);
+            dst = {};
+        }
+
+        loaded_path = wanted_path;
+        if (wanted_path.empty())
+        {
+            return;
+        }
+
+        const std::string absolute_path = ctx->getAssets()->assetPath(wanted_path);
+        ktxutil::Ktx3D ktx{};
+        if (!absolute_path.empty() && ktxutil::load_ktx2_3d(absolute_path.c_str(), ktx))
+        {
+            dst = resources->create_image_compressed_layers(
+                ktx.bytes.data(),
+                ktx.bytes.size(),
+                ktx.fmt,
+                ktx.mipLevels,
+                1,
+                ktx.copies,
+                VK_IMAGE_USAGE_SAMPLED_BIT);
+        }
+    };
+
+    reload_jitter_tex_3d(_jitterNoiseTex, _jitterNoiseLoadedPath, ctx->atmosphere.jitterTexturePath);
+    reload_cloud_tex_2d(_cloudOverlayTex, _cloudOverlayLoadedPath, ctx->planetClouds.overlayTexturePath);
+    reload_cloud_tex_2d(_cloudNoiseTex, _cloudNoiseLoadedPath, ctx->planetClouds.noiseTexturePath);
+    reload_cloud_tex_3d(_cloudNoiseTex3D, _cloudNoise3DLoadedPath, ctx->planetClouds.noiseTexture3DPath);
 }
 
 void AtmospherePass::release_history_images()
@@ -706,7 +825,6 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
     }
 
     const bool cloud_overlay_ready = (_cloudOverlayTex.imageView != VK_NULL_HANDLE);
-    const bool cloud_noise_ready = (_cloudNoiseTex.imageView != VK_NULL_HANDLE);
     const VkExtent2D draw_extent = _context->getDrawExtent();
     const VkExtent2D low_extent = half_extent(draw_extent);
     const bool run_cloud_pipeline = _context->enablePlanetClouds && cloud_overlay_ready;
@@ -727,8 +845,10 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
     next_snapshot.sunColor = _context->getSceneData().sunlightColor;
     next_snapshot.ambientColor = _context->getSceneData().ambientColor;
     next_snapshot.bodyName = _context->atmosphere.bodyName;
+    next_snapshot.jitterPath = _context->atmosphere.jitterTexturePath;
     next_snapshot.overlayPath = _context->planetClouds.overlayTexturePath;
     next_snapshot.noisePath = _context->planetClouds.noiseTexturePath;
+    next_snapshot.noise3DPath = _context->planetClouds.noiseTexture3DPath;
     next_snapshot.cloudBaseM = _context->planetClouds.baseHeightM;
     next_snapshot.cloudThicknessM = _context->planetClouds.thicknessM;
     next_snapshot.cloudDensityScale = _context->planetClouds.densityScale;
@@ -757,8 +877,10 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
                         !nearly_equal_vec4(_historySnapshot.sunColor, next_snapshot.sunColor, 2.0e-2f) ||
                         !nearly_equal_vec4(_historySnapshot.ambientColor, next_snapshot.ambientColor, 2.0e-2f) ||
                         _historySnapshot.bodyName != next_snapshot.bodyName ||
+                        _historySnapshot.jitterPath != next_snapshot.jitterPath ||
                         _historySnapshot.overlayPath != next_snapshot.overlayPath ||
                         _historySnapshot.noisePath != next_snapshot.noisePath ||
+                        _historySnapshot.noise3DPath != next_snapshot.noise3DPath ||
                         !nearly_equal(_historySnapshot.cloudBaseM, next_snapshot.cloudBaseM) ||
                         !nearly_equal(_historySnapshot.cloudThicknessM, next_snapshot.cloudThicknessM) ||
                         !nearly_equal(_historySnapshot.cloudDensityScale, next_snapshot.cloudDensityScale) ||
@@ -1063,7 +1185,10 @@ void AtmospherePass::draw_cloud_low_res(VkCommandBuffer cmd,
 
     VkImageView overlay_view = _cloudOverlayTex.imageView != VK_NULL_HANDLE ? _cloudOverlayTex.imageView : assets->fallbackBlackView();
     VkImageView noise_view = _cloudNoiseTex.imageView != VK_NULL_HANDLE ? _cloudNoiseTex.imageView : assets->fallbackWhiteView();
-    if (overlay_view == VK_NULL_HANDLE || noise_view == VK_NULL_HANDLE)
+    VkImageView noise_view_3d = _cloudNoiseTex3D.imageView != VK_NULL_HANDLE ? _cloudNoiseTex3D.imageView : _cloudNoiseFallback3D.imageView;
+    VkImageView jitter_view = _jitterNoiseTex.imageView != VK_NULL_HANDLE ? _jitterNoiseTex.imageView : _cloudNoiseFallback3D.imageView;
+    if (overlay_view == VK_NULL_HANDLE || noise_view == VK_NULL_HANDLE || noise_view_3d == VK_NULL_HANDLE ||
+        jitter_view == VK_NULL_HANDLE)
     {
         return;
     }
@@ -1083,6 +1208,10 @@ void AtmospherePass::draw_cloud_low_res(VkCommandBuffer cmd,
     writer.write_image(2, overlay_view, ctx->getSamplers()->linearRepeatClampEdge(),
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     writer.write_image(3, noise_view, ctx->getSamplers()->linearRepeatClampEdge(),
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    writer.write_image(4, noise_view_3d, ctx->getSamplers()->linearRepeatClampEdge(),
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    writer.write_image(5, jitter_view, ctx->getSamplers()->defaultNearest(),
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     writer.update_set(ctx->getDevice()->device(), input_set);
 
@@ -1105,8 +1234,10 @@ void AtmospherePass::draw_cloud_low_res(VkCommandBuffer cmd,
         *ctx,
         planet_center_local,
         planet_radius_m,
+        _jitterNoiseTex.imageView != VK_NULL_HANDLE,
         _cloudOverlayTex.imageView != VK_NULL_HANDLE,
-        _cloudNoiseTex.imageView != VK_NULL_HANDLE);
+        _cloudNoiseTex.imageView != VK_NULL_HANDLE,
+        _cloudNoiseTex3D.imageView != VK_NULL_HANDLE);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _cloudLowResPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _cloudLowResPipelineLayout, 0, 1, &scene_set, 0, nullptr);
@@ -1270,8 +1401,10 @@ void AtmospherePass::draw_cloud_upscale(VkCommandBuffer cmd,
         *ctx,
         planet_center_local,
         planet_radius_m,
+        _jitterNoiseTex.imageView != VK_NULL_HANDLE,
         _cloudOverlayTex.imageView != VK_NULL_HANDLE,
-        _cloudNoiseTex.imageView != VK_NULL_HANDLE);
+        _cloudNoiseTex.imageView != VK_NULL_HANDLE,
+        _cloudNoiseTex3D.imageView != VK_NULL_HANDLE);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _cloudUpscalePipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _cloudUpscalePipelineLayout, 0, 1, &scene_set, 0, nullptr);
@@ -1313,6 +1446,8 @@ void AtmospherePass::draw_composite(VkCommandBuffer cmd,
 
     VkImageView overlay_view = _cloudOverlayTex.imageView != VK_NULL_HANDLE ? _cloudOverlayTex.imageView : assets->fallbackBlackView();
     VkImageView noise_view = _cloudNoiseTex.imageView != VK_NULL_HANDLE ? _cloudNoiseTex.imageView : assets->fallbackWhiteView();
+    VkImageView noise_view_3d = _cloudNoiseTex3D.imageView != VK_NULL_HANDLE ? _cloudNoiseTex3D.imageView : _cloudNoiseFallback3D.imageView;
+    VkImageView jitter_view = _jitterNoiseTex.imageView != VK_NULL_HANDLE ? _jitterNoiseTex.imageView : _cloudNoiseFallback3D.imageView;
     VkImageView cloud_lighting_resolved_view = resources.image_view(cloudLightingResolved);
     VkImageView cloud_segment_resolved_view = resources.image_view(cloudSegmentResolved);
     if (cloud_lighting_resolved_view == VK_NULL_HANDLE)
@@ -1323,7 +1458,8 @@ void AtmospherePass::draw_composite(VkCommandBuffer cmd,
     {
         cloud_segment_resolved_view = assets->fallbackBlackView();
     }
-    if (overlay_view == VK_NULL_HANDLE || noise_view == VK_NULL_HANDLE ||
+    if (overlay_view == VK_NULL_HANDLE || noise_view == VK_NULL_HANDLE || noise_view_3d == VK_NULL_HANDLE ||
+        jitter_view == VK_NULL_HANDLE ||
         cloud_lighting_resolved_view == VK_NULL_HANDLE || cloud_segment_resolved_view == VK_NULL_HANDLE)
     {
         return;
@@ -1351,6 +1487,10 @@ void AtmospherePass::draw_composite(VkCommandBuffer cmd,
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     writer.write_image(6, cloud_segment_resolved_view, ctx->getSamplers()->defaultNearest(),
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    writer.write_image(7, noise_view_3d, ctx->getSamplers()->linearRepeatClampEdge(),
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    writer.write_image(8, jitter_view, ctx->getSamplers()->defaultNearest(),
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     writer.update_set(ctx->getDevice()->device(), input_set);
 
     if (!ctx->pipelines->getGraphics("atmosphere.composite", _compositePipeline, _compositePipelineLayout))
@@ -1372,8 +1512,10 @@ void AtmospherePass::draw_composite(VkCommandBuffer cmd,
         *ctx,
         planet_center_local,
         planet_radius_m,
+        _jitterNoiseTex.imageView != VK_NULL_HANDLE,
         _cloudOverlayTex.imageView != VK_NULL_HANDLE,
-        _cloudNoiseTex.imageView != VK_NULL_HANDLE);
+        _cloudNoiseTex.imageView != VK_NULL_HANDLE,
+        _cloudNoiseTex3D.imageView != VK_NULL_HANDLE);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _compositePipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _compositePipelineLayout, 0, 1, &scene_set, 0, nullptr);
