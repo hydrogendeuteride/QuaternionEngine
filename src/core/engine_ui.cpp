@@ -1976,6 +1976,16 @@ namespace
         }
         ImGui::SliderFloat("Starburst Sharpness", &atm.sunStarburstSharpness, 1.0f, 64.0f, "%.1f");
         ImGui::SliderFloat("Jitter", &atm.jitterStrength, 0.0f, 1.0f, "%.2f");
+        static char jitterPathBuf[256]{};
+        const std::string &jitterPathRef = atm.jitterTexturePath;
+        if (std::strncmp(jitterPathBuf, jitterPathRef.c_str(), sizeof(jitterPathBuf)) != 0)
+        {
+            std::snprintf(jitterPathBuf, sizeof(jitterPathBuf), "%s", jitterPathRef.c_str());
+        }
+        if (ImGui::InputText("Jitter Noise Path (assets/)", jitterPathBuf, sizeof(jitterPathBuf)))
+        {
+            atm.jitterTexturePath = jitterPathBuf;
+        }
         ImGui::SliderFloat("Planet Snap (m)", &atm.planetSurfaceSnapM, 0.0f, 2000.0f, "%.1f");
         ImGui::SliderInt("View Steps", &atm.viewSteps, 4, 64);
         ImGui::SliderInt("Light Steps", &atm.lightSteps, 2, 32);
@@ -2016,7 +2026,18 @@ namespace
         {
             clouds.noiseTexturePath = noisePathBuf;
         }
-        ImGui::TextUnformatted("Overlay drives macro coverage; noise adds height-aware internal breakup.");
+
+        static char noise3DPathBuf[256]{};
+        const std::string &noise3DPathRef = clouds.noiseTexture3DPath;
+        if (std::strncmp(noise3DPathBuf, noise3DPathRef.c_str(), sizeof(noise3DPathBuf)) != 0)
+        {
+            std::snprintf(noise3DPathBuf, sizeof(noise3DPathBuf), "%s", noise3DPathRef.c_str());
+        }
+        if (ImGui::InputText("Noise 3D Path (assets/)", noise3DPathBuf, sizeof(noise3DPathBuf)))
+        {
+            clouds.noiseTexture3DPath = noise3DPathBuf;
+        }
+        ImGui::TextUnformatted("Overlay drives macro coverage; 2D noise shapes weather; optional 3D noise breaks up internal repetition.");
 
         float rotDeg = glm::degrees(clouds.overlayRotationRad);
         if (ImGui::SliderFloat("Overlay Rotation (deg)", &rotDeg, -180.0f, 180.0f, "%.1f"))

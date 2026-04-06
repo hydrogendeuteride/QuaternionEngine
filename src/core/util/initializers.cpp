@@ -294,7 +294,7 @@ VkImageCreateInfo vkinit::image_create_info(VkFormat format, VkImageUsageFlags u
     info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     info.pNext = nullptr;
 
-    info.imageType = VK_IMAGE_TYPE_2D;
+    info.imageType = (extent.depth > 1) ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
 
     info.format = format;
     info.extent = extent;
@@ -324,7 +324,7 @@ VkImageCreateInfo vkinit::image_create_info(VkFormat format,
     info.pNext = nullptr;
 
     info.flags = flags;
-    info.imageType = VK_IMAGE_TYPE_2D;
+    info.imageType = (extent.depth > 1) ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
     info.format = format;
     info.extent = extent;
     info.mipLevels = mipLevels > 0 ? mipLevels : 1;

@@ -103,7 +103,7 @@ AllocatedImage ResourceManager::create_image(VkExtent3D size, VkFormat format, V
     VkImageCreateInfo img_info = vkinit::image_create_info(format, usage, size);
     if (mipmapped)
     {
-        img_info.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1;
+        img_info.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max({size.width, size.height, size.depth})))) + 1;
     }
 
     // always allocate images on dedicated GPU memory
@@ -125,7 +125,8 @@ AllocatedImage ResourceManager::create_image(VkExtent3D size, VkFormat format, V
     }
 
     // build a image-view for the image
-    VkImageViewCreateInfo view_info = vkinit::imageview_create_info(format, newImage.image, aspectFlag);
+    const VkImageViewType view_type = (size.depth > 1) ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
+    VkImageViewCreateInfo view_info = vkinit::imageview_create_info(view_type, format, newImage.image, aspectFlag, 0, img_info.mipLevels, 0, 1);
     view_info.subresourceRange.levelCount = img_info.mipLevels;
 
     VK_CHECK(vkCreateImageView(_deviceManager->device(), &view_info, nullptr, &newImage.imageView));
@@ -162,7 +163,8 @@ AllocatedImage ResourceManager::create_image(VkExtent3D size, VkFormat format, V
         aspectFlag = VK_IMAGE_ASPECT_DEPTH_BIT;
     }
 
-    VkImageViewCreateInfo view_info = vkinit::imageview_create_info(format, newImage.image, aspectFlag);
+    const VkImageViewType view_type = (size.depth > 1) ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
+    VkImageViewCreateInfo view_info = vkinit::imageview_create_info(view_type, format, newImage.image, aspectFlag, 0, img_info.mipLevels, 0, 1);
     view_info.subresourceRange.levelCount = img_info.mipLevels;
 
     VK_CHECK(vkCreateImageView(_deviceManager->device(), &view_info, nullptr, &newImage.imageView));
@@ -813,7 +815,10 @@ AllocatedImage ResourceManager::create_image_compressed_layers(const void* bytes
     const bool isDepth = (fmt == VK_FORMAT_D32_SFLOAT);
     VkImageAspectFlags aspect = isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     const bool isCube = ((flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) != 0) && (layerCount == 6);
-    VkImageViewType viewType = isCube ? VK_IMAGE_VIEW_TYPE_CUBE : (layerCount > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D);
+    const bool isVolume = (extent.depth > 1) && (layerCount == 1);
+    VkImageViewType viewType = isCube
+        ? VK_IMAGE_VIEW_TYPE_CUBE
+        : (isVolume ? VK_IMAGE_VIEW_TYPE_3D : (layerCount > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D));
 
     VkImageViewCreateInfo viewInfo = vkinit::imageview_create_info(viewType, fmt, newImage.image, aspect, 0, mipLevels, 0, layerCount);
     VK_CHECK(vkCreateImageView(_deviceManager->device(), &viewInfo, nullptr, &newImage.imageView));

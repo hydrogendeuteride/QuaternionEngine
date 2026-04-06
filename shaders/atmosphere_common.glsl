@@ -5,9 +5,12 @@ const float INV_PI = 0.3183098861837907;
 const int FLAG_ATMOSPHERE = 1;
 const int FLAG_CLOUDS = 2;
 const int FLAG_CLOUD_FLIP_V = 4;
+const int FLAG_CLOUD_NOISE_3D = 8;
+const int FLAG_JITTER_BLUE_NOISE = 16;
 const uint MISC_FLAGS_MASK = 0xFFu;
 const uint MISC_NOISE_BLEND_SHIFT = 8u;
 const uint MISC_DETAIL_ERODE_SHIFT = 16u;
+const uint MISC_JITTER_FRAME_SHIFT = 24u;
 
 const float CLOUD_BETA = 1.0e-3;
 const float CLOUD_AMBIENT_SCALE = 0.25;
@@ -22,12 +25,36 @@ const float CLOUD_THICKNESS_MAX = 1.35;
 const float CLOUD_SLICE_HEIGHT_FREQ = 1.65;
 const float CLOUD_SHEAR_MIN = 0.018;
 const float CLOUD_SHEAR_MAX = 0.080;
+const float CLOUD_3D_HEIGHT_FREQ = 0.55;
 
 float hash12(vec2 p)
 {
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
     p3 += dot(p3, p3.yzx + 33.33);
     return fract((p3.x + p3.y) * p3.z);
+}
+
+float sample_jitter_noise_screen()
+{
+    ivec3 size_i = textureSize(jitterNoiseTex, 0);
+    vec3 size = max(vec3(size_i), vec3(1.0));
+    uint miscPacked = uint(pc.misc.w);
+    float frameIndex = float((miscPacked >> MISC_JITTER_FRAME_SHIFT) & 0xFFu);
+    float slice = mod(frameIndex, size.z);
+    vec3 uvw = vec3(fract(gl_FragCoord.xy / size.xy), (slice + 0.5) / size.z);
+    return textureLod(jitterNoiseTex, uvw, 0.0).r;
+}
+
+float resolve_jitter_sample(vec2 screenUv)
+{
+    uint miscPacked = uint(pc.misc.w);
+    int flags = int(miscPacked & MISC_FLAGS_MASK);
+    float jitterSample = hash12(screenUv * 1024.0);
+    if ((flags & FLAG_JITTER_BLUE_NOISE) != 0)
+    {
+        jitterSample = sample_jitter_noise_screen();
+    }
+    return mix(0.5, jitterSample, clamp(pc.jitter_params.x, 0.0, 1.0));
 }
 
 float luminance(vec3 c)
@@ -74,6 +101,11 @@ float sample_cloud_noise_grad_aniso(vec2 uvE, vec2 uvDx, vec2 uvDy, vec2 scale, 
 {
     vec2 uv = uvE * scale + offset;
     return textureGrad(cloudNoiseTex, fract(uv), uvDx * scale, uvDy * scale).r;
+}
+
+float sample_cloud_noise_3d_grad(vec3 p, vec3 dpdx, vec3 dpdy, vec3 offset)
+{
+    return textureGrad(cloudNoiseTex3D, fract(p + offset), dpdx, dpdy).r;
 }
 
 void build_local_cloud_frame(vec3 dir, out vec3 east, out vec3 north)
@@ -179,6 +211,7 @@ float cloud_density(vec3 dir,
     uint miscPacked = uint(pc.misc.w);
     float weatherBlend = float((miscPacked >> MISC_NOISE_BLEND_SHIFT) & 0xFFu) * (1.0 / 255.0);
     float detailErode = float((miscPacked >> MISC_DETAIL_ERODE_SHIFT) & 0xFFu) * (1.0 / 255.0);
+    bool useNoise3D = (int(miscPacked & MISC_FLAGS_MASK) & FLAG_CLOUD_NOISE_3D) != 0;
 
     float lowScale = max(pc.cloud_params.x, 0.001);
     float detailScale = max(pc.cloud_params.y, 0.001);
@@ -224,17 +257,49 @@ float cloud_density(vec3 dir,
     float shearAmount = mix(CLOUD_SHEAR_MIN, CLOUD_SHEAR_MAX, weatherField);
     vec2 shearUv = shearDir * ((hLocal - 0.5) * shearAmount);
 
-    // Reuse the 2D noise texture as two orthogonal height slices to fake internal depth.
-    float sliceU = sample_cloud_noise_grad_aniso(vec2(uvE.x + shearUv.x, hLocal),
-                                                 vec2(uvDx.x, hLocalDx),
-                                                 vec2(uvDy.x, hLocalDy),
-                                                 vec2(detailScale, CLOUD_SLICE_HEIGHT_FREQ),
-                                                 vec2(0.619, 0.281));
-    float sliceV = sample_cloud_noise_grad_aniso(vec2(uvE.y + shearUv.y, hLocal),
-                                                 vec2(uvDx.y, hLocalDx),
-                                                 vec2(uvDy.y, hLocalDy),
-                                                 vec2(detailScale * 0.85, CLOUD_SLICE_HEIGHT_FREQ * 1.13),
-                                                 vec2(0.113, 0.763));
+    float sliceU;
+    float sliceV;
+    if (useNoise3D)
+    {
+        float radialScaleA = detailScale * (1.0 + hLocal * CLOUD_3D_HEIGHT_FREQ);
+        float radialScaleB = detailScale * (0.83 + hLocal * CLOUD_3D_HEIGHT_FREQ * 1.17);
+        float radialScaleDxA = detailScale * CLOUD_3D_HEIGHT_FREQ * hLocalDx;
+        float radialScaleDyA = detailScale * CLOUD_3D_HEIGHT_FREQ * hLocalDy;
+        float radialScaleDxB = detailScale * CLOUD_3D_HEIGHT_FREQ * 1.17 * hLocalDx;
+        float radialScaleDyB = detailScale * CLOUD_3D_HEIGHT_FREQ * 1.17 * hLocalDy;
+
+        vec3 sampleA = dirW * radialScaleA + vec3(shearUv.x, hLocal * CLOUD_SLICE_HEIGHT_FREQ, shearUv.y);
+        vec3 sampleB = vec3(dirW.z, dirW.x, -dirW.y) * radialScaleB +
+                       vec3(-shearUv.y, hLocal * CLOUD_SLICE_HEIGHT_FREQ * 1.13, shearUv.x);
+
+        vec3 sampleADx = dirWdx * radialScaleA + dirW * radialScaleDxA +
+                         vec3(0.0, hLocalDx * CLOUD_SLICE_HEIGHT_FREQ, 0.0);
+        vec3 sampleADy = dirWdy * radialScaleA + dirW * radialScaleDyA +
+                         vec3(0.0, hLocalDy * CLOUD_SLICE_HEIGHT_FREQ, 0.0);
+        vec3 sampleBDx = vec3(dirWdx.z, dirWdx.x, -dirWdx.y) * radialScaleB +
+                         vec3(dirW.z, dirW.x, -dirW.y) * radialScaleDxB +
+                         vec3(0.0, hLocalDx * CLOUD_SLICE_HEIGHT_FREQ * 1.13, 0.0);
+        vec3 sampleBDy = vec3(dirWdy.z, dirWdy.x, -dirWdy.y) * radialScaleB +
+                         vec3(dirW.z, dirW.x, -dirW.y) * radialScaleDyB +
+                         vec3(0.0, hLocalDy * CLOUD_SLICE_HEIGHT_FREQ * 1.13, 0.0);
+
+        sliceU = sample_cloud_noise_3d_grad(sampleA, sampleADx, sampleADy, vec3(0.619, 0.281, 0.113));
+        sliceV = sample_cloud_noise_3d_grad(sampleB, sampleBDx, sampleBDy, vec3(0.173, 0.547, 0.763));
+    }
+    else
+    {
+        // Reuse the 2D noise texture as two orthogonal height slices to fake internal depth.
+        sliceU = sample_cloud_noise_grad_aniso(vec2(uvE.x + shearUv.x, hLocal),
+                                               vec2(uvDx.x, hLocalDx),
+                                               vec2(uvDy.x, hLocalDy),
+                                               vec2(detailScale, CLOUD_SLICE_HEIGHT_FREQ),
+                                               vec2(0.619, 0.281));
+        sliceV = sample_cloud_noise_grad_aniso(vec2(uvE.y + shearUv.y, hLocal),
+                                               vec2(uvDx.y, hLocalDx),
+                                               vec2(uvDy.y, hLocalDy),
+                                               vec2(detailScale * 0.85, CLOUD_SLICE_HEIGHT_FREQ * 1.13),
+                                               vec2(0.113, 0.763));
+    }
     sliceU = clamp((sliceU - 0.5) * 1.55 + 0.5, 0.0, 1.0);
     sliceV = clamp((sliceV - 0.5) * 1.55 + 0.5, 0.0, 1.0);
 
