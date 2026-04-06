@@ -173,4 +173,74 @@ namespace ktxutil
         ktxTexture_Destroy(ktxTexture(ktex));
         return true;
     }
+
+    bool load_ktx2_3d(const char* path, Ktx3D& out)
+    {
+        out = Ktx3D{};
+        if (path == nullptr || !exists_file(path)) return false;
+
+        ktxTexture2* ktex = nullptr;
+        ktxResult kres = ktxTexture2_CreateFromNamedFile(path, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktex);
+        if (kres != KTX_SUCCESS || !ktex) return false;
+
+        const bool is_volume = (ktex->baseDepth > 1) && (ktex->numFaces == 1) && (std::max(1u, ktex->numLayers) == 1u);
+        if (!is_volume)
+        {
+            ktxTexture_Destroy(ktxTexture(ktex));
+            return false;
+        }
+
+        // Volume textures should already be stored in a GPU-ready format.
+        if (ktxTexture2_NeedsTranscoding(ktex))
+        {
+            ktxTexture_Destroy(ktxTexture(ktex));
+            return false;
+        }
+
+        const VkFormat vkfmt = static_cast<VkFormat>(ktex->vkFormat);
+        if (vkfmt == VK_FORMAT_UNDEFINED)
+        {
+            ktxTexture_Destroy(ktxTexture(ktex));
+            return false;
+        }
+
+        const uint32_t mipLevels = ktex->numLevels;
+        const uint32_t baseW = ktex->baseWidth;
+        const uint32_t baseH = ktex->baseHeight;
+        const uint32_t baseD = ktex->baseDepth;
+
+        ktx_size_t totalSize = ktxTexture_GetDataSize(ktxTexture(ktex));
+        const uint8_t* dataPtr = reinterpret_cast<const uint8_t*>(ktxTexture_GetData(ktxTexture(ktex)));
+
+        out.fmt = vkfmt;
+        out.baseW = baseW;
+        out.baseH = baseH;
+        out.baseD = baseD;
+        out.mipLevels = mipLevels;
+        out.bytes.assign(dataPtr, dataPtr + totalSize);
+
+        out.copies.clear();
+        out.copies.reserve(mipLevels);
+        for (uint32_t mip = 0; mip < mipLevels; ++mip)
+        {
+            ktx_size_t off = 0;
+            ktxTexture_GetImageOffset(ktxTexture(ktex), mip, 0, 0, &off);
+
+            VkBufferImageCopy r{};
+            r.bufferOffset = static_cast<VkDeviceSize>(off);
+            r.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            r.imageSubresource.mipLevel = mip;
+            r.imageSubresource.baseArrayLayer = 0;
+            r.imageSubresource.layerCount = 1;
+            r.imageExtent = {
+                std::max(1u, baseW >> mip),
+                std::max(1u, baseH >> mip),
+                std::max(1u, baseD >> mip)
+            };
+            out.copies.push_back(r);
+        }
+
+        ktxTexture_Destroy(ktxTexture(ktex));
+        return true;
+    }
 }

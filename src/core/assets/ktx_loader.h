@@ -35,5 +35,16 @@ namespace ktxutil
         std::vector<VkBufferImageCopy> copies;
     };
     bool load_ktx2_2d(const char* path, Ktx2D& out);
-}
 
+    struct Ktx3D
+    {
+        VkFormat fmt{VK_FORMAT_UNDEFINED};
+        uint32_t baseW{0};
+        uint32_t baseH{0};
+        uint32_t baseD{0};
+        uint32_t mipLevels{0};
+        std::vector<uint8_t> bytes;
+        std::vector<VkBufferImageCopy> copies;
+    };
+    bool load_ktx2_3d(const char* path, Ktx3D& out);
+}

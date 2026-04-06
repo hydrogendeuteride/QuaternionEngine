@@ -50,8 +50,10 @@ private:
         glm::vec4 sunColor{0.0f};
         glm::vec4 ambientColor{0.0f};
         std::string bodyName;
+        std::string jitterPath;
         std::string overlayPath;
         std::string noisePath;
+        std::string noise3DPath;
         float cloudBaseM = 0.0f;
         float cloudThicknessM = 0.0f;
         float cloudDensityScale = 0.0f;
@@ -130,6 +132,11 @@ private:
     std::string _cloudOverlayLoadedPath;
     AllocatedImage _cloudNoiseTex{};
     std::string _cloudNoiseLoadedPath;
+    AllocatedImage _jitterNoiseTex{};
+    std::string _jitterNoiseLoadedPath;
+    AllocatedImage _cloudNoiseTex3D{};
+    std::string _cloudNoise3DLoadedPath;
+    AllocatedImage _cloudNoiseFallback3D{};
 
     std::array<AllocatedImage, 2> _cloudLightingHistory{};
     std::array<AllocatedImage, 2> _cloudSegmentHistory{};
