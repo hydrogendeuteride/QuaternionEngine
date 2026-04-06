@@ -221,6 +221,8 @@ struct AtmosphereSettings
 
     // Sampling jitter (0 = off; 1 = full per-pixel jitter). Disabling reduces noise but may introduce banding.
     float jitterStrength = 0.0f;
+    // Optional GPU-ready 3D KTX2 spatiotemporal blue-noise texture for jitter sampling.
+    std::string jitterTexturePath = "vfx/stbn_scalar_128x128x64_r8.ktx2";
 
     // When clamping the raymarch to the visible surface, snap planet pixels to the analytic planet sphere
     // if the GBuffer surface is within this distance (meters) to reduce cube-sphere patch faceting artifacts.
@@ -255,13 +257,16 @@ struct PlanetCloudSettings
     // Relative to assets/ (KTX2 recommended). Tileable noise reused for weather modulation and internal breakup.
     std::string noiseTexturePath = "vfx/perlin_bc4.ktx2";
 
+    // Optional GPU-ready 3D KTX2 noise for seam-free internal cloud breakup.
+    std::string noiseTexture3DPath;
+
     // Rotate the overlay around +Y (radians) to align the texture seam/orientation.
     float overlayRotationRad = 0.0f;
 
     // Flip the overlay V coordinate (useful if the source texture is upside-down).
     bool overlayFlipV = false;
 
-    // Macro weather frequency and pseudo-volume internal detail controls.
+    // Macro weather frequency and internal detail controls.
     float noiseScale = 1.5f;
     float detailScale = 12.0f;
     float noiseBlend = 0.65f;     // 0..1 weather-field influence from the noise texture
