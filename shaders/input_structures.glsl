@@ -99,7 +99,10 @@ layout(set = 1, binding = 0) uniform GLTFMaterialData{
 // - extra[2].y: gbuffer flags (planet-style: >0 => force clipmap receiver shadows in RT-only)
 // - Planet materials:
 //   extra[2].z = cube-face specular enabled (1/0), extra[2].w = specular strength
-//   extra[3].w = target ocean roughness
+//   extra[3].x = terrain material flag (1/0), extra[3].w = target ocean roughness
+//   extra[4] = (planetCenterLocal.xyz, planetRadiusM)
+//   extra[5] = (faceIndex, detailNormalStrength, cavityStrength, enableTerminatorShadow)
+//   extra[6].x = terrain height scale (meters)
 // - Mesh VFX materials:
 //   extra[3].x = opacity multiplier, extra[3].y = fresnel power, extra[3].z = fresnel strength
 //   extra[4].rgb = tint
@@ -114,8 +117,8 @@ layout(set = 1, binding = 0) uniform GLTFMaterialData{
 // - extra[13]: blackbody hot range (x=hotRangeStart, y=hotRangeEnd)
 
 layout(set = 1, binding = 1) uniform sampler2D colorTex;
-layout(set = 1, binding = 2) uniform sampler2D metalRoughTex;
-layout(set = 1, binding = 3) uniform sampler2D normalMap;   // tangent-space normal, UNORM
-layout(set = 1, binding = 4) uniform sampler2D occlusionTex; // occlusion (R channel)
+layout(set = 1, binding = 2) uniform sampler2D metalRoughTex; // terrain path: height map
+layout(set = 1, binding = 3) uniform sampler2D normalMap;   // terrain path: object-space detail normal
+layout(set = 1, binding = 4) uniform sampler2D occlusionTex; // terrain path: cavity / AO (R channel)
 layout(set = 1, binding = 5) uniform sampler2D emissiveTex;  // emissive (RGB, sRGB)
 layout(set = 1, binding = 6) uniform sampler2D planetSpecularTex; // per-face planet specular mask (R, linear)

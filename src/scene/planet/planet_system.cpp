@@ -304,6 +304,7 @@ void PlanetSystem::cleanup()
             {
                 rm->destroy_buffer(state.material_constants_buffer);
                 state.material_constants_buffer = {};
+                state.material_constants_stride = 0;
             }
         }
 
@@ -452,6 +453,13 @@ PlanetSystem::PlanetBody *PlanetSystem::create_terrain_planet(const TerrainPlane
     body.terrain_albedo_dir = info.albedo_dir;
     body.terrain_height_dir = info.height_dir;
     body.terrain_height_max_m = (!info.height_dir.empty()) ? std::max(0.0, info.height_max_m) : 0.0;
+    body.terrain_detail_normal_dir = info.detail_normal_dir;
+    body.terrain_detail_normal_strength = info.detail_normal_strength;
+    body.terrain_cavity_dir = info.cavity_dir;
+    body.terrain_cavity_strength = info.cavity_strength;
+    body.terrain_enable_terminator_shadow = info.enable_terminator_shadow;
+    body.patch_resolution_override = info.patch_resolution_override;
+    body.target_sse_px_override = info.target_sse_px_override;
     body.terrain_emission_dir = info.emission_dir;
     body.emission_factor = info.emission_factor;
     body.terrain_specular_dir = info.specular_dir;
@@ -507,6 +515,7 @@ bool PlanetSystem::destroy_planet(std::string_view name)
                 }
             }
             state->material_constants_buffer = {};
+            state->material_constants_stride = 0;
         }
     }
     _terrain_states.erase(std::string{name});
@@ -571,6 +580,7 @@ void PlanetSystem::clear_planets(bool destroy_mesh_assets)
                 }
             }
             state.material_constants_buffer = {};
+            state.material_constants_stride = 0;
         }
     }
     _terrain_states.clear();
@@ -723,7 +733,8 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                                    _earth_patch_resolution);
             const Clock::time_point t_q1 = Clock::now();
 
-            ensure_terrain_face_materials(*state, body);
+            const glm::vec3 body_center_local = world_to_local(body.center_world, origin_world);
+            ensure_terrain_face_materials(*state, body, body_center_local);
             if (_context->textures)
             {
                 for (const MaterialInstance &mat: state->face_materials)
@@ -941,7 +952,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 {
                     OceanRenderObject ocean{};
                     ocean.surface = obj;
-                    ocean.body_center_local = world_to_local(body.center_world, origin_world);
+                    ocean.body_center_local = body_center_local;
                     ocean.sea_level_radius = static_cast<float>(body.radius_m);
                     ocean.shell_offset = ocean_shell_offset_m(body.radius_m);
                     draw_context.OceanSurfaces.push_back(ocean);
