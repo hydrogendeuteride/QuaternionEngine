@@ -8,6 +8,7 @@
 #include "lighting_common.glsl"
 #include "planet_shadow.glsl"
 #include "blackbody.glsl"
+#include "planet_terrain_common.glsl"
 
 layout (location = 0) in vec3 inNormal;
 layout (location = 1) in vec3 inColor;
@@ -61,10 +62,16 @@ void main()
         discard;
     }
     vec3 albedo = inColor * baseTex.rgb * materialData.colorFactors.rgb;
-    // glTF: metallicRoughnessTexture uses G=roughness, B=metallic
-    vec2 mrTex = texture(metalRoughTex, inUV).gb;
-    float roughness = clamp(mrTex.x * materialData.metal_rough_factors.y, 0.04, 1.0);
-    float metallic  = clamp(mrTex.y * materialData.metal_rough_factors.x, 0.0, 1.0);
+    bool isTerrain = terrain_material_enabled();
+    float roughness = clamp(materialData.metal_rough_factors.y, 0.04, 1.0);
+    float metallic  = clamp(materialData.metal_rough_factors.x, 0.0, 1.0);
+    if (!isTerrain)
+    {
+        // glTF: metallicRoughnessTexture uses G=roughness, B=metallic
+        vec2 mrTex = texture(metalRoughTex, inUV).gb;
+        roughness = clamp(mrTex.x * materialData.metal_rough_factors.y, 0.04, 1.0);
+        metallic = clamp(mrTex.y * materialData.metal_rough_factors.x, 0.0, 1.0);
+    }
     apply_planet_water_override(albedo, roughness, inUV);
 
     // Normal mapping path for forward/transparent pipeline
@@ -72,18 +79,25 @@ void main()
     vec3 Nn = normalize(inNormal);
     vec3 N = Nn;
 
-    float normalScale = max(materialData.extra[0].x, 0.0);
-    if (normalScale > 0.0)
+    if (isTerrain)
     {
-        vec2 enc = texture(normalMap, inUV).xy * 2.0 - 1.0;
-        enc *= normalScale;
-        float z2 = 1.0 - dot(enc, enc);
-        float nz = z2 > 0.0 ? sqrt(z2) : 0.0;
-        vec3 Nm = vec3(enc, nz);
+        N = apply_terrain_detail_normal(N, inUV);
+    }
+    else
+    {
+        float normalScale = max(materialData.extra[0].x, 0.0);
+        if (normalScale > 0.0)
+        {
+            vec2 enc = texture(normalMap, inUV).xy * 2.0 - 1.0;
+            enc *= normalScale;
+            float z2 = 1.0 - dot(enc, enc);
+            float nz = z2 > 0.0 ? sqrt(z2) : 0.0;
+            vec3 Nm = vec3(enc, nz);
 
-        vec3 T = normalize(inTangent.xyz);
-        vec3 B = normalize(cross(Nn, T)) * inTangent.w;
-        N = normalize(T * Nm.x + B * Nm.y + Nn * Nm.z);
+            vec3 T = normalize(inTangent.xyz);
+            vec3 B = normalize(cross(Nn, T)) * inTangent.w;
+            N = normalize(T * Nm.x + B * Nm.y + Nn * Nm.z);
+        }
     }
     vec3 camLocal = getCameraLocalPosition();
     vec3 V = normalize(camLocal - inWorldPos);
@@ -97,6 +111,10 @@ void main()
         vec3 wp = inWorldPos + N * 0.0025;
         sunVis = planet_analytic_shadow_visibility(wp, Lsun);
         sunVis = max(sunVis, clamp(sceneData.shadowTuning.x, 0.0, 1.0));
+    }
+    if (isTerrain)
+    {
+        sunVis *= terrain_terminator_visibility(inUV, N, inWorldPos, Lsun);
     }
     vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
     vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * sunVis;

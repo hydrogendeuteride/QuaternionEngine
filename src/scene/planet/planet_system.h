@@ -67,6 +67,13 @@ public:
         std::string height_dir;
         // Height map range in meters for [0..1] texel values.
         double height_max_m = 6400.0;
+        std::string detail_normal_dir;
+        float detail_normal_strength = 0.0f;
+        std::string cavity_dir;
+        float cavity_strength = 0.0f;
+        bool enable_terminator_shadow = false;
+        uint32_t patch_resolution_override = 0;
+        float target_sse_px_override = 0.0f;
 
         // Optional emission texture root (relative to assets/). If empty, no emission.
         // Expected files: {px,nx,py,ny,pz,nz}.ktx2 or .png (sRGB).
@@ -119,6 +126,13 @@ public:
         // Expected files: {px,nx,py,ny,pz,nz}.ktx2 (BC4/R8, linear).
         std::string terrain_height_dir;
         double terrain_height_max_m = 0.0;
+        std::string terrain_detail_normal_dir;
+        float terrain_detail_normal_strength = 0.0f;
+        std::string terrain_cavity_dir;
+        float terrain_cavity_strength = 0.0f;
+        bool terrain_enable_terminator_shadow = false;
+        uint32_t patch_resolution_override = 0;
+        float target_sse_px_override = 0.0f;
 
         // Terrain-only: cube-face texture root for emission, relative to assets/.
         // Expected files: {px,nx,py,ny,pz,nz}.ktx2 or .png (sRGB).
@@ -236,6 +250,8 @@ private:
 
     struct TerrainState
     {
+        static constexpr uint32_t k_face_count = 6u;
+
         std::string terrain_name;
         planet::PlanetQuadtree quadtree{};
         EarthDebugStats debug_stats{};
@@ -247,6 +263,7 @@ private:
         std::list<uint32_t> patch_lru;
 
         AllocatedBuffer material_constants_buffer{};
+        VkDeviceSize material_constants_stride = 0;
         glm::vec4 bound_base_color{1.0f, 1.0f, 1.0f, 1.0f};
         float bound_metallic = 0.0f;
         float bound_roughness = 1.0f;
@@ -255,7 +272,10 @@ private:
         float bound_specular_strength = 1.0f;
         float bound_specular_roughness = 0.06f;
         std::string bound_albedo_dir;
+        std::string bound_height_texture_dir;
         std::string bound_height_dir;
+        std::string bound_detail_normal_dir;
+        std::string bound_cavity_dir;
         std::string bound_emission_dir;
         std::string bound_specular_dir;
         double bound_height_max_m = 0.0;
@@ -373,10 +393,12 @@ private:
     void ensure_earth_patch_material_layout();
 
     void ensure_terrain_material_constants_buffer(TerrainState &state,
-                                                  const PlanetBody &body);
+                                                  const PlanetBody &body,
+                                                  const glm::vec3 &planet_center_local);
 
     void ensure_terrain_face_materials(TerrainState &state,
-                                       const PlanetBody &body);
+                                       const PlanetBody &body,
+                                       const glm::vec3 &planet_center_local);
 
     void ensure_terrain_height_maps(TerrainState &state, const PlanetBody &body);
 
