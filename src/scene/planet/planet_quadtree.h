@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cubesphere.h"
+#include "planet_heightmap.h"
 
 #include <core/types.h>
 #include <core/world.h>
@@ -75,7 +76,8 @@ namespace planet
                     const WorldVec3 &origin_world,
                     const GPUSceneData &scene_data,
                     VkExtent2D logical_extent,
-                    uint32_t patch_resolution);
+                    uint32_t patch_resolution,
+                    const HeightFaceSet *height_faces = nullptr);
 
     private:
         Settings _settings{};

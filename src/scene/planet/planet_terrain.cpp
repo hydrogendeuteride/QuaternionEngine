@@ -270,9 +270,10 @@ void PlanetSystem::clear_terrain_materials(TerrainState &state)
     state.bound_cavity_dir.clear();
 }
 
-void PlanetSystem::ensure_earth_patch_index_buffer()
+void PlanetSystem::ensure_terrain_patch_index_buffer(TerrainState &state, const uint32_t resolution)
 {
-    if (_earth_patch_index_buffer.buffer != VK_NULL_HANDLE && _earth_patch_index_resolution == _earth_patch_resolution)
+    const uint32_t safe_resolution = std::max(2u, resolution);
+    if (state.patch_index_buffer.buffer != VK_NULL_HANDLE && state.patch_index_resolution == safe_resolution)
     {
         return;
     }
@@ -288,14 +289,14 @@ void PlanetSystem::ensure_earth_patch_index_buffer()
         return;
     }
 
-    // Resolution changed (or first init): clear existing patch cache and shared index buffer.
-    if (_earth_patch_index_buffer.buffer != VK_NULL_HANDLE)
+    // Resolution changed (or first init): clear this terrain's patch cache and rebuild its shared index buffer.
+    if (state.patch_index_buffer.buffer != VK_NULL_HANDLE)
     {
         FrameResources *frame = _context->currentFrame;
 
-        clear_all_terrain_patch_caches();
+        clear_terrain_patch_cache(state);
 
-        const AllocatedBuffer ib = _earth_patch_index_buffer;
+        const AllocatedBuffer ib = state.patch_index_buffer;
         if (frame)
         {
             frame->_deletionQueue.push_function([rm, ib]() { rm->destroy_buffer(ib); });
@@ -304,25 +305,25 @@ void PlanetSystem::ensure_earth_patch_index_buffer()
         {
             rm->destroy_buffer(ib);
         }
-        _earth_patch_index_buffer = {};
-        _earth_patch_index_count = 0;
-        _earth_patch_index_resolution = 0;
-        _earth_patch_indices_cpu.clear();
-        _earth_patch_indices_cpu_snapshot.reset();
+        state.patch_index_buffer = {};
+        state.patch_index_count = 0;
+        state.patch_index_resolution = 0;
+        state.patch_indices_cpu.clear();
+        state.patch_indices_cpu_snapshot.reset();
     }
 
-    _earth_patch_indices_cpu.clear();
-    planet::build_cubesphere_patch_indices(_earth_patch_indices_cpu, _earth_patch_resolution);
-    _earth_patch_indices_cpu_snapshot =
-            std::make_shared<const std::vector<uint32_t>>(_earth_patch_indices_cpu);
-    _earth_patch_index_count = static_cast<uint32_t>(_earth_patch_indices_cpu.size());
-    _earth_patch_index_buffer =
-            rm->upload_buffer(_earth_patch_indices_cpu.data(),
-                              _earth_patch_indices_cpu.size() * sizeof(uint32_t),
+    state.patch_indices_cpu.clear();
+    planet::build_cubesphere_patch_indices(state.patch_indices_cpu, safe_resolution);
+    state.patch_indices_cpu_snapshot =
+            std::make_shared<const std::vector<uint32_t>>(state.patch_indices_cpu);
+    state.patch_index_count = static_cast<uint32_t>(state.patch_indices_cpu.size());
+    state.patch_index_buffer =
+            rm->upload_buffer(state.patch_indices_cpu.data(),
+                              state.patch_indices_cpu.size() * sizeof(uint32_t),
                               VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
-    _earth_patch_index_resolution = _earth_patch_resolution;
+    state.patch_index_resolution = safe_resolution;
 }
 
 void PlanetSystem::ensure_earth_patch_material_layout()
@@ -965,10 +966,10 @@ PlanetSystem::TerrainBuildSnapshot PlanetSystem::make_terrain_build_snapshot(con
     TerrainBuildSnapshot snapshot{};
     snapshot.radius_m = body.radius_m;
     snapshot.height_max_m = body.terrain_height_max_m;
-    snapshot.patch_resolution = std::max(2u, _earth_patch_resolution);
+    snapshot.patch_resolution = std::max(2u, state.effective_patch_resolution);
     snapshot.debug_tint_by_lod = _earth_debug_tint_patches_by_lod;
     snapshot.height_faces = state.height_faces_snapshot;
-    snapshot.patch_indices = _earth_patch_indices_cpu_snapshot;
+    snapshot.patch_indices = state.patch_indices_cpu_snapshot;
     return snapshot;
 }
 
