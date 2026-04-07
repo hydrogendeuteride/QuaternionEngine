@@ -58,6 +58,9 @@ namespace Game
             earth.albedo_dir = "planets/earth/albedo/L0";
             earth.height_dir = "planets/earth/height/L0";
             earth.height_max_m = 8000.0;
+            earth.detail_normal_strength = 0.0f;
+            earth.cavity_strength = 0.0f;
+            earth.enable_terminator_shadow = false;
             earth.emission_dir = "planets/earth/emission/L0";
             earth.emission_factor = glm::vec3(2.0f, 2.0f, 2.0f);
             earth.specular_dir = "planets/earth/specular/L0";
@@ -79,6 +82,13 @@ namespace Game
             moon.albedo_dir = "planets/moon/albedo/L0";
             moon.height_dir = "planets/moon/height/L0";
             moon.height_max_m = 19'667.0;
+            moon.detail_normal_dir = "planets/moon/detail_normal/L0";
+            moon.detail_normal_strength = 1.25f;
+            moon.cavity_dir = "planets/moon/cavity/L0";
+            moon.cavity_strength = 0.35f;
+            moon.enable_terminator_shadow = true;
+            moon.patch_resolution_override = 65;
+            moon.target_sse_px_override = 18.0f;
             moon.soi_radius_m = 6.61e7;
             moon.orbit_distance_m = 384'400'000.0;
             moon.prediction_orbit_color = glm::vec3(0.84f, 0.84f, 0.87f);
@@ -611,6 +621,13 @@ namespace Game
                 planet.albedo_dir = cdef.albedo_dir;
                 planet.height_dir = cdef.height_dir;
                 planet.height_max_m = cdef.height_max_m;
+                planet.detail_normal_dir = cdef.detail_normal_dir;
+                planet.detail_normal_strength = cdef.detail_normal_strength;
+                planet.cavity_dir = cdef.cavity_dir;
+                planet.cavity_strength = cdef.cavity_strength;
+                planet.enable_terminator_shadow = cdef.enable_terminator_shadow;
+                planet.patch_resolution_override = cdef.patch_resolution_override;
+                planet.target_sse_px_override = cdef.target_sse_px_override;
                 planet.emission_dir = cdef.emission_dir;
                 planet.emission_factor = cdef.emission_factor;
                 planet.specular_dir = cdef.specular_dir;

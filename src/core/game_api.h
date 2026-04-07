@@ -138,6 +138,16 @@ struct PlanetTerrain
     std::string height_dir;
     // Height map range in meters for [0..1] texel values.
     double height_max_m{6400.0};
+    // Optional object-space detail normal cube-face root relative to assets/.
+    std::string detail_normal_dir;
+    float detail_normal_strength{0.0f};
+    // Optional cavity/AO cube-face root relative to assets/.
+    std::string cavity_dir;
+    float cavity_strength{0.0f};
+    bool enable_terminator_shadow{false};
+    // 0 keeps the global PlanetSystem defaults.
+    uint32_t patch_resolution_override{0};
+    float target_sse_px_override{0.0f};
 
     // Optional emission texture root relative to assets/ (e.g. "planets/earth/emission/L0").
     // Expected files: {px,nx,py,ny,pz,nz}.ktx2 or .png (sRGB). If empty, no emission.

@@ -392,6 +392,34 @@ namespace Game
             c.albedo_dir = json_required<std::string>(j, "albedo_dir", path);
             c.height_dir = json_required<std::string>(j, "height_dir", path);
             c.height_max_m = json_required_finite<double>(j, "height_max_m", path);
+            if (const auto it = j.find("detail_normal_dir"); it != j.end() && !it->is_null())
+            {
+                c.detail_normal_dir = json_required<std::string>(j, "detail_normal_dir", path);
+            }
+            if (const auto it = j.find("detail_normal_strength"); it != j.end() && !it->is_null())
+            {
+                c.detail_normal_strength = json_required_finite<float>(j, "detail_normal_strength", path);
+            }
+            if (const auto it = j.find("cavity_dir"); it != j.end() && !it->is_null())
+            {
+                c.cavity_dir = json_required<std::string>(j, "cavity_dir", path);
+            }
+            if (const auto it = j.find("cavity_strength"); it != j.end() && !it->is_null())
+            {
+                c.cavity_strength = json_required_finite<float>(j, "cavity_strength", path);
+            }
+            if (const auto it = j.find("enable_terminator_shadow"); it != j.end() && !it->is_null())
+            {
+                c.enable_terminator_shadow = json_required<bool>(j, "enable_terminator_shadow", path);
+            }
+            if (const auto it = j.find("patch_resolution_override"); it != j.end() && !it->is_null())
+            {
+                c.patch_resolution_override = json_required<uint32_t>(j, "patch_resolution_override", path);
+            }
+            if (const auto it = j.find("target_sse_px_override"); it != j.end() && !it->is_null())
+            {
+                c.target_sse_px_override = json_required_finite<float>(j, "target_sse_px_override", path);
+            }
             c.emission_dir = json_required<std::string>(j, "emission_dir", path);
             c.emission_factor = parse_vec3(*json_required_object(j, "emission_factor", path), child_path(path, "emission_factor"));
             if (const auto it = j.find("specular_dir"); it != j.end() && !it->is_null())
@@ -428,7 +456,9 @@ namespace Game
             }
             if (c.atmosphere_top_m < 0.0 || c.terrain_max_m < 0.0 || c.soi_radius_m < 0.0 ||
                 c.orbit_distance_m < 0.0 || c.height_max_m < 0.0 ||
-                c.specular_strength < 0.0f || c.specular_roughness < 0.0f)
+                c.detail_normal_strength < 0.0f || c.cavity_strength < 0.0f ||
+                c.specular_strength < 0.0f || c.specular_roughness < 0.0f ||
+                c.target_sse_px_override < 0.0f)
             {
                 fail(path + " numeric distances/heights must be >= 0");
             }
@@ -458,6 +488,13 @@ namespace Game
             j["albedo_dir"] = c.albedo_dir;
             j["height_dir"] = c.height_dir;
             j["height_max_m"] = c.height_max_m;
+            j["detail_normal_dir"] = c.detail_normal_dir;
+            j["detail_normal_strength"] = c.detail_normal_strength;
+            j["cavity_dir"] = c.cavity_dir;
+            j["cavity_strength"] = c.cavity_strength;
+            j["enable_terminator_shadow"] = c.enable_terminator_shadow;
+            j["patch_resolution_override"] = c.patch_resolution_override;
+            j["target_sse_px_override"] = c.target_sse_px_override;
             j["emission_dir"] = c.emission_dir;
             j["emission_factor"] = {{"x", c.emission_factor.x}, {"y", c.emission_factor.y}, {"z", c.emission_factor.z}};
             j["specular_dir"] = c.specular_dir;
