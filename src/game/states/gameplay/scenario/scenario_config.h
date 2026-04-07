@@ -30,6 +30,13 @@ namespace Game
             std::string albedo_dir;
             std::string height_dir;
             double height_max_m{0.0};
+            std::string detail_normal_dir;
+            float detail_normal_strength{0.0f};
+            std::string cavity_dir;
+            float cavity_strength{0.0f};
+            bool enable_terminator_shadow{false};
+            uint32_t patch_resolution_override{0};
+            float target_sse_px_override{0.0f};
             std::string emission_dir;
             glm::vec3 emission_factor{0.0f};
             std::string specular_dir;

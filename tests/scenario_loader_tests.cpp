@@ -53,14 +53,21 @@ namespace
                                               {"soi_radius_m", 924000000.0},
                                               {"orbit_distance_m", 0.0},
                                               {"has_terrain", false},
-                                              {"albedo_dir", ""},
-                                              {"height_dir", ""},
-                                              {"height_max_m", 0.0},
-                                              {"emission_dir", ""},
-                                              {"emission_factor", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}}},
-                                              {"render_scale", 1.0},
-                                      },
-                              })},
+                                               {"albedo_dir", ""},
+                                               {"height_dir", ""},
+                                               {"height_max_m", 0.0},
+                                               {"detail_normal_dir", ""},
+                                               {"detail_normal_strength", 0.0},
+                                               {"cavity_dir", ""},
+                                               {"cavity_strength", 0.0},
+                                               {"enable_terminator_shadow", false},
+                                               {"patch_resolution_override", 0},
+                                               {"target_sse_px_override", 0.0},
+                                               {"emission_dir", ""},
+                                               {"emission_factor", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}}},
+                                               {"render_scale", 1.0},
+                                       },
+                               })},
                 {"orbiters", json::array({
                                      {
                                              {"name", "ship"},
@@ -136,7 +143,14 @@ TEST(ScenarioLoader, LoadsBundledDefaultGameplayScenario)
                                       cfg->celestials.end(),
                                       [](const Game::ScenarioConfig::CelestialDef &body) { return body.name == "moon"; });
     ASSERT_NE(moon_it, cfg->celestials.end());
-    EXPECT_FALSE(moon_it->has_terrain);
+    EXPECT_TRUE(moon_it->has_terrain);
+    EXPECT_EQ(moon_it->detail_normal_dir, "planets/moon/detail_normal/L0");
+    EXPECT_FLOAT_EQ(moon_it->detail_normal_strength, 1.25f);
+    EXPECT_EQ(moon_it->cavity_dir, "planets/moon/cavity/L0");
+    EXPECT_FLOAT_EQ(moon_it->cavity_strength, 0.35f);
+    EXPECT_TRUE(moon_it->enable_terminator_shadow);
+    EXPECT_EQ(moon_it->patch_resolution_override, 65u);
+    EXPECT_FLOAT_EQ(moon_it->target_sse_px_override, 18.0f);
 
     const auto probe_it = std::find_if(cfg->orbiters.begin(),
                                        cfg->orbiters.end(),
@@ -314,21 +328,36 @@ TEST(ScenarioLoader, SaveCreatesParentDirectoriesAndRoundTrips)
     const std::string input_path = write_json_file(tmp.path, "valid_for_roundtrip.json", make_valid_scenario());
     const auto loaded = Game::load_scenario_config(input_path);
     ASSERT_TRUE(loaded.has_value());
+    Game::ScenarioConfig cfg = *loaded;
+    cfg.celestials.front().detail_normal_dir = "planets/test/detail_normal/L0";
+    cfg.celestials.front().detail_normal_strength = 0.8f;
+    cfg.celestials.front().cavity_dir = "planets/test/cavity/L0";
+    cfg.celestials.front().cavity_strength = 0.2f;
+    cfg.celestials.front().enable_terminator_shadow = true;
+    cfg.celestials.front().patch_resolution_override = 33u;
+    cfg.celestials.front().target_sse_px_override = 12.0f;
 
     const std::filesystem::path output_path = tmp.path / "nested" / "scenario" / "saved.json";
-    ASSERT_TRUE(Game::save_scenario_config(output_path.string(), *loaded));
+    ASSERT_TRUE(Game::save_scenario_config(output_path.string(), cfg));
     ASSERT_TRUE(std::filesystem::exists(output_path));
 
     const auto reloaded = Game::load_scenario_config(output_path.string());
     ASSERT_TRUE(reloaded.has_value());
 
-    EXPECT_EQ(reloaded->celestials.size(), loaded->celestials.size());
-    EXPECT_EQ(reloaded->orbiters.size(), loaded->orbiters.size());
-    EXPECT_DOUBLE_EQ(reloaded->mu_base, loaded->mu_base);
-    EXPECT_DOUBLE_EQ(reloaded->speed_scale, loaded->speed_scale);
-    EXPECT_EQ(reloaded->celestials.front().name, loaded->celestials.front().name);
-    EXPECT_EQ(reloaded->orbiters.front().name, loaded->orbiters.front().name);
-    EXPECT_EQ(reloaded->orbiters.front().body_settings.layer, loaded->orbiters.front().body_settings.layer);
+    EXPECT_EQ(reloaded->celestials.size(), cfg.celestials.size());
+    EXPECT_EQ(reloaded->orbiters.size(), cfg.orbiters.size());
+    EXPECT_DOUBLE_EQ(reloaded->mu_base, cfg.mu_base);
+    EXPECT_DOUBLE_EQ(reloaded->speed_scale, cfg.speed_scale);
+    EXPECT_EQ(reloaded->celestials.front().name, cfg.celestials.front().name);
+    EXPECT_EQ(reloaded->celestials.front().detail_normal_dir, cfg.celestials.front().detail_normal_dir);
+    EXPECT_FLOAT_EQ(reloaded->celestials.front().detail_normal_strength, cfg.celestials.front().detail_normal_strength);
+    EXPECT_EQ(reloaded->celestials.front().cavity_dir, cfg.celestials.front().cavity_dir);
+    EXPECT_FLOAT_EQ(reloaded->celestials.front().cavity_strength, cfg.celestials.front().cavity_strength);
+    EXPECT_EQ(reloaded->celestials.front().enable_terminator_shadow, cfg.celestials.front().enable_terminator_shadow);
+    EXPECT_EQ(reloaded->celestials.front().patch_resolution_override, cfg.celestials.front().patch_resolution_override);
+    EXPECT_FLOAT_EQ(reloaded->celestials.front().target_sse_px_override, cfg.celestials.front().target_sse_px_override);
+    EXPECT_EQ(reloaded->orbiters.front().name, cfg.orbiters.front().name);
+    EXPECT_EQ(reloaded->orbiters.front().body_settings.layer, cfg.orbiters.front().body_settings.layer);
     EXPECT_TRUE(reloaded->orbiters.front().body_settings.shape.is_capsule());
 }
 
