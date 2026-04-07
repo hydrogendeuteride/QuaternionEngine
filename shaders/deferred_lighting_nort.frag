@@ -4,6 +4,7 @@
 #include "ibl_common.glsl"
 #include "lighting_common.glsl"
 #include "planet_shadow.glsl"
+#include "planet_gbuffer_payload.glsl"
 
 layout(location=0) in vec2 inUV;
 layout(location=0) out vec4 outColor;
@@ -262,8 +263,9 @@ void main(){
     vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);
 
     // Planet night emission: only show emission on the dark side of planet surfaces
-    bool isPlanet = (posSample.w > 1.5);
-    float oceanMask = isPlanet ? clamp((posSample.w - 2.0) * 4.0, 0.0, 1.0) : 0.0;
+    bool isPlanet = decode_planet_gbuffer_is_planet(posSample.w);
+    float oceanMask = decode_planet_gbuffer_water_mask(posSample.w);
+    float terrainSunVis = decode_planet_gbuffer_terrain_sun_vis(posSample.w);
     if (isPlanet)
     {
         float NdotL = max(dot(N, Lsun), 0.0);
@@ -274,7 +276,7 @@ void main(){
     }
     float sunVis = calcShadowVisibility(pos, N, Lsun);
     vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
-    vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * sunVis;
+    vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * sunVis * terrainSunVis;
 
     // Non-RT shader fallback: treat RT-only punctual mode as shadow-map mode.
     uint punctualMode = sceneData.punctualShadowConfig.x;

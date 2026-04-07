@@ -15,9 +15,59 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
+#include <cstring>
 #include <filesystem>
 
 #include "device.h"
+
+namespace
+{
+    constexpr uint32_t k_terrain_face_count = 6u;
+
+    VkDeviceSize align_up(VkDeviceSize value, VkDeviceSize alignment)
+    {
+        if (alignment <= 1)
+        {
+            return value;
+        }
+        return (value + alignment - 1u) & ~(alignment - 1u);
+    }
+
+    VkDeviceSize terrain_material_constants_stride(DeviceManager *device)
+    {
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(device->physicalDevice(), &props);
+        return align_up(sizeof(GLTFMetallic_Roughness::MaterialConstants),
+                        props.limits.minUniformBufferOffsetAlignment);
+    }
+
+    std::string resolve_optional_face_texture_path(AssetManager &assets,
+                                                   std::string_view dir,
+                                                   const planet::CubeFace face)
+    {
+        if (dir.empty())
+        {
+            return {};
+        }
+
+        std::string rel = fmt::format("{}/{}.ktx2", dir, planet::cube_face_name(face));
+        std::string abs_path = assets.assetPath(rel);
+        if (std::filesystem::exists(abs_path))
+        {
+            return abs_path;
+        }
+
+        rel = fmt::format("{}/{}.png", dir, planet::cube_face_name(face));
+        abs_path = assets.assetPath(rel);
+        if (std::filesystem::exists(abs_path))
+        {
+            return abs_path;
+        }
+
+        return {};
+    }
+}
 
 PlanetSystem::TerrainState *PlanetSystem::get_or_create_terrain_state(std::string_view name)
 {
@@ -213,13 +263,17 @@ void PlanetSystem::clear_terrain_materials(TerrainState &state)
     // Keep descriptor sets allocated so they can be reused if terrain is re-enabled,
     // but force a rebinding on next use.
     state.bound_albedo_dir.clear();
+    state.bound_height_texture_dir.clear();
     state.bound_emission_dir.clear();
     state.bound_specular_dir.clear();
+    state.bound_detail_normal_dir.clear();
+    state.bound_cavity_dir.clear();
 }
 
-void PlanetSystem::ensure_earth_patch_index_buffer()
+void PlanetSystem::ensure_terrain_patch_index_buffer(TerrainState &state, const uint32_t resolution)
 {
-    if (_earth_patch_index_buffer.buffer != VK_NULL_HANDLE && _earth_patch_index_resolution == _earth_patch_resolution)
+    const uint32_t safe_resolution = std::max(2u, resolution);
+    if (state.patch_index_buffer.buffer != VK_NULL_HANDLE && state.patch_index_resolution == safe_resolution)
     {
         return;
     }
@@ -235,14 +289,14 @@ void PlanetSystem::ensure_earth_patch_index_buffer()
         return;
     }
 
-    // Resolution changed (or first init): clear existing patch cache and shared index buffer.
-    if (_earth_patch_index_buffer.buffer != VK_NULL_HANDLE)
+    // Resolution changed (or first init): clear this terrain's patch cache and rebuild its shared index buffer.
+    if (state.patch_index_buffer.buffer != VK_NULL_HANDLE)
     {
         FrameResources *frame = _context->currentFrame;
 
-        clear_all_terrain_patch_caches();
+        clear_terrain_patch_cache(state);
 
-        const AllocatedBuffer ib = _earth_patch_index_buffer;
+        const AllocatedBuffer ib = state.patch_index_buffer;
         if (frame)
         {
             frame->_deletionQueue.push_function([rm, ib]() { rm->destroy_buffer(ib); });
@@ -251,25 +305,25 @@ void PlanetSystem::ensure_earth_patch_index_buffer()
         {
             rm->destroy_buffer(ib);
         }
-        _earth_patch_index_buffer = {};
-        _earth_patch_index_count = 0;
-        _earth_patch_index_resolution = 0;
-        _earth_patch_indices_cpu.clear();
-        _earth_patch_indices_cpu_snapshot.reset();
+        state.patch_index_buffer = {};
+        state.patch_index_count = 0;
+        state.patch_index_resolution = 0;
+        state.patch_indices_cpu.clear();
+        state.patch_indices_cpu_snapshot.reset();
     }
 
-    _earth_patch_indices_cpu.clear();
-    planet::build_cubesphere_patch_indices(_earth_patch_indices_cpu, _earth_patch_resolution);
-    _earth_patch_indices_cpu_snapshot =
-            std::make_shared<const std::vector<uint32_t>>(_earth_patch_indices_cpu);
-    _earth_patch_index_count = static_cast<uint32_t>(_earth_patch_indices_cpu.size());
-    _earth_patch_index_buffer =
-            rm->upload_buffer(_earth_patch_indices_cpu.data(),
-                              _earth_patch_indices_cpu.size() * sizeof(uint32_t),
+    state.patch_indices_cpu.clear();
+    planet::build_cubesphere_patch_indices(state.patch_indices_cpu, safe_resolution);
+    state.patch_indices_cpu_snapshot =
+            std::make_shared<const std::vector<uint32_t>>(state.patch_indices_cpu);
+    state.patch_index_count = static_cast<uint32_t>(state.patch_indices_cpu.size());
+    state.patch_index_buffer =
+            rm->upload_buffer(state.patch_indices_cpu.data(),
+                              state.patch_indices_cpu.size() * sizeof(uint32_t),
                               VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
-    _earth_patch_index_resolution = _earth_patch_resolution;
+    state.patch_index_resolution = safe_resolution;
 }
 
 void PlanetSystem::ensure_earth_patch_material_layout()
@@ -306,73 +360,41 @@ void PlanetSystem::ensure_earth_patch_material_layout()
 }
 
 void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
-                                                            const PlanetBody &body)
+                                                            const PlanetBody &body,
+                                                            const glm::vec3 &planet_center_local)
 {
     const bool specular_enabled = !body.terrain_specular_dir.empty() && (body.specular_strength > 0.0f);
     const float specular_strength = specular_enabled ? std::clamp(body.specular_strength, 0.0f, 1.0f) : 0.0f;
     const float specular_roughness = std::clamp(body.specular_roughness, 0.04f, 1.0f);
+    const bool has_detail_normal = !body.terrain_detail_normal_dir.empty() && (body.terrain_detail_normal_strength != 0.0f);
+    const float detail_normal_strength = has_detail_normal ? body.terrain_detail_normal_strength : 0.0f;
+    const bool has_cavity = !body.terrain_cavity_dir.empty() && (body.terrain_cavity_strength > 0.0f);
+    const float cavity_strength = has_cavity ? std::max(body.terrain_cavity_strength, 0.0f) : 0.0f;
+    const bool terminator_enabled =
+            body.terrain_enable_terminator_shadow &&
+            !body.terrain_height_dir.empty() &&
+            (body.terrain_height_max_m > 0.0);
 
-    auto build_constants = [&]() {
+    auto build_constants = [&](const uint32_t face_index) {
         GLTFMetallic_Roughness::MaterialConstants constants =
                 planet_helpers::make_planet_constants(body.base_color,
                                                       body.metallic,
                                                       body.roughness,
                                                       body.emission_factor);
+        // Terrain path uses constant metallic/roughness instead of a sampled ORM texture.
+        constants.extra[0].y = cavity_strength;
+        constants.extra[0].z = has_cavity ? 1.0f : 0.0f;
         constants.extra[2].z = specular_enabled ? 1.0f : 0.0f;
         constants.extra[2].w = specular_strength;
-        constants.extra[3] = glm::vec4(0.0f, 0.0f, 0.0f, specular_roughness);
+        constants.extra[3] = glm::vec4(1.0f, 0.0f, 0.0f, specular_roughness);
+        constants.extra[4] = glm::vec4(planet_center_local, static_cast<float>(body.radius_m));
+        constants.extra[5] = glm::vec4(static_cast<float>(face_index),
+                                       detail_normal_strength,
+                                       cavity_strength,
+                                       terminator_enabled ? 1.0f : 0.0f);
+        constants.extra[6] = glm::vec4(static_cast<float>(body.terrain_height_max_m), 0.0f, 0.0f, 0.0f);
         return constants;
     };
-
-    if (state.material_constants_buffer.buffer != VK_NULL_HANDLE)
-    {
-        if (!_context)
-        {
-            return;
-        }
-
-        DeviceManager *device = _context->getDevice();
-        if (!device)
-        {
-            return;
-        }
-
-        const bool same_constants =
-                state.bound_base_color == body.base_color &&
-                state.bound_metallic == body.metallic &&
-                state.bound_roughness == body.roughness &&
-                state.bound_emission_factor == body.emission_factor &&
-                state.bound_specular_enabled == specular_enabled &&
-                state.bound_specular_strength == specular_strength &&
-                state.bound_specular_roughness == specular_roughness;
-        if (same_constants)
-        {
-            return;
-        }
-
-        const GLTFMetallic_Roughness::MaterialConstants constants = build_constants();
-
-        VmaAllocationInfo allocInfo{};
-        vmaGetAllocationInfo(device->allocator(), state.material_constants_buffer.allocation, &allocInfo);
-        auto *mapped = static_cast<GLTFMetallic_Roughness::MaterialConstants *>(allocInfo.pMappedData);
-        if (mapped)
-        {
-            *mapped = constants;
-            vmaFlushAllocation(device->allocator(),
-                               state.material_constants_buffer.allocation,
-                               0,
-                               sizeof(constants));
-
-            state.bound_base_color = body.base_color;
-            state.bound_metallic = body.metallic;
-            state.bound_roughness = body.roughness;
-            state.bound_emission_factor = body.emission_factor;
-            state.bound_specular_enabled = specular_enabled;
-            state.bound_specular_strength = specular_strength;
-            state.bound_specular_roughness = specular_roughness;
-        }
-        return;
-    }
 
     if (!_context)
     {
@@ -386,12 +408,26 @@ void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
         return;
     }
 
-    const GLTFMetallic_Roughness::MaterialConstants constants = build_constants();
+    const VkDeviceSize stride = terrain_material_constants_stride(device);
+    const VkDeviceSize required_size = stride * k_terrain_face_count;
 
-    state.material_constants_buffer =
-            rm->create_buffer(sizeof(GLTFMetallic_Roughness::MaterialConstants),
-                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                              VMA_MEMORY_USAGE_CPU_TO_GPU);
+    if (state.material_constants_buffer.buffer != VK_NULL_HANDLE &&
+        state.material_constants_stride != 0 &&
+        state.material_constants_stride != stride)
+    {
+        rm->destroy_buffer(state.material_constants_buffer);
+        state.material_constants_buffer = {};
+        state.material_constants_stride = 0;
+    }
+
+    if (state.material_constants_buffer.buffer == VK_NULL_HANDLE)
+    {
+        state.material_constants_buffer =
+                rm->create_buffer(required_size,
+                                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                                  VMA_MEMORY_USAGE_CPU_TO_GPU);
+        state.material_constants_stride = stride;
+    }
 
     if (state.material_constants_buffer.buffer == VK_NULL_HANDLE)
     {
@@ -400,11 +436,15 @@ void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
 
     VmaAllocationInfo allocInfo{};
     vmaGetAllocationInfo(device->allocator(), state.material_constants_buffer.allocation, &allocInfo);
-    auto *mapped = static_cast<GLTFMetallic_Roughness::MaterialConstants *>(allocInfo.pMappedData);
+    auto *mapped = static_cast<std::byte *>(allocInfo.pMappedData);
     if (mapped)
     {
-        *mapped = constants;
-        vmaFlushAllocation(device->allocator(), state.material_constants_buffer.allocation, 0, sizeof(constants));
+        for (uint32_t face_index = 0; face_index < k_terrain_face_count; ++face_index)
+        {
+            const GLTFMetallic_Roughness::MaterialConstants constants = build_constants(face_index);
+            std::memcpy(mapped + stride * face_index, &constants, sizeof(constants));
+        }
+        vmaFlushAllocation(device->allocator(), state.material_constants_buffer.allocation, 0, required_size);
 
         state.bound_base_color = body.base_color;
         state.bound_metallic = body.metallic;
@@ -417,7 +457,8 @@ void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
 }
 
 void PlanetSystem::ensure_terrain_face_materials(TerrainState &state,
-                                                 const PlanetBody &body)
+                                                 const PlanetBody &body,
+                                                 const glm::vec3 &planet_center_local)
 {
     if (!_context || !body.material)
     {
@@ -434,7 +475,7 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state,
     }
 
     ensure_earth_patch_material_layout();
-    ensure_terrain_material_constants_buffer(state, body);
+    ensure_terrain_material_constants_buffer(state, body, planet_center_local);
 
     if (_earth_patch_material_layout == VK_NULL_HANDLE ||
         state.material_constants_buffer.buffer == VK_NULL_HANDLE)
@@ -485,6 +526,27 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state,
         state.bound_albedo_dir = desired_albedo_dir;
     }
 
+    const std::string desired_height_dir = body.terrain_height_dir;
+    const bool height_dir_changed = desired_height_dir != state.bound_height_texture_dir;
+    if (height_dir_changed)
+    {
+        state.bound_height_texture_dir = desired_height_dir;
+    }
+
+    const std::string desired_detail_normal_dir = body.terrain_detail_normal_dir;
+    const bool detail_normal_dir_changed = desired_detail_normal_dir != state.bound_detail_normal_dir;
+    if (detail_normal_dir_changed)
+    {
+        state.bound_detail_normal_dir = desired_detail_normal_dir;
+    }
+
+    const std::string desired_cavity_dir = body.terrain_cavity_dir;
+    const bool cavity_dir_changed = desired_cavity_dir != state.bound_cavity_dir;
+    if (cavity_dir_changed)
+    {
+        state.bound_cavity_dir = desired_cavity_dir;
+    }
+
     const std::string desired_emission_dir = body.terrain_emission_dir;
     const bool emission_dir_changed = desired_emission_dir != state.bound_emission_dir;
     if (emission_dir_changed)
@@ -518,6 +580,77 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state,
         textures->watchBinding(h, set, 1u, tileSampler, checker);
     };
 
+    auto watch_height = [&](size_t face_index, VkDescriptorSet set) {
+        if (!textures || desired_height_dir.empty())
+        {
+            return;
+        }
+
+        const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
+        const std::string abs_path = resolve_optional_face_texture_path(*assets, desired_height_dir, face);
+        if (abs_path.empty())
+        {
+            return;
+        }
+
+        TextureCache::TextureKey tk{};
+        tk.kind = TextureCache::TextureKey::SourceKind::FilePath;
+        tk.path = abs_path;
+        tk.srgb = false;
+        tk.mipmapped = true;
+        tk.channels = TextureCache::TextureKey::ChannelsHint::R;
+
+        TextureCache::TextureHandle h = textures->request(tk, tileSampler);
+        textures->watchBinding(h, set, 2u, tileSampler, white);
+    };
+
+    auto watch_detail_normal = [&](size_t face_index, VkDescriptorSet set) {
+        if (!textures || desired_detail_normal_dir.empty())
+        {
+            return;
+        }
+
+        const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
+        const std::string abs_path = resolve_optional_face_texture_path(*assets, desired_detail_normal_dir, face);
+        if (abs_path.empty())
+        {
+            return;
+        }
+
+        TextureCache::TextureKey tk{};
+        tk.kind = TextureCache::TextureKey::SourceKind::FilePath;
+        tk.path = abs_path;
+        tk.srgb = false;
+        tk.mipmapped = true;
+
+        TextureCache::TextureHandle h = textures->request(tk, tileSampler);
+        textures->watchBinding(h, set, 3u, tileSampler, flatNormal);
+    };
+
+    auto watch_cavity = [&](size_t face_index, VkDescriptorSet set) {
+        if (!textures || desired_cavity_dir.empty())
+        {
+            return;
+        }
+
+        const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
+        const std::string abs_path = resolve_optional_face_texture_path(*assets, desired_cavity_dir, face);
+        if (abs_path.empty())
+        {
+            return;
+        }
+
+        TextureCache::TextureKey tk{};
+        tk.kind = TextureCache::TextureKey::SourceKind::FilePath;
+        tk.path = abs_path;
+        tk.srgb = false;
+        tk.mipmapped = true;
+        tk.channels = TextureCache::TextureKey::ChannelsHint::R;
+
+        TextureCache::TextureHandle h = textures->request(tk, tileSampler);
+        textures->watchBinding(h, set, 4u, tileSampler, white);
+    };
+
     auto watch_emission = [&](size_t face_index, VkDescriptorSet set) {
         if (!textures || desired_emission_dir.empty())
         {
@@ -525,12 +658,10 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state,
         }
 
         const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
-        std::string rel = fmt::format("{}/{}.ktx2", desired_emission_dir, planet::cube_face_name(face));
-        std::string abs_path = assets->assetPath(rel);
-        if (!std::filesystem::exists(abs_path))
+        const std::string abs_path = resolve_optional_face_texture_path(*assets, desired_emission_dir, face);
+        if (abs_path.empty())
         {
-            rel = fmt::format("{}/{}.png", desired_emission_dir, planet::cube_face_name(face));
-            abs_path = assets->assetPath(rel);
+            return;
         }
 
         TextureCache::TextureKey tk{};
@@ -550,12 +681,10 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state,
         }
 
         const planet::CubeFace face = static_cast<planet::CubeFace>(face_index);
-        std::string rel = fmt::format("{}/{}.ktx2", desired_specular_dir, planet::cube_face_name(face));
-        std::string abs_path = assets->assetPath(rel);
-        if (!std::filesystem::exists(abs_path))
+        const std::string abs_path = resolve_optional_face_texture_path(*assets, desired_specular_dir, face);
+        if (abs_path.empty())
         {
-            rel = fmt::format("{}/{}.png", desired_specular_dir, planet::cube_face_name(face));
-            abs_path = assets->assetPath(rel);
+            return;
         }
 
         TextureCache::TextureKey tk{};
@@ -584,7 +713,7 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state,
             writer.write_buffer(0,
                                 state.material_constants_buffer.buffer,
                                 sizeof(GLTFMetallic_Roughness::MaterialConstants),
-                                0,
+                                state.material_constants_stride * face_index,
                                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
             writer.write_image(1,
                                checker,
@@ -619,10 +748,14 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state,
             writer.update_set(device->device(), mat.materialSet);
 
             watch_albedo(face_index, mat.materialSet);
+            watch_height(face_index, mat.materialSet);
+            watch_detail_normal(face_index, mat.materialSet);
+            watch_cavity(face_index, mat.materialSet);
             watch_emission(face_index, mat.materialSet);
             watch_specular(face_index, mat.materialSet);
         }
-        else if ((albedo_dir_changed || emission_dir_changed || specular_dir_changed) &&
+        else if ((albedo_dir_changed || height_dir_changed || detail_normal_dir_changed ||
+                  cavity_dir_changed || emission_dir_changed || specular_dir_changed) &&
                  textures &&
                  tileSampler != VK_NULL_HANDLE)
         {
@@ -633,6 +766,30 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state,
             {
                 writer.write_image(1,
                                    checker,
+                                   tileSampler,
+                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            }
+            if (height_dir_changed)
+            {
+                writer.write_image(2,
+                                   white,
+                                   tileSampler,
+                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            }
+            if (detail_normal_dir_changed)
+            {
+                writer.write_image(3,
+                                   flatNormal,
+                                   tileSampler,
+                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            }
+            if (cavity_dir_changed)
+            {
+                writer.write_image(4,
+                                   white,
                                    tileSampler,
                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
@@ -656,6 +813,9 @@ void PlanetSystem::ensure_terrain_face_materials(TerrainState &state,
             writer.update_set(device->device(), mat.materialSet);
 
             watch_albedo(face_index, mat.materialSet);
+            watch_height(face_index, mat.materialSet);
+            watch_detail_normal(face_index, mat.materialSet);
+            watch_cavity(face_index, mat.materialSet);
             watch_emission(face_index, mat.materialSet);
             watch_specular(face_index, mat.materialSet);
         }
@@ -806,10 +966,10 @@ PlanetSystem::TerrainBuildSnapshot PlanetSystem::make_terrain_build_snapshot(con
     TerrainBuildSnapshot snapshot{};
     snapshot.radius_m = body.radius_m;
     snapshot.height_max_m = body.terrain_height_max_m;
-    snapshot.patch_resolution = std::max(2u, _earth_patch_resolution);
+    snapshot.patch_resolution = std::max(2u, state.effective_patch_resolution);
     snapshot.debug_tint_by_lod = _earth_debug_tint_patches_by_lod;
     snapshot.height_faces = state.height_faces_snapshot;
-    snapshot.patch_indices = _earth_patch_indices_cpu_snapshot;
+    snapshot.patch_indices = state.patch_indices_cpu_snapshot;
     return snapshot;
 }
 

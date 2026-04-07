@@ -304,13 +304,18 @@ void PlanetSystem::cleanup()
             {
                 rm->destroy_buffer(state.material_constants_buffer);
                 state.material_constants_buffer = {};
+                state.material_constants_stride = 0;
             }
-        }
 
-        if (_earth_patch_index_buffer.buffer != VK_NULL_HANDLE)
-        {
-            rm->destroy_buffer(_earth_patch_index_buffer);
-            _earth_patch_index_buffer = {};
+            if (state.patch_index_buffer.buffer != VK_NULL_HANDLE)
+            {
+                rm->destroy_buffer(state.patch_index_buffer);
+                state.patch_index_buffer = {};
+                state.patch_index_count = 0;
+                state.patch_index_resolution = 0;
+                state.patch_indices_cpu.clear();
+                state.patch_indices_cpu_snapshot.reset();
+            }
         }
     }
 
@@ -324,10 +329,6 @@ void PlanetSystem::cleanup()
     }
 
     _terrain_states.clear();
-
-    _earth_patch_index_count = 0;
-    _earth_patch_index_resolution = 0;
-    _earth_patch_indices_cpu.clear();
 
     _bodies.clear();
 }
@@ -386,6 +387,17 @@ const PlanetSystem::EarthDebugStats &PlanetSystem::earth_debug_stats() const
 {
     const PlanetBody *body = find_terrain_body();
     return body ? terrain_debug_stats(body->name) : _empty_debug_stats;
+}
+
+uint32_t PlanetSystem::terrain_patch_resolution_for_body(const PlanetBody &body) const
+{
+    return std::max(2u, body.patch_resolution_override != 0u ? body.patch_resolution_override : _earth_patch_resolution);
+}
+
+float PlanetSystem::terrain_target_sse_for_body(const PlanetBody &body) const
+{
+    const float base_target = std::max(_earth_quadtree_settings.target_sse_px, 0.1f);
+    return (body.target_sse_px_override > 0.0f) ? body.target_sse_px_override : base_target;
 }
 
 PlanetSystem::PlanetBody *PlanetSystem::create_mesh_planet(const MeshPlanetCreateInfo &info)
@@ -452,6 +464,13 @@ PlanetSystem::PlanetBody *PlanetSystem::create_terrain_planet(const TerrainPlane
     body.terrain_albedo_dir = info.albedo_dir;
     body.terrain_height_dir = info.height_dir;
     body.terrain_height_max_m = (!info.height_dir.empty()) ? std::max(0.0, info.height_max_m) : 0.0;
+    body.terrain_detail_normal_dir = info.detail_normal_dir;
+    body.terrain_detail_normal_strength = info.detail_normal_strength;
+    body.terrain_cavity_dir = info.cavity_dir;
+    body.terrain_cavity_strength = info.cavity_strength;
+    body.terrain_enable_terminator_shadow = info.enable_terminator_shadow;
+    body.patch_resolution_override = info.patch_resolution_override;
+    body.target_sse_px_override = info.target_sse_px_override;
     body.terrain_emission_dir = info.emission_dir;
     body.emission_factor = info.emission_factor;
     body.terrain_specular_dir = info.specular_dir;
@@ -507,6 +526,30 @@ bool PlanetSystem::destroy_planet(std::string_view name)
                 }
             }
             state->material_constants_buffer = {};
+            state->material_constants_stride = 0;
+        }
+
+        if (_context && state->patch_index_buffer.buffer != VK_NULL_HANDLE)
+        {
+            ResourceManager *rm = _context->getResources();
+            FrameResources *frame = _context->currentFrame;
+            const AllocatedBuffer buf = state->patch_index_buffer;
+            if (rm)
+            {
+                if (frame)
+                {
+                    frame->_deletionQueue.push_function([rm, buf]() { rm->destroy_buffer(buf); });
+                }
+                else
+                {
+                    rm->destroy_buffer(buf);
+                }
+            }
+            state->patch_index_buffer = {};
+            state->patch_index_count = 0;
+            state->patch_index_resolution = 0;
+            state->patch_indices_cpu.clear();
+            state->patch_indices_cpu_snapshot.reset();
         }
     }
     _terrain_states.erase(std::string{name});
@@ -571,6 +614,30 @@ void PlanetSystem::clear_planets(bool destroy_mesh_assets)
                 }
             }
             state.material_constants_buffer = {};
+            state.material_constants_stride = 0;
+        }
+
+        if (_context && state.patch_index_buffer.buffer != VK_NULL_HANDLE)
+        {
+            ResourceManager *rm = _context->getResources();
+            FrameResources *frame = _context->currentFrame;
+            const AllocatedBuffer buf = state.patch_index_buffer;
+            if (rm)
+            {
+                if (frame)
+                {
+                    frame->_deletionQueue.push_function([rm, buf]() { rm->destroy_buffer(buf); });
+                }
+                else
+                {
+                    rm->destroy_buffer(buf);
+                }
+            }
+            state.patch_index_buffer = {};
+            state.patch_index_count = 0;
+            state.patch_index_resolution = 0;
+            state.patch_indices_cpu.clear();
+            state.patch_indices_cpu_snapshot.reset();
         }
     }
     _terrain_states.clear();
@@ -685,8 +752,6 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
         const VkExtent2D logical_extent = _context->getLogicalRenderExtent();
         const WorldVec3 cam_world = scene.getMainCamera().position_world;
 
-        ensure_earth_patch_index_buffer();
-
         for (PlanetBody &body: _bodies)
         {
             if (!body.terrain || !body.visible || !body.material)
@@ -706,11 +771,19 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 state->patch_cache_dirty = false;
             }
 
+            const uint32_t effective_patch_resolution = terrain_patch_resolution_for_body(body);
+            const float effective_target_sse_px = terrain_target_sse_for_body(body);
+            state->effective_patch_resolution = effective_patch_resolution;
+            state->effective_target_sse_px = effective_target_sse_px;
+            ensure_terrain_patch_index_buffer(*state, effective_patch_resolution);
+
             const Clock::time_point t0 = Clock::now();
 
-            state->quadtree.set_settings(_earth_quadtree_settings);
-
             ensure_terrain_height_maps(*state, body);
+
+            planet::PlanetQuadtree::Settings effective_quadtree_settings = _earth_quadtree_settings;
+            effective_quadtree_settings.target_sse_px = effective_target_sse_px;
+            state->quadtree.set_settings(effective_quadtree_settings);
 
             const Clock::time_point t_q0 = Clock::now();
             state->quadtree.update(body.center_world,
@@ -720,10 +793,12 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                                    origin_world,
                                    scene.getSceneData(),
                                    logical_extent,
-                                   _earth_patch_resolution);
+                                   effective_patch_resolution,
+                                   &state->height_faces);
             const Clock::time_point t_q1 = Clock::now();
 
-            ensure_terrain_face_materials(*state, body);
+            const glm::vec3 body_center_local = world_to_local(body.center_world, origin_world);
+            ensure_terrain_face_materials(*state, body, body_center_local);
             if (_context->textures)
             {
                 for (const MaterialInstance &mat: state->face_materials)
@@ -889,8 +964,8 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 if (patch.state != TerrainPatchState::Ready ||
                     patch.vertex_buffer.buffer == VK_NULL_HANDLE ||
                     patch.vertex_buffer_address == 0 ||
-                    _earth_patch_index_buffer.buffer == VK_NULL_HANDLE ||
-                    _earth_patch_index_count == 0)
+                    state->patch_index_buffer.buffer == VK_NULL_HANDLE ||
+                    state->patch_index_count == 0)
                 {
                     continue;
                 }
@@ -918,9 +993,9 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 b.type = patch.pick_bvh ? BoundsType::Mesh : BoundsType::Box;
 
                 RenderObject obj{};
-                obj.indexCount = _earth_patch_index_count;
+                obj.indexCount = state->patch_index_count;
                 obj.firstIndex = 0;
-                obj.indexBuffer = _earth_patch_index_buffer.buffer;
+                obj.indexBuffer = state->patch_index_buffer.buffer;
                 obj.vertexBuffer = patch.vertex_buffer.buffer;
                 obj.vertexBufferAddress = patch.vertex_buffer_address;
                 obj.material = material;
@@ -941,7 +1016,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 {
                     OceanRenderObject ocean{};
                     ocean.surface = obj;
-                    ocean.body_center_local = world_to_local(body.center_world, origin_world);
+                    ocean.body_center_local = body_center_local;
                     ocean.sea_level_radius = static_cast<float>(body.radius_m);
                     ocean.shell_offset = ocean_shell_offset_m(body.radius_m);
                     draw_context.OceanSurfaces.push_back(ocean);
@@ -952,7 +1027,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             trim_terrain_patch_cache(*state);
 
             const uint32_t visible_patches = static_cast<uint32_t>(state->quadtree.visible_leaves().size());
-            const uint32_t n = _earth_patch_resolution;
+            const uint32_t n = effective_patch_resolution;
             const uint32_t patch_tris = (n >= 2u) ? (2u * (n - 1u) * (n + 3u)) : 0u;
             const uint32_t estimated_tris = patch_tris * visible_patches;
 

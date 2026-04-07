@@ -3,6 +3,8 @@
 #extension GL_EXT_buffer_reference : require
 #include "input_structures.glsl"
 #include "blackbody.glsl"
+#include "planet_gbuffer_payload.glsl"
+#include "planet_terrain_common.glsl"
 
 layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec3 inColor;
@@ -76,11 +78,17 @@ void main() {
         discard;
     }
     vec3 albedo = inColor * baseTex.rgb * materialData.colorFactors.rgb;
+    bool isTerrain = terrain_material_enabled();
 
-    // glTF metallic-roughness in G (roughness) and B (metallic)
-    vec2 mrTex = texture(metalRoughTex, inUV).gb;
-    float roughness = clamp(mrTex.x * materialData.metal_rough_factors.y, 0.04, 1.0);
-    float metallic  = clamp(mrTex.y * materialData.metal_rough_factors.x, 0.0, 1.0);
+    float roughness = clamp(materialData.metal_rough_factors.y, 0.04, 1.0);
+    float metallic  = clamp(materialData.metal_rough_factors.x, 0.0, 1.0);
+    if (!isTerrain)
+    {
+        // glTF metallic-roughness in G (roughness) and B (metallic)
+        vec2 mrTex = texture(metalRoughTex, inUV).gb;
+        roughness = clamp(mrTex.x * materialData.metal_rough_factors.y, 0.04, 1.0);
+        metallic = clamp(mrTex.y * materialData.metal_rough_factors.x, 0.0, 1.0);
+    }
     float waterMask = sample_planet_water_mask(inUV);
     apply_planet_water_override(albedo, roughness, waterMask);
 
@@ -89,26 +97,34 @@ void main() {
     vec3 N = normalize(inNormal);
     vec3 Nw = N;
 
-    float normalScale = max(materialData.extra[0].x, 0.0);
-    if (normalScale > 0.0)
+    if (isTerrain)
     {
-        vec2 enc = texture(normalMap, inUV).xy * 2.0 - 1.0;
-        enc *= normalScale;
-        float z2 = 1.0 - dot(enc, enc);
-        float nz = z2 > 0.0 ? sqrt(z2) : 0.0;
-        vec3 Nm = vec3(enc, nz);
+        Nw = apply_terrain_detail_normal(Nw, inUV);
+    }
+    else
+    {
+        float normalScale = max(materialData.extra[0].x, 0.0);
+        if (normalScale > 0.0)
+        {
+            vec2 enc = texture(normalMap, inUV).xy * 2.0 - 1.0;
+            enc *= normalScale;
+            float z2 = 1.0 - dot(enc, enc);
+            float nz = z2 > 0.0 ? sqrt(z2) : 0.0;
+            vec3 Nm = vec3(enc, nz);
 
-        vec3 T = normalize(inTangent.xyz);
-        vec3 B = normalize(cross(N, T)) * inTangent.w;
-        Nw = normalize(T * Nm.x + B * Nm.y + N * Nm.z);
+            vec3 T = normalize(inTangent.xyz);
+            vec3 B = normalize(cross(N, T)) * inTangent.w;
+            Nw = normalize(T * Nm.x + B * Nm.y + N * Nm.z);
+        }
     }
 
     // outPos.w is used as a "valid pixel" marker by downstream passes.
     // Keep 0.0 reserved for background/no-geometry, and encode small flags above 1.0.
     // Convention: materialData.extra[2].y > 0 => planet-style shadowing override.
     float gbuffer_flags = materialData.extra[2].y;
-    // Encode ocean mask in the high end of pos.w so deferred lighting can suppress terrain IBL there.
-    outPos = vec4(inWorldPos, 1.0 + clamp(gbuffer_flags, 0.0, 1.0) + waterMask * 0.25);
+    vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);
+    float terrainSunVis = isTerrain ? terrain_terminator_visibility(inUV, Nw, inWorldPos, Lsun) : 1.0;
+    outPos = vec4(inWorldPos, encode_planet_gbuffer_pos_w(gbuffer_flags, waterMask, terrainSunVis));
     outNorm = vec4(Nw, roughness);
     outAlbedo = vec4(albedo, metallic);
     // Extra G-buffer: x = AO, yzw = emissive
