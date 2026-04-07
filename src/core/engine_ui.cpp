@@ -3100,7 +3100,21 @@ namespace
                 }
 
                 const PlanetSystem::EarthDebugStats &s = planets->terrain_debug_stats(terrain_body->name);
+                const uint32_t effective_patch_resolution =
+                        (terrain_body->patch_resolution_override != 0u)
+                                ? terrain_body->patch_resolution_override
+                                : planets->earth_patch_resolution();
+                const float effective_target_sse =
+                        (terrain_body->target_sse_px_override > 0.0f)
+                                ? terrain_body->target_sse_px_override
+                                : planets->earth_quadtree_settings().target_sse_px;
                 ImGui::Separator();
+                ImGui::Text("Effective patch resolution: %u%s",
+                            effective_patch_resolution,
+                            terrain_body->patch_resolution_override != 0u ? " (body override)" : " (global)");
+                ImGui::Text("Effective target SSE: %.1f px%s",
+                            effective_target_sse,
+                            terrain_body->target_sse_px_override > 0.0f ? " (body override)" : " (global)");
                 ImGui::Text("Visible patches: %u  (rendered: %u | est. tris: %u)",
                             s.visible_patches,
                             s.rendered_patches,

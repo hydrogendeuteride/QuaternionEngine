@@ -250,6 +250,46 @@ namespace planet
                 key.y >> 1u,
             };
         }
+
+        float patch_local_variance(const HeightFaceSet *height_faces, const PatchKey &key)
+        {
+            if (!height_faces)
+            {
+                return 0.0f;
+            }
+
+            const uint32_t face_index = static_cast<uint32_t>(key.face);
+            if (face_index >= height_faces->size())
+            {
+                return 0.0f;
+            }
+
+            const HeightFace &face = (*height_faces)[face_index];
+            if (face.width == 0u || face.height == 0u || face.texels.empty() || face.variance_mips.empty())
+            {
+                return 0.0f;
+            }
+
+            double u0 = 0.0, u1 = 0.0, v0 = 0.0, v1 = 0.0;
+            cubesphere_tile_uv_bounds(key.level, key.x, key.y, u0, u1, v0, v1);
+
+            const float u01 = static_cast<float>(((u0 + u1) * 0.25) + 0.5);
+            const float v01 = static_cast<float>(((v0 + v1) * 0.25) + 0.5);
+            const uint32_t aggregate_mip = choose_height_mip_level(face, key.level, 2u);
+            return glm::clamp(sample_height_variance(face, u01, v01, aggregate_mip), 0.0f, 1.0f);
+        }
+
+        float patch_terminator_weight(const glm::dvec3 &patch_dir, const glm::dvec3 &sun_dir)
+        {
+            const double sun_len2 = glm::dot(sun_dir, sun_dir);
+            if (!(sun_len2 > 0.0))
+            {
+                return 0.0f;
+            }
+
+            const double abs_dot = std::abs(glm::dot(patch_dir, sun_dir * (1.0 / std::sqrt(sun_len2))));
+            return 1.0f - glm::smoothstep(0.0f, 0.35f, static_cast<float>(glm::clamp(abs_dot, 0.0, 1.0)));
+        }
     } // namespace
 
     void PlanetQuadtree::update(const WorldVec3 &body_center_world,
@@ -259,7 +299,8 @@ namespace planet
                                 const WorldVec3 &origin_world,
                                 const GPUSceneData &scene_data,
                                 VkExtent2D logical_extent,
-                                uint32_t patch_resolution)
+                                uint32_t patch_resolution,
+                                const HeightFaceSet *height_faces)
     {
         const std::vector<PatchKey> previous_visible_leaves = _visible_leaves;
         _visible_leaves.clear();
@@ -316,6 +357,7 @@ namespace planet
         const float hysteresis = glm::clamp(_settings.lod_hysteresis_ratio, 0.0f, 0.95f);
         const float split_threshold = _settings.target_sse_px * (1.0f + hysteresis);
         const float keep_threshold = _settings.target_sse_px * std::max(0.0f, 1.0f - hysteresis);
+        const glm::dvec3 sun_dir = glm::dvec3(scene_data.sunlightDirection);
 
         thread_local std::vector<Node> stack;
         stack.clear();
@@ -401,6 +443,11 @@ namespace planet
             const double segments = static_cast<double>(safe_res - 1u);
             const double error_m = 0.5 * patch_edge_m / segments;
             const float sse_px = static_cast<float>((error_m / dist_m) * static_cast<double>(proj_scale));
+            const float local_variance = patch_local_variance(height_faces, k);
+            const float terminator_factor = patch_terminator_weight(patch_dir, sun_dir);
+            const float weighted_sse = sse_px *
+                                       (1.0f + 1.5f * local_variance) *
+                                       (1.0f + 1.0f * terminator_factor);
 
             bool was_refined_last_frame = false;
             if (const auto previous_it = previous_max_levels.find(k); previous_it != previous_max_levels.end())
@@ -409,7 +456,7 @@ namespace planet
             }
 
             const float refine_threshold = was_refined_last_frame ? keep_threshold : split_threshold;
-            bool refine = (k.level < _settings.max_level) && (sse_px > refine_threshold);
+            bool refine = (k.level < _settings.max_level) && (weighted_sse > refine_threshold);
             if (!refine && rt_guardrail_active && (k.level < _settings.max_level) && (
                     patch_edge_m > _settings.max_patch_edge_rt_m))
             {

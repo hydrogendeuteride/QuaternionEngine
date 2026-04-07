@@ -58,6 +58,35 @@ target_link_libraries(scenario_loader_tests PRIVATE
 
 add_test(NAME scenario_loader_tests COMMAND scenario_loader_tests)
 
+add_executable(planet_quadtree_tests
+  planet_quadtree_tests.cpp
+  "${PROJECT_SOURCE_DIR}/src/scene/planet/planet_heightmap.cpp"
+  "${PROJECT_SOURCE_DIR}/src/scene/planet/planet_quadtree.cpp"
+  "${PROJECT_SOURCE_DIR}/src/scene/planet/cubesphere.cpp"
+  "${PROJECT_SOURCE_DIR}/src/scene/tangent_space.cpp"
+)
+
+set_property(TARGET planet_quadtree_tests PROPERTY CXX_STANDARD 20)
+
+target_compile_definitions(planet_quadtree_tests PRIVATE
+  GLM_FORCE_DEPTH_ZERO_TO_ONE
+  PLANET_HEIGHTMAP_DISABLE_KTX_IO=1
+)
+
+target_include_directories(planet_quadtree_tests PRIVATE
+  "${PROJECT_SOURCE_DIR}/src"
+  "${PROJECT_SOURCE_DIR}/third_party/vma"
+  "${PROJECT_SOURCE_DIR}/third_party/taskflow/3rd-party"
+)
+
+target_link_libraries(planet_quadtree_tests PRIVATE
+  gtest
+  fmt::fmt
+  glm
+)
+
+add_test(NAME planet_quadtree_tests COMMAND planet_quadtree_tests)
+
 add_executable(orbit_helpers_tests
   orbit_helpers_tests.cpp
 )
