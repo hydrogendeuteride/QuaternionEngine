@@ -261,6 +261,13 @@ private:
         std::vector<TerrainPatch> patches;
         std::vector<uint32_t> patch_free;
         std::list<uint32_t> patch_lru;
+        AllocatedBuffer patch_index_buffer{};
+        uint32_t patch_index_count = 0;
+        uint32_t patch_index_resolution = 0;
+        std::vector<uint32_t> patch_indices_cpu{};
+        std::shared_ptr<const std::vector<uint32_t>> patch_indices_cpu_snapshot{};
+        uint32_t effective_patch_resolution = 0;
+        float effective_target_sse_px = 0.0f;
 
         AllocatedBuffer material_constants_buffer{};
         VkDeviceSize material_constants_stride = 0;
@@ -388,7 +395,7 @@ private:
     void terrain_patch_worker_loop();
     static bool build_terrain_patch_cpu(const TerrainBuildRequest &request, TerrainBuildResult &out_result);
 
-    void ensure_earth_patch_index_buffer();
+    void ensure_terrain_patch_index_buffer(TerrainState &state, uint32_t resolution);
 
     void ensure_earth_patch_material_layout();
 
@@ -410,6 +417,9 @@ private:
 
     void clear_terrain_materials(TerrainState &state);
 
+    uint32_t terrain_patch_resolution_for_body(const PlanetBody &body) const;
+    float terrain_target_sse_for_body(const PlanetBody &body) const;
+
     EngineContext *_context = nullptr;
     bool _enabled = true;
     std::vector<PlanetBody> _bodies;
@@ -417,11 +427,6 @@ private:
     planet::PlanetQuadtree::Settings _earth_quadtree_settings{};
     std::unordered_map<std::string, std::unique_ptr<TerrainState> > _terrain_states;
     EarthDebugStats _empty_debug_stats{};
-    AllocatedBuffer _earth_patch_index_buffer{};
-    uint32_t _earth_patch_index_count = 0;
-    uint32_t _earth_patch_index_resolution = 0;
-    std::vector<uint32_t> _earth_patch_indices_cpu{};
-    std::shared_ptr<const std::vector<uint32_t>> _earth_patch_indices_cpu_snapshot{};
     TerrainAsyncState _terrain_async{};
 
     VkDescriptorSetLayout _earth_patch_material_layout = VK_NULL_HANDLE;

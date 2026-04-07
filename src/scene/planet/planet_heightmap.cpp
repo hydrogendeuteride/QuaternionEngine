@@ -7,8 +7,10 @@
 #include <utility>
 
 #include <glm/glm.hpp>
+#if !defined(PLANET_HEIGHTMAP_DISABLE_KTX_IO)
 #include <ktx.h>
 #include <vulkan/vulkan.h>
+#endif
 
 namespace planet
 {
@@ -21,11 +23,12 @@ namespace planet
             const std::vector<uint8_t> *texels = nullptr;
         };
 
-        bool file_exists(const std::string &path)
+        struct HeightVarianceView
         {
-            std::error_code ec;
-            return std::filesystem::exists(path, ec) && !ec;
-        }
+            uint32_t width = 0;
+            uint32_t height = 0;
+            const std::vector<float> *texels = nullptr;
+        };
 
         std::mutex g_preloaded_heightmap_mutex;
         std::unordered_map<std::string, HeightFaceSet> g_preloaded_heightmaps;
@@ -47,14 +50,32 @@ namespace planet
             return HeightView{mip.width, mip.height, &mip.texels};
         }
 
+        HeightVarianceView height_variance_view_for_mip(const HeightFace &face, uint32_t mip_level)
+        {
+            if (mip_level == 0u)
+            {
+                return HeightVarianceView{};
+            }
+
+            const uint32_t index = mip_level - 1u;
+            if (index >= face.variance_mips.size())
+            {
+                return HeightVarianceView{};
+            }
+
+            const HeightVarianceMip &mip = face.variance_mips[index];
+            return HeightVarianceView{mip.width, mip.height, &mip.texels};
+        }
+
         uint32_t height_level_count(const HeightFace &face)
         {
             return 1u + static_cast<uint32_t>(face.mips.size());
         }
 
-        void build_height_mips(HeightFace &face)
+        void build_height_mips_internal(HeightFace &face)
         {
             face.mips.clear();
+            face.variance_mips.clear();
             if (face.width == 0u || face.height == 0u || face.texels.empty())
             {
                 return;
@@ -62,7 +83,12 @@ namespace planet
 
             uint32_t src_w = face.width;
             uint32_t src_h = face.height;
-            std::vector<uint8_t> src = face.texels;
+            std::vector<float> src_mean(static_cast<size_t>(src_w) * src_h);
+            std::vector<float> src_variance(static_cast<size_t>(src_w) * src_h, 0.0f);
+            for (size_t i = 0; i < src_mean.size(); ++i)
+            {
+                src_mean[i] = static_cast<float>(face.texels[i]) * (1.0f / 255.0f);
+            }
 
             while (src_w > 1u || src_h > 1u)
             {
@@ -74,6 +100,14 @@ namespace planet
                 mip.height = dst_h;
                 mip.texels.resize(static_cast<size_t>(dst_w) * dst_h);
 
+                HeightVarianceMip variance_mip{};
+                variance_mip.width = dst_w;
+                variance_mip.height = dst_h;
+                variance_mip.texels.resize(static_cast<size_t>(dst_w) * dst_h);
+
+                std::vector<float> dst_mean(static_cast<size_t>(dst_w) * dst_h, 0.0f);
+                std::vector<float> dst_variance(static_cast<size_t>(dst_w) * dst_h, 0.0f);
+
                 for (uint32_t y = 0; y < dst_h; ++y)
                 {
                     const uint32_t y0 = std::min(src_h - 1u, y * 2u);
@@ -83,22 +117,48 @@ namespace planet
                         const uint32_t x0 = std::min(src_w - 1u, x * 2u);
                         const uint32_t x1 = std::min(src_w - 1u, x0 + 1u);
 
-                        const uint32_t a = src[static_cast<size_t>(y0) * src_w + x0];
-                        const uint32_t b = src[static_cast<size_t>(y0) * src_w + x1];
-                        const uint32_t c = src[static_cast<size_t>(y1) * src_w + x0];
-                        const uint32_t d = src[static_cast<size_t>(y1) * src_w + x1];
-                        mip.texels[static_cast<size_t>(y) * dst_w + x] =
-                                static_cast<uint8_t>((a + b + c + d + 2u) >> 2u);
+                        const size_t idx_a = static_cast<size_t>(y0) * src_w + x0;
+                        const size_t idx_b = static_cast<size_t>(y0) * src_w + x1;
+                        const size_t idx_c = static_cast<size_t>(y1) * src_w + x0;
+                        const size_t idx_d = static_cast<size_t>(y1) * src_w + x1;
+
+                        const float mean_a = src_mean[idx_a];
+                        const float mean_b = src_mean[idx_b];
+                        const float mean_c = src_mean[idx_c];
+                        const float mean_d = src_mean[idx_d];
+
+                        const float var_a = src_variance[idx_a];
+                        const float var_b = src_variance[idx_b];
+                        const float var_c = src_variance[idx_c];
+                        const float var_d = src_variance[idx_d];
+
+                        const float mean = 0.25f * (mean_a + mean_b + mean_c + mean_d);
+                        const float mean_square = 0.25f * (
+                            (var_a + mean_a * mean_a) +
+                            (var_b + mean_b * mean_b) +
+                            (var_c + mean_c * mean_c) +
+                            (var_d + mean_d * mean_d));
+                        const float variance = std::max(0.0f, mean_square - mean * mean);
+                        const float normalized_variance = glm::clamp(variance * 4.0f, 0.0f, 1.0f);
+
+                        const size_t dst_index = static_cast<size_t>(y) * dst_w + x;
+                        dst_mean[dst_index] = mean;
+                        dst_variance[dst_index] = variance;
+                        mip.texels[dst_index] = static_cast<uint8_t>(glm::clamp(std::round(mean * 255.0f), 0.0f, 255.0f));
+                        variance_mip.texels[dst_index] = normalized_variance;
                     }
                 }
 
                 src_w = dst_w;
                 src_h = dst_h;
-                src = mip.texels;
                 face.mips.push_back(std::move(mip));
+                face.variance_mips.push_back(std::move(variance_mip));
+                src_mean = std::move(dst_mean);
+                src_variance = std::move(dst_variance);
             }
         }
 
+#if !defined(PLANET_HEIGHTMAP_DISABLE_KTX_IO)
         void decode_bc4_unorm_block(const uint8_t *block, uint8_t out_texels[16])
         {
             const uint8_t r0 = block[0];
@@ -140,12 +200,18 @@ namespace planet
                 out_texels[i] = lut[code];
             }
         }
+#endif
     } // namespace
 
     bool load_heightmap_bc4(const std::string &path, HeightFace &out_face)
     {
         out_face = {};
-        if (path.empty() || !file_exists(path))
+#if defined(PLANET_HEIGHTMAP_DISABLE_KTX_IO)
+        (void) path;
+        return false;
+#else
+        std::error_code ec;
+        if (path.empty() || !std::filesystem::exists(path, ec) || ec)
         {
             return false;
         }
@@ -233,14 +299,20 @@ namespace planet
         }
 
         ktxTexture_Destroy(ktxTexture(ktex));
-        build_height_mips(out_face);
+        build_height_mips_internal(out_face);
         return true;
+#endif
     }
 
     bool load_heightmap_cube_faces_bc4(const std::string &directory_path, HeightFaceSet &out_faces)
     {
         out_faces = {};
-        if (directory_path.empty() || !file_exists(directory_path))
+#if defined(PLANET_HEIGHTMAP_DISABLE_KTX_IO)
+        (void) directory_path;
+        return false;
+#else
+        std::error_code ec;
+        if (directory_path.empty() || !std::filesystem::exists(directory_path, ec) || ec)
         {
             return false;
         }
@@ -259,6 +331,7 @@ namespace planet
 
         out_faces = std::move(loaded_faces);
         return true;
+#endif
     }
 
     void retain_preloaded_heightmap_faces(const std::string &height_dir_key, HeightFaceSet faces)
@@ -298,6 +371,11 @@ namespace planet
         g_preloaded_heightmaps.clear();
     }
 
+    void rebuild_height_mips(HeightFace &face)
+    {
+        build_height_mips_internal(face);
+    }
+
     float sample_height(const HeightFace &face, float u, float v, uint32_t mip_level)
     {
         const HeightView view = height_view_for_mip(face, mip_level);
@@ -324,6 +402,43 @@ namespace planet
         {
             const uint8_t v8 = (*view.texels)[static_cast<size_t>(yi) * view.width + xi];
             return static_cast<float>(v8) * (1.0f / 255.0f);
+        };
+
+        const float h00 = texel(x0, y0);
+        const float h10 = texel(x1, y0);
+        const float h01 = texel(x0, y1);
+        const float h11 = texel(x1, y1);
+
+        const float hx0 = glm::mix(h00, h10, tx);
+        const float hx1 = glm::mix(h01, h11, tx);
+        return glm::mix(hx0, hx1, ty);
+    }
+
+    float sample_height_variance(const HeightFace &face, float u, float v, uint32_t mip_level)
+    {
+        const HeightVarianceView view = height_variance_view_for_mip(face, mip_level);
+        if (view.width == 0 || view.height == 0 || !view.texels || view.texels->empty())
+        {
+            return 0.0f;
+        }
+
+        const float uu = glm::clamp(u, 0.0f, 1.0f);
+        const float vv = glm::clamp(v, 0.0f, 1.0f);
+
+        const float x = uu * static_cast<float>(view.width - 1u);
+        const float y = vv * static_cast<float>(view.height - 1u);
+
+        const uint32_t x0 = static_cast<uint32_t>(std::floor(x));
+        const uint32_t y0 = static_cast<uint32_t>(std::floor(y));
+        const uint32_t x1 = std::min(x0 + 1u, view.width - 1u);
+        const uint32_t y1 = std::min(y0 + 1u, view.height - 1u);
+
+        const float tx = x - static_cast<float>(x0);
+        const float ty = y - static_cast<float>(y0);
+
+        auto texel = [&](uint32_t xi, uint32_t yi) -> float
+        {
+            return (*view.texels)[static_cast<size_t>(yi) * view.width + xi];
         };
 
         const float h00 = texel(x0, y0);
