@@ -57,7 +57,7 @@ namespace Game
             earth.has_terrain = true;
             earth.albedo_dir = "planets/earth/albedo/L0";
             earth.height_dir = "planets/earth/height/L0";
-            earth.height_max_m = 8000.0;
+            earth.height_max_m = 8'848.0;
             earth.detail_normal_strength = 0.0f;
             earth.cavity_strength = 0.0f;
             earth.enable_terminator_shadow = false;
@@ -83,7 +83,7 @@ namespace Game
             moon.height_dir = "planets/moon/height/L0";
             moon.height_max_m = 19'667.0;
             moon.detail_normal_dir = "planets/moon/detail_normal/L0";
-            moon.detail_normal_strength = 1.25f;
+            moon.detail_normal_strength = 0.5f;
             moon.cavity_dir = "planets/moon/cavity/L0";
             moon.cavity_strength = 0.35f;
             moon.enable_terminator_shadow = true;

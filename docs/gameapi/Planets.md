@@ -37,18 +37,18 @@ struct PlanetSphere
 ### Creating Sphere Planets
 
 ```cpp
-GameAPI::PlanetSphere moon;
-moon.name = "Moon";
-moon.center = glm::dvec3(0.0, 0.0, -384400000.0);  // ~384,400 km
-moon.radius_m = 1737400.0;  // ~1,737 km
-moon.visible = true;
-moon.base_color = glm::vec4(0.6f, 0.6f, 0.6f, 1.0f);  // Gray
-moon.metallic = 0.0f;
-moon.roughness = 0.9f;
-moon.sectors = 64;
-moon.stacks = 32;
+GameAPI::PlanetSphere farBody;
+farBody.name = "DistantMoon";
+farBody.center = glm::dvec3(0.0, 0.0, -384400000.0);  // ~384,400 km
+farBody.radius_m = 500000.0;
+farBody.visible = true;
+farBody.base_color = glm::vec4(0.6f, 0.6f, 0.6f, 1.0f);
+farBody.metallic = 0.0f;
+farBody.roughness = 0.9f;
+farBody.sectors = 64;
+farBody.stacks = 32;
 
-bool success = api.add_planet_sphere(moon);
+bool success = api.add_planet_sphere(farBody);
 ```
 
 ## Planet Terrain
@@ -70,14 +70,34 @@ struct PlanetTerrain
     float metallic{0.0f};
     float roughness{1.0f};
 
-    // Terrain textures (cube faces: {px,nx,py,ny,pz,nz}.ktx2)
+    // Terrain textures (cube faces: {px,nx,py,ny,pz,nz}.ktx2, R16_UNORM preferred for height)
     std::string albedo_dir;         // e.g., "planets/earth/albedo/L0"
     std::string height_dir;         // Height map for displacement
     double height_max_m{6400.0};    // Height range in meters for [0..1] texel values
 
+    // Object-space detail normal (cube faces, optional)
+    std::string detail_normal_dir;           // e.g., "planets/moon/detail_normal/L0"
+    float detail_normal_strength{0.0f};      // Blend strength (0 = off)
+
+    // Cavity / AO (cube faces, optional — applied to indirect light via AO path)
+    std::string cavity_dir;                  // e.g., "planets/moon/cavity/L0"
+    float cavity_strength{0.0f};             // Cavity multiplier (0 = off)
+
+    // Terminator self-shadow (horizon-traced shadow near day/night boundary)
+    bool enable_terminator_shadow{false};
+
+    // Per-body LOD overrides (0 = use global PlanetQuadtreeSettings)
+    uint32_t patch_resolution_override{0};   // Vertices per patch edge
+    float target_sse_px_override{0.0f};      // Target screen-space error in pixels
+
     // Emission textures (optional, e.g., city lights)
     std::string emission_dir;       // e.g., "planets/earth/emission/L0"
     glm::vec3 emission_factor{0.0f, 0.0f, 0.0f};  // Emission intensity multiplier
+
+    // Specular mask (cube faces, optional — e.g., ocean specular)
+    std::string specular_dir;                // e.g., "planets/earth/specular/L0"
+    float specular_strength{1.0f};           // Specular mask multiplier
+    float specular_roughness{0.06f};         // Override roughness for specular areas
 };
 ```
 
@@ -109,7 +129,10 @@ bool success = api.add_planet_terrain(earth);
 - Each directory should contain 6 KTX2 files: `px.ktx2`, `nx.ktx2`, `py.ktx2`, `ny.ktx2`, `pz.ktx2`, `nz.ktx2`
 - Albedo: sRGB color (BC7/ASTC)
 - Height: Linear R8 or BC4 (0 = radius, 1 = radius + height_max_m)
+- Detail Normal: Object-space RGB (BC7, linear) — blended with terrain normal
+- Cavity/AO: Linear R channel (BC4/R8) — applied to indirect light via AO path
 - Emission: sRGB color (BC7/ASTC)
+- Specular: Linear R channel (BC4/R8) — ocean/surface specular mask
 
 ## Managing Planets
 
@@ -436,7 +459,29 @@ earth.height_dir = "planets/earth/height/L0";
 earth.height_max_m = 8848.0;
 earth.emission_dir = "planets/earth/emission/L0";
 earth.emission_factor = glm::vec3(1.0f, 0.9f, 0.7f);
+earth.specular_dir = "planets/earth/specular/L0";
+earth.specular_strength = 1.0f;
+earth.specular_roughness = 0.06f;
 api.add_planet_terrain(earth);
+
+// Create Moon with terrain, detail normal, cavity, and terminator shadow
+GameAPI::PlanetTerrain moon;
+moon.name = "Moon";
+moon.center = glm::dvec3(384400000.0, 0.0, 0.0);  // ~384,400 km
+moon.radius_m = 1737400.0;
+moon.base_color = glm::vec4(0.72f, 0.72f, 0.75f, 1.0f);
+moon.roughness = 1.0f;
+moon.albedo_dir = "planets/moon/albedo/L0";
+moon.height_dir = "planets/moon/height/L0";
+moon.height_max_m = 19667.0;
+moon.detail_normal_dir = "planets/moon/detail_normal/L0";
+moon.detail_normal_strength = 0.5f;
+moon.cavity_dir = "planets/moon/cavity/L0";
+moon.cavity_strength = 0.35f;
+moon.enable_terminator_shadow = true;
+moon.patch_resolution_override = 65;
+moon.target_sse_px_override = 18.0f;
+api.add_planet_terrain(moon);
 
 // Configure terrain LOD
 GameAPI::PlanetQuadtreeSettings quadtree;

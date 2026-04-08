@@ -9,6 +9,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+Image.MAX_IMAGE_PIXELS = None
+
 
 FACE_NAMES = ("px", "nx", "py", "ny", "pz", "nz")
 
@@ -43,7 +45,11 @@ def load_height_faces(height_dir: Path) -> dict[str, np.ndarray]:
         if not path.is_file():
             raise SystemExit(f"missing height face: {path}")
         with Image.open(path) as image:
-            faces[face] = np.asarray(image.convert("L"), dtype=np.float32) / 255.0
+            pixels = np.asarray(image)
+            if pixels.dtype == np.uint16:
+                faces[face] = pixels.astype(np.float32) / 65535.0
+            else:
+                faces[face] = np.asarray(image.convert("L"), dtype=np.float32) / 255.0
     return faces
 
 

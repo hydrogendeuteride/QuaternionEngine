@@ -19,7 +19,7 @@
       "has_terrain": true,
       "albedo_dir": "planets/earth/albedo/L0",
       "height_dir": "planets/earth/height/L0",
-      "height_max_m": 8000.0,
+      "height_max_m": 8848.0,
       "detail_normal_dir": "",
       "detail_normal_strength": 0.0,
       "cavity_dir": "",

@@ -416,8 +416,7 @@ namespace planet_helpers
             const float len2 = glm::dot(blended, blended);
             if (len2 > 1e-12f)
             {
-                // Keep midpoint normals unnormalized so coarse/fine LOD edges interpolate identically.
-                vertices[center].normal = blended;
+                vertices[center].normal = blended * (1.0f / std::sqrt(len2));
             }
         };
 
@@ -708,9 +707,8 @@ namespace planet_helpers
             vertices[center].position = 0.5f * (vertices[prev].position + vertices[next].position);
             const glm::vec3 blended = 0.5f * (vertices[prev].normal + vertices[next].normal);
             const float len2 = glm::dot(blended, blended);
-            // Keep midpoint normals unnormalized so interpolation across 2:1 stitched edges matches
-            // the coarser edge (shaders normalize per-fragment).
-            vertices[center].normal = (len2 > 1e-12f) ? blended : vertices[prev].normal;
+            vertices[center].normal =
+                    (len2 > 1e-12f) ? blended * (1.0f / std::sqrt(len2)) : vertices[prev].normal;
         };
 
         if ((edge_mask & kEdgeTop) != 0u)
