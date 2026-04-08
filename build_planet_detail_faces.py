@@ -38,6 +38,18 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def load_height_image(image: Image.Image) -> np.ndarray:
+    if image.mode in ("I;16", "I;16B", "I;16L"):
+        pixels = np.array(image, dtype=np.uint16).astype(np.float32)
+        return pixels / 65535.0
+
+    if image.mode == "I":
+        pixels = np.array(image, dtype=np.int32).astype(np.float32)
+        return np.clip(pixels, 0.0, 65535.0) / 65535.0
+
+    return np.asarray(image.convert("L"), dtype=np.float32) / 255.0
+
+
 def load_height_faces(height_dir: Path) -> dict[str, np.ndarray]:
     faces: dict[str, np.ndarray] = {}
     for face in FACE_NAMES:
@@ -45,11 +57,7 @@ def load_height_faces(height_dir: Path) -> dict[str, np.ndarray]:
         if not path.is_file():
             raise SystemExit(f"missing height face: {path}")
         with Image.open(path) as image:
-            pixels = np.asarray(image)
-            if pixels.dtype == np.uint16:
-                faces[face] = pixels.astype(np.float32) / 65535.0
-            else:
-                faces[face] = np.asarray(image.convert("L"), dtype=np.float32) / 255.0
+            faces[face] = load_height_image(image)
     return faces
 
 
