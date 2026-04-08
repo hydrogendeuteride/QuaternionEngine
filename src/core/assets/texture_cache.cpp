@@ -337,6 +337,8 @@ static inline size_t bytes_per_texel(VkFormat fmt)
         case VK_FORMAT_R8G8_UNORM:
         case VK_FORMAT_R8G8_SRGB:
             return 2;
+        case VK_FORMAT_R16_UNORM:
+            return 2;
         case VK_FORMAT_R8G8B8A8_UNORM:
         case VK_FORMAT_R8G8B8A8_SRGB:
         case VK_FORMAT_B8G8R8A8_UNORM:
@@ -734,6 +736,7 @@ void TextureCache::workerLoop()
                             case VK_FORMAT_BC6H_SFLOAT_BLOCK:
                             case VK_FORMAT_BC7_UNORM_BLOCK:
                             case VK_FORMAT_BC7_SRGB_BLOCK:
+                            case VK_FORMAT_R16_UNORM:
                                 break;
                             default:
                                 Logger::warn("[TextureCache] libktx returned non-BC format {} -- skipping KTX2", string_VkFormat(vkfmt));

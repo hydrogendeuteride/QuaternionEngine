@@ -6,6 +6,7 @@
 #include "ibl_common.glsl"
 #include "lighting_common.glsl"
 #include "planet_shadow.glsl"
+#include "planet_terrain_common.glsl"
 
 layout(location = 0) in vec3 inBaseNormal;
 layout(location = 1) in vec2 inUV;
@@ -305,6 +306,8 @@ void main()
 
     vec3 R = reflect(-V, N);
     float NdotV = max(dot(N, V), 0.0);
+    float sunFacing = dot(baseNormal, Lsun);
+    float nightReflectionFactor = mix(0.04, 1.0, smoothstep(-0.12, 0.08, sunFacing));
     vec3 localUp = atmosphereActive
         ? normalize(inWorldPos - pc.atmosphere_center_radius.xyz)
         : normalize(baseNormal);
@@ -317,10 +320,10 @@ void main()
         skyTransmittance,
         atmosphereActive);
     vec3 fresnel = fresnelSchlick(NdotV, F0);
-    vec3 skyReflection = skyColor * fresnel * viewTransmittance;
+    vec3 skyReflection = skyColor * fresnel * viewTransmittance * nightReflectionFactor;
 
     vec3 waterTint = vec3(0.012, 0.026, 0.041);
-    vec3 grazingTint = waterTint * mix(0.14, 0.03, NdotV) * viewTransmittance;
+    vec3 grazingTint = waterTint * mix(0.14, 0.03, NdotV) * viewTransmittance * nightReflectionFactor;
 
     vec3 color = (direct + skyReflection + grazingTint) * coverage;
     outColor = vec4(color, 1.0);

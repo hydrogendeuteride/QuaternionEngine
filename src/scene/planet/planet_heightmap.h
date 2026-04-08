@@ -13,7 +13,7 @@ namespace planet
     {
         uint32_t width = 0;
         uint32_t height = 0;
-        std::vector<uint8_t> texels; // R8 values, row-major
+        std::vector<uint16_t> texels; // normalized integer values, row-major
     };
 
     struct HeightVarianceMip
@@ -27,14 +27,14 @@ namespace planet
     {
         uint32_t width = 0;
         uint32_t height = 0;
-        std::vector<uint8_t> texels; // R8 values, row-major
+        std::vector<uint16_t> texels; // normalized integer values, row-major
         std::vector<HeightMip> mips; // Mean/downsampled mip levels starting at level 1
         std::vector<HeightVarianceMip> variance_mips; // Variance mip levels matching `mips`
     };
 
     using HeightFaceSet = std::array<HeightFace, 6>;
 
-    // Load a KTX2 BC4_UNORM height map and decode it to R8 texels.
+    // Load a KTX2 BC4_UNORM or R16_UNORM height map and decode it to normalized texels.
     // Returns false on failure (file not found, wrong format, etc.).
     bool load_heightmap_bc4(const std::string &path, HeightFace &out_face);
 

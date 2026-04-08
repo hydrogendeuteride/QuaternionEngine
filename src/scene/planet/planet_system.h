@@ -67,6 +67,8 @@ public:
         std::string height_dir;
         // Height map range in meters for [0..1] texel values.
         double height_max_m = 6400.0;
+        // Constant displacement added before sampled height, in meters.
+        double height_offset_m = 0.0;
         std::string detail_normal_dir;
         float detail_normal_strength = 0.0f;
         std::string cavity_dir;
@@ -126,6 +128,7 @@ public:
         // Expected files: {px,nx,py,ny,pz,nz}.ktx2 (BC4/R8, linear).
         std::string terrain_height_dir;
         double terrain_height_max_m = 0.0;
+        double terrain_height_offset_m = 0.0;
         std::string terrain_detail_normal_dir;
         float terrain_detail_normal_strength = 0.0f;
         std::string terrain_cavity_dir;
@@ -286,6 +289,7 @@ private:
         std::string bound_emission_dir;
         std::string bound_specular_dir;
         double bound_height_max_m = 0.0;
+        double bound_height_offset_m = 0.0;
         std::array<planet::HeightFace, 6> height_faces{};
         std::shared_ptr<const std::array<planet::HeightFace, 6>> height_faces_snapshot{};
         std::array<MaterialInstance, 6> face_materials{};
@@ -299,6 +303,7 @@ private:
     {
         double radius_m = 1.0;
         double height_max_m = 0.0;
+        double height_offset_m = 0.0;
         uint32_t patch_resolution = 33;
         bool debug_tint_by_lod = false;
         std::shared_ptr<const std::array<planet::HeightFace, 6>> height_faces{};

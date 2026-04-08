@@ -392,6 +392,10 @@ namespace Game
             c.albedo_dir = json_required<std::string>(j, "albedo_dir", path);
             c.height_dir = json_required<std::string>(j, "height_dir", path);
             c.height_max_m = json_required_finite<double>(j, "height_max_m", path);
+            if (const auto it = j.find("height_offset_m"); it != j.end() && !it->is_null())
+            {
+                c.height_offset_m = json_required_finite<double>(j, "height_offset_m", path);
+            }
             if (const auto it = j.find("detail_normal_dir"); it != j.end() && !it->is_null())
             {
                 c.detail_normal_dir = json_required<std::string>(j, "detail_normal_dir", path);
@@ -455,7 +459,7 @@ namespace Game
                 fail(child_path(path, "radius_m") + " must be > 0");
             }
             if (c.atmosphere_top_m < 0.0 || c.terrain_max_m < 0.0 || c.soi_radius_m < 0.0 ||
-                c.orbit_distance_m < 0.0 || c.height_max_m < 0.0 ||
+                c.orbit_distance_m < 0.0 || c.height_max_m < 0.0 || c.height_offset_m < 0.0 ||
                 c.detail_normal_strength < 0.0f || c.cavity_strength < 0.0f ||
                 c.specular_strength < 0.0f || c.specular_roughness < 0.0f ||
                 c.target_sse_px_override < 0.0f)
@@ -488,6 +492,7 @@ namespace Game
             j["albedo_dir"] = c.albedo_dir;
             j["height_dir"] = c.height_dir;
             j["height_max_m"] = c.height_max_m;
+            j["height_offset_m"] = c.height_offset_m;
             j["detail_normal_dir"] = c.detail_normal_dir;
             j["detail_normal_strength"] = c.detail_normal_strength;
             j["cavity_dir"] = c.cavity_dir;

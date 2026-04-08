@@ -99,6 +99,7 @@ void main() {
 
     if (isTerrain)
     {
+        Nw = terrain_shading_normal_from_height(inUV, inWorldPos, Nw);
         Nw = apply_terrain_detail_normal(Nw, inUV);
     }
     else

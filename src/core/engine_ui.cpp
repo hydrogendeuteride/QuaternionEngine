@@ -3206,9 +3206,28 @@ namespace
                     planets->set_planet_radius(edit_target_name, std::max(1.0, edit_radius_km * 1000.0));
                 }
 
-                const double dist = glm::length(cam_world - b.center_world);
-                const double alt_m = dist - b.radius_m;
-                ImGui::Text("Altitude above %s: %.3f km", b.name.c_str(), alt_m / 1000.0);
+                const WorldVec3 to_cam = cam_world - b.center_world;
+                const double dist = glm::length(to_cam);
+                const double alt_base_radius_m = dist - b.radius_m;
+                const WorldVec3 dir_from_center =
+                        (dist > 1.0e-12) ? (to_cam * (1.0 / dist)) : WorldVec3(0.0, 0.0, 1.0);
+                const double terrain_displacement_m =
+                        (b.terrain && b.visible && b.radius_m > 0.0)
+                                ? planets->sample_terrain_displacement_m(b, dir_from_center)
+                                : 0.0;
+                const double clearance_above_terrain_m = alt_base_radius_m - terrain_displacement_m;
+
+                ImGui::Text("Altitude above base radius: %.3f km", alt_base_radius_m / 1000.0);
+                if (b.terrain)
+                {
+                    ImGui::Text("Terrain displacement at camera: %.3f km", terrain_displacement_m / 1000.0);
+                    ImGui::Text("Clearance above terrain: %.3f km", clearance_above_terrain_m / 1000.0);
+                }
+                else
+                {
+                    ImGui::TextUnformatted("Terrain displacement at camera: n/a");
+                    ImGui::TextUnformatted("Clearance above terrain: n/a");
+                }
 
                 if (ImGui::Button("Look at##selected"))
                 {

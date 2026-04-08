@@ -1,5 +1,6 @@
 #include "planet_heightmap.h"
 
+#include <cstring>
 #include <cmath>
 #include <filesystem>
 #include <mutex>
@@ -20,7 +21,7 @@ namespace planet
         {
             uint32_t width = 0;
             uint32_t height = 0;
-            const std::vector<uint8_t> *texels = nullptr;
+            const std::vector<uint16_t> *texels = nullptr;
         };
 
         struct HeightVarianceView
@@ -87,7 +88,7 @@ namespace planet
             std::vector<float> src_variance(static_cast<size_t>(src_w) * src_h, 0.0f);
             for (size_t i = 0; i < src_mean.size(); ++i)
             {
-                src_mean[i] = static_cast<float>(face.texels[i]) * (1.0f / 255.0f);
+                src_mean[i] = static_cast<float>(face.texels[i]) * (1.0f / 65535.0f);
             }
 
             while (src_w > 1u || src_h > 1u)
@@ -144,7 +145,8 @@ namespace planet
                         const size_t dst_index = static_cast<size_t>(y) * dst_w + x;
                         dst_mean[dst_index] = mean;
                         dst_variance[dst_index] = variance;
-                        mip.texels[dst_index] = static_cast<uint8_t>(glm::clamp(std::round(mean * 255.0f), 0.0f, 255.0f));
+                        mip.texels[dst_index] =
+                            static_cast<uint16_t>(glm::clamp(std::round(mean * 65535.0f), 0.0f, 65535.0f));
                         variance_mip.texels[dst_index] = normalized_variance;
                     }
                 }
@@ -159,7 +161,7 @@ namespace planet
         }
 
 #if !defined(PLANET_HEIGHTMAP_DISABLE_KTX_IO)
-        void decode_bc4_unorm_block(const uint8_t *block, uint8_t out_texels[16])
+        void decode_bc4_unorm_block(const uint8_t *block, uint16_t out_texels[16])
         {
             const uint8_t r0 = block[0];
             const uint8_t r1 = block[1];
@@ -197,7 +199,7 @@ namespace planet
             for (int i = 0; i < 16; ++i)
             {
                 const uint8_t code = static_cast<uint8_t>((bits >> (3 * i)) & 0x7ull);
-                out_texels[i] = lut[code];
+                out_texels[i] = static_cast<uint16_t>(lut[code]) * 257u;
             }
         }
 #endif
@@ -231,7 +233,7 @@ namespace planet
         }
 
         const VkFormat fmt = static_cast<VkFormat>(ktex->vkFormat);
-        if (fmt != VK_FORMAT_BC4_UNORM_BLOCK)
+        if (fmt != VK_FORMAT_BC4_UNORM_BLOCK && fmt != VK_FORMAT_R16_UNORM)
         {
             ktxTexture_Destroy(ktxTexture(ktex));
             return false;
@@ -261,38 +263,51 @@ namespace planet
             return false;
         }
 
-        const uint32_t blocks_x = (w + 3u) / 4u;
-        const uint32_t blocks_y = (h + 3u) / 4u;
-        const size_t expected_bytes = static_cast<size_t>(blocks_x) * static_cast<size_t>(blocks_y) * 8u;
-        if (image_size < expected_bytes)
-        {
-            ktxTexture_Destroy(ktxTexture(ktex));
-            return false;
-        }
-
         out_face.width = w;
         out_face.height = h;
         out_face.texels.resize(static_cast<size_t>(w) * static_cast<size_t>(h));
 
         const uint8_t *src = data + off;
-        uint8_t block_out[16] = {};
-        for (uint32_t by = 0; by < blocks_y; ++by)
+        if (fmt == VK_FORMAT_R16_UNORM)
         {
-            for (uint32_t bx = 0; bx < blocks_x; ++bx)
+            const size_t expected_bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * sizeof(uint16_t);
+            if (image_size < expected_bytes)
             {
-                const size_t block_index = static_cast<size_t>(by) * blocks_x + bx;
-                const uint8_t *block = src + block_index * 8u;
-                decode_bc4_unorm_block(block, block_out);
+                ktxTexture_Destroy(ktxTexture(ktex));
+                return false;
+            }
+            std::memcpy(out_face.texels.data(), src, expected_bytes);
+        }
+        else
+        {
+            const uint32_t blocks_x = (w + 3u) / 4u;
+            const uint32_t blocks_y = (h + 3u) / 4u;
+            const size_t expected_bytes = static_cast<size_t>(blocks_x) * static_cast<size_t>(blocks_y) * 8u;
+            if (image_size < expected_bytes)
+            {
+                ktxTexture_Destroy(ktxTexture(ktex));
+                return false;
+            }
 
-                for (uint32_t iy = 0; iy < 4u; ++iy)
+            uint16_t block_out[16] = {};
+            for (uint32_t by = 0; by < blocks_y; ++by)
+            {
+                for (uint32_t bx = 0; bx < blocks_x; ++bx)
                 {
-                    const uint32_t py = by * 4u + iy;
-                    if (py >= h) continue;
-                    for (uint32_t ix = 0; ix < 4u; ++ix)
+                    const size_t block_index = static_cast<size_t>(by) * blocks_x + bx;
+                    const uint8_t *block = src + block_index * 8u;
+                    decode_bc4_unorm_block(block, block_out);
+
+                    for (uint32_t iy = 0; iy < 4u; ++iy)
                     {
-                        const uint32_t px = bx * 4u + ix;
-                        if (px >= w) continue;
-                        out_face.texels[static_cast<size_t>(py) * w + px] = block_out[iy * 4u + ix];
+                        const uint32_t py = by * 4u + iy;
+                        if (py >= h) continue;
+                        for (uint32_t ix = 0; ix < 4u; ++ix)
+                        {
+                            const uint32_t px = bx * 4u + ix;
+                            if (px >= w) continue;
+                            out_face.texels[static_cast<size_t>(py) * w + px] = block_out[iy * 4u + ix];
+                        }
                     }
                 }
             }
@@ -400,8 +415,8 @@ namespace planet
 
         auto texel = [&](uint32_t xi, uint32_t yi) -> float
         {
-            const uint8_t v8 = (*view.texels)[static_cast<size_t>(yi) * view.width + xi];
-            return static_cast<float>(v8) * (1.0f / 255.0f);
+            const uint16_t v16 = (*view.texels)[static_cast<size_t>(yi) * view.width + xi];
+            return static_cast<float>(v16) * (1.0f / 65535.0f);
         };
 
         const float h00 = texel(x0, y0);

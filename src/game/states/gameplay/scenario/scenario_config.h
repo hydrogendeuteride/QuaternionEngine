@@ -30,6 +30,7 @@ namespace Game
             std::string albedo_dir;
             std::string height_dir;
             double height_max_m{0.0};
+            double height_offset_m{0.0};
             std::string detail_normal_dir;
             float detail_normal_strength{0.0f};
             std::string cavity_dir;
