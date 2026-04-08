@@ -366,8 +366,10 @@ void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
     const bool specular_enabled = !body.terrain_specular_dir.empty() && (body.specular_strength > 0.0f);
     const float specular_strength = specular_enabled ? std::clamp(body.specular_strength, 0.0f, 1.0f) : 0.0f;
     const float specular_roughness = std::clamp(body.specular_roughness, 0.04f, 1.0f);
-    const bool has_detail_normal = !body.terrain_detail_normal_dir.empty() && (body.terrain_detail_normal_strength != 0.0f);
-    const float detail_normal_strength = has_detail_normal ? body.terrain_detail_normal_strength : 0.0f;
+    const bool has_detail_normal =
+            !body.terrain_detail_normal_dir.empty() && (body.terrain_detail_normal_strength != 0.0f);
+    const float detail_normal_strength =
+            has_detail_normal ? std::clamp(body.terrain_detail_normal_strength, 0.0f, 1.0f) : 0.0f;
     const bool has_cavity = !body.terrain_cavity_dir.empty() && (body.terrain_cavity_strength > 0.0f);
     const float cavity_strength = has_cavity ? std::max(body.terrain_cavity_strength, 0.0f) : 0.0f;
     const bool terminator_enabled =

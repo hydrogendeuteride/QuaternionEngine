@@ -6,8 +6,8 @@ A system for rendering planetary-scale terrain and celestial bodies using cube-s
 
 PlanetSystem supports two types of planets:
 
-1. **Mesh Planet (PlanetSphere)**: Simple sphere mesh rendering (e.g., Moon)
-2. **Terrain Planet (PlanetTerrain)**: Detailed terrain with cube-sphere quadtree patches (e.g., Earth)
+1. **Mesh Planet (PlanetSphere)**: Simple sphere mesh rendering (distant/low-detail bodies)
+2. **Terrain Planet (PlanetTerrain)**: Detailed terrain with cube-sphere quadtree patches (e.g., Earth, Moon)
 
 ## Architecture
 
@@ -24,7 +24,7 @@ src/scene/planet/
 - **PlanetSystem**: Manages planet creation, updates, and rendering
 - **PlanetQuadtree**: View-dependent LOD selection and visible patch determination
 - **Cubesphere**: Generates cube-sphere geometry with 6 faces projected onto a sphere
-- **HeightFace**: Loads and samples BC4 compressed KTX2 heightmaps
+- **HeightFace**: Loads and samples BC4 or R16_UNORM KTX2 heightmaps
 
 ## GameAPI Usage
 
@@ -53,14 +53,14 @@ earth.roughness = 1.0f;
 // Texture paths (relative to assets/)
 earth.albedo_dir = "planets/earth/albedo/L0";
 earth.height_dir = "planets/earth/height/L0";
-earth.height_max_m = 6400.0;  // Maximum heightmap displacement in meters
+earth.height_max_m = 8848.0;  // Mt. Everest height for topography-only source
 earth.emission_dir = "planets/earth/emission/L0";
 earth.emission_factor = glm::vec3(1.0f, 1.0f, 1.0f);
 
 api.add_planet_terrain(earth);
 
-// Simple sphere planet (Moon)
-GameAPI::PlanetSphere moon{};
+// Terrain planet (Moon) with detail normal, cavity, and terminator shadow
+GameAPI::PlanetTerrain moon{};
 moon.name = "Moon";
 moon.center = glm::dvec3(kMoonDistanceM, 0.0, 0.0);
 moon.radius_m = kMoonRadiusM;
@@ -68,10 +68,19 @@ moon.visible = true;
 moon.base_color = glm::vec4(0.72f, 0.72f, 0.75f, 1.0f);
 moon.metallic = 0.0f;
 moon.roughness = 1.0f;
-moon.sectors = 48;  // Longitude divisions
-moon.stacks = 24;   // Latitude divisions
 
-api.add_planet_sphere(moon);
+moon.albedo_dir = "planets/moon/albedo/L0";
+moon.height_dir = "planets/moon/height/L0";
+moon.height_max_m = 19667.0;
+moon.detail_normal_dir = "planets/moon/detail_normal/L0";
+moon.detail_normal_strength = 0.5f;
+moon.cavity_dir = "planets/moon/cavity/L0";
+moon.cavity_strength = 0.35f;
+moon.enable_terminator_shadow = true;
+moon.patch_resolution_override = 65;
+moon.target_sse_px_override = 18.0f;
+
+api.add_planet_terrain(moon);
 ```
 
 ### Camera Setup
@@ -149,9 +158,21 @@ assets/planets/earth/
 │   ├── pz.ktx2    # +Z face (front)
 │   └── nz.ktx2    # -Z face (back)
 ├── height/L0/
-│   └── {px,nx,py,ny,pz,nz}.ktx2  # BC4/R8, linear
-└── emission/L0/
-    └── {px,nx,py,ny,pz,nz}.ktx2  # or .png, sRGB
+│   └── {px,nx,py,ny,pz,nz}.ktx2  # R16_UNORM preferred, BC4 legacy, linear
+├── emission/L0/
+│   └── {px,nx,py,ny,pz,nz}.ktx2  # or .png, sRGB
+└── specular/L0/
+    └── {px,nx,py,ny,pz,nz}.ktx2  # R channel, linear
+
+assets/planets/moon/
+├── albedo/L0/
+│   └── {px,nx,py,ny,pz,nz}.ktx2
+├── height/L0/
+│   └── {px,nx,py,ny,pz,nz}.ktx2  # R16_UNORM preferred, BC4 legacy, linear
+├── detail_normal/L0/
+│   └── {px,nx,py,ny,pz,nz}.ktx2  # object-space RGB, linear
+└── cavity/L0/
+    └── {px,nx,py,ny,pz,nz}.ktx2  # R channel, linear
 ```
 
 ### Texture Formats
@@ -159,8 +180,11 @@ assets/planets/earth/
 | Texture Type | Format | Color Space | Purpose |
 |--------------|--------|-------------|---------|
 | Albedo | KTX2 (BC7 recommended) | sRGB | Base color |
-| Height | KTX2 (BC4/R8) | Linear | Terrain displacement |
+| Height | KTX2 (R16_UNORM preferred, BC4 legacy) | Linear | Terrain displacement |
+| Detail Normal | KTX2 (BC7) | Linear | Object-space normals blended with terrain normal |
+| Cavity/AO | KTX2 (BC4/R8) | Linear | Indirect-light occlusion (R channel) |
 | Emission | KTX2 or PNG | sRGB | Night lights |
+| Specular | KTX2 (BC4/R8) | Linear | Per-face specular mask (R channel) |
 
 ## Cube-Sphere Geometry
 
@@ -207,10 +231,11 @@ Per-patch cube-face textures are bound:
 ```
 Binding 0: Material Constants (UBO)
 Binding 1: Albedo Texture (Combined Sampler)
-Binding 2: Metal-Roughness Texture
-Binding 3: Normal Map
-Binding 4: Occlusion
+Binding 2: Height Map (terrain displacement; non-terrain path: metal-roughness)
+Binding 3: Detail Normal (object-space RGB; non-terrain path: normal map)
+Binding 4: Cavity / AO (R channel; reuses occlusion path)
 Binding 5: Emission Texture
+Binding 6: Specular Mask (R channel, linear — e.g., ocean specular)
 ```
 
 ### Height Displacement
@@ -253,10 +278,12 @@ Normals are recomputed using central differencing after displacement.
 | `createdPatches` | Patches created this frame |
 | `patchCacheSize` | Total patches in cache |
 | `estimatedTriangles` | Estimated triangle count |
-| `ms_quadtree` | Quadtree update time |
-| `ms_patch_create` | Patch creation time |
-| `ms_emit` | Draw command generation time |
-| `ms_total` | Total system time |
+| `maxLevelUsed` | Deepest quadtree level reached |
+| `msQuadtree` | Quadtree update time (ms) |
+| `msPatchCreate` | Patch creation time (ms) |
+| `msTotal` | Total system time (ms) |
+
+The internal debug UI also shows `splits_budget_limited` (patches that wanted to split but were capped by the per-frame budget).
 
 ## Related Documentation
 
