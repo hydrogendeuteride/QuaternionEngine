@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Usage: python3 build_equirect_cube_faces.py --source path/to/input.png
 #        [--name job] [--output path/to/L0] [--height-mode] [--write-r16-ktx2]
+#        [--name job] [--output path/to/L0] [--height-mode] [--write-ktx2]
 
 import subprocess
 import sys
