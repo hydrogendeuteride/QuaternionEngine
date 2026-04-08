@@ -9,7 +9,7 @@ planet/
   planet_system.h / .cpp         # top-level PlanetSystem class: planet CRUD, update/emit, mesh planets
   planet_terrain.cpp             # terrain patch infrastructure: cache, materials, height maps, async build workers
   planet_quadtree.h / .cpp       # screen-space-error LOD quadtree with frustum/horizon culling
-  planet_heightmap.h / .cpp      # BC4 KTX2 height map loader and bilinear sampler
+  planet_heightmap.h / .cpp      # BC4/R16 KTX2 height map loader and bilinear sampler
   planet_patch_helpers.h / .cpp  # shared patch helpers: bounds, normals, edge stitching, LOD balancing
   cubesphere.h / .cpp            # cube-sphere math: direction mapping, tile UV bounds, patch mesh generation
 ```
@@ -25,7 +25,7 @@ planet/
   `planet::PlanetQuadtree` -- view-dependent LOD selection over six cube faces. Configured via `Settings` (max level, target SSE pixels, frustum/horizon culling, RT guardrail). `update()` runs a DFS that splits patches based on screen-space error, enforces 2:1 LOD balance, and produces a sorted `visible_leaves()` vector of `PatchKey` entries. Also defines `PatchKey` and `PatchKeyHash`.
 
 - `planet_heightmap.h`
-  `planet::HeightFace` struct (R8 texel grid) and two free functions: `load_heightmap_bc4` (loads a KTX2 BC4_UNORM file and decodes to R8) and `sample_height` (bilinear interpolation, returns normalized [0..1]).
+  `planet::HeightFace` struct (normalized integer texel grid) and two free functions: `load_heightmap_bc4` (loads a KTX2 BC4_UNORM or R16_UNORM file and decodes it for CPU sampling) and `sample_height` (bilinear interpolation, returns normalized [0..1]).
 
 - `planet_patch_helpers.h`
   Internal helpers in `planet_helpers` namespace shared across the `.cpp` files: `compute_patch_bounds`, `make_planet_constants` (PBR material constants with emission and force-clipmap flag), `debug_color_for_level`, `recompute_patch_normals`, `refine_patch_edge_normals_from_height`, `reinforce_patch_skirts`, `stitch_patch_edges_to_parent_grid`, `compute_patch_edge_stitch_mask`, `patch_needs_balance_split`.
@@ -45,7 +45,7 @@ planet/
   `PlanetQuadtree::update` implementation: DFS traversal over six cube faces, per-node visibility (horizon cull, frustum cull), screen-space error refinement, optional RT guardrail, visible-patch budget enforcement, and multi-pass 2:1 LOD balance.
 
 - `planet_heightmap.cpp`
-  `load_heightmap_bc4` (KTX2 file I/O via libktx, BC4 block decoding to R8 texels) and `sample_height` (bilinear interpolation with clamp).
+  `load_heightmap_bc4` (KTX2 file I/O via libktx, BC4 block decoding or direct R16 loading for CPU texels) and `sample_height` (bilinear interpolation with clamp).
 
 - `planet_patch_helpers.cpp`
   Patch geometry helpers: AABB bounds computation, PBR material constant factory, LOD debug tint colors, normal recomputation with edge blending, height-map-based edge normal refinement for stitched boundaries, skirt reinforcement, edge stitching to parent grid (2:1 LOD), edge stitch mask computation, and balance-split detection.
@@ -101,5 +101,5 @@ planet/
 - Data flow: `PlanetQuadtree::update()` produces `visible_leaves` -> `update_and_emit` computes edge stitch masks and submits async build requests -> worker threads run `build_terrain_patch_cpu` -> main thread polls completed results via `pump_completed_terrain_patch_builds` and uploads vertex buffers -> `build_ready_render_cut` resolves drawable patches (falling back to ready ancestors) -> draw objects emitted into `DrawContext`.
 - Patch vertex positions are stored relative to the patch center direction on the sphere surface (not world-space). The draw emission step applies a per-patch model matrix to place them in the scene.
 - The system supports both mesh-based planets (simple UV sphere) and terrain planets (cube-sphere quadtree with height maps, per-face albedo/emission textures).
-- Height maps are loaded as CPU-side R8 texel grids (decoded from BC4 KTX2) for terrain vertex displacement and physics queries. GPU texturing uses the original KTX2 files loaded through the asset manager.
+- Height maps are loaded as CPU-side normalized texel grids from BC4 or R16 KTX2 for terrain vertex displacement and physics queries. GPU texturing uses the original KTX2 files loaded through the asset manager.
 - Edge stitching uses a 2:1 LOD constraint: neighboring patches may differ by at most one level. Stitched edges snap odd vertices to midpoints of the coarser grid to prevent T-junction cracks.

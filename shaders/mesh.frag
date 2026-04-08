@@ -81,6 +81,7 @@ void main()
 
     if (isTerrain)
     {
+        N = terrain_shading_normal_from_height(inUV, inWorldPos, N);
         N = apply_terrain_detail_normal(N, inUV);
     }
     else
@@ -144,6 +145,14 @@ void main()
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 specIBL = prefiltered * (F0 * brdf.x + brdf.y);
     vec3 diffIBL = (1.0 - metallic) * albedo * sh_eval_irradiance(N);
+    bool isPlanet = (materialData.extra[2].y > 0.0);
+    float planetIndirectFactor = 1.0;
+    if (isPlanet)
+    {
+        float sunFacing = dot(N, Lsun);
+        float dayBlend = smoothstep(-0.08, 0.16, sunFacing);
+        planetIndirectFactor = mix(0.05, 1.0, dayBlend);
+    }
 
     // Ambient occlusion from texture + strength (indirect only)
     // extra[0].y = AO strength, extra[0].z = hasAO flag (1 = use AO texture)
@@ -173,7 +182,6 @@ void main()
 
             // Planet night emission: only show emission on the dark side of planet surfaces
             // Convention: extra[2].y > 0 => planet material
-            bool isPlanet = (materialData.extra[2].y > 0.0);
             if (isPlanet)
             {
                 float NdotL = max(dot(N, Lsun), 0.0);
@@ -185,7 +193,7 @@ void main()
         }
     }
 
-    vec3 indirect = diffIBL + specIBL;
+    vec3 indirect = (diffIBL + specIBL) * planetIndirectFactor;
     vec3 color = direct + indirect * ao + emissive;
 
     outFragColor = vec4(color, alpha);

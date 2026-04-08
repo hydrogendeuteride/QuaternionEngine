@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Usage: python3 build_equirect_cube_faces.py --source path/to/input.png
+#        [--name job] [--output path/to/L0] [--height-mode] [--write-r16-ktx2]
 #        [--name job] [--output path/to/L0] [--height-mode] [--write-ktx2]
 
 import subprocess
@@ -27,7 +28,7 @@ def main() -> int:
     source = None
     output_dir = None
     height_mode = False
-    write_ktx2 = False
+    write_r16_ktx2 = False
 
     args = iter(sys.argv[1:])
     for arg in args:
@@ -39,8 +40,8 @@ def main() -> int:
             output_dir = Path(next(args, ""))
         elif arg == "--height-mode":
             height_mode = True
-        elif arg in ("--write-ktx2", "--write-r16-ktx2"):
-            write_ktx2 = True
+        elif arg == "--write-r16-ktx2":
+            write_r16_ktx2 = True
         else:
             raise SystemExit(f"unknown argument: {arg}")
 
@@ -95,49 +96,28 @@ def main() -> int:
                     else:
                         numbered_faces[face_name] = image.convert("I;16").copy()
                 else:
-                    numbered_faces[face_name] = image.convert("RGBA").copy()
+                    numbered_faces[face_name] = image.convert("L").copy()
 
         rotate180 = Image.Transpose.ROTATE_180
         output_dir.mkdir(parents=True, exist_ok=True)
         for face_name, (source_face, rotate) in REMAP.items():
             png_path = output_dir / f"{face_name}.png"
             png_path.unlink(missing_ok=True)
-            if write_ktx2:
+            if write_r16_ktx2:
                 png_path.with_suffix(".ktx2").unlink(missing_ok=True)
 
             face_image = numbered_faces[source_face].transpose(rotate180) if rotate else numbered_faces[source_face]
             face_image.save(png_path, optimize=True)
-            if write_ktx2:
-                if height_mode:
-                    subprocess.run([
-                        "toktx",
-                        "--t2",
-                        "--genmipmap",
-                        "--assign_oetf", "linear",
-                        "--target_type", "R",
-                        str(png_path.with_suffix(".ktx2")),
-                        str(png_path),
-                    ], check=True)
-                else:
-                    with tempfile.TemporaryDirectory(prefix=f"{face_name.lower()}-ktx2-") as temp_dir:
-                        temp_ktx_path = Path(temp_dir) / f"{face_name}.uastc.ktx2"
-                        subprocess.run([
-                            "toktx",
-                            "--t2",
-                            "--encode", "uastc",
-                            "--uastc_quality", "2",
-                            "--assign_oetf", "srgb",
-                            "--genmipmap",
-                            str(temp_ktx_path),
-                            str(png_path),
-                        ], check=True)
-                        subprocess.run([
-                            "ktx",
-                            "transcode",
-                            "--target", "bc7",
-                            str(temp_ktx_path),
-                            str(png_path.with_suffix(".ktx2")),
-                        ], check=True)
+            if write_r16_ktx2:
+                subprocess.run([
+                    "toktx",
+                    "--t2",
+                    "--genmipmap",
+                    "--assign_oetf", "linear",
+                    "--target_type", "R",
+                    str(png_path.with_suffix(".ktx2")),
+                    str(png_path),
+                ], check=True)
 
     return 0
 
