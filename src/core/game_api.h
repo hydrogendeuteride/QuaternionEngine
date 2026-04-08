@@ -138,6 +138,8 @@ struct PlanetTerrain
     std::string height_dir;
     // Height map range in meters for [0..1] texel values.
     double height_max_m{6400.0};
+    // Constant displacement added before the sampled [0..1] height range.
+    double height_offset_m{0.0};
     // Optional object-space detail normal cube-face root relative to assets/.
     std::string detail_normal_dir;
     float detail_normal_strength{0.0f};

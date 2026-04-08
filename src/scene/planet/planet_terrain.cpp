@@ -366,6 +366,7 @@ void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
     const bool specular_enabled = !body.terrain_specular_dir.empty() && (body.specular_strength > 0.0f);
     const float specular_strength = specular_enabled ? std::clamp(body.specular_strength, 0.0f, 1.0f) : 0.0f;
     const float specular_roughness = std::clamp(body.specular_roughness, 0.04f, 1.0f);
+    const float height_offset_m = static_cast<float>(std::max(0.0, body.terrain_height_offset_m));
     const bool has_detail_normal =
             !body.terrain_detail_normal_dir.empty() && (body.terrain_detail_normal_strength != 0.0f);
     const float detail_normal_strength =
@@ -394,7 +395,7 @@ void PlanetSystem::ensure_terrain_material_constants_buffer(TerrainState &state,
                                        detail_normal_strength,
                                        cavity_strength,
                                        terminator_enabled ? 1.0f : 0.0f);
-        constants.extra[6] = glm::vec4(static_cast<float>(body.terrain_height_max_m), 0.0f, 0.0f, 0.0f);
+        constants.extra[6] = glm::vec4(static_cast<float>(body.terrain_height_max_m), height_offset_m, 0.0f, 0.0f);
         return constants;
     };
 
@@ -833,11 +834,13 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
 
     const std::string desired_dir = body.terrain_height_dir;
     const double desired_max_m = body.terrain_height_max_m;
+    const double desired_offset_m = body.terrain_height_offset_m;
     const bool changed =
             desired_dir != state.bound_height_dir ||
-            desired_max_m != state.bound_height_max_m;
+            desired_max_m != state.bound_height_max_m ||
+            desired_offset_m != state.bound_height_offset_m;
 
-    const bool want_height = !desired_dir.empty() && (desired_max_m > 0.0);
+    const bool want_height = !desired_dir.empty() && (desired_max_m > 0.0 || desired_offset_m != 0.0);
     const bool have_height = [&]() -> bool {
         for (const planet::HeightFace &f: state.height_faces)
         {
@@ -863,6 +866,7 @@ void PlanetSystem::ensure_terrain_height_maps(TerrainState &state, const PlanetB
 
         state.bound_height_dir = desired_dir;
         state.bound_height_max_m = desired_max_m;
+        state.bound_height_offset_m = desired_offset_m;
         for (planet::HeightFace &f: state.height_faces)
         {
             f = {};
@@ -968,6 +972,7 @@ PlanetSystem::TerrainBuildSnapshot PlanetSystem::make_terrain_build_snapshot(con
     TerrainBuildSnapshot snapshot{};
     snapshot.radius_m = body.radius_m;
     snapshot.height_max_m = body.terrain_height_max_m;
+    snapshot.height_offset_m = body.terrain_height_offset_m;
     snapshot.patch_resolution = std::max(2u, state.effective_patch_resolution);
     snapshot.debug_tint_by_lod = _earth_debug_tint_patches_by_lod;
     snapshot.height_faces = state.height_faces_snapshot;
@@ -1123,6 +1128,7 @@ bool PlanetSystem::build_terrain_patch_cpu(const TerrainBuildRequest &request, T
             if (height_face.width > 0 && height_face.height > 0 && !height_face.texels.empty())
             {
                 const float scale = static_cast<float>(request.snapshot.height_max_m);
+                const float offset = static_cast<float>(request.snapshot.height_offset_m);
                 const uint32_t height_mip_level =
                         planet::choose_height_mip_level(height_face, request.key.level, safe_res);
                 constexpr float kFaceEdgeEpsilon = 1e-6f;
@@ -1183,7 +1189,7 @@ bool PlanetSystem::build_terrain_patch_cpu(const TerrainBuildRequest &request, T
                             height_face, vertex.uv_x, vertex.uv_y, height_mip_level);
                     }
 
-                    vertex.position += vertex.normal * (h01 * scale);
+                    vertex.position += vertex.normal * (offset + h01 * scale);
                 }
 
                 planet_helpers::stitch_patch_edges_to_parent_grid(

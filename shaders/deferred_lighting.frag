@@ -564,8 +564,15 @@ void main(){
     vec3 specIBL = prefiltered * (F0 * brdf.x + brdf.y);
     vec3 diffIBL = (1.0 - metallic) * albedo * sh_eval_irradiance(N);
     float iblWeight = 1.0 - oceanMask;
+    float planetIndirectFactor = 1.0;
+    if (isPlanet)
+    {
+        float sunFacing = dot(N, Lsun);
+        float dayBlend = smoothstep(-0.08, 0.16, sunFacing);
+        planetIndirectFactor = mix(0.05, 1.0, dayBlend);
+    }
 
-    vec3 indirect = (diffIBL + specIBL) * iblWeight;
+    vec3 indirect = (diffIBL + specIBL) * iblWeight * planetIndirectFactor;
     vec3 color = direct + indirect * ao + emissive;
 
     outColor = vec4(color, 1.0);
