@@ -95,8 +95,20 @@ namespace
 
     float ocean_shell_offset_m(double radius_m)
     {
+        // Ocean is rendered as a separate shell over terrain patches. Keep enough
+        // radial separation to beat reversed-Z precision and patch-boundary depth ties.
         const double scaled = radius_m * 1.0e-6;
         return static_cast<float>(std::max(2.0, scaled));
+    }
+
+    uint32_t ocean_patch_index_count(uint32_t resolution)
+    {
+        if (resolution < 2u)
+        {
+            return 0u;
+        }
+
+        return (resolution - 1u) * (resolution - 1u) * 6u;
     }
 
     PatchLevelMap build_desired_max_levels(const std::vector<PatchKey> &desired_leaves)
@@ -342,7 +354,7 @@ PlanetSystem::PlanetBody *PlanetSystem::find_body_by_name(std::string_view name)
 
 double PlanetSystem::sample_terrain_displacement_m(const PlanetBody &body, const glm::dvec3 &dir_from_center) const
 {
-    if (!body.terrain || !(body.terrain_height_max_m > 0.0))
+    if (!body.terrain || !(body.terrain_height_max_m > 0.0 || body.terrain_height_offset_m != 0.0))
     {
         return 0.0;
     }
@@ -374,7 +386,7 @@ double PlanetSystem::sample_terrain_displacement_m(const PlanetBody &body, const
     }
 
     const float h01 = planet::sample_height(height_face, static_cast<float>(u01), static_cast<float>(v01));
-    return static_cast<double>(h01) * body.terrain_height_max_m;
+    return body.terrain_height_offset_m + static_cast<double>(h01) * body.terrain_height_max_m;
 }
 
 const PlanetSystem::EarthDebugStats &PlanetSystem::terrain_debug_stats(std::string_view name) const
@@ -464,6 +476,7 @@ PlanetSystem::PlanetBody *PlanetSystem::create_terrain_planet(const TerrainPlane
     body.terrain_albedo_dir = info.albedo_dir;
     body.terrain_height_dir = info.height_dir;
     body.terrain_height_max_m = (!info.height_dir.empty()) ? std::max(0.0, info.height_max_m) : 0.0;
+    body.terrain_height_offset_m = (!info.height_dir.empty()) ? std::max(0.0, info.height_offset_m) : 0.0;
     body.terrain_detail_normal_dir = info.detail_normal_dir;
     body.terrain_detail_normal_strength = info.detail_normal_strength;
     body.terrain_cavity_dir = info.cavity_dir;
@@ -788,7 +801,7 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
             const Clock::time_point t_q0 = Clock::now();
             state->quadtree.update(body.center_world,
                                    body.radius_m,
-                                   body.terrain_height_max_m,
+                                   std::max(0.0, body.terrain_height_offset_m + body.terrain_height_max_m),
                                    cam_world,
                                    origin_world,
                                    scene.getSceneData(),
@@ -1016,8 +1029,17 @@ void PlanetSystem::update_and_emit(const SceneManager &scene, DrawContext &draw_
                 {
                     OceanRenderObject ocean{};
                     ocean.surface = obj;
+                    // Terrain patches append inward skirts after the base grid to hide land
+                    // cracks. When reprojected to a constant sea-level sphere those skirt
+                    // triangles collapse onto edge vertices and become visible as quadtree
+                    // stair-steps, especially once sea level is normalized to height 0.
+                    const uint32_t ocean_index_count = ocean_patch_index_count(state->patch_index_resolution);
+                    if (ocean_index_count > 0u)
+                    {
+                        ocean.surface.indexCount = std::min(ocean_index_count, state->patch_index_count);
+                    }
                     ocean.body_center_local = body_center_local;
-                    ocean.sea_level_radius = static_cast<float>(body.radius_m);
+                    ocean.sea_level_radius = static_cast<float>(body.radius_m + body.terrain_height_offset_m);
                     ocean.shell_offset = ocean_shell_offset_m(body.radius_m);
                     draw_context.OceanSurfaces.push_back(ocean);
                 }

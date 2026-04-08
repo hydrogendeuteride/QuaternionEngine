@@ -102,7 +102,7 @@ layout(set = 1, binding = 0) uniform GLTFMaterialData{
 //   extra[3].x = terrain material flag (1/0), extra[3].w = target ocean roughness
 //   extra[4] = (planetCenterLocal.xyz, planetRadiusM)
 //   extra[5] = (faceIndex, detailNormalStrength, cavityStrength, enableTerminatorShadow)
-//   extra[6].x = terrain height scale (meters)
+//   extra[6].x = terrain height scale (meters), extra[6].y = terrain height offset (meters)
 // - Mesh VFX materials:
 //   extra[3].x = opacity multiplier, extra[3].y = fresnel power, extra[3].z = fresnel strength
 //   extra[4].rgb = tint

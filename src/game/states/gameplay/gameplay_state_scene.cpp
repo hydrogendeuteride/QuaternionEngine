@@ -621,6 +621,7 @@ namespace Game
                 planet.albedo_dir = cdef.albedo_dir;
                 planet.height_dir = cdef.height_dir;
                 planet.height_max_m = cdef.height_max_m;
+                planet.height_offset_m = cdef.height_offset_m;
                 planet.detail_normal_dir = cdef.detail_normal_dir;
                 planet.detail_normal_strength = cdef.detail_normal_strength;
                 planet.cavity_dir = cdef.cavity_dir;

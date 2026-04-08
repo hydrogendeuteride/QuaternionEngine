@@ -62,6 +62,7 @@ bool Engine::add_planet_terrain(const PlanetTerrain &planet)
     info.albedo_dir = planet.albedo_dir;
     info.height_dir = planet.height_dir;
     info.height_max_m = planet.height_max_m;
+    info.height_offset_m = planet.height_offset_m;
     info.detail_normal_dir = planet.detail_normal_dir;
     info.detail_normal_strength = planet.detail_normal_strength;
     info.cavity_dir = planet.cavity_dir;
