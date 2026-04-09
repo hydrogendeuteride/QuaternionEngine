@@ -220,7 +220,7 @@ struct AtmosphereSettings
     float sunStarburstSharpness = 12.0f;
 
     // Sampling jitter (0 = off; 1 = full per-pixel jitter). Disabling reduces noise but may introduce banding.
-    float jitterStrength = 0.0f;
+    float jitterStrength = 1.0f;
     // Optional GPU-ready 3D KTX2 spatiotemporal blue-noise texture for jitter sampling.
     std::string jitterTexturePath = "vfx/stbn_scalar_128x128x64_r8.ktx2";
 

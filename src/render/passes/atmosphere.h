@@ -8,6 +8,7 @@
 
 #include <array>
 #include <string>
+#include <string_view>
 
 class RenderGraph;
 class RGPassResources;
@@ -54,6 +55,9 @@ private:
         std::string overlayPath;
         std::string noisePath;
         std::string noise3DPath;
+        std::string terrainHeightPath;
+        float terrainHeightMaxM = 0.0f;
+        float terrainHeightOffsetM = 0.0f;
         float cloudBaseM = 0.0f;
         float cloudThicknessM = 0.0f;
         float cloudDensityScale = 0.0f;
@@ -110,6 +114,8 @@ private:
                         RGImageHandle cloudSegmentResolved);
 
     void ensure_cloud_textures(EngineContext *context);
+    void ensure_planet_height_textures(EngineContext *context, std::string_view height_dir);
+    void release_planet_height_textures();
     void release_history_images();
     void ensure_history_images(VkExtent2D extent);
 
@@ -137,6 +143,9 @@ private:
     AllocatedImage _cloudNoiseTex3D{};
     std::string _cloudNoise3DLoadedPath;
     AllocatedImage _cloudNoiseFallback3D{};
+    std::array<uint32_t, 6> _planetHeightHandles{
+        UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX};
+    std::string _planetHeightLoadedDir;
 
     std::array<AllocatedImage, 2> _cloudLightingHistory{};
     std::array<AllocatedImage, 2> _cloudSegmentHistory{};
