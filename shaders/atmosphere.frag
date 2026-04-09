@@ -17,6 +17,12 @@ layout(set = 1, binding = 5) uniform sampler2D cloudLightingResolvedTex;
 layout(set = 1, binding = 6) uniform sampler2D cloudSegmentResolvedTex;
 layout(set = 1, binding = 7) uniform sampler3D cloudNoiseTex3D;
 layout(set = 1, binding = 8) uniform sampler3D jitterNoiseTex;
+layout(set = 1, binding = 9) uniform sampler2D planetHeightTexPX;
+layout(set = 1, binding = 10) uniform sampler2D planetHeightTexNX;
+layout(set = 1, binding = 11) uniform sampler2D planetHeightTexPY;
+layout(set = 1, binding = 12) uniform sampler2D planetHeightTexNY;
+layout(set = 1, binding = 13) uniform sampler2D planetHeightTexPZ;
+layout(set = 1, binding = 14) uniform sampler2D planetHeightTexNZ;
 
 layout(push_constant) uniform AtmospherePush
 {
@@ -25,6 +31,7 @@ layout(push_constant) uniform AtmospherePush
     vec4 beta_rayleigh;
     vec4 beta_mie;
     vec4 jitter_params;
+    vec4 terrain_params;
     vec4 cloud_layer;
     vec4 cloud_params;
     vec4 cloud_color;

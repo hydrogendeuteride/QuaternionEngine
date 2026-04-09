@@ -91,6 +91,215 @@ bool ray_sphere_intersect(vec3 ro, vec3 rd, vec3 center, float radius, out float
     return true;
 }
 
+bool terrain_height_enabled()
+{
+    return pc.terrain_params.x > 0.0 || pc.terrain_params.y > 0.0;
+}
+
+float sample_planet_height_face(int faceIndex, vec2 uv01)
+{
+    vec2 uv = clamp(uv01, vec2(0.0), vec2(1.0));
+    switch (faceIndex)
+    {
+        case 0: return textureLod(planetHeightTexPX, uv, 0.0).r;
+        case 1: return textureLod(planetHeightTexNX, uv, 0.0).r;
+        case 2: return textureLod(planetHeightTexPY, uv, 0.0).r;
+        case 3: return textureLod(planetHeightTexNY, uv, 0.0).r;
+        case 4: return textureLod(planetHeightTexPZ, uv, 0.0).r;
+        case 5: return textureLod(planetHeightTexNZ, uv, 0.0).r;
+        default: return 0.0;
+    }
+}
+
+bool cubesphere_direction_to_face_uv(vec3 dir, out int faceIndex, out vec2 uv01)
+{
+    vec3 d = normalize(dir);
+    vec3 ad = abs(d);
+    float ma = 1.0;
+    vec2 uv = vec2(0.0);
+
+    if (ad.x >= ad.y && ad.x >= ad.z)
+    {
+        ma = ad.x;
+        if (d.x >= 0.0)
+        {
+            faceIndex = 0;
+            uv = vec2(-d.z / ma, -d.y / ma);
+        }
+        else
+        {
+            faceIndex = 1;
+            uv = vec2(d.z / ma, -d.y / ma);
+        }
+    }
+    else if (ad.y >= ad.x && ad.y >= ad.z)
+    {
+        ma = ad.y;
+        if (d.y >= 0.0)
+        {
+            faceIndex = 2;
+            uv = vec2(d.x / ma, d.z / ma);
+        }
+        else
+        {
+            faceIndex = 3;
+            uv = vec2(d.x / ma, -d.z / ma);
+        }
+    }
+    else
+    {
+        ma = ad.z;
+        if (d.z >= 0.0)
+        {
+            faceIndex = 4;
+            uv = vec2(d.x / ma, -d.y / ma);
+        }
+        else
+        {
+            faceIndex = 5;
+            uv = vec2(-d.x / ma, -d.y / ma);
+        }
+    }
+
+    uv01 = clamp(uv * 0.5 + 0.5, vec2(0.0), vec2(1.0));
+    return true;
+}
+
+float sample_planet_surface_radius(vec3 p, vec3 center, float planetRadius)
+{
+    float heightScale = max(pc.terrain_params.x, 0.0);
+    float heightOffset = max(pc.terrain_params.y, 0.0);
+    vec3 radial = p - center;
+    float radialLen = length(radial);
+    if (radialLen <= 1e-5)
+    {
+        return planetRadius + heightOffset;
+    }
+
+    int faceIndex = 0;
+    vec2 uv01 = vec2(0.5);
+    cubesphere_direction_to_face_uv(radial / radialLen, faceIndex, uv01);
+    return planetRadius + heightOffset + sample_planet_height_face(faceIndex, uv01) * heightScale;
+}
+
+float planet_surface_signed_distance(vec3 camLocal,
+                                     vec3 rd,
+                                     vec3 center,
+                                     float planetRadius,
+                                     float t)
+{
+    vec3 p = camLocal + rd * t;
+    return length(p - center) - sample_planet_surface_radius(p, center, planetRadius);
+}
+
+bool solve_planet_heightmap_surface_depth(vec3 camLocal,
+                                          vec3 rd,
+                                          vec3 center,
+                                          float planetRadius,
+                                          out float outTSurf)
+{
+    if (!terrain_height_enabled())
+    {
+        return false;
+    }
+
+    float heightScale = max(pc.terrain_params.x, 0.0);
+    float heightOffset = max(pc.terrain_params.y, 0.0);
+    float innerRadius = planetRadius + heightOffset;
+    float outerRadius = innerRadius + heightScale;
+    if (outerRadius <= 0.0)
+    {
+        return false;
+    }
+
+    float tOuter0;
+    float tOuter1;
+    if (!ray_sphere_intersect(camLocal, rd, center, outerRadius, tOuter0, tOuter1))
+    {
+        return false;
+    }
+
+    float tLo = max(tOuter0, 0.0);
+    float fLo = planet_surface_signed_distance(camLocal, rd, center, planetRadius, tLo);
+    if (fLo <= 0.0)
+    {
+        outTSurf = tLo;
+        return true;
+    }
+
+    float tHi = tOuter1;
+    float fHi = 1.0;
+    bool haveHi = false;
+
+    float tInner0;
+    float tInner1;
+    if (ray_sphere_intersect(camLocal, rd, center, innerRadius, tInner0, tInner1))
+    {
+        float candidate = -1.0;
+        if (tInner0 > tLo)
+        {
+            candidate = tInner0;
+        }
+        else if (tInner1 > tLo)
+        {
+            candidate = tInner1;
+        }
+
+        if (candidate > 0.0)
+        {
+            tHi = candidate;
+            fHi = planet_surface_signed_distance(camLocal, rd, center, planetRadius, tHi);
+            haveHi = fHi <= 0.0;
+        }
+    }
+
+    if (!haveHi)
+    {
+        float searchEnd = max(tOuter1, tLo);
+        float prevT = tLo;
+        float prevF = fLo;
+        for (int i = 1; i <= 32; ++i)
+        {
+            float t = mix(tLo, searchEnd, float(i) / 32.0);
+            float f = planet_surface_signed_distance(camLocal, rd, center, planetRadius, t);
+            if (f <= 0.0)
+            {
+                tLo = prevT;
+                fLo = prevF;
+                tHi = t;
+                fHi = f;
+                haveHi = true;
+                break;
+            }
+            prevT = t;
+            prevF = f;
+        }
+    }
+
+    if (!haveHi)
+    {
+        return false;
+    }
+
+    for (int i = 0; i < 8; ++i)
+    {
+        float tm = 0.5 * (tLo + tHi);
+        float fm = planet_surface_signed_distance(camLocal, rd, center, planetRadius, tm);
+        if (fm > 0.0)
+        {
+            tLo = tm;
+        }
+        else
+        {
+            tHi = tm;
+            fHi = fm;
+        }
+    }
+
+    outTSurf = tHi;
+    return fHi <= 0.0;
+}
+
 float sample_cloud_noise_grad(vec2 uvE, vec2 uvDx, vec2 uvDy, float scale, vec2 offset)
 {
     vec2 uv = uvE * scale + offset;
@@ -608,19 +817,27 @@ bool compute_primary_ray_bounds(vec3 camLocal,
             bool isPlanet = (posSample.w > 1.5);
             if (isPlanet)
             {
-                float snapM = max(pc.jitter_params.y, 0.0);
-                if (snapM > 0.0)
+                float terrainTSurf = tSurf;
+                if (solve_planet_heightmap_surface_depth(camLocal, rd, center, planetRadius, terrainTSurf))
                 {
-                    float tP0;
-                    float tP1;
-                    if (ray_sphere_intersect(camLocal, rd, center, planetRadius, tP0, tP1))
+                    tSurf = terrainTSurf;
+                }
+                else
+                {
+                    float snapM = max(pc.jitter_params.y, 0.0);
+                    if (snapM > 0.0)
                     {
-                        float tSphere = (tP0 > 0.0) ? tP0 : tP1;
-                        if (tSphere > 0.0)
+                        float tP0;
+                        float tP1;
+                        if (ray_sphere_intersect(camLocal, rd, center, planetRadius, tP0, tP1))
                         {
-                            float rSurf = length(posSample.xyz - center);
-                            if (rSurf < planetRadius) tSurf = min(tSurf, tSphere);
-                            if (abs(rSurf - planetRadius) <= snapM) tSurf = tSphere;
+                            float tSphere = (tP0 > 0.0) ? tP0 : tP1;
+                            if (tSphere > 0.0)
+                            {
+                                float rSurf = length(posSample.xyz - center);
+                                if (rSurf < planetRadius) tSurf = min(tSurf, tSphere);
+                                if (abs(rSurf - planetRadius) <= snapM) tSurf = tSphere;
+                            }
                         }
                     }
                 }
@@ -692,7 +909,7 @@ vec3 render_atmosphere_monolithic(vec3 baseColor)
 
     int viewSteps = clamp(pc.misc.x, 4, 64);
     int cloudStepsTotal = clamp(pc.misc.z, 4, 128);
-    float jitter = mix(0.5, hash12(inUV * 1024.0), clamp(pc.jitter_params.x, 0.0, 1.0));
+    float jitter = resolve_jitter_sample(inUV);
 
     vec3 sunDir = normalize(-sceneData.sunlightDirection.xyz);
     vec3 sunCol = sceneData.sunlightColor.rgb * sceneData.sunlightColor.a;
