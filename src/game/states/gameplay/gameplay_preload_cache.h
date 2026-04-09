@@ -3,7 +3,7 @@
 #include <memory>
 #include <vector>
 
-class LoadedGLTF;
+struct LoadedGLTF;
 
 namespace Game
 {
