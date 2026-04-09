@@ -2,6 +2,7 @@
 
 #include "core/assets/ktx_loader.h"
 #include "core/assets/manager.h"
+#include "core/assets/texture_cache.h"
 #include "core/context.h"
 #include "core/descriptor/descriptors.h"
 #include "core/descriptor/manager.h"
@@ -24,6 +25,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <span>
 
 #include <glm/gtc/packing.hpp>
@@ -39,6 +41,13 @@ namespace
     constexpr uint32_t k_flag_cloud_noise_3d = 8u;
     constexpr uint32_t k_flag_jitter_blue_noise = 16u;
 
+    struct AtmosphereBodySelection
+    {
+        const PlanetSystem::PlanetBody *body = nullptr;
+        glm::vec3 center_local{0.0f};
+        float radius_m = 0.0f;
+    };
+
     struct AtmospherePush
     {
         glm::vec4 planet_center_radius;
@@ -46,6 +55,7 @@ namespace
         glm::vec4 beta_rayleigh;
         glm::vec4 beta_mie;
         glm::vec4 jitter_params;
+        glm::vec4 terrain_params;
         glm::vec4 cloud_layer;
         glm::vec4 cloud_params;
         glm::vec4 cloud_color;
@@ -66,7 +76,7 @@ namespace
         glm::ivec4 misc;
     };
 
-    static_assert(sizeof(AtmospherePush) == 144);
+    static_assert(sizeof(AtmospherePush) == 160);
     static_assert(sizeof(CloudTemporalPush) == 112);
 
     static bool vec3_finite(const glm::vec3 &v)
@@ -115,12 +125,39 @@ namespace
         vkCmdSetScissor(cmd, 0, 1, &sc);
     }
 
+    static std::string resolve_optional_face_texture_path(AssetManager &assets,
+                                                          std::string_view dir,
+                                                          planet::CubeFace face)
+    {
+        if (dir.empty())
+        {
+            return {};
+        }
+
+        std::string rel = std::string(dir) + "/" + planet::cube_face_name(face) + ".ktx2";
+        std::string abs_path = assets.assetPath(rel);
+        if (std::filesystem::exists(abs_path))
+        {
+            return abs_path;
+        }
+
+        rel = std::string(dir) + "/" + planet::cube_face_name(face) + ".png";
+        abs_path = assets.assetPath(rel);
+        if (std::filesystem::exists(abs_path))
+        {
+            return abs_path;
+        }
+
+        return {};
+    }
+
     static bool find_atmosphere_body(const EngineContext &ctx,
                                      const SceneManager &scene,
                                      const PlanetSystem &planets,
-                                     glm::vec3 &out_center_local,
-                                     float &out_radius_m)
+                                     AtmosphereBodySelection &out_selection)
     {
+        out_selection = {};
+
         const auto &bodies = planets.bodies();
         if (bodies.empty())
         {
@@ -172,14 +209,14 @@ namespace
             return false;
         }
 
-        out_center_local = world_to_local(picked->center_world, scene.get_world_origin());
-        out_radius_m = static_cast<float>(picked->radius_m);
-        return std::isfinite(out_radius_m) && out_radius_m > 0.0f;
+        out_selection.body = picked;
+        out_selection.center_local = world_to_local(picked->center_world, scene.get_world_origin());
+        out_selection.radius_m = static_cast<float>(picked->radius_m);
+        return std::isfinite(out_selection.radius_m) && out_selection.radius_m > 0.0f;
     }
 
     static AtmospherePush build_atmosphere_push(const EngineContext &ctx,
-                                                const glm::vec3 &planet_center_local,
-                                                float planet_radius_m,
+                                                const AtmosphereBodySelection &body_selection,
                                                 bool jitter_noise_ready,
                                                 bool cloud_overlay_ready,
                                                 bool cloud_noise_ready,
@@ -187,6 +224,9 @@ namespace
     {
         const AtmosphereSettings &s = ctx.atmosphere;
         const PlanetCloudSettings &c = ctx.planetClouds;
+        const PlanetSystem::PlanetBody *body = body_selection.body;
+        const glm::vec3 &planet_center_local = body_selection.center_local;
+        const float planet_radius_m = body_selection.radius_m;
 
         const bool atmosphere_enabled = ctx.enableAtmosphere;
         const bool clouds_enabled = ctx.enablePlanetClouds && cloud_overlay_ready;
@@ -211,6 +251,15 @@ namespace
         const float intensity = atmosphere_enabled ? std::max(0.0f, s.intensity) : 0.0f;
         const float jitter_strength = std::clamp(s.jitterStrength, 0.0f, 1.0f);
         const float planet_snap_m = std::max(0.0f, s.planetSurfaceSnapM);
+        const bool terrain_height_enabled = body && body->terrain &&
+            (!body->terrain_height_dir.empty()) &&
+            (body->terrain_height_max_m > 0.0 || body->terrain_height_offset_m > 0.0);
+        const float terrain_height_scale_m = terrain_height_enabled
+            ? static_cast<float>(std::max(0.0, body->terrain_height_max_m))
+            : 0.0f;
+        const float terrain_height_offset_m = terrain_height_enabled
+            ? static_cast<float>(std::max(0.0, body->terrain_height_offset_m))
+            : 0.0f;
         const int view_steps = std::clamp(s.viewSteps, 4, 64);
 
         const float cloud_base_m = std::max(0.0f, c.baseHeightM);
@@ -276,6 +325,7 @@ namespace
         push.beta_rayleigh = glm::vec4(beta_rayleigh, intensity);
         push.beta_mie = glm::vec4(beta_mie, absorption_strength);
         push.jitter_params = glm::vec4(jitter_strength, planet_snap_m, cloud_overlay_sin, cloud_overlay_cos);
+        push.terrain_params = glm::vec4(terrain_height_scale_m, terrain_height_offset_m, 0.0f, 0.0f);
         push.cloud_layer = glm::vec4(cloud_base_m, cloud_thickness_m, cloud_density_scale, cloud_coverage);
         push.cloud_params = glm::vec4(cloud_noise_scale, cloud_detail_scale, cloud_wind_speed, cloud_wind_angle);
         push.cloud_color = glm::vec4(cloud_color, 1.0f);
@@ -303,6 +353,12 @@ void AtmospherePass::init(EngineContext *context)
         builder.add_binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         _lowResSetLayout = builder.build(
             device,
             VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -328,6 +384,12 @@ void AtmospherePass::init(EngineContext *context)
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         _upscaleSetLayout = builder.build(
             device,
             VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -346,6 +408,12 @@ void AtmospherePass::init(EngineContext *context)
         builder.add_binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         builder.add_binding(8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.add_binding(14, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         _compositeSetLayout = builder.build(
             device,
             VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -466,6 +534,7 @@ void AtmospherePass::init(EngineContext *context)
 void AtmospherePass::cleanup()
 {
     release_history_images();
+    release_planet_height_textures();
 
     if (_context && _context->getResources())
     {
@@ -501,6 +570,7 @@ void AtmospherePass::cleanup()
     _cloudNoiseLoadedPath.clear();
     _jitterNoiseLoadedPath.clear();
     _cloudNoise3DLoadedPath.clear();
+    _planetHeightLoadedDir.clear();
     _historySnapshot = {};
     _historyValid = false;
 
@@ -544,6 +614,79 @@ void AtmospherePass::execute(VkCommandBuffer)
 void AtmospherePass::preload_cloud_textures()
 {
     ensure_cloud_textures(_context);
+}
+
+void AtmospherePass::release_planet_height_textures()
+{
+    if (_context && _context->textures)
+    {
+        for (uint32_t &handle : _planetHeightHandles)
+        {
+            if (handle != UINT32_MAX)
+            {
+                _context->textures->unpin(handle);
+                handle = UINT32_MAX;
+            }
+        }
+    }
+    else
+    {
+        _planetHeightHandles.fill(UINT32_MAX);
+    }
+
+    _planetHeightLoadedDir.clear();
+}
+
+void AtmospherePass::ensure_planet_height_textures(EngineContext *context, std::string_view height_dir)
+{
+    EngineContext *ctx = context ? context : _context;
+    if (!ctx || !ctx->textures || !ctx->getAssets() || !ctx->getSamplers())
+    {
+        release_planet_height_textures();
+        return;
+    }
+
+    const std::string desired_dir{height_dir};
+    if (desired_dir == _planetHeightLoadedDir)
+    {
+        return;
+    }
+
+    release_planet_height_textures();
+    _planetHeightLoadedDir = desired_dir;
+    if (desired_dir.empty())
+    {
+        return;
+    }
+
+    AssetManager *assets = ctx->getAssets();
+    TextureCache *textures = ctx->textures;
+    VkSampler sampler = ctx->getSamplers()->linearClampEdge();
+    if (!assets || !textures || sampler == VK_NULL_HANDLE)
+    {
+        return;
+    }
+
+    for (uint32_t face_index = 0; face_index < _planetHeightHandles.size(); ++face_index)
+    {
+        const auto face = static_cast<planet::CubeFace>(face_index);
+        const std::string abs_path = resolve_optional_face_texture_path(*assets, desired_dir, face);
+        if (abs_path.empty())
+        {
+            continue;
+        }
+
+        TextureCache::TextureKey key{};
+        key.kind = TextureCache::TextureKey::SourceKind::FilePath;
+        key.path = abs_path;
+        key.srgb = false;
+        key.mipmapped = true;
+        key.channels = TextureCache::TextureKey::ChannelsHint::R;
+
+        const uint32_t handle = textures->request(key, sampler);
+        textures->pin(handle);
+        _planetHeightHandles[face_index] = handle;
+    }
 }
 
 void AtmospherePass::ensure_cloud_textures(EngineContext *context)
@@ -781,25 +924,24 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
 
             ctx_local->pipelines->setComputeInstanceStorageImage("atmosphere.transmittance_lut", 0, lut_view);
 
-            glm::vec3 planet_center_local{0.0f};
-            float planet_radius_m = 0.0f;
+            AtmosphereBodySelection body_selection{};
             if (ctx_local->scene)
             {
                 if (PlanetSystem *planets = ctx_local->scene->get_planet_system(); planets && planets->enabled())
                 {
-                    (void)find_atmosphere_body(*ctx_local, *ctx_local->scene, *planets, planet_center_local, planet_radius_m);
+                    (void)find_atmosphere_body(*ctx_local, *ctx_local->scene, *planets, body_selection);
                 }
             }
 
             const AtmosphereSettings &settings = ctx_local->atmosphere;
             const float atmosphere_height = std::max(0.0f, settings.atmosphereHeightM);
-            const float atmosphere_radius = (planet_radius_m > 0.0f && atmosphere_height > 0.0f)
-                ? (planet_radius_m + atmosphere_height)
+            const float atmosphere_radius = (body_selection.radius_m > 0.0f && atmosphere_height > 0.0f)
+                ? (body_selection.radius_m + atmosphere_height)
                 : 0.0f;
 
             AtmosphereLutPush push{};
             push.radii_heights = glm::vec4(
-                planet_radius_m,
+                body_selection.radius_m,
                 atmosphere_radius,
                 std::max(1.0f, settings.rayleighScaleHeightM),
                 std::max(1.0f, settings.mieScaleHeightM));
@@ -814,13 +956,12 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
             ctx_local->pipelines->dispatchComputeInstance(cmd, "atmosphere.transmittance_lut", dispatch);
         });
 
-    glm::vec3 planet_center_local{0.0f};
-    float planet_radius_m = 0.0f;
+    AtmosphereBodySelection body_selection{};
     if (_context->scene)
     {
         if (PlanetSystem *planets = _context->scene->get_planet_system(); planets && planets->enabled())
         {
-            (void)find_atmosphere_body(*_context, *_context->scene, *planets, planet_center_local, planet_radius_m);
+            (void)find_atmosphere_body(*_context, *_context->scene, *planets, body_selection);
         }
     }
 
@@ -840,7 +981,7 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
     next_snapshot.lowExtent = low_extent;
     next_snapshot.originRevision = _context->origin_revision;
     next_snapshot.projection = _context->getSceneData().proj;
-    next_snapshot.planetCenterRadius = glm::vec4(planet_center_local, planet_radius_m);
+    next_snapshot.planetCenterRadius = glm::vec4(body_selection.center_local, body_selection.radius_m);
     next_snapshot.sunDirection = _context->getSceneData().sunlightDirection;
     next_snapshot.sunColor = _context->getSceneData().sunlightColor;
     next_snapshot.ambientColor = _context->getSceneData().ambientColor;
@@ -849,6 +990,16 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
     next_snapshot.overlayPath = _context->planetClouds.overlayTexturePath;
     next_snapshot.noisePath = _context->planetClouds.noiseTexturePath;
     next_snapshot.noise3DPath = _context->planetClouds.noiseTexture3DPath;
+    next_snapshot.terrainHeightPath =
+        (body_selection.body && body_selection.body->terrain) ? body_selection.body->terrain_height_dir : std::string{};
+    next_snapshot.terrainHeightMaxM =
+        (body_selection.body && body_selection.body->terrain)
+            ? static_cast<float>(std::max(0.0, body_selection.body->terrain_height_max_m))
+            : 0.0f;
+    next_snapshot.terrainHeightOffsetM =
+        (body_selection.body && body_selection.body->terrain)
+            ? static_cast<float>(std::max(0.0, body_selection.body->terrain_height_offset_m))
+            : 0.0f;
     next_snapshot.cloudBaseM = _context->planetClouds.baseHeightM;
     next_snapshot.cloudThicknessM = _context->planetClouds.thicknessM;
     next_snapshot.cloudDensityScale = _context->planetClouds.densityScale;
@@ -881,6 +1032,9 @@ RGImageHandle AtmospherePass::register_graph(RenderGraph *graph, RGImageHandle h
                         _historySnapshot.overlayPath != next_snapshot.overlayPath ||
                         _historySnapshot.noisePath != next_snapshot.noisePath ||
                         _historySnapshot.noise3DPath != next_snapshot.noise3DPath ||
+                        _historySnapshot.terrainHeightPath != next_snapshot.terrainHeightPath ||
+                        !nearly_equal(_historySnapshot.terrainHeightMaxM, next_snapshot.terrainHeightMaxM) ||
+                        !nearly_equal(_historySnapshot.terrainHeightOffsetM, next_snapshot.terrainHeightOffsetM) ||
                         !nearly_equal(_historySnapshot.cloudBaseM, next_snapshot.cloudBaseM) ||
                         !nearly_equal(_historySnapshot.cloudThicknessM, next_snapshot.cloudThicknessM) ||
                         !nearly_equal(_historySnapshot.cloudDensityScale, next_snapshot.cloudDensityScale) ||
@@ -1183,12 +1337,44 @@ void AtmospherePass::draw_cloud_low_res(VkCommandBuffer cmd,
         return;
     }
 
+    AtmosphereBodySelection body_selection{};
+    if (ctx->scene)
+    {
+        if (PlanetSystem *planets = ctx->scene->get_planet_system(); planets && planets->enabled())
+        {
+            (void)find_atmosphere_body(*ctx, *ctx->scene, *planets, body_selection);
+        }
+    }
+
+    const std::string_view terrain_height_dir =
+        (body_selection.body && body_selection.body->terrain) ? body_selection.body->terrain_height_dir : std::string_view{};
+    ensure_planet_height_textures(ctx, terrain_height_dir);
+
     VkImageView overlay_view = _cloudOverlayTex.imageView != VK_NULL_HANDLE ? _cloudOverlayTex.imageView : assets->fallbackBlackView();
     VkImageView noise_view = _cloudNoiseTex.imageView != VK_NULL_HANDLE ? _cloudNoiseTex.imageView : assets->fallbackWhiteView();
     VkImageView noise_view_3d = _cloudNoiseTex3D.imageView != VK_NULL_HANDLE ? _cloudNoiseTex3D.imageView : _cloudNoiseFallback3D.imageView;
     VkImageView jitter_view = _jitterNoiseTex.imageView != VK_NULL_HANDLE ? _jitterNoiseTex.imageView : _cloudNoiseFallback3D.imageView;
+    std::array<VkImageView, 6> terrain_height_views{};
+    terrain_height_views.fill(assets->fallbackBlackView());
+    if (ctx->textures)
+    {
+        for (size_t i = 0; i < _planetHeightHandles.size(); ++i)
+        {
+            const uint32_t handle = _planetHeightHandles[i];
+            if (handle == UINT32_MAX)
+            {
+                continue;
+            }
+            ctx->textures->markUsed(handle, ctx->frameIndex);
+            VkImageView view = ctx->textures->imageView(handle);
+            if (view != VK_NULL_HANDLE)
+            {
+                terrain_height_views[i] = view;
+            }
+        }
+    }
     if (overlay_view == VK_NULL_HANDLE || noise_view == VK_NULL_HANDLE || noise_view_3d == VK_NULL_HANDLE ||
-        jitter_view == VK_NULL_HANDLE)
+        jitter_view == VK_NULL_HANDLE || terrain_height_views[0] == VK_NULL_HANDLE)
     {
         return;
     }
@@ -1213,6 +1399,11 @@ void AtmospherePass::draw_cloud_low_res(VkCommandBuffer cmd,
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     writer.write_image(5, jitter_view, ctx->getSamplers()->defaultNearest(),
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    for (uint32_t i = 0; i < terrain_height_views.size(); ++i)
+    {
+        writer.write_image(6 + static_cast<int>(i), terrain_height_views[i], ctx->getSamplers()->linearClampEdge(),
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    }
     writer.update_set(ctx->getDevice()->device(), input_set);
 
     if (!ctx->pipelines->getGraphics("atmosphere.cloud_lowres", _cloudLowResPipeline, _cloudLowResPipelineLayout))
@@ -1220,20 +1411,9 @@ void AtmospherePass::draw_cloud_low_res(VkCommandBuffer cmd,
         return;
     }
 
-    glm::vec3 planet_center_local{0.0f};
-    float planet_radius_m = 0.0f;
-    if (ctx->scene)
-    {
-        if (PlanetSystem *planets = ctx->scene->get_planet_system(); planets && planets->enabled())
-        {
-            (void)find_atmosphere_body(*ctx, *ctx->scene, *planets, planet_center_local, planet_radius_m);
-        }
-    }
-
     const AtmospherePush push = build_atmosphere_push(
         *ctx,
-        planet_center_local,
-        planet_radius_m,
+        body_selection,
         _jitterNoiseTex.imageView != VK_NULL_HANDLE,
         _cloudOverlayTex.imageView != VK_NULL_HANDLE,
         _cloudNoiseTex.imageView != VK_NULL_HANDLE,
@@ -1372,6 +1552,48 @@ void AtmospherePass::draw_cloud_upscale(VkCommandBuffer cmd,
         return;
     }
 
+    AssetManager *assets = ctx->getAssets();
+    if (!assets)
+    {
+        return;
+    }
+
+    AtmosphereBodySelection body_selection{};
+    if (ctx->scene)
+    {
+        if (PlanetSystem *planets = ctx->scene->get_planet_system(); planets && planets->enabled())
+        {
+            (void)find_atmosphere_body(*ctx, *ctx->scene, *planets, body_selection);
+        }
+    }
+
+    const std::string_view terrain_height_dir =
+        (body_selection.body && body_selection.body->terrain) ? body_selection.body->terrain_height_dir : std::string_view{};
+    ensure_planet_height_textures(ctx, terrain_height_dir);
+    std::array<VkImageView, 6> terrain_height_views{};
+    terrain_height_views.fill(assets->fallbackBlackView());
+    if (ctx->textures)
+    {
+        for (size_t i = 0; i < _planetHeightHandles.size(); ++i)
+        {
+            const uint32_t handle = _planetHeightHandles[i];
+            if (handle == UINT32_MAX)
+            {
+                continue;
+            }
+            ctx->textures->markUsed(handle, ctx->frameIndex);
+            VkImageView view = ctx->textures->imageView(handle);
+            if (view != VK_NULL_HANDLE)
+            {
+                terrain_height_views[i] = view;
+            }
+        }
+    }
+    if (terrain_height_views[0] == VK_NULL_HANDLE)
+    {
+        return;
+    }
+
     VkDescriptorSet input_set = ctx->currentFrame->_frameDescriptors.allocate(ctx->getDevice()->device(), _upscaleSetLayout);
     DescriptorWriter writer;
     writer.write_image(0, pos_view, ctx->getSamplers()->defaultNearest(),
@@ -1380,6 +1602,11 @@ void AtmospherePass::draw_cloud_upscale(VkCommandBuffer cmd,
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     writer.write_image(2, cloud_segment_lowres_view, ctx->getSamplers()->defaultNearest(),
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    for (uint32_t i = 0; i < terrain_height_views.size(); ++i)
+    {
+        writer.write_image(3 + static_cast<int>(i), terrain_height_views[i], ctx->getSamplers()->linearClampEdge(),
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    }
     writer.update_set(ctx->getDevice()->device(), input_set);
 
     if (!ctx->pipelines->getGraphics("atmosphere.cloud_upscale", _cloudUpscalePipeline, _cloudUpscalePipelineLayout))
@@ -1387,20 +1614,9 @@ void AtmospherePass::draw_cloud_upscale(VkCommandBuffer cmd,
         return;
     }
 
-    glm::vec3 planet_center_local{0.0f};
-    float planet_radius_m = 0.0f;
-    if (ctx->scene)
-    {
-        if (PlanetSystem *planets = ctx->scene->get_planet_system(); planets && planets->enabled())
-        {
-            (void)find_atmosphere_body(*ctx, *ctx->scene, *planets, planet_center_local, planet_radius_m);
-        }
-    }
-
     const AtmospherePush push = build_atmosphere_push(
         *ctx,
-        planet_center_local,
-        planet_radius_m,
+        body_selection,
         _jitterNoiseTex.imageView != VK_NULL_HANDLE,
         _cloudOverlayTex.imageView != VK_NULL_HANDLE,
         _cloudNoiseTex.imageView != VK_NULL_HANDLE,
@@ -1444,10 +1660,42 @@ void AtmospherePass::draw_composite(VkCommandBuffer cmd,
         return;
     }
 
+    AtmosphereBodySelection body_selection{};
+    if (ctx->scene)
+    {
+        if (PlanetSystem *planets = ctx->scene->get_planet_system(); planets && planets->enabled())
+        {
+            (void)find_atmosphere_body(*ctx, *ctx->scene, *planets, body_selection);
+        }
+    }
+
+    const std::string_view terrain_height_dir =
+        (body_selection.body && body_selection.body->terrain) ? body_selection.body->terrain_height_dir : std::string_view{};
+    ensure_planet_height_textures(ctx, terrain_height_dir);
+
     VkImageView overlay_view = _cloudOverlayTex.imageView != VK_NULL_HANDLE ? _cloudOverlayTex.imageView : assets->fallbackBlackView();
     VkImageView noise_view = _cloudNoiseTex.imageView != VK_NULL_HANDLE ? _cloudNoiseTex.imageView : assets->fallbackWhiteView();
     VkImageView noise_view_3d = _cloudNoiseTex3D.imageView != VK_NULL_HANDLE ? _cloudNoiseTex3D.imageView : _cloudNoiseFallback3D.imageView;
     VkImageView jitter_view = _jitterNoiseTex.imageView != VK_NULL_HANDLE ? _jitterNoiseTex.imageView : _cloudNoiseFallback3D.imageView;
+    std::array<VkImageView, 6> terrain_height_views{};
+    terrain_height_views.fill(assets->fallbackBlackView());
+    if (ctx->textures)
+    {
+        for (size_t i = 0; i < _planetHeightHandles.size(); ++i)
+        {
+            const uint32_t handle = _planetHeightHandles[i];
+            if (handle == UINT32_MAX)
+            {
+                continue;
+            }
+            ctx->textures->markUsed(handle, ctx->frameIndex);
+            VkImageView view = ctx->textures->imageView(handle);
+            if (view != VK_NULL_HANDLE)
+            {
+                terrain_height_views[i] = view;
+            }
+        }
+    }
     VkImageView cloud_lighting_resolved_view = resources.image_view(cloudLightingResolved);
     VkImageView cloud_segment_resolved_view = resources.image_view(cloudSegmentResolved);
     if (cloud_lighting_resolved_view == VK_NULL_HANDLE)
@@ -1460,7 +1708,8 @@ void AtmospherePass::draw_composite(VkCommandBuffer cmd,
     }
     if (overlay_view == VK_NULL_HANDLE || noise_view == VK_NULL_HANDLE || noise_view_3d == VK_NULL_HANDLE ||
         jitter_view == VK_NULL_HANDLE ||
-        cloud_lighting_resolved_view == VK_NULL_HANDLE || cloud_segment_resolved_view == VK_NULL_HANDLE)
+        cloud_lighting_resolved_view == VK_NULL_HANDLE || cloud_segment_resolved_view == VK_NULL_HANDLE ||
+        terrain_height_views[0] == VK_NULL_HANDLE)
     {
         return;
     }
@@ -1491,6 +1740,11 @@ void AtmospherePass::draw_composite(VkCommandBuffer cmd,
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     writer.write_image(8, jitter_view, ctx->getSamplers()->defaultNearest(),
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    for (uint32_t i = 0; i < terrain_height_views.size(); ++i)
+    {
+        writer.write_image(9 + static_cast<int>(i), terrain_height_views[i], ctx->getSamplers()->linearClampEdge(),
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    }
     writer.update_set(ctx->getDevice()->device(), input_set);
 
     if (!ctx->pipelines->getGraphics("atmosphere.composite", _compositePipeline, _compositePipelineLayout))
@@ -1498,20 +1752,9 @@ void AtmospherePass::draw_composite(VkCommandBuffer cmd,
         return;
     }
 
-    glm::vec3 planet_center_local{0.0f};
-    float planet_radius_m = 0.0f;
-    if (ctx->scene)
-    {
-        if (PlanetSystem *planets = ctx->scene->get_planet_system(); planets && planets->enabled())
-        {
-            (void)find_atmosphere_body(*ctx, *ctx->scene, *planets, planet_center_local, planet_radius_m);
-        }
-    }
-
     const AtmospherePush push = build_atmosphere_push(
         *ctx,
-        planet_center_local,
-        planet_radius_m,
+        body_selection,
         _jitterNoiseTex.imageView != VK_NULL_HANDLE,
         _cloudOverlayTex.imageView != VK_NULL_HANDLE,
         _cloudNoiseTex.imageView != VK_NULL_HANDLE,
