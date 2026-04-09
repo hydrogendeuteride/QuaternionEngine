@@ -13,7 +13,7 @@
 #include <thread>
 #include <vector>
 
-class LoadedGLTF;
+struct LoadedGLTF;
 class VulkanEngine;
 
 namespace Game

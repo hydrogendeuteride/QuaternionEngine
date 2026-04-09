@@ -22,7 +22,7 @@
 class EngineContext;
 class SceneManager;
 struct DrawContext;
-class MeshAsset;
+struct MeshAsset;
 struct MeshBVH;
 struct GLTFMaterial;
 

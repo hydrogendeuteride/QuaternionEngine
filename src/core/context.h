@@ -24,7 +24,7 @@ class SwapchainManager;
 class DescriptorManager;
 class SamplerManager;
 class SceneManager;
-class MeshAsset;
+struct MeshAsset;
 struct DrawContext;
 struct GPUSceneData;
 class ComputeManager;
