@@ -18,7 +18,7 @@
 #include "locator.h"
 
 class VulkanEngine;
-class MeshAsset;
+struct MeshAsset;
 
 class AssetManager
 {
