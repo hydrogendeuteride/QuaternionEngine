@@ -450,6 +450,18 @@ PlanetSystem::PlanetBody *PlanetSystem::create_mesh_planet(const MeshPlanetCreat
                                        std::span<Vertex>(verts),
                                        std::span<uint32_t>(inds),
                                        body.material);
+        if (body.mesh)
+        {
+            for (GeoSurface &surface : body.mesh->surfaces)
+            {
+                surface.bounds.type = BoundsType::Sphere;
+                surface.bounds.sphereRadius = std::max({
+                    surface.bounds.extents.x,
+                    surface.bounds.extents.y,
+                    surface.bounds.extents.z,
+                });
+            }
+        }
     }
 
     _bodies.push_back(std::move(body));

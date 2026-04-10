@@ -4,6 +4,7 @@
 #include <unordered_set>
 
 #include "core/assets/texture_cache.h"
+#include "scene/render_object_culling.h"
 #include "scene/vk_scene.h"
 #include "core/context.h"
 #include "core/device/device.h"
@@ -91,9 +92,16 @@ void MeshVfxPass::draw_mesh_vfx(VkCommandBuffer cmd,
 
     std::vector<const RenderObject *> draws;
     draws.reserve(dc.MeshVfxSurfaces.size());
+    const scene::frustum::PlaneSet frustum = scene::frustum::extract_clip_planes(sceneData.viewproj);
     for (const auto &r : dc.MeshVfxSurfaces)
     {
-        if (r.material != nullptr)
+        if (r.material == nullptr)
+        {
+            continue;
+        }
+
+        const scene::culling::VisibilityBounds bounds = scene::culling::compute_visibility_bounds(r);
+        if (scene::culling::intersects_view_frustum(r, bounds, frustum))
         {
             draws.push_back(&r);
         }
@@ -177,4 +185,3 @@ void MeshVfxPass::cleanup()
 {
     Logger::info("MeshVfxPass::cleanup()");
 }
-

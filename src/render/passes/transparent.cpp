@@ -6,6 +6,7 @@
 #include "core/assets/ibl_manager.h"
 #include "core/assets/texture_cache.h"
 #include "core/pipeline/sampler.h"
+#include "scene/render_object_culling.h"
 #include "scene/vk_scene.h"
 #include "core/device/swapchain.h"
 #include "core/context.h"
@@ -142,7 +143,16 @@ void TransparentPass::draw_transparent(VkCommandBuffer cmd,
     // For better results consider using per-object center or per-draw depth range.
     std::vector<const RenderObject *> draws;
     draws.reserve(dc.TransparentSurfaces.size());
-    for (const auto &r: dc.TransparentSurfaces) draws.push_back(&r);
+    const scene::frustum::PlaneSet frustum = scene::frustum::extract_clip_planes(sceneData.viewproj);
+    for (const auto &r : dc.TransparentSurfaces)
+    {
+        const scene::culling::VisibilityBounds bounds = scene::culling::compute_visibility_bounds(r);
+        if (scene::culling::intersects_view_frustum(r, bounds, frustum))
+        {
+            draws.push_back(&r);
+        }
+    }
+    if (draws.empty()) return;
 
     auto view = sceneData.view; // world -> view
     auto depthOf = [&](const RenderObject *r) {
