@@ -12,6 +12,7 @@
 #include "render/pipelines.h"
 #include "render/graph/graph.h"
 #include "render/graph/builder.h"
+#include "scene/render_object_culling.h"
 #include "scene/vk_scene.h"
 
 namespace
@@ -231,6 +232,15 @@ void PunctualShadowPass::draw_shadow(VkCommandBuffer cmd,
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     const DrawContext &dc = ctxLocal->getMainDrawContext();
+    const scene::frustum::PlaneSet light_frustum = scene::frustum::extract_clip_planes(lightVP);
+    glm::vec3 light_pos_local(0.0f);
+    float light_radius = 0.0f;
+    if (pointLight && lightIndex < kMaxPunctualLights)
+    {
+        light_pos_local = glm::vec3(sd.punctualLights[lightIndex].position_radius);
+        light_radius = std::max(sd.punctualLights[lightIndex].position_radius.w, 0.0f);
+    }
+
     VkBuffer lastIndexBuffer = VK_NULL_HANDLE;
     for (const auto &r : dc.OpaqueSurfaces)
     {
@@ -238,6 +248,18 @@ void PunctualShadowPass::draw_shadow(VkCommandBuffer cmd,
         {
             continue;
         }
+
+        const scene::culling::VisibilityBounds bounds = scene::culling::compute_visibility_bounds(r);
+        if (pointLight && light_radius > 0.0f &&
+            !scene::culling::intersects_bounding_sphere(bounds, light_pos_local, light_radius))
+        {
+            continue;
+        }
+        if (!scene::culling::intersects_view_frustum(r, bounds, light_frustum))
+        {
+            continue;
+        }
+
         if (r.indexBuffer != lastIndexBuffer)
         {
             lastIndexBuffer = r.indexBuffer;

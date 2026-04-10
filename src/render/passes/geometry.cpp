@@ -1,5 +1,6 @@
 #include "geometry.h"
 
+#include <algorithm>
 #include <chrono>
 #include <unordered_set>
 
@@ -12,48 +13,10 @@
 #include "core/device/resource.h"
 
 #include "vk_mem_alloc.h"
+#include "scene/render_object_culling.h"
 #include "scene/vk_scene.h"
 #include "core/device/swapchain.h"
 #include "render/graph/graph.h"
-
-// Basic conservative frustum test against RenderObject AABB.
-// Clip space uses Vulkan Z0 (0..w). Returns true if any part of the box is inside.
-bool is_visible(const RenderObject &obj, const glm::mat4 &viewproj)
-{
-    const std::array<glm::vec3, 8> corners{
-        glm::vec3{+1, +1, +1}, glm::vec3{+1, +1, -1}, glm::vec3{+1, -1, +1}, glm::vec3{+1, -1, -1},
-        glm::vec3{-1, +1, +1}, glm::vec3{-1, +1, -1}, glm::vec3{-1, -1, +1}, glm::vec3{-1, -1, -1},
-    };
-
-    const glm::vec3 o = obj.bounds.origin;
-    const glm::vec3 e = obj.bounds.extents;
-    const glm::mat4 m = viewproj * obj.transform; // world -> clip
-
-    glm::vec4 clip[8];
-    for (int i = 0; i < 8; ++i)
-    {
-        const glm::vec3 p = o + corners[i] * e;
-        clip[i] = m * glm::vec4(p, 1.f);
-    }
-
-    auto all_out = [&](auto pred) {
-        for (int i = 0; i < 8; ++i)
-        {
-            if (!pred(clip[i])) return false;
-        }
-        return true;
-    };
-
-    // Clip volume in Vulkan (ZO): -w<=x<=w, -w<=y<=w, 0<=z<=w
-    if (all_out([](const glm::vec4 &v) { return v.x < -v.w; })) return false; // left
-    if (all_out([](const glm::vec4 &v) { return v.x >  v.w; })) return false; // right
-    if (all_out([](const glm::vec4 &v) { return v.y < -v.w; })) return false; // bottom
-    if (all_out([](const glm::vec4 &v) { return v.y >  v.w; })) return false; // top
-    if (all_out([](const glm::vec4 &v) { return v.z <  0.0f; })) return false; // near (ZO)
-    if (all_out([](const glm::vec4 &v) { return v.z >  v.w; })) return false; // far
-
-    return true; // intersects or is fully inside
-}
 
 void GeometryPass::init(EngineContext *context)
 {
@@ -173,10 +136,17 @@ void GeometryPass::draw_geometry(VkCommandBuffer cmd,
 
     std::vector<uint32_t> opaque_draws;
     opaque_draws.reserve(mainDrawContext.OpaqueSurfaces.size());
+    const scene::frustum::PlaneSet frustum = scene::frustum::extract_clip_planes(sceneData.viewproj);
+    const glm::vec3 camera_local = ctxLocal->scene
+        ? ctxLocal->scene->get_camera_local_position()
+        : glm::vec3(0.0f);
 
     for (size_t i = 0; i < mainDrawContext.OpaqueSurfaces.size(); ++i)
     {
-        if (is_visible(mainDrawContext.OpaqueSurfaces[i], sceneData.viewproj))
+        const RenderObject &obj = mainDrawContext.OpaqueSurfaces[i];
+        const scene::culling::VisibilityBounds bounds = scene::culling::compute_visibility_bounds(obj);
+        if (scene::culling::intersects_view_frustum(obj, bounds, frustum) &&
+            !scene::culling::is_occluded_by_planet(bounds, camera_local, sceneData))
         {
             opaque_draws.push_back(static_cast<uint32_t>(i));
         }
