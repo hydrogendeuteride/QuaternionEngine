@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(vulkan_engine LANGUAGES C CXX)
 
+option(VULKAN_ENGINE_OUTPUT_TO_SOURCE_ROOT "Place executables and shared libraries under the source tree bin/ and lib/ directories" ON)
+
 if(WIN32)
     if(DEFINED ENV{VULKAN_SDK})
         file(TO_CMAKE_PATH "$ENV{VULKAN_SDK}" _VULKAN_SDK)
@@ -20,9 +22,14 @@ endif()
 
 find_package(Vulkan REQUIRED COMPONENTS glslangValidator)
 
-# Keep build artifacts inside the build directory so multiple build trees
-# (e.g. build/, cmake-build-debug/, etc.) do not clobber each other.
-set(_vulkan_engine_out_root "${PROJECT_BINARY_DIR}")
+# By default, keep runtime artifacts in the legacy source-root bin/ layout.
+# This matches the previous workflow and keeps run paths stable, while still
+# allowing per-build-tree outputs when needed.
+if(VULKAN_ENGINE_OUTPUT_TO_SOURCE_ROOT)
+    set(_vulkan_engine_out_root "${PROJECT_SOURCE_DIR}")
+else()
+    set(_vulkan_engine_out_root "${PROJECT_BINARY_DIR}")
+endif()
 if(CMAKE_CONFIGURATION_TYPES)
     set(_vulkan_engine_cfg_dir "/$<CONFIG>")
 else()
