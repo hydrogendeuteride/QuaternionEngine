@@ -2,13 +2,18 @@
 /build*/
 /assets
 /.idea
+/compile_commands.json
 *.spv
 /bin
+/lib
 /cmake-build-*/
+/__cmake_systeminformation/
 /tmp
 
 # Local AI/tooling files
 /.claude/
+/.clangd
+/.codex
 /AGENTS.md
 /CLAUDE.md
 
@@ -18,6 +23,7 @@
 /imgui.ini
 /vulkan_engine.log
 /nul
+/assets_route.md
 /check_doc_freshness.py
 /workflow.md
 /game_plans.md

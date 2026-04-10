@@ -2,76 +2,45 @@
 
 - Prerequisites
   - Vulkan SDK installed and `VULKAN_SDK` set.
-  - A C++20 compiler and CMake ≥ 3.16.
-  - GPU drivers with Vulkan 1.2+.
-  - KTX software with libktx
-  - Ninja build system on PATH.
+  - CMake installed.
+  - Linux/WSL: `clang`, `clang++`, `make`.
+  - Windows clang-cl: `clang-cl`, `lld-link`, `llvm-rc`, `ninja`.
 
-- Configure & Build (default, system compiler)
+- Quick build
   ```bash
-  cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-  cmake --build build --target vulkan_engine -j 12
+  python3 ./build.py
+  python3 ./build.py debug
+  python3 ./build.py release linux ./out/release
+  py .\build.py debug windows .\cmake-build-debug-win-clangcl
   ```
+  - Format: `build.py [debug|release|reldeb] [linux|windows] [optional_build_dir]`
 
-- Windows clang-cl
-  - Requires LLVM (clang-cl, lld-link, llvm-rc) on PATH.
-  - Configure:
-    ```bash
-    cmake -S . -B build -G Ninja \
-      -DCMAKE_C_COMPILER=clang-cl \
-      -DCMAKE_CXX_COMPILER=clang-cl \
-      -DCMAKE_LINKER=lld-link \
-      -DCMAKE_RC_COMPILER=llvm-rc \
-      -DCMAKE_BUILD_TYPE=Debug
-    ```
-  - Build:
-    ```bash
-    cmake --build build --target vulkan_engine -j 12
-    ```
+- Output
+  - Runtime output defaults to repo-root `bin/`.
+  - Linux/WSL: `./bin/vulkan_engine`
+  - Windows single-config: `bin\vulkan_engine.exe`
+  - Windows multi-config: `bin\Debug\vulkan_engine.exe` or `bin\Release\vulkan_engine.exe`
+  - To keep runtime artifacts inside the build tree instead: `-DVULKAN_ENGINE_OUTPUT_TO_SOURCE_ROOT=OFF`
 
-- Linux clang
-  - Configure:
-    ```bash
-    cmake -S . -B build -G Ninja \
-      -DCMAKE_C_COMPILER=clang \
-      -DCMAKE_CXX_COMPILER=clang++ \
-      -DCMAKE_BUILD_TYPE=Debug
-    ```
-  - Build:
-    ```bash
-    cmake --build build --target vulkan_engine -j 12
-    ```
+- compile_commands.json
+  - If you need it, enable it explicitly in your build dir with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`.
 
-- CLion on Windows (clang-cl)
-  - Settings → Build, Execution, Deployment → CMake → CMake options:
+- Manual CMake
+  - Linux/WSL clang:
+    ```bash
+    cmake -S . -B cmake-build-release-linux-clang -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+    cmake --build cmake-build-release-linux-clang --target vulkan_engine --parallel 16
     ```
-    -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_LINKER=lld-link -DCMAKE_RC_COMPILER=llvm-rc
+  - Windows clang-cl:
+    ```bash
+    cmake -S . -B cmake-build-release-win-clangcl -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_LINKER=lld-link -DCMAKE_RC_COMPILER=llvm-rc
+    cmake --build cmake-build-release-win-clangcl --target vulkan_engine --parallel 16
     ```
-  - Build type is selected separately in the CLion profile.
-
-- Run
-  - Linux/macOS: `./build/bin/vulkan_engine`
-  - Windows: `build\bin\vulkan_engine.exe`
 
 - Shaders
-  - CMake compiles GLSL via `glslangValidator` to SPIR-V targeting Vulkan 1.2:
-    - Files under `shaders/*.vert|*.frag|*.comp` are rebuilt on `cmake --build`.
-  - Helper: `./compile_shaders.py --config Debug|Release` uses `glslc` with `--target-env=vulkan1.3` and supports additional stages (mesh/task/ray tracing).
-    - Windows shim: `./compile_shaders.ps1 -Config Debug|Release` (calls the Python script).
-  - Ensure `glslangValidator`/`glslc` is on `PATH`. See `docs/SHADERS.md`.
-
-- Windows SDK note
-  - `CMakeLists.txt` includes a default SDK path for Windows `1.3.296.0`:
-    - Update the path or set `VULKAN_SDK` accordingly if your version differs.
-
-- Third-party deps
-  - Vendored under `third_party/` and brought in via CMake. Do not edit headers directly; update through targets.
-
-- Optional: MikkTSpace tangents
-  - Enable at configure time: `-DENABLE_MIKKTS=ON` (default ON if found).
-  - Requires `third_party/MikkTSpace/mikktspace.c` and `mikktspace.h` (provided).
-  - Disable to use the built-in Gram-Schmidt generator: `-DENABLE_MIKKTS=OFF`.
+  - CMake compiles `shaders/*.vert|*.frag|*.comp` to `.spv` on build.
+  - Manual helper: `./compile_shaders.py --config Debug|Release`
 
 - Validation Layers
-  - Enabled in Debug (`kUseValidationLayers = true` in `src/core/config.h`).
-  - Disable by building Release or toggling the flag during local experimentation.
+  - Enabled in Debug in `src/core/config.h`.
+  - Use Release to turn them off for normal runtime testing.
