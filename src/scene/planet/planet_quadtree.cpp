@@ -1,5 +1,7 @@
 #include "planet_quadtree.h"
 
+#include "scene/frustum_culling.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -92,43 +94,15 @@ namespace planet
             return cos_theta >= cos_limit;
         }
 
-        bool is_patch_visible_frustum(const glm::vec3 &center_local, float bound_radius_m, const glm::mat4 &viewproj)
+        bool is_patch_visible_frustum(const scene::frustum::PlaneSet &frustum,
+                                      const glm::vec3 &center_local,
+                                      float bound_radius_m)
         {
             if (!(bound_radius_m > 0.0f))
             {
                 bound_radius_m = 1.0f;
             }
-
-            // Conservative AABB-in-clip test for a cube around the patch center.
-            const std::array<glm::vec3, 8> corners{
-                glm::vec3{+1, +1, +1}, glm::vec3{+1, +1, -1}, glm::vec3{+1, -1, +1}, glm::vec3{+1, -1, -1},
-                glm::vec3{-1, +1, +1}, glm::vec3{-1, +1, -1}, glm::vec3{-1, -1, +1}, glm::vec3{-1, -1, -1},
-            };
-
-            glm::vec4 clip[8];
-            for (int i = 0; i < 8; ++i)
-            {
-                const glm::vec3 p = center_local + corners[i] * bound_radius_m;
-                clip[i] = viewproj * glm::vec4(p, 1.0f);
-            }
-
-            auto all_out = [&](auto pred) {
-                for (int i = 0; i < 8; ++i)
-                {
-                    if (!pred(clip[i])) return false;
-                }
-                return true;
-            };
-
-            // Clip volume in Vulkan (ZO): -w<=x<=w, -w<=y<=w, 0<=z<=w
-            if (all_out([](const glm::vec4 &v) { return v.x < -v.w; })) return false; // left
-            if (all_out([](const glm::vec4 &v) { return v.x > v.w; })) return false; // right
-            if (all_out([](const glm::vec4 &v) { return v.y < -v.w; })) return false; // bottom
-            if (all_out([](const glm::vec4 &v) { return v.y > v.w; })) return false; // top
-            if (all_out([](const glm::vec4 &v) { return v.z < 0.0f; })) return false; // near (ZO)
-            if (all_out([](const glm::vec4 &v) { return v.z > v.w; })) return false; // far
-
-            return true;
+            return scene::frustum::intersects_sphere(frustum, center_local, bound_radius_m);
         }
 
         bool find_leaf_containing(const std::unordered_set<PatchKey, PatchKeyHash> &leaf_set,
@@ -332,6 +306,7 @@ namespace planet
         {
             return;
         }
+        const scene::frustum::PlaneSet frustum = scene::frustum::extract_clip_planes(scene_data.viewproj);
 
         std::unordered_map<PatchKey, uint32_t, PatchKeyHash> previous_max_levels;
         previous_max_levels.reserve(previous_visible_leaves.size() * 3u + 16u);
@@ -429,7 +404,7 @@ namespace planet
             {
                 const glm::vec3 patch_center_local = world_to_local(patch_center_world, origin_world);
                 const float bound_r = static_cast<float>(patch_bound_r_m);
-                if (!is_patch_visible_frustum(patch_center_local, bound_r, scene_data.viewproj))
+                if (!is_patch_visible_frustum(frustum, patch_center_local, bound_r))
                 {
                     _stats.nodes_culled++;
                     continue;

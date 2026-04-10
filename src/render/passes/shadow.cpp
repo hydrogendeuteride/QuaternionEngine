@@ -16,6 +16,7 @@
 #include "core/pipeline/manager.h"
 #include "core/assets/manager.h"
 #include "render/pipelines.h"
+#include "scene/render_object_culling.h"
 #include "core/types.h"
 #include "core/config.h"
 
@@ -198,6 +199,8 @@ void ShadowPass::draw_shadow(VkCommandBuffer cmd,
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     const DrawContext &dc = ctxLocal->getMainDrawContext();
+    const scene::frustum::PlaneSet cascade_frustum =
+        scene::frustum::extract_clip_planes(ctxLocal->getSceneData().lightViewProjCascades[cascadeIndex]);
 
     VkBuffer lastIndexBuffer = VK_NULL_HANDLE;
     for (const auto &r : dc.OpaqueSurfaces)
@@ -206,6 +209,13 @@ void ShadowPass::draw_shadow(VkCommandBuffer cmd,
         {
             continue;
         }
+
+        const scene::culling::VisibilityBounds bounds = scene::culling::compute_visibility_bounds(r);
+        if (!scene::culling::intersects_view_frustum(r, bounds, cascade_frustum))
+        {
+            continue;
+        }
+
         if (r.indexBuffer != lastIndexBuffer)
         {
             lastIndexBuffer = r.indexBuffer;
