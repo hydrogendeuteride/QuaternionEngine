@@ -104,7 +104,7 @@ void main()
     vec3 V = normalize(camLocal - inWorldPos);
 
     // Directional sun term (no shadows in forward path)
-    vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);
+    vec3 Lsun = -sceneData.sunlightDirection.xyz;
     float sunVis = 1.0;
     if (sceneData.rtParams.y > 0.0)
     {
