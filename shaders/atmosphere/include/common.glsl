@@ -1,0 +1,6 @@
+#include "atmosphere/include/constants.glsl"
+#include "atmosphere/include/jitter_noise.glsl"
+#include "atmosphere/include/planet_heightmap.glsl"
+#include "atmosphere/include/cloud_density.glsl"
+#include "atmosphere/include/ray_bounds.glsl"
+#include "atmosphere/include/march.glsl"
