@@ -46,7 +46,7 @@ float noise2D(vec2 p)
 float fbm(vec2 p)
 {
     float v = 0.0, a = 0.5;
-    mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
+    const mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
     for (int i = 0; i < 4; ++i)
     {
         v += a * noise2D(p);
@@ -75,13 +75,13 @@ void main()
 
     // ─── View / world direction ──────────────────────────────────────
 
-    vec2 ndc     = inUV * 2.0 - 1.0;
+    vec2 ndc = inUV * 2.0 - 1.0;
     vec3 viewDir = normalize(vec3(ndc.x / sceneData.proj[0][0],
-    ndc.y / sceneData.proj[1][1], -1.0));
+                                  ndc.y / sceneData.proj[1][1], -1.0));
     vec3 worldDir = transpose(mat3(sceneData.view)) * viewDir;
 
-    vec3  sunDir  = normalize(-sceneData.sunlightDirection.xyz);
-    float theta   = max(sceneData.rtParams.w, 0.0);    // angular radius
+    vec3  sunDir  = -sceneData.sunlightDirection.xyz;
+    float theta   = max(sceneData.rtParams.w, 0.0);
 
     float cosTheta = dot(worldDir, sunDir);
     float cosEdge  = cos(theta);
@@ -98,113 +98,130 @@ void main()
     // ─── Disk with quadratic limb-darkening + COLOR SHIFT ────────────
 
     float disk = diskMask;
-    vec3  diskColor = vec3(1.0);   // will tint center-to-edge
+    vec3  diskColor = vec3(1.0);
 
     if (theta > 0.0 && diskMask > 0.0)
     {
         float mu = clamp((cosTheta - cosEdge) / max(1.0 - cosEdge, 1.0e-6), 0.0, 1.0);
 
-        // Standard quadratic limb-darkening
-        float u1 = 0.5;
-        float u2 = 0.1;
-        float limb = 1.0 - u1 * (1.0 - mu) - u2 * (1.0 - mu) * (1.0 - mu);
+        float oneMinusMu = 1.0 - mu;
+        float limb = 1.0 - 0.5 * oneMinusMu - 0.1 * oneMinusMu * oneMinusMu;
         disk *= limb;
 
-        // Color shift: center → white-hot,  edge → warm orange-red
-        vec3 centerCol = vec3(1.0, 1.0, 0.95);          // slightly cool white
-        vec3 edgeCol   = vec3(1.0, 0.45, 0.15);          // deep orange
+        vec3 centerCol = vec3(1.0, 1.0, 0.95);
+        vec3 edgeCol   = vec3(1.0, 0.45, 0.15);
         diskColor = mix(edgeCol, centerCol, mu * mu);
     }
 
-    // ─── Angular distance from sun center ────────────────────────────
+    vec3 sunCol = sceneData.sunlightColor.rgb * sceneData.sunlightColor.a;
+    vec3 result = diskIntensity * disk * diskColor * sunCol;
+    if (haloIntensity <= 0.0 && starIntensity <= 0.0)
+    {
+        outColor = vec4(result, 1.0);
+        return;
+    }
 
-    float theta2    = max(2.0 * (1.0 - cosTheta), 0.0);
-    float thetaDiff = sqrt(theta2);
+    // ─── Angular distance squared (defer sqrt) ──────────────────────
+
+    float theta2 = max(2.0 * (1.0 - cosTheta), 0.0);
 
     // ─── Screen-space sun position (shared by several effects) ───────
 
-    vec3  sunViewDir = mat3(sceneData.view) * sunDir;
-    bool  sunOnScreen = (sunViewDir.z < -1.0e-6);
-    vec2  sunUV  = vec2(0.5);
-    float aspect = sceneData.proj[1][1] / max(sceneData.proj[0][0], 1.0e-6);
+    bool needCorona = (haloIntensity > 0.0 && theta > 0.0);
+    bool needStar = (starIntensity > 0.0 && starRadiusDeg > 0.0);
+    bool needStreak = (anamorphicStreakEnabled && haloIntensity > 0.0);
+    bool needScreenDelta = needCorona || needStar || needStreak;
 
-    if (sunOnScreen)
+    bool sunOnScreen = false;
+    vec2 delta = vec2(0.0);
+    if (needScreenDelta)
     {
-        float invZ = 1.0 / (-sunViewDir.z);
-        vec2 sunNdc = vec2(sunViewDir.x * sceneData.proj[0][0] * invZ,
-        sunViewDir.y * sceneData.proj[1][1] * invZ);
-        sunUV = sunNdc * 0.5 + 0.5;
+        vec3 sunViewDir = mat3(sceneData.view) * sunDir;
+        sunOnScreen = (sunViewDir.z < -1.0e-6);
+
+        vec2 sunUV = vec2(0.5);
+        if (sunOnScreen)
+        {
+            float invZ = 1.0 / (-sunViewDir.z);
+            vec2 sunNdc = vec2(sunViewDir.x * sceneData.proj[0][0] * invZ,
+                               sunViewDir.y * sceneData.proj[1][1] * invZ);
+            sunUV = sunNdc * 0.5 + 0.5;
+        }
+
+        delta = inUV - sunUV;
+        delta.x *= sceneData.proj[1][1] / max(sceneData.proj[0][0], 1.0e-6);
     }
 
-    vec2 delta = inUV - sunUV;
-    delta.x *= aspect;
-    float screenDist = length(delta);
+    // ─── Shared precomputations ──────────────────────────────────────
+    // Hoist values used across multiple effect blocks
 
-    // ─── 1. CHROMATIC HALO ───────────────────────────────────────────
-    //        Three gaussian layers (R, G, B) at slightly different radii
-    //        to produce a subtle rainbow fringe around the sun.
-
-    vec3 halo = vec3(0.0);
-    if (haloIntensity > 0.0 && haloRadiusDeg > 0.0)
+    float s = 0.0;
+    if (haloIntensity > 0.0)
     {
         float haloRadius = radians(haloRadiusDeg);
+        float invHR2 = 1.0 / max(haloRadius * haloRadius, 1.0e-12);
+        s = theta2 * invHR2;
+    }
 
-        // Per-channel radius offsets → chromatic fringe
-        float rR = haloRadius * 1.08;   // red extends further
-        float rG = haloRadius * 1.00;
-        float rB = haloRadius * 0.92;   // blue is tighter
+    bool needPolarFx = needCorona || (needStar && sunOnScreen);
+    float phi = 0.0;
+    float seed = 0.0;
+    float thetaDiff = 0.0;
+    if (needPolarFx)
+    {
+        phi = atan(delta.y, delta.x);
+        seed = fract(sin(dot(sunDir, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+        thetaDiff = sqrt(theta2);
+    }
 
-        float tR = thetaDiff / max(rR, 1.0e-6);
-        float tG = thetaDiff / max(rG, 1.0e-6);
-        float tB = thetaDiff / max(rB, 1.0e-6);
+    // ─── 1. CHROMATIC HALO + MULTI-LAYER BLOOM ──────────────────────
+    //    Merged: both gate on haloIntensity and share radial exp(−s·k).
+    //    Coefficients: k = originalExp / channelScale²
 
-        // Tight core + soft outer bloom
-        halo.r = exp(-tR * tR * 16.0) + exp(-tR * tR * 1.5) * 0.15;
-        halo.g = exp(-tG * tG * 16.0) + exp(-tG * tG * 1.5) * 0.15;
-        halo.b = exp(-tB * tB * 16.0) + exp(-tB * tB * 1.5) * 0.15;
+    vec3 halo  = vec3(0.0);
+    vec3 bloom = vec3(0.0);
 
-        // Extra wide soft glow (warm-tinted)
-        float tWide = thetaDiff / max(haloRadius * 2.5, 1.0e-6);
-        float wideGlow = exp(-tWide * tWide * 4.0) * 0.08;
+    if (haloIntensity > 0.0 && haloRadiusDeg > 0.0)
+    {
+        // Chromatic halo  (R×1.08  G×1.00  B×0.92)
+        //   core 16/scale²          outer 1.5/scale²
+        halo.r = exp(-s * 13.717) + exp(-s * 1.286) * 0.15;   // 1.08² = 1.1664
+        halo.g = exp(-s * 16.0)   + exp(-s * 1.5)   * 0.15;
+        halo.b = exp(-s * 18.898) + exp(-s * 1.773)  * 0.15;  // 0.92² = 0.8464
+
+        // Wide warm glow  (scale 2.5 → 4/6.25 = 0.64)
+        float wideGlow = exp(-s * 0.64) * 0.08;
         halo += vec3(wideGlow * 1.2, wideGlow * 0.9, wideGlow * 0.5);
+
+        // Multi-layer bloom rings (scale² denominators pre-folded)
+        bloom  = exp(-s * 222.222) * vec3(0.15, 0.1425, 0.1275);   // ×0.3 → 20/0.09
+        bloom += exp(-s * 2.667)   * vec3(0.06, 0.042, 0.018);     // ×1.5 → 6/2.25
+        bloom += exp(-s * 0.125)   * vec3(0.02, 0.006, 0.002);     // ×4.0 → 2/16
     }
 
     // ─── 2. CORONA TENDRILS ──────────────────────────────────────────
-    //        Procedural wisps radiating outward from the limb, using FBM
-    //        so each direction has unique length & brightness.
 
     float corona = 0.0;
-    if (haloIntensity > 0.0 && theta > 0.0)
+    if (needCorona)
     {
-        float phi = atan(delta.y, delta.x);
-
-        // Seed from sun direction so pattern changes with sun position
-        float seed = fract(sin(dot(sunDir, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
-
-        // FBM-based radial noise for organic tendrils
         float n  = fbm(vec2(phi * 3.0 + seed * 100.0, thetaDiff * 60.0));
         float n2 = fbm(vec2(phi * 7.0 - seed * 47.0,  thetaDiff * 30.0 + 5.0));
 
         float tendril = mix(n, n2, 0.4);
         tendril = pow(max(tendril, 0.0), 1.5);
 
-        // Radial envelope: strongest near limb, fades outward
-        float coronaRadius = radians(haloRadiusDeg) * 0.8;
-        float rNorm = thetaDiff / max(coronaRadius, 1.0e-6);
-        float env = exp(-rNorm * rNorm * 3.0) * smoothstep(0.0, theta * 1.2, thetaDiff);
+        // Envelope: coronaRadius = haloRadius×0.8 → 3/0.64 = 4.6875
+        float env = exp(-s * 4.6875) * smoothstep(0.0, theta * 1.2, thetaDiff);
 
         corona = tendril * env * 0.6;
     }
 
-    // ─── 3. STARBURST (original + enhanced) ──────────────────────────
+    // ─── 3. STARBURST ────────────────────────────────────────────────
 
     float star = 0.0;
-    if (starIntensity > 0.0 && starRadiusDeg > 0.0 && sunOnScreen)
+    if (needStar && sunOnScreen)
     {
-        float phi = atan(delta.y, delta.x);
-        float k   = starSpikes * 0.5;
-
-        float seed = fract(sin(dot(sunDir, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+        float k = starSpikes * 0.5;
 
         float u = (phi + PI) / TAU * starSpikes;
 
@@ -218,7 +235,6 @@ void main()
 
         float spikes = amp * pow(abs(cos((phi + phaseJit) * k)), sharp);
 
-        // Secondary fine spikes layer (twice the frequency, thinner)
         float fineSpikes = 0.3 * pow(abs(cos((phi - phaseJit * 0.5) * k * 2.0)), sharp * 1.8);
         spikes = max(spikes, fineSpikes);
 
@@ -229,71 +245,32 @@ void main()
         float lenJit     = mix(0.75, 1.35, rA);
         float t = clamp(thetaDiff / max(starRadius * lenJit, 1.0e-6), 0.0, 1.0);
 
-        float envelope = (1.0 - t);
-        envelope = envelope * envelope;
+        float envelope = 1.0 - t;
+        envelope *= envelope;
 
         star = envelope * spikes;
     }
 
     // ─── 4. ANAMORPHIC STREAK ────────────────────────────────────────
-    //        Horizontal light streak (simulates anamorphic lens flare).
+    //    exp(a)·exp(b) → exp(a+b);  abs() unnecessary before squaring.
 
     float streak = 0.0;
-    if (anamorphicStreakEnabled && haloIntensity > 0.0 && sunOnScreen)
+    if (needStreak && sunOnScreen)
     {
-        // Tight vertical falloff with broad horizontal reach.
-        float dy = abs(delta.y);
-        float dx = abs(delta.x);
-
-        float hStreak = exp(-dy * dy * 24000.0)
-            * exp(-dx * dx * 32.0);
-
-        streak = hStreak * 0.35;
-    }
-
-    // ─── 5. MULTI-LAYER BLOOM ────────────────────────────────────────
-    //        Several concentric soft rings at different scales for richness.
-
-    vec3 bloom = vec3(0.0);
-    if (haloIntensity > 0.0)
-    {
-        float haloRadius = radians(haloRadiusDeg);
-
-        // Ring 1: tight, bright
-        float r1 = thetaDiff / max(haloRadius * 0.3, 1.0e-6);
-        bloom += exp(-r1 * r1 * 20.0) * vec3(1.0, 0.95, 0.85) * 0.15;
-
-        // Ring 2: medium, warm
-        float r2 = thetaDiff / max(haloRadius * 1.5, 1.0e-6);
-        bloom += exp(-r2 * r2 * 6.0) * vec3(1.0, 0.7, 0.3) * 0.06;
-
-        // Ring 3: very wide, subtle crimson
-        float r3 = thetaDiff / max(haloRadius * 4.0, 1.0e-6);
-        bloom += exp(-r3 * r3 * 2.0) * vec3(1.0, 0.3, 0.1) * 0.02;
+        streak = exp(-delta.y * delta.y * 24000.0
+                     - delta.x * delta.x * 32.0) * 0.35;
     }
 
     // ─── Composite ───────────────────────────────────────────────────
 
-    vec3 sunCol = sceneData.sunlightColor.rgb * sceneData.sunlightColor.a;
-
-    // Disk: tinted by limb color shift
-    vec3 result = diskIntensity * disk * diskColor * sunCol;
-
-    // Chromatic halo (per-channel)
     result += haloIntensity * halo * sunCol;
 
-    // Corona tendrils (warm-tinted)
-    vec3 coronaColor = sunCol * vec3(1.0, 0.8, 0.5);
-    result += haloIntensity * corona * coronaColor;
+    result += haloIntensity * corona * (sunCol * vec3(1.0, 0.8, 0.5));
 
-    // Starburst
     result += starIntensity * star * sunCol;
 
-    // Anamorphic streak (slightly desaturated / warm)
-    vec3 streakColor = sunCol * vec3(1.0, 0.9, 0.7);
-    result += haloIntensity * streak * streakColor;
+    result += haloIntensity * streak * (sunCol * vec3(1.0, 0.9, 0.7));
 
-    // Multi-layer bloom
     result += haloIntensity * bloom * sunCol;
 
     outColor = vec4(result, 1.0);

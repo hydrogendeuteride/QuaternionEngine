@@ -18,6 +18,12 @@ float sample_jitter_noise_screen()
 
 float resolve_jitter_sample(vec2 screenUv)
 {
+    float jitterStrength = clamp(pc.jitter_params.x, 0.0, 1.0);
+    if (jitterStrength <= 0.0)
+    {
+        return 0.5;
+    }
+
     uint miscPacked = uint(pc.misc.w);
     int flags = int(miscPacked & MISC_FLAGS_MASK);
     float jitterSample = hash12(screenUv * 1024.0);
@@ -25,5 +31,5 @@ float resolve_jitter_sample(vec2 screenUv)
     {
         jitterSample = sample_jitter_noise_screen();
     }
-    return mix(0.5, jitterSample, clamp(pc.jitter_params.x, 0.0, 1.0));
+    return mix(0.5, jitterSample, jitterStrength);
 }

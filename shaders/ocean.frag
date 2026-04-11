@@ -224,7 +224,7 @@ void main()
     vec3 N = compute_wave_normal(baseNormal, inSeaRadius, sceneData.timeParams.x, coverage);
     vec3 cameraLocal = getCameraLocalPosition();
     vec3 V = normalize(cameraLocal - inWorldPos);
-    vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);
+    vec3 Lsun = -sceneData.sunlightDirection.xyz;
 
     float sunVis = 1.0;
     if (sceneData.rtParams.y > 0.0)

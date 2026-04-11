@@ -2,6 +2,50 @@
 
 using namespace atmosphere::detail;
 
+void AtmospherePass::release_transmittance_lut_image()
+{
+    if (!_context || !_context->getResources())
+    {
+        return;
+    }
+
+    if (_transmittanceLut.image != VK_NULL_HANDLE)
+    {
+        _context->getResources()->destroy_image(_transmittanceLut);
+        _transmittanceLut = {};
+    }
+
+    _transmittanceLutState = {};
+    _transmittanceLutParams = {};
+    _transmittanceLutValid = false;
+}
+
+void AtmospherePass::ensure_transmittance_lut_image()
+{
+    if (!_context || !_context->getResources())
+    {
+        return;
+    }
+
+    const bool needs_recreate =
+        _transmittanceLut.image == VK_NULL_HANDLE ||
+        _transmittanceLut.imageView == VK_NULL_HANDLE ||
+        _transmittanceLut.imageFormat != VK_FORMAT_R16G16B16A16_SFLOAT ||
+        _transmittanceLut.imageExtent.width != k_transmittance_lut_width ||
+        _transmittanceLut.imageExtent.height != k_transmittance_lut_height;
+
+    if (!needs_recreate)
+    {
+        return;
+    }
+
+    release_transmittance_lut_image();
+
+    const VkExtent3D extent{k_transmittance_lut_width, k_transmittance_lut_height, 1u};
+    const VkImageUsageFlags usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    _transmittanceLut = _context->getResources()->create_image(extent, VK_FORMAT_R16G16B16A16_SFLOAT, usage);
+}
+
 void AtmospherePass::release_history_images()
 {
     if (!_context || !_context->getResources())
@@ -80,4 +124,3 @@ void AtmospherePass::ensure_history_images(VkExtent2D extent)
         _cloudSegmentHistory[i] = resources->create_image(image_extent, VK_FORMAT_R32G32B32A32_SFLOAT, usage);
     }
 }
-

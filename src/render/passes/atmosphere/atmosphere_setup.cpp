@@ -203,6 +203,7 @@ void AtmospherePass::cleanup()
 {
     release_history_images();
     release_planet_height_textures();
+    release_transmittance_lut_image();
 
     if (_context && _context->getResources())
     {

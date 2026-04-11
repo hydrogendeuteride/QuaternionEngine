@@ -163,7 +163,7 @@ void main()
     vec3 rdDy = dFdy(rd);
     float jitter = resolve_jitter_sample(inUV);
 
-    vec3 sunDir = normalize(-sceneData.sunlightDirection.xyz);
+    vec3 sunDir = -sceneData.sunlightDirection.xyz;
     vec3 sunCol = sceneData.sunlightColor.rgb * sceneData.sunlightColor.a;
     vec3 ambCol = sceneData.ambientColor.rgb;
     vec3 cloudTint = max(pc.cloud_color.rgb, vec3(0.0));

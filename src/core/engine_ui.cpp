@@ -2311,7 +2311,7 @@ namespace
         // Sunlight editor (Directional light)
         ImGui::TextUnformatted("Sunlight (directional)");
         {
-            // Shaders use Lsun = normalize(-sceneData.sunlightDirection.xyz).
+            // Shaders consume a normalized -sceneData.sunlightDirection.xyz.
             // Expose Lsun directly in the UI (direction *towards* the sun).
             glm::vec3 Lsun = -sceneMgr->getSunlightDirection();
             const float len2 = glm::length2(Lsun);
