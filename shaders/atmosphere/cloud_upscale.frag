@@ -8,7 +8,7 @@ layout(location = 1) in vec3 inWorldRay;
 layout(location = 2) flat in vec3 inCamLocal;
 
 layout(location = 0) out vec4 outCloudLighting;
-layout(location = 1) out vec2 outCloudSegment;
+layout(location = 1) out vec4 outCloudSegment;
 
 layout(set = 1, binding = 0) uniform sampler2D posTex;
 layout(set = 1, binding = 1) uniform sampler2D cloudLightingLowResTex;
@@ -33,6 +33,10 @@ layout(push_constant) uniform AtmospherePush
     vec4 cloud_color;
     ivec4 misc;
 } pc;
+
+const float CLOUD_TERRAIN_FAST_TOLERANCE_FRAC = 0.02;
+const float CLOUD_TERRAIN_FAST_TOLERANCE_MIN_M = 25.0;
+const float CLOUD_TERRAIN_FAST_GRAZE_MIN_COS = 0.20;
 
 bool ray_sphere_intersect(vec3 ro, vec3 rd, vec3 center, float radius, out float t0, out float t1)
 {
@@ -348,12 +352,54 @@ bool compute_ray_bounds(vec3 camLocal,
             bool isPlanet = (posSample.w > 1.5);
             if (isPlanet)
             {
-                float terrainTSurf = tSurf;
-                if (solve_planet_heightmap_surface_depth(camLocal, rd, center, planetRadius, terrainTSurf))
+                bool resolvedApprox = false;
+                bool requireExact = terrain_height_enabled();
+
+                if (terrain_height_enabled())
                 {
-                    tSurf = terrainTSurf;
+                    vec3 surfaceRadial = posSample.xyz - center;
+                    float surfaceRadialLen = length(surfaceRadial);
+                    if (surfaceRadialLen > 1e-5)
+                    {
+                        float approxRadius = sample_planet_surface_radius(posSample.xyz, center, planetRadius);
+                        float tP0;
+                        float tP1;
+                        if (ray_sphere_intersect(camLocal, rd, center, approxRadius, tP0, tP1))
+                        {
+                            float tApprox = (tP0 > 0.0) ? tP0 : tP1;
+                            if (tApprox > 0.0)
+                            {
+                                float terrainScale = max(pc.terrain_params.x, 0.0);
+                                float tolerance = max(max(pc.jitter_params.y,
+                                                          terrainScale * CLOUD_TERRAIN_FAST_TOLERANCE_FRAC),
+                                                      CLOUD_TERRAIN_FAST_TOLERANCE_MIN_M);
+                                float radialMismatch = abs(surfaceRadialLen - approxRadius);
+                                float depthMismatch = abs(tApprox - tSurf);
+                                float viewCos = abs(dot(surfaceRadial / surfaceRadialLen, rd));
+                                if (radialMismatch <= tolerance &&
+                                    depthMismatch <= tolerance &&
+                                    viewCos >= CLOUD_TERRAIN_FAST_GRAZE_MIN_COS)
+                                {
+                                    tSurf = tApprox;
+                                    resolvedApprox = true;
+                                    requireExact = false;
+                                }
+                            }
+                        }
+                    }
                 }
-                else
+
+                if (requireExact)
+                {
+                    float terrainTSurf = tSurf;
+                    if (solve_planet_heightmap_surface_depth(camLocal, rd, center, planetRadius, terrainTSurf))
+                    {
+                        tSurf = terrainTSurf;
+                        resolvedApprox = true;
+                    }
+                }
+
+                if (!resolvedApprox)
                 {
                     float snapM = max(pc.jitter_params.y, 0.0);
                     if (snapM > 0.0)
@@ -386,15 +432,44 @@ bool segment_valid(vec2 seg)
     return seg.x < seg.y;
 }
 
-float segment_error(vec2 lhs, vec2 rhs)
+int segment_count(vec4 segments)
 {
-    return abs(lhs.x - rhs.x) + abs(lhs.y - rhs.y);
+    int count = 0;
+    if (segment_valid(segments.xy)) count++;
+    if (segment_valid(segments.zw)) count++;
+    return count;
+}
+
+float segment_total_length(vec4 segments)
+{
+    float total = 0.0;
+    if (segment_valid(segments.xy)) total += max(segments.y - segments.x, 0.0);
+    if (segment_valid(segments.zw)) total += max(segments.w - segments.z, 0.0);
+    return total;
+}
+
+float segment_error(vec4 lhs, vec4 rhs)
+{
+    int lhsCount = segment_count(lhs);
+    int rhsCount = segment_count(rhs);
+    if (lhsCount != rhsCount) return 1e20;
+
+    float error = 0.0;
+    if (lhsCount >= 1)
+    {
+        error += abs(lhs.x - rhs.x) + abs(lhs.y - rhs.y);
+    }
+    if (lhsCount == 2)
+    {
+        error += abs(lhs.z - rhs.z) + abs(lhs.w - rhs.w);
+    }
+    return error;
 }
 
 void main()
 {
     outCloudLighting = vec4(0.0, 0.0, 0.0, 1.0);
-    outCloudSegment = vec2(0.0);
+    outCloudSegment = vec4(0.0);
 
     float planetRadius = pc.planet_center_radius.w;
     if (planetRadius <= 0.0) return;
@@ -429,7 +504,8 @@ void main()
     vec2 analyticSeg0;
     vec2 analyticSeg1;
     int analyticCount = compute_cloud_segments(camLocal, rd, center, rBase, rTop, tStart, tEnd, analyticSeg0, analyticSeg1);
-    if (analyticCount != 1 || !segment_valid(analyticSeg0))
+    vec4 analyticSegments = vec4(analyticSeg0, (analyticCount == 2 && segment_valid(analyticSeg1)) ? analyticSeg1 : vec2(0.0));
+    if (segment_count(analyticSegments) == 0)
     {
         return;
     }
@@ -437,25 +513,41 @@ void main()
     ivec2 lowSize = textureSize(cloudSegmentLowResTex, 0);
     ivec2 baseCoord = clamp(ivec2(gl_FragCoord.xy) / 2, ivec2(0), lowSize - ivec2(1));
 
-    float analyticLen = max(analyticSeg0.y - analyticSeg0.x, 1e-3);
-    float rejectThreshold = max(2500.0, analyticLen * 0.45);
-    float blendThreshold = max(900.0, analyticLen * 0.14);
+    float analyticLen = max(segment_total_length(analyticSegments), 1e-3);
+    float countScale = float(max(analyticCount, 1));
+    float rejectThreshold = max(3200.0, analyticLen * 0.60 * countScale);
+    float blendThreshold = max(1200.0, analyticLen * 0.20 * countScale);
     vec4 accumulatedLighting = vec4(0.0);
     float accumulatedWeight = 0.0;
     bool found = false;
+    vec4 fallbackLighting = vec4(0.0);
+    float fallbackScore = 1e20;
+    float fallbackDistance2 = 1e20;
+    bool haveFallback = false;
 
     for (int y = -1; y <= 1; ++y)
     {
         for (int x = -1; x <= 1; ++x)
         {
             ivec2 coord = clamp(baseCoord + ivec2(x, y), ivec2(0), lowSize - ivec2(1));
-            vec2 candidateSeg = texelFetch(cloudSegmentLowResTex, coord, 0).rg;
-            if (!segment_valid(candidateSeg))
+            vec4 candidateSeg = texelFetch(cloudSegmentLowResTex, coord, 0);
+            if (segment_count(candidateSeg) == 0)
             {
                 continue;
             }
 
-            float score = segment_error(candidateSeg, analyticSeg0);
+            float score = segment_error(candidateSeg, analyticSegments);
+            float distance2 = float(x * x + y * y);
+            if (!haveFallback ||
+                score < fallbackScore ||
+                (score == fallbackScore && distance2 < fallbackDistance2))
+            {
+                fallbackLighting = texelFetch(cloudLightingLowResTex, coord, 0);
+                fallbackScore = score;
+                fallbackDistance2 = distance2;
+                haveFallback = true;
+            }
+
             if (score > rejectThreshold)
             {
                 continue;
@@ -463,7 +555,7 @@ void main()
 
             float scoreNorm = score / max(blendThreshold, 1e-3);
             float segmentWeight = exp(-scoreNorm * scoreNorm);
-            float spatialWeight = 1.0 / (1.0 + float(x * x + y * y));
+            float spatialWeight = 1.0 / (1.0 + distance2);
             float weight = segmentWeight * spatialWeight;
             if (weight <= 1e-4)
             {
@@ -476,11 +568,18 @@ void main()
         }
     }
 
-    if (!found || accumulatedWeight <= 1e-4)
+    if (found && accumulatedWeight > 1e-4)
+    {
+        outCloudLighting = accumulatedLighting / accumulatedWeight;
+        outCloudSegment = analyticSegments;
+        return;
+    }
+
+    if (!haveFallback)
     {
         return;
     }
 
-    outCloudLighting = accumulatedLighting / accumulatedWeight;
-    outCloudSegment = analyticSeg0;
+    outCloudLighting = fallbackLighting;
+    outCloudSegment = analyticSegments;
 }

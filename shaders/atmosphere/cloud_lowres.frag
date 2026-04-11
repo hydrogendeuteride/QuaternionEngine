@@ -8,7 +8,7 @@ layout(location = 1) in vec3 inWorldRay;
 layout(location = 2) flat in vec3 inCamLocal;
 
 layout(location = 0) out vec4 outCloudLighting;
-layout(location = 1) out vec2 outCloudSegment;
+layout(location = 1) out vec4 outCloudSegment;
 
 layout(set = 1, binding = 0) uniform sampler2D posTex;
 layout(set = 1, binding = 1) uniform sampler2D transmittanceLut;
@@ -37,12 +37,72 @@ layout(push_constant) uniform AtmospherePush
     ivec4 misc;
 } pc;
 
-#include "atmosphere_common.glsl"
+#include "atmosphere/include/common.glsl"
+
+const float CLOUD_LOWRES_PREGAP_STEP_SCALE = 0.35;
+const int CLOUD_LOWRES_PREGAP_MAX_STEPS = 8;
+const float CLOUD_LOWRES_CLOUD_STEP_SCALE = 0.50;
+const int CLOUD_LOWRES_CLOUD_STEP_MAX = 16;
+const int CLOUD_LOWRES_CLOUD_STEP_MIN = 3;
+
+bool segment_valid(vec2 seg)
+{
+    return seg.x < seg.y;
+}
+
+void distribute_steps_scalar_2(float len0,
+                               float len1,
+                               int count,
+                               int totalSteps,
+                               out int steps0,
+                               out int steps1)
+{
+    steps0 = 0;
+    steps1 = 0;
+
+    float totalLen = 0.0;
+    int activeCount = 0;
+    if (count >= 1 && len0 > 0.0)
+    {
+        totalLen += len0;
+        activeCount++;
+    }
+    if (count >= 2 && len1 > 0.0)
+    {
+        totalLen += len1;
+        activeCount++;
+    }
+
+    if (totalSteps <= 0 || activeCount == 0)
+    {
+        return;
+    }
+
+    totalSteps = max(totalSteps, activeCount);
+    if (count >= 1 && len0 > 0.0)
+    {
+        if (activeCount == 1)
+        {
+            steps0 = max(1, totalSteps);
+            return;
+        }
+
+        steps0 = int(round(float(totalSteps) * (len0 / totalLen)));
+        steps0 = clamp(steps0, 1, totalSteps - (activeCount - 1));
+        totalSteps -= steps0;
+        activeCount--;
+    }
+
+    if (count >= 2 && len1 > 0.0)
+    {
+        steps1 = max(1, totalSteps);
+    }
+}
 
 void main()
 {
     outCloudLighting = vec4(0.0, 0.0, 0.0, 1.0);
-    outCloudSegment = vec2(0.0);
+    outCloudSegment = vec4(0.0);
 
     float planetRadius = pc.planet_center_radius.w;
     if (planetRadius <= 0.0) return;
@@ -86,7 +146,7 @@ void main()
 
     float tStart;
     float tEnd;
-    if (!compute_primary_ray_bounds(camLocal, rd, center, planetRadius, boundRadius, tStart, tEnd))
+    if (!compute_primary_ray_bounds_cloud_hybrid(camLocal, rd, center, planetRadius, boundRadius, tStart, tEnd))
     {
         return;
     }
@@ -94,7 +154,7 @@ void main()
     vec2 cloudSeg0;
     vec2 cloudSeg1;
     int cloudSegCount = compute_cloud_segments(camLocal, rd, center, rBase, rTop, tStart, tEnd, cloudSeg0, cloudSeg1);
-    if (cloudSegCount != 1 || cloudSeg0.y <= cloudSeg0.x)
+    if (cloudSegCount == 0 || !segment_valid(cloudSeg0))
     {
         return;
     }
@@ -150,27 +210,77 @@ void main()
     mp.cloudWindSC = vec2(sin(arc), cos(arc));
 
     MarchState state = march_state_init();
+    bool hasSecondCloud = (cloudSegCount == 2 && segment_valid(cloudSeg1));
 
-    float preLen = max(cloudSeg0.x - tStart, 0.0);
-    float cloudLen = max(cloudSeg0.y - cloudSeg0.x, 0.0);
-    float totalLen = max(preLen + cloudLen, 1e-3);
-    int preSteps = atmActive ? clamp(int(round(float(pc.misc.x) * (preLen / totalLen))), 0, pc.misc.x) : 0;
-    int cloudSteps = clamp(pc.misc.z, 4, 128);
+    float cloud0Len = max(cloudSeg0.y - cloudSeg0.x, 0.0);
+    float cloud1Len = hasSecondCloud ? max(cloudSeg1.y - cloudSeg1.x, 0.0) : 0.0;
 
-    if (preSteps > 0 && preLen > 0.0)
+    float preGap0Start = tStart;
+    float preGap0End = cloudSeg0.x;
+    float preGap0Len = max(preGap0End - preGap0Start, 0.0);
+
+    float preGap1Start = cloudSeg0.y;
+    float preGap1End = hasSecondCloud ? cloudSeg1.x : cloudSeg0.y;
+    float preGap1Len = hasSecondCloud ? max(preGap1End - preGap1Start, 0.0) : 0.0;
+
+    int preGapCount = hasSecondCloud ? 2 : 1;
+    float cloudLenTotal = cloud0Len + cloud1Len;
+    float preGapLenTotal = preGap0Len + preGap1Len;
+    float consideredLen = max(cloudLenTotal + preGapLenTotal, 1e-3);
+    int preGapStepsTotal = 0;
+    if (atmActive && preGapLenTotal > 0.0)
     {
-        integrate_segment(tStart, cloudSeg0.x, preSteps, false, mp, state);
+        int preGapBudget = clamp(int(round(float(pc.misc.x) * (preGapLenTotal / consideredLen))), 0, pc.misc.x);
+        preGapStepsTotal = clamp(int(round(float(preGapBudget) * CLOUD_LOWRES_PREGAP_STEP_SCALE)),
+                                 1,
+                                 min(pc.misc.x, CLOUD_LOWRES_PREGAP_MAX_STEPS));
+    }
+    int cloudStepBudget = compute_adaptive_cloud_steps(cloudLenTotal, cloudThicknessM, clamp(pc.misc.z, 4, 128));
+    int cloudStepsTotal = 0;
+    if (cloudStepBudget > 0)
+    {
+        cloudStepsTotal = clamp(int(round(float(cloudStepBudget) * CLOUD_LOWRES_CLOUD_STEP_SCALE)),
+                                min(CLOUD_LOWRES_CLOUD_STEP_MIN, cloudStepBudget),
+                                min(clamp(pc.misc.z, 4, 128), CLOUD_LOWRES_CLOUD_STEP_MAX));
     }
 
-    vec3 preCloudScatterAtm = state.scatterAtm;
-    integrate_segment(cloudSeg0.x, cloudSeg0.y, cloudSteps, true, mp, state);
+    int preGap0Steps;
+    int preGap1Steps;
+    distribute_steps_scalar_2(preGap0Len, preGap1Len, preGapCount, preGapStepsTotal, preGap0Steps, preGap1Steps);
+
+    int cloud0Steps;
+    int cloud1Steps;
+    distribute_steps_scalar_2(cloud0Len, cloud1Len, cloudSegCount, cloudStepsTotal, cloud0Steps, cloud1Steps);
+
+    if (preGap0Len > 0.0 && preGap0Steps > 0)
+    {
+        integrate_optical_depth_segment(preGap0Start, preGap0End, preGap0Steps, mp, state);
+    }
+
+    if (cloud0Len > 0.0 && cloud0Steps > 0)
+    {
+        integrate_segment(cloudSeg0.x, cloudSeg0.y, cloud0Steps, true, mp, state);
+    }
+
+    if (hasSecondCloud)
+    {
+        if (preGap1Len > 0.0 && preGap1Steps > 0)
+        {
+            integrate_optical_depth_segment(preGap1Start, preGap1End, preGap1Steps, mp, state);
+        }
+
+        if (cloud1Len > 0.0 && cloud1Steps > 0)
+        {
+            integrate_segment(cloudSeg1.x, cloudSeg1.y, cloud1Steps, true, mp, state);
+        }
+    }
 
     float cloudTransmittance = exp(-CLOUD_BETA * state.odC);
-    vec3 cloudIntervalAtmRadiance = (state.scatterAtm - preCloudScatterAtm) * (sunCol * atmIntensity);
+    vec3 cloudIntervalAtmRadiance = state.scatterAtm * (sunCol * atmIntensity);
     vec3 cloudRadiance = state.scatterCloudSun * cloudSunCol +
                          state.scatterCloudAmb * (cloudAmbCol * CLOUD_AMBIENT_SCALE) +
                          cloudIntervalAtmRadiance;
 
     outCloudLighting = vec4(cloudRadiance, cloudTransmittance);
-    outCloudSegment = cloudSeg0;
+    outCloudSegment = vec4(cloudSeg0, (cloudSegCount == 2 && segment_valid(cloudSeg1)) ? cloudSeg1 : vec2(0.0));
 }

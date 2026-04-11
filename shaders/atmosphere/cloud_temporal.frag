@@ -8,7 +8,7 @@ layout(location = 1) in vec3 inWorldRay;
 layout(location = 2) flat in vec3 inCamLocal;
 
 layout(location = 0) out vec4 outCloudLighting;
-layout(location = 1) out vec2 outCloudSegment;
+layout(location = 1) out vec4 outCloudSegment;
 
 layout(set = 1, binding = 0) uniform sampler2D cloudLightingCurrentTex;
 layout(set = 1, binding = 1) uniform sampler2D cloudSegmentCurrentTex;
@@ -28,21 +28,68 @@ bool segment_valid(vec2 segment)
     return segment.x < segment.y;
 }
 
+int segment_count(vec4 segments)
+{
+    int count = 0;
+    if (segment_valid(segments.xy)) count++;
+    if (segment_valid(segments.zw)) count++;
+    return count;
+}
+
+float segment_total_length(vec4 segments)
+{
+    float total = 0.0;
+    if (segment_valid(segments.xy)) total += max(segments.y - segments.x, 0.0);
+    if (segment_valid(segments.zw)) total += max(segments.w - segments.z, 0.0);
+    return total;
+}
+
+float segment_error(vec4 lhs, vec4 rhs)
+{
+    int lhsCount = segment_count(lhs);
+    int rhsCount = segment_count(rhs);
+    if (lhsCount != rhsCount) return 1e20;
+
+    float error = 0.0;
+    if (lhsCount >= 1)
+    {
+        error += abs(lhs.x - rhs.x) + abs(lhs.y - rhs.y);
+    }
+    if (lhsCount == 2)
+    {
+        error += abs(lhs.z - rhs.z) + abs(lhs.w - rhs.w);
+    }
+    return error;
+}
+
+float segment_weighted_midpoint(vec4 segments)
+{
+    float len0 = segment_valid(segments.xy) ? max(segments.y - segments.x, 0.0) : 0.0;
+    float len1 = segment_valid(segments.zw) ? max(segments.w - segments.z, 0.0) : 0.0;
+    float totalLen = max(len0 + len1, 1e-3);
+
+    float weightedMid = 0.0;
+    if (len0 > 0.0) weightedMid += (0.5 * (segments.x + segments.y)) * len0;
+    if (len1 > 0.0) weightedMid += (0.5 * (segments.z + segments.w)) * len1;
+    return weightedMid / totalLen;
+}
+
 void main()
 {
     vec4 currentLighting = texture(cloudLightingCurrentTex, inUV);
-    vec2 currentSegment = texture(cloudSegmentCurrentTex, inUV).rg;
+    vec4 currentSegment = texture(cloudSegmentCurrentTex, inUV);
 
     outCloudLighting = currentLighting;
     outCloudSegment = currentSegment;
 
-    if (pc.misc.x == 0 || !segment_valid(currentSegment))
+    int currentCount = segment_count(currentSegment);
+    if (pc.misc.x == 0 || currentCount == 0)
     {
         return;
     }
 
     vec3 rd = normalize(inWorldRay);
-    float midT = 0.5 * (currentSegment.x + currentSegment.y);
+    float midT = segment_weighted_midpoint(currentSegment);
     vec3 currentMidpoint = inCamLocal + rd * midT;
     vec3 previousMidpoint = currentMidpoint + pc.origin_delta_blend.xyz;
 
@@ -59,15 +106,15 @@ void main()
     }
 
     vec4 historyLighting = texture(cloudLightingHistoryTex, prevUV);
-    vec2 historySegment = texture(cloudSegmentHistoryTex, prevUV).rg;
-    if (!segment_valid(historySegment))
+    vec4 historySegment = texture(cloudSegmentHistoryTex, prevUV);
+    if (segment_count(historySegment) == 0)
     {
         return;
     }
 
-    float currentLen = max(currentSegment.y - currentSegment.x, 1e-3);
-    float segmentError = abs(historySegment.x - currentSegment.x) + abs(historySegment.y - currentSegment.y);
-    if (segmentError > max(2500.0, currentLen * 0.35))
+    float currentLen = max(segment_total_length(currentSegment), 1e-3);
+    float segmentMismatch = segment_error(historySegment, currentSegment);
+    if (segmentMismatch > max(2500.0, currentLen * 0.35 * float(currentCount)))
     {
         return;
     }

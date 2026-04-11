@@ -38,11 +38,39 @@ layout(push_constant) uniform AtmospherePush
     ivec4 misc;
 } pc;
 
-#include "atmosphere_common.glsl"
+#include "atmosphere/include/common.glsl"
 
 bool segment_valid(vec2 seg)
 {
     return seg.x < seg.y;
+}
+
+int normalize_resolved_segments(vec4 resolvedSegments,
+                                float tStart,
+                                float tEnd,
+                                out vec2 seg0,
+                                out vec2 seg1)
+{
+    seg0 = vec2(clamp(resolvedSegments.x, tStart, tEnd), clamp(resolvedSegments.y, tStart, tEnd));
+    seg1 = vec2(clamp(resolvedSegments.z, tStart, tEnd), clamp(resolvedSegments.w, tStart, tEnd));
+
+    bool valid0 = segment_valid(seg0);
+    bool valid1 = segment_valid(seg1);
+    if (valid0 && valid1 && seg1.x < seg0.x)
+    {
+        vec2 tmp = seg0;
+        seg0 = seg1;
+        seg1 = tmp;
+    }
+    else if (!valid0 && valid1)
+    {
+        seg0 = seg1;
+        seg1 = vec2(0.0);
+        valid0 = true;
+        valid1 = false;
+    }
+
+    return (valid0 ? 1 : 0) + (valid1 ? 1 : 0);
 }
 
 void main()
@@ -97,9 +125,9 @@ void main()
     }
 
     vec4 resolvedLighting = texture(cloudLightingResolvedTex, inUV);
-    vec2 resolvedSegment = texture(cloudSegmentResolvedTex, inUV).rg;
+    vec4 resolvedSegment = texture(cloudSegmentResolvedTex, inUV);
 
-    if (!cloudsActive || !segment_valid(resolvedSegment))
+    if (!cloudsActive)
     {
         outColor = vec4(render_atmosphere_monolithic(baseColor), 1.0);
         return;
@@ -120,28 +148,9 @@ void main()
 
     float tStart;
     float tEnd;
-    if (!compute_primary_ray_bounds(camLocal, rd, center, planetRadius, boundRadius, tStart, tEnd))
+    if (!compute_primary_ray_bounds_fast(camLocal, rd, center, planetRadius, boundRadius, tStart, tEnd))
     {
         outColor = vec4(baseColor, 1.0);
-        return;
-    }
-
-    vec2 analyticSeg0;
-    vec2 analyticSeg1;
-    int cloudSegCount = compute_cloud_segments(camLocal, rd, center, rBase, rTop, tStart, tEnd, analyticSeg0, analyticSeg1);
-    if (cloudSegCount != 1 || !segment_valid(analyticSeg0))
-    {
-        outColor = vec4(render_atmosphere_monolithic(baseColor), 1.0);
-        return;
-    }
-
-    float analyticLen = max(analyticSeg0.y - analyticSeg0.x, 1e-3);
-    float resolvedError = abs(resolvedSegment.x - analyticSeg0.x) + abs(resolvedSegment.y - analyticSeg0.y);
-    float resolvedSoftReject = max(900.0, analyticLen * 0.14);
-    float resolvedHardReject = max(2500.0, analyticLen * 0.35);
-    if (resolvedError > resolvedHardReject)
-    {
-        outColor = vec4(render_atmosphere_monolithic(baseColor), 1.0);
         return;
     }
 
@@ -183,38 +192,70 @@ void main()
     float arc = (pc.cloud_params.z * max(sceneData.timeParams.x, 0.0)) / max(cloudR, 1.0);
     mp.cloudWindSC = vec2(sin(arc), cos(arc));
 
+    vec2 cloudSeg0;
+    vec2 cloudSeg1;
+    int cloudSegCount = normalize_resolved_segments(resolvedSegment, tStart, tEnd, cloudSeg0, cloudSeg1);
+
     MarchState state = march_state_init();
+
+    if (cloudSegCount == 0)
+    {
+        if (atmActive)
+        {
+            integrate_segment(tStart, tEnd, clamp(pc.misc.x, 4, 64), false, mp, state);
+        }
+
+        vec3 transmittance = exp(-(betaR_eff * state.odR + betaM_eff * state.odM + betaA_eff * state.odR));
+        vec3 outRgb = baseColor * transmittance;
+        if (atmActive)
+        {
+            outRgb += state.scatterAtm * (sunCol * atmIntensity);
+        }
+
+        outColor = vec4(outRgb, 1.0);
+        return;
+    }
+
+    float gapStart[3];
+    float gapEnd[3];
+    int gapCount;
+    if (cloudSegCount == 1)
+    {
+        gapStart[0] = tStart;       gapEnd[0] = cloudSeg0.x;
+        gapStart[1] = cloudSeg0.y;  gapEnd[1] = tEnd;
+        gapCount = 2;
+    }
+    else
+    {
+        gapStart[0] = tStart;       gapEnd[0] = cloudSeg0.x;
+        gapStart[1] = cloudSeg0.y;  gapEnd[1] = cloudSeg1.x;
+        gapStart[2] = cloudSeg1.y;  gapEnd[2] = tEnd;
+        gapCount = 3;
+    }
 
     vec2 gapStepSegs[MAX_SEGS];
     for (int i = 0; i < MAX_SEGS; ++i) gapStepSegs[i] = vec2(0.0);
-    gapStepSegs[0].x = max(analyticSeg0.x - tStart, 0.0);
-    gapStepSegs[1].x = max(tEnd - analyticSeg0.y, 0.0);
-    distribute_steps(gapStepSegs, 2, atmActive ? clamp(pc.misc.x, 4, 64) : 0);
-
-    if (gapStepSegs[0].x > 0.0 && gapStepSegs[0].y > 0.0)
+    for (int i = 0; i < gapCount; ++i)
     {
-        integrate_segment(tStart, analyticSeg0.x, int(gapStepSegs[0].y), false, mp, state);
+        gapStepSegs[i].x = max(gapEnd[i] - gapStart[i], 0.0);
+    }
+    distribute_steps(gapStepSegs, gapCount, atmActive ? clamp(pc.misc.x, 4, 64) : 0);
+
+    for (int i = 0; i < gapCount; ++i)
+    {
+        if (gapStepSegs[i].x > 0.0 && gapStepSegs[i].y > 0.0)
+        {
+            integrate_segment(gapStart[i], gapEnd[i], int(gapStepSegs[i].y), false, mp, state);
+        }
     }
 
     state.odC = max(-log(max(resolvedLighting.a, 1e-4)) / CLOUD_BETA, 0.0);
-
-    if (gapStepSegs[1].x > 0.0 && gapStepSegs[1].y > 0.0)
-    {
-        integrate_segment(analyticSeg0.y, tEnd, int(gapStepSegs[1].y), false, mp, state);
-    }
 
     vec3 transmittance = exp(-(betaR_eff * state.odR + betaM_eff * state.odM + betaA_eff * state.odR + vec3(CLOUD_BETA * state.odC)));
     vec3 outRgb = baseColor * transmittance + resolvedLighting.rgb;
     if (atmActive)
     {
         outRgb += state.scatterAtm * (sunCol * atmIntensity);
-    }
-
-    float resolvedTrust = 1.0 - smoothstep(resolvedSoftReject, resolvedHardReject, resolvedError);
-    if (resolvedTrust < 0.999)
-    {
-        vec3 fallbackRgb = render_atmosphere_monolithic(baseColor);
-        outRgb = mix(fallbackRgb, outRgb, resolvedTrust);
     }
 
     outColor = vec4(outRgb, 1.0);
