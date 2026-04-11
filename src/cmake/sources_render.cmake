@@ -34,7 +34,12 @@ list(APPEND VULKAN_ENGINE_SOURCES
   render/passes/rocket_plume.h
   render/passes/rocket_plume.cpp
   render/passes/atmosphere.h
-  render/passes/atmosphere.cpp
+  render/passes/atmosphere/atmosphere_internal.h
+  render/passes/atmosphere/atmosphere_setup.cpp
+  render/passes/atmosphere/atmosphere_textures.cpp
+  render/passes/atmosphere/atmosphere_history.cpp
+  render/passes/atmosphere/atmosphere_graph.cpp
+  render/passes/atmosphere/atmosphere_draw.cpp
   render/passes/particles.h
   render/passes/particles.cpp
   render/passes/mesh_vfx.h
