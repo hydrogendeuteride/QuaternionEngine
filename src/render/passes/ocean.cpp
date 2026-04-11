@@ -129,7 +129,7 @@ void OceanPass::init(EngineContext *context)
                                                                        VK_IMAGE_USAGE_SAMPLED_BIT);
 
     ComputePipelineCreateInfo lut_info{};
-    lut_info.shaderPath = _context->getAssets()->shaderPath("atmosphere_transmittance_lut.comp.spv");
+    lut_info.shaderPath = _context->getAssets()->shaderPath("atmosphere/transmittance_lut.comp.spv");
     lut_info.descriptorTypes = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE};
     lut_info.pushConstantSize = sizeof(OceanAtmosphereLutPush);
     lut_info.pushConstantStages = VK_SHADER_STAGE_COMPUTE_BIT;

@@ -88,6 +88,9 @@ if(VULKAN_ENGINE_BUILD_SHADERS)
         "${PROJECT_SOURCE_DIR}/shaders/*.vert"
         "${PROJECT_SOURCE_DIR}/shaders/*.comp"
     )
+    file(GLOB_RECURSE GLSL_INCLUDE_FILES CONFIGURE_DEPENDS
+        "${PROJECT_SOURCE_DIR}/shaders/*.glsl"
+    )
 
     set(SPIRV_BINARY_FILES "")
     foreach(GLSL IN LISTS GLSL_SOURCE_FILES)
@@ -95,8 +98,10 @@ if(VULKAN_ENGINE_BUILD_SHADERS)
         add_custom_command(
             OUTPUT "${SPIRV}"
             # Force SPIR-V 1.5 output for broader driver compatibility (some drivers crash on SPIR-V 1.6 modules).
-            COMMAND "${GLSL_VALIDATOR}" -V --target-env vulkan1.2 --target-env spirv1.5 "${GLSL}" -o "${SPIRV}"
-            DEPENDS "${GLSL}"
+            COMMAND "${GLSL_VALIDATOR}" -V --target-env vulkan1.2 --target-env spirv1.5
+                    "-I${PROJECT_SOURCE_DIR}/shaders"
+                    "${GLSL}" -o "${SPIRV}"
+            DEPENDS "${GLSL}" ${GLSL_INCLUDE_FILES}
             VERBATIM
         )
         list(APPEND SPIRV_BINARY_FILES "${SPIRV}")
