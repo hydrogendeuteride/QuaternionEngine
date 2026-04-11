@@ -124,9 +124,6 @@ void main()
         return;
     }
 
-    vec4 resolvedLighting = texture(cloudLightingResolvedTex, inUV);
-    vec4 resolvedSegment = texture(cloudSegmentResolvedTex, inUV);
-
     if (!cloudsActive)
     {
         outColor = vec4(render_atmosphere_monolithic(baseColor), 1.0);
@@ -154,8 +151,11 @@ void main()
         return;
     }
 
+    vec4 resolvedLighting = texture(cloudLightingResolvedTex, inUV);
+    vec4 resolvedSegment = texture(cloudSegmentResolvedTex, inUV);
+
     float jitter = resolve_jitter_sample(inUV);
-    vec3 sunDir = normalize(-sceneData.sunlightDirection.xyz);
+    vec3 sunDir = -sceneData.sunlightDirection.xyz;
     vec3 sunCol = sceneData.sunlightColor.rgb * sceneData.sunlightColor.a;
     float cosTheta = dot(rd, sunDir);
 
@@ -196,6 +196,7 @@ void main()
     vec2 cloudSeg1;
     int cloudSegCount = normalize_resolved_segments(resolvedSegment, tStart, tEnd, cloudSeg0, cloudSeg1);
 
+    vec3 betaRA_eff = betaR_eff + betaA_eff;
     MarchState state = march_state_init();
 
     if (cloudSegCount == 0)
@@ -205,7 +206,7 @@ void main()
             integrate_segment(tStart, tEnd, clamp(pc.misc.x, 4, 64), false, mp, state);
         }
 
-        vec3 transmittance = exp(-(betaR_eff * state.odR + betaM_eff * state.odM + betaA_eff * state.odR));
+        vec3 transmittance = exp(-(betaRA_eff * state.odR + betaM_eff * state.odM));
         vec3 outRgb = baseColor * transmittance;
         if (atmActive)
         {
@@ -251,7 +252,7 @@ void main()
 
     state.odC = max(-log(max(resolvedLighting.a, 1e-4)) / CLOUD_BETA, 0.0);
 
-    vec3 transmittance = exp(-(betaR_eff * state.odR + betaM_eff * state.odM + betaA_eff * state.odR + vec3(CLOUD_BETA * state.odC)));
+    vec3 transmittance = exp(-(betaRA_eff * state.odR + betaM_eff * state.odM + vec3(CLOUD_BETA * state.odC)));
     vec3 outRgb = baseColor * transmittance + resolvedLighting.rgb;
     if (atmActive)
     {

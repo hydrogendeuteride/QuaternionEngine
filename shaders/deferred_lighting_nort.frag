@@ -260,7 +260,7 @@ void main(){
     vec3 V = normalize(camLocal - pos);
 
     // Directional sun term using evaluate_brdf + cascaded shadowing
-    vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);
+    vec3 Lsun = -sceneData.sunlightDirection.xyz;
 
     // Planet night emission: only show emission on the dark side of planet surfaces
     bool isPlanet = decode_planet_gbuffer_is_planet(posSample.w);

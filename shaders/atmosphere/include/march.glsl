@@ -1,12 +1,16 @@
+const float RAYLEIGH_PHASE_SCALE = 3.0 / (16.0 * PI);
+const float MIE_PHASE_SCALE = 1.0 / (4.0 * PI);
+
 float phase_rayleigh(float cosTheta)
 {
-    return (3.0 / (16.0 * PI)) * (1.0 + cosTheta * cosTheta);
+    return RAYLEIGH_PHASE_SCALE * (1.0 + cosTheta * cosTheta);
 }
 
 float phase_mie_hg(float cosTheta, float g)
 {
     float g2 = g * g;
-    return (1.0 / (4.0 * PI)) * (1.0 - g2) / pow(max(1.0 + g2 - 2.0 * g * cosTheta, 1e-4), 1.5);
+    float d = max(1.0 + g2 - 2.0 * g * cosTheta, 1e-4);
+    return MIE_PHASE_SCALE * (1.0 - g2) / (d * sqrt(d));
 }
 vec2 sun_optical_depth(float r, float muS, float planetRadius, float atmRadius)
 {
@@ -77,14 +81,15 @@ void integrate_optical_depth_segment(float t0, float t1, int steps, MarchParams 
     float dt = (t1 - t0) / float(steps);
     float invHr = 1.0 / max(mp.Hr, 1.0);
     float invHm = 1.0 / max(mp.Hm, 1.0);
+    vec3 dp = mp.rd * dt;
+    vec3 p = mp.camLocal + mp.rd * (t0 + mp.jitter * dt);
 
     for (int i = 0; i < steps; ++i)
     {
-        float ts = t0 + (float(i) + mp.jitter) * dt;
-        vec3 p = mp.camLocal + mp.rd * ts;
         float height = max(length(p - mp.center) - mp.planetRadius, 0.0);
         s.odR += exp(-height * invHr) * dt;
         s.odM += exp(-height * invHm) * dt;
+        p += dp;
     }
 }
 
@@ -94,29 +99,27 @@ void integrate_segment(float t0, float t1, int steps, bool doCloud, MarchParams 
 
     float dt = (t1 - t0) / float(steps);
     float planetRadius2 = mp.planetRadius * mp.planetRadius;
+    float invHr = 1.0 / max(mp.Hr, 1.0);
+    float invHm = 1.0 / max(mp.Hm, 1.0);
+    vec3 betaRA = mp.betaR + mp.betaA;
+    float ts = t0 + mp.jitter * dt;
+    vec3 dp = mp.rd * dt;
+    vec3 p = mp.camLocal + mp.rd * ts;
 
     for (int i = 0; i < steps; ++i)
     {
-        float ts = t0 + (float(i) + mp.jitter) * dt;
-        vec3 p = mp.camLocal + mp.rd * ts;
-
         vec3 radial = p - mp.center;
         float r = length(radial);
-        vec3 dir = (r > 0.0) ? (radial / r) : vec3(0.0, 1.0, 0.0);
-        vec3 radialDx = mp.rayDx * ts;
-        vec3 radialDy = mp.rayDy * ts;
-        vec3 dirDx = differentiate_normalized(radial, radialDx);
-        vec3 dirDy = differentiate_normalized(radial, radialDy);
+        float invR = (r > 0.0) ? (1.0 / r) : 0.0;
+        vec3 dir = (r > 0.0) ? (radial * invR) : vec3(0.0, 1.0, 0.0);
         float height = max(r - mp.planetRadius, 0.0);
-        float heightDx = dot(dir, radialDx);
-        float heightDy = dot(dir, radialDy);
 
         float densR = 0.0;
         float densM = 0.0;
         if (mp.atmActive)
         {
-            densR = exp(-height / max(mp.Hr, 1.0));
-            densM = exp(-height / max(mp.Hm, 1.0));
+            densR = exp(-height * invHr);
+            densM = exp(-height * invHm);
             s.odR += densR * dt;
             s.odM += densM * dt;
         }
@@ -124,6 +127,12 @@ void integrate_segment(float t0, float t1, int steps, bool doCloud, MarchParams 
         float densC = 0.0;
         if (doCloud)
         {
+            vec3 radialDx = mp.rayDx * ts;
+            vec3 radialDy = mp.rayDy * ts;
+            vec3 dirDx = differentiate_normalized(radial, radialDx);
+            vec3 dirDy = differentiate_normalized(radial, radialDy);
+            float heightDx = dot(dir, radialDx);
+            float heightDy = dot(dir, radialDy);
             densC = cloud_density(dir,
                                   dirDx,
                                   dirDy,
@@ -138,10 +147,11 @@ void integrate_segment(float t0, float t1, int steps, bool doCloud, MarchParams 
             if (densC > 0.0) s.odC += densC * dt;
         }
 
-        vec3 tauCam = mp.betaR * s.odR + mp.betaM * s.odM + mp.betaA * s.odR + vec3(CLOUD_BETA * s.odC);
+        vec3 tauCam = betaRA * s.odR + mp.betaM * s.odM + vec3(CLOUD_BETA * s.odC);
         vec3 attenCam = exp(-tauCam);
 
         float bSun = dot(radial, mp.sunDir);
+        float muS = bSun * invR;
         float d2 = r * r - bSun * bSun;
         bool inShadow = (bSun < 0.0) && (d2 < planetRadius2);
 
@@ -150,10 +160,9 @@ void integrate_segment(float t0, float t1, int steps, bool doCloud, MarchParams 
             vec3 attenSun = vec3(1.0);
             if (mp.atmActive && mp.atmRadius > mp.planetRadius)
             {
-                float muS = dot(dir, mp.sunDir);
                 vec2 amSun = sun_optical_depth(r, muS, mp.planetRadius, mp.atmRadius);
                 vec2 odSun = amSun * vec2(mp.Hr, mp.Hm);
-                attenSun = exp(-(mp.betaR * odSun.x + mp.betaM * odSun.y + mp.betaA * odSun.x));
+                attenSun = exp(-(betaRA * odSun.x + mp.betaM * odSun.y));
             }
 
             vec3 atten = attenCam * attenSun;
@@ -164,8 +173,8 @@ void integrate_segment(float t0, float t1, int steps, bool doCloud, MarchParams 
             }
             if (doCloud && densC > 0.0)
             {
-                float muS = max(dot(dir, mp.sunDir), 0.0);
-                float pathToTop = max(mp.cloudRTop - r, 0.0) / max(muS, 0.15);
+                float cloudMuS = max(muS, 0.0);
+                float pathToTop = max(mp.cloudRTop - r, 0.0) / max(cloudMuS, 0.15);
                 float cloudSunTrans = exp(-CLOUD_BETA * densC * pathToTop);
                 float powder = 1.0 - exp(-densC * 2.0);
                 float scatterBoost = mix(0.45, 1.0, powder);
@@ -178,7 +187,6 @@ void integrate_segment(float t0, float t1, int steps, bool doCloud, MarchParams 
         {
             float powder = 1.0 - exp(-densC * 1.25);
             float scatterBoost = mix(0.25, 1.0, powder);
-            float muS = dot(dir, mp.sunDir);
             float dayMask = smoothstep(-0.02, 0.12, muS);
             if (inShadow) dayMask = 0.0;
             s.scatterCloudAmb += attenCam * (densC * CLOUD_BETA) * dt * scatterBoost * CLOUD_SCATTER_SCALE * dayMask;
@@ -189,6 +197,9 @@ void integrate_segment(float t0, float t1, int steps, bool doCloud, MarchParams 
         {
             break;
         }
+
+        ts += dt;
+        p += dp;
     }
 }
 
@@ -296,7 +307,7 @@ vec3 render_atmosphere_monolithic(vec3 baseColor)
     int viewSteps = clamp(pc.misc.x, 4, 64);
     float jitter = resolve_jitter_sample(inUV);
 
-    vec3 sunDir = normalize(-sceneData.sunlightDirection.xyz);
+    vec3 sunDir = -sceneData.sunlightDirection.xyz;
     vec3 sunCol = sceneData.sunlightColor.rgb * sceneData.sunlightColor.a;
     vec3 ambCol = sceneData.ambientColor.rgb;
     vec3 cloudTint = max(pc.cloud_color.rgb, vec3(0.0));
@@ -409,7 +420,8 @@ vec3 render_atmosphere_monolithic(vec3 baseColor)
         }
     }
 
-    vec3 transmittance = exp(-(betaR_eff * state.odR + betaM_eff * state.odM + betaA_eff * state.odR + vec3(CLOUD_BETA * state.odC)));
+    vec3 betaRA_eff = betaR_eff + betaA_eff;
+    vec3 transmittance = exp(-(betaRA_eff * state.odR + betaM_eff * state.odM + vec3(CLOUD_BETA * state.odC)));
     vec3 outRgb = baseColor * transmittance;
     if (atmActive) outRgb += state.scatterAtm * (sunCol * atmIntensity);
     outRgb += state.scatterCloudSun * cloudSunCol;

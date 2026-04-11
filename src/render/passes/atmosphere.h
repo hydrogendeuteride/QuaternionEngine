@@ -73,6 +73,12 @@ private:
         bool cloudOverlayFlipV = false;
     };
 
+    struct TransmittanceLutSnapshot
+    {
+        glm::vec4 radiiHeights{0.0f};
+        int lightSteps = 0;
+    };
+
     void draw_cloud_low_res(VkCommandBuffer cmd,
                             EngineContext *context,
                             const RGPassResources &resources,
@@ -116,6 +122,8 @@ private:
     void ensure_cloud_textures(EngineContext *context);
     void ensure_planet_height_textures(EngineContext *context, std::string_view height_dir);
     void release_planet_height_textures();
+    void release_transmittance_lut_image();
+    void ensure_transmittance_lut_image();
     void release_history_images();
     void ensure_history_images(VkExtent2D extent);
 
@@ -146,6 +154,10 @@ private:
     std::array<uint32_t, 6> _planetHeightHandles{
         UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX};
     std::string _planetHeightLoadedDir;
+    AllocatedImage _transmittanceLut{};
+    HistoryImageState _transmittanceLutState{};
+    TransmittanceLutSnapshot _transmittanceLutParams{};
+    bool _transmittanceLutValid = false;
 
     std::array<AllocatedImage, 2> _cloudLightingHistory{};
     std::array<AllocatedImage, 2> _cloudSegmentHistory{};
