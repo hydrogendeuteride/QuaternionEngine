@@ -149,7 +149,7 @@ void main()
     float jitter = hash12(inUV * 1024.0);
     float t = max(t0, 0.0) + (jitter - 0.5) * dt;
 
-    vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);
+    vec3 Lsun = -sceneData.sunlightDirection.xyz;
     vec3 sunCol = sceneData.sunlightColor.rgb * sceneData.sunlightColor.a;
     vec3 ambCol = sceneData.ambientColor.rgb;
 

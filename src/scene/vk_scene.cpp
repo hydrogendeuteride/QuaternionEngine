@@ -104,7 +104,7 @@ void SceneManager::init(EngineContext *context)
     mainCamera.orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 
     sceneData.ambientColor = glm::vec4(0.1f, 0.1f, 0.1f, 1.0f);
-    sceneData.sunlightDirection = glm::vec4(-0.2f, -1.0f, -0.3f, 1.0f);
+    sceneData.sunlightDirection = glm::vec4(glm::normalize(glm::vec3(-0.2f, -1.0f, -0.3f)), 1.0f);
     sceneData.sunlightColor = glm::vec4(1.0f, 1.0f, 1.0f, 3.0f);
 
     cameraRig.init(*this, mainCamera);

@@ -123,7 +123,7 @@ void main() {
     // Keep 0.0 reserved for background/no-geometry, and encode small flags above 1.0.
     // Convention: materialData.extra[2].y > 0 => planet-style shadowing override.
     float gbuffer_flags = materialData.extra[2].y;
-    vec3 Lsun = normalize(-sceneData.sunlightDirection.xyz);
+    vec3 Lsun = -sceneData.sunlightDirection.xyz;
     float terrainSunVis = isTerrain ? terrain_terminator_visibility(inUV, Nw, inWorldPos, Lsun) : 1.0;
     outPos = vec4(inWorldPos, encode_planet_gbuffer_pos_w(gbuffer_flags, waterMask, terrainSunVis));
     outNorm = vec4(Nw, roughness);
