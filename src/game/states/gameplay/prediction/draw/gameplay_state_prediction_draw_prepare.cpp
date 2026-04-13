@@ -1,9 +1,8 @@
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 
-#include "game/orbit/orbit_prediction_tuning.h"
-
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace Game
 {
@@ -151,10 +150,19 @@ namespace Game
         out.world_basis_draw_ctx.line_overlay_boost = out.draw_ctx.line_overlay_boost;
 
         out.future_window_s = prediction_future_window_s(track.key);
-        const double default_planned_window_s = maneuver_plan_preview_window_s();
-        out.planned_visual_window_s = default_planned_window_s;
-        out.planned_exact_window_s = default_planned_window_s;
-        out.planned_pick_window_s = default_planned_window_s;
+        if (out.planned_window_segments && !out.planned_window_segments->empty() &&
+            out.planned_cache && out.planned_cache->has_planned_frame_draw_data())
+        {
+            const double planned_segments_t0_s = out.planned_window_segments->front().t0_s;
+            const double planned_segments_t1_s =
+                    out.planned_window_segments->back().t0_s + out.planned_window_segments->back().dt_s;
+            const PredictionTimeContext time_ctx =
+                    build_prediction_time_context(track.key, out.now_s, planned_segments_t0_s, planned_segments_t1_s);
+            out.planned_window_policy = resolve_prediction_window_policy(&track, time_ctx, true);
+            out.planned_visual_window_s = out.planned_window_policy.visual_window_s;
+            out.planned_exact_window_s = out.planned_window_policy.exact_window_s;
+            out.planned_pick_window_s = out.planned_window_policy.pick_window_s;
+        }
         return true;
     }
 } // namespace Game

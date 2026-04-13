@@ -11,6 +11,27 @@ namespace Game
 {
     namespace
     {
+        constexpr double kPredictionTimeEpsilonS = 1.0e-6;
+
+        bool node_time_in_context_range(const PredictionTimeContext &time_ctx, const double node_time_s)
+        {
+            if (!std::isfinite(node_time_s))
+            {
+                return false;
+            }
+
+            if (std::isfinite(time_ctx.trajectory_t0_s) && node_time_s < (time_ctx.trajectory_t0_s - kPredictionTimeEpsilonS))
+            {
+                return false;
+            }
+
+            if (std::isfinite(time_ctx.trajectory_t1_s) && node_time_s > (time_ctx.trajectory_t1_s + kPredictionTimeEpsilonS))
+            {
+                return false;
+            }
+
+            return true;
+        }
     } // namespace
 
     void GameplayState::sync_prediction_dirty_flag()
@@ -88,74 +109,32 @@ namespace Game
                                                       const double now_s,
                                                       const bool with_maneuvers) const
     {
-        const double plotted_ahead_s =
-                std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(key) : 0.0);
-
-        if (!with_maneuvers)
+        const PredictionTimeContext time_ctx = build_prediction_time_context(key, now_s);
+        const PredictionWindowPolicyResult policy = resolve_prediction_window_policy(find_prediction_track(key), time_ctx, with_maneuvers);
+        if (policy.valid)
         {
-            return plotted_ahead_s;
+            return policy.visual_window_s;
         }
 
-        double required_ahead_s = plotted_ahead_s;
-        double max_node_time_s = now_s;
-        for (const ManeuverNode &node : _maneuver_state.nodes)
-        {
-            if (!std::isfinite(node.time_s))
-            {
-                continue;
-            }
-            max_node_time_s = std::max(max_node_time_s, node.time_s);
-        }
-
-        if (max_node_time_s > now_s)
-        {
-            required_ahead_s = std::max(required_ahead_s, (max_node_time_s - now_s) + maneuver_post_node_coverage_s());
-        }
-
-        return required_ahead_s;
+        return std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(key) : 0.0);
     }
 
     double GameplayState::prediction_planned_exact_window_s(const PredictionTrackState &track,
                                                             const double now_s,
                                                             const bool with_maneuvers) const
     {
-        if (!with_maneuvers || !prediction_subject_is_player(track.key) || _maneuver_state.nodes.empty())
-        {
-            return 0.0;
-        }
-
-        double last_future_node_time_s = -std::numeric_limits<double>::infinity();
-        for (const ManeuverNode &node : _maneuver_state.nodes)
-        {
-            if (!std::isfinite(node.time_s))
-            {
-                continue;
-            }
-
-            if (node.time_s >= now_s)
-            {
-                last_future_node_time_s = std::max(last_future_node_time_s, node.time_s);
-            }
-        }
-
-        if (!std::isfinite(last_future_node_time_s))
-        {
-            return 0.0;
-        }
-
-        // Request enough horizon to keep the preview stable across successive node executions.
-        // Rendering still anchors to the first future node, but the solve should already cover
-        // the final future node plus the requested preview tail.
-        return std::max(0.0, last_future_node_time_s - now_s) + maneuver_plan_preview_window_s();
+        const PredictionTimeContext time_ctx = build_prediction_time_context(track.key, now_s);
+        const PredictionWindowPolicyResult policy = resolve_prediction_window_policy(&track, time_ctx, with_maneuvers);
+        return policy.exact_window_s;
     }
 
     double GameplayState::prediction_required_window_s(const PredictionTrackState &track,
                                                        const double now_s,
                                                        const bool with_maneuvers) const
     {
-        const double display_window_s = prediction_display_window_s(track.key, now_s, with_maneuvers);
-        const double planned_exact_window_s = prediction_planned_exact_window_s(track, now_s, with_maneuvers);
-        return std::max(display_window_s, planned_exact_window_s);
+        const PredictionTimeContext time_ctx = build_prediction_time_context(track.key, now_s);
+        const PredictionWindowPolicyResult policy = resolve_prediction_window_policy(&track, time_ctx, with_maneuvers);
+        return policy.request_window_s;
     }
 
     double GameplayState::prediction_required_window_s(const PredictionSubjectKey key,
@@ -166,7 +145,124 @@ namespace Game
         {
             return prediction_required_window_s(*track, now_s, with_maneuvers);
         }
-        return prediction_display_window_s(key, now_s, with_maneuvers);
+        const PredictionTimeContext time_ctx = build_prediction_time_context(key, now_s);
+        const PredictionWindowPolicyResult policy = resolve_prediction_window_policy(nullptr, time_ctx, with_maneuvers);
+        return policy.request_window_s;
+    }
+
+    PredictionTimeContext GameplayState::build_prediction_time_context(const PredictionSubjectKey key,
+                                                                       const double sim_now_s,
+                                                                       const double trajectory_t0_s,
+                                                                       const double trajectory_t1_s) const
+    {
+        (void) key;
+
+        PredictionTimeContext out{};
+        out.sim_now_s = sim_now_s;
+        out.plan_epoch_s = std::isfinite(_maneuver_plan_epoch_s) ? _maneuver_plan_epoch_s : sim_now_s;
+        out.trajectory_t0_s = trajectory_t0_s;
+        out.trajectory_t1_s = trajectory_t1_s;
+
+        if (const ManeuverNode *selected = _maneuver_state.find_node(_maneuver_state.selected_node_id))
+        {
+            if (node_time_in_context_range(out, selected->time_s))
+            {
+                out.selected_node_time_s = selected->time_s;
+            }
+        }
+
+        for (const ManeuverNode &node : _maneuver_state.nodes)
+        {
+            if (!node_time_in_context_range(out, node.time_s))
+            {
+                continue;
+            }
+
+            out.has_plan = true;
+            out.first_relevant_node_time_s = std::isfinite(out.first_relevant_node_time_s)
+                                                     ? std::min(out.first_relevant_node_time_s, node.time_s)
+                                                     : node.time_s;
+
+            if (node.time_s + kPredictionTimeEpsilonS >= sim_now_s)
+            {
+                out.first_future_node_time_s = std::isfinite(out.first_future_node_time_s)
+                                                       ? std::min(out.first_future_node_time_s, node.time_s)
+                                                       : node.time_s;
+                out.last_future_node_time_s = std::isfinite(out.last_future_node_time_s)
+                                                      ? std::max(out.last_future_node_time_s, node.time_s)
+                                                      : node.time_s;
+            }
+        }
+
+        return out;
+    }
+
+    PredictionWindowPolicyResult GameplayState::resolve_prediction_window_policy(const PredictionTrackState *track,
+                                                                                 const PredictionTimeContext &time_ctx,
+                                                                                 const bool with_maneuvers) const
+    {
+        const PredictionSubjectKey key = track ? track->key : PredictionSubjectKey{};
+
+        PredictionWindowPolicyResult out{};
+        out.request_window_s =
+                std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(key) : 0.0);
+
+        const bool supports_maneuver_windows =
+                with_maneuvers &&
+                track &&
+                prediction_subject_is_player(track->key) &&
+                time_ctx.has_plan;
+        if (!supports_maneuver_windows)
+        {
+            return out;
+        }
+
+        out.visual_window_s = maneuver_plan_preview_window_s();
+        out.pick_window_s = out.visual_window_s;
+        out.exact_window_s = out.visual_window_s;
+
+        if (std::isfinite(time_ctx.selected_node_time_s))
+        {
+            out.anchor_time_s = time_ctx.selected_node_time_s;
+            out.anchor_kind = PredictionTimeAnchorKind::SelectedNode;
+        }
+        else if (std::isfinite(time_ctx.first_future_node_time_s))
+        {
+            out.anchor_time_s = time_ctx.first_future_node_time_s;
+            out.anchor_kind = PredictionTimeAnchorKind::FirstFutureNode;
+        }
+        else if (std::isfinite(time_ctx.first_relevant_node_time_s))
+        {
+            out.anchor_time_s = time_ctx.first_relevant_node_time_s;
+            out.anchor_kind = PredictionTimeAnchorKind::FirstRelevantNode;
+        }
+        else if (std::isfinite(time_ctx.plan_epoch_s))
+        {
+            out.anchor_time_s = time_ctx.plan_epoch_s;
+            out.anchor_kind = PredictionTimeAnchorKind::PlanEpoch;
+        }
+
+        out.valid =
+                std::isfinite(out.anchor_time_s) &&
+                out.visual_window_s > 0.0 &&
+                out.pick_window_s > 0.0 &&
+                out.exact_window_s > 0.0;
+
+        out.anchor_is_future =
+                std::isfinite(out.anchor_time_s) &&
+                std::isfinite(time_ctx.sim_now_s) &&
+                out.anchor_time_s + kPredictionTimeEpsilonS >= time_ctx.sim_now_s;
+
+        if (std::isfinite(time_ctx.last_future_node_time_s) &&
+            std::isfinite(time_ctx.sim_now_s) &&
+            time_ctx.last_future_node_time_s > time_ctx.sim_now_s)
+        {
+            out.request_window_s = std::max(
+                    out.request_window_s,
+                    std::max(0.0, time_ctx.last_future_node_time_s - time_ctx.sim_now_s) + maneuver_post_node_coverage_s());
+        }
+
+        return out;
     }
 
     bool GameplayState::should_rebuild_prediction_track(const PredictionTrackState &track,

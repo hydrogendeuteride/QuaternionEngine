@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 namespace Game
 {
@@ -63,6 +64,14 @@ namespace Game
 
         const double now_s = current_sim_time_s();
         const PredictionTrackState *player_track = player_prediction_track();
+        const PredictionSubjectKey time_key = player_track ? player_track->key : PredictionSubjectKey{};
+        const PredictionTimeContext time_ctx = build_prediction_time_context(time_key, now_s);
+        const auto to_t_plus_s = [&time_ctx](const double absolute_time_s) {
+            return absolute_time_s - time_ctx.sim_now_s;
+        };
+        const auto from_t_plus_s = [&time_ctx](const double t_plus_s) {
+            return time_ctx.sim_now_s + std::max(0.0, t_plus_s);
+        };
         const auto default_node_primary_body_id = [&]() -> orbitsim::BodyId {
             if (_prediction_analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
                 _prediction_analysis_selection.spec.fixed_body_id != orbitsim::kInvalidBodyId)
@@ -120,6 +129,10 @@ namespace Game
         }
 
         auto add_maneuver_node_at_time = [&](const double time_s) {
+            if (_maneuver_state.nodes.empty())
+            {
+                _maneuver_plan_epoch_s = time_ctx.sim_now_s;
+            }
             ManeuverNode n{};
             n.id = _maneuver_state.next_node_id++;
             n.time_s = time_s;
@@ -136,7 +149,7 @@ namespace Game
         ImGui::SameLine();
         if (ImGui::Button("+Node"))
         {
-            add_maneuver_node_at_time(now_s + 60.0);
+            add_maneuver_node_at_time(from_t_plus_s(60.0));
         }
 
         ImGui::SameLine();
@@ -144,6 +157,7 @@ namespace Game
         {
             _maneuver_state.nodes.clear();
             _maneuver_state.selected_node_id = -1;
+            _maneuver_plan_epoch_s = std::numeric_limits<double>::quiet_NaN();
             _execute_node_armed = false;
             _execute_node_id = -1;
             _maneuver_gizmo_interaction = {};
@@ -327,13 +341,13 @@ namespace Game
 
         if (_warp_to_time_active)
         {
-            const double remain_s = _warp_to_time_target_s - now_s;
+            const double remain_s = to_t_plus_s(_warp_to_time_target_s);
             ImGui::SameLine();
             ImGui::Text("Warping: T%+.0fs", remain_s);
         }
 
-        const double t_start_s = now_s;
-        const double t_end_s = now_s + std::max(60.0, _maneuver_timeline_window_s);
+        const double t_start_s = time_ctx.sim_now_s;
+        const double t_end_s = time_ctx.sim_now_s + std::max(60.0, _maneuver_timeline_window_s);
         const double span_s = t_end_s - t_start_s;
 
         const PickingSystem *picking = nullptr;
@@ -479,7 +493,7 @@ namespace Game
                                     ring_color,
                                     ManeuverColors::kOrbitPickOuterSelected);
 
-            const double dt_s = orbit_pick->time_s - now_s;
+            const double dt_s = to_t_plus_s(orbit_pick->time_s);
             if (std::isfinite(dt_s))
             {
                 ImGui::Text("Orbit pick: %s  T%+.0fs", orbit_pick->ownerName.c_str(), dt_s);
@@ -565,7 +579,7 @@ namespace Game
                 // Keep dragged nodes inside the visible timeline window and never allow them into the past.
                 const double u_clamped = std::clamp(u_drag, 0.0, 1.0);
                 const double t_new = t_start_s + u_clamped * span_s;
-                node.time_s = std::max(now_s, t_new);
+                node.time_s = std::max(time_ctx.sim_now_s, t_new);
                 needs_sort = true;
                 mark_maneuver_plan_dirty();
             }
@@ -574,7 +588,7 @@ namespace Game
             {
                 ImGui::BeginTooltip();
                 ImGui::Text("Node %d", node.id);
-                ImGui::Text("T%+.1fs", node.time_s - now_s);
+                ImGui::Text("T%+.1fs", to_t_plus_s(node.time_s));
                 ImGui::Text("DV RTN: (%.1f, %.1f, %.1f) m/s",
                             node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z);
                 ImGui::EndTooltip();
@@ -651,7 +665,7 @@ namespace Game
                           sizeof(label),
                           "Node %d   T%+.0fs   DV %.1f",
                           node.id,
-                          node.time_s - now_s,
+                          to_t_plus_s(node.time_s),
                           node.total_dv_mps);
 
             ImGui::PushID(node.id);
@@ -694,7 +708,7 @@ namespace Game
         }
 
         ImGui::Text("Selected Node %d", sel->id);
-        ImGui::TextDisabled("T%+.1fs  |  DV %.2f m/s", sel->time_s - now_s, safe_length(sel->dv_rtn_mps));
+        ImGui::TextDisabled("T%+.1fs  |  DV %.2f m/s", to_t_plus_s(sel->time_s), safe_length(sel->dv_rtn_mps));
 
         // Navigation
         ImGui::BeginDisabled(selected_idx <= 0);
@@ -726,7 +740,7 @@ namespace Game
             _execute_node_armed = true;
             _execute_node_id = sel->id;
 
-            if (sel->time_s > now_s + 0.01)
+            if (sel->time_s > time_ctx.sim_now_s + 0.01)
             {
                 _warp_to_time_active = true;
                 _warp_to_time_target_s = sel->time_s;
@@ -754,10 +768,10 @@ namespace Game
             ImGui::SetTooltip("Deletes the selected node and all later nodes.");
         }
 
-        float t_from_now = static_cast<float>(sel->time_s - now_s);
+        float t_from_now = static_cast<float>(to_t_plus_s(sel->time_s));
         if (ImGui::DragFloat("T+ (s)", &t_from_now, 1.0f, 0.0f, 15'552'000.0f, "%.1f"))
         {
-            sel->time_s = now_s + static_cast<double>(std::max(0.0f, t_from_now));
+            sel->time_s = from_t_plus_s(static_cast<double>(t_from_now));
             needs_sort = true;
             mark_maneuver_plan_dirty();
         }
