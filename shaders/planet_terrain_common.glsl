@@ -189,10 +189,15 @@ vec3 terrain_shading_normal_from_height(vec2 uv, vec3 worldPos, vec3 fallbackNor
         n = -n;
     }
 
-    float agreement = clamp(dot(n, fallback), -1.0, 1.0);
-    float geometryBias = smoothstep(0.15, 0.55, 1.0 - agreement);
-    vec3 resolved = normalize(mix(n, fallback, geometryBias));
-    return normalize(mix(fallback, resolved, edgeFade));
+    // Clamp extreme deviations using the continuous radialDir (not fallback,
+    // which has patch-boundary discontinuities from CPU-side edge blending).
+    // Only suppress normals nearly perpendicular to or facing away from the
+    // surface — legitimate steep terrain (up to ~80°) passes through untouched.
+    float radialAgreement = clamp(dot(n, radialDir), 0.0, 1.0);
+    float radialBias = 1.0 - smoothstep(0.0, 0.15, radialAgreement);
+    n = normalize(mix(n, radialDir, radialBias));
+
+    return normalize(mix(fallback, n, edgeFade));
 }
 
 vec3 apply_terrain_detail_normal(vec3 baseNormal, vec2 uv, mat3 normalMatrix)
@@ -235,7 +240,12 @@ float terrain_terminator_visibility(vec2 uv,
     vec3 shadedN = normalize(shadedNormal);
     vec3 geomN = normalize(geometryNormal);
 
-    float NdotL = dot(geomN, sunLocalDir);
+    // Use the more sun-facing of the two normals so sloped terrain that is
+    // genuinely lit (heightmap normal faces the sun) is not incorrectly
+    // shadowed just because the vertex (radial) normal doesn't.  Using max()
+    // also avoids a patch-boundary discontinuity: geomN transitions from
+    // computed to radial at edges, while shadedN stays continuous.
+    float NdotL = max(dot(geomN, sunLocalDir), dot(shadedN, sunLocalDir));
     if (NdotL >= 0.35)
     {
         return 1.0;
@@ -310,9 +320,7 @@ float terrain_terminator_visibility(vec2 uv,
     }
 
     float visibility = 1.0 - smoothstep(sunSlope - 0.02, sunSlope + 0.02, maxSlope);
-    float agreement = clamp(dot(shadedN, geomN), 0.0, 1.0);
-    float mismatchFade = 1.0 - smoothstep(0.15, 0.45, 1.0 - agreement);
-    return mix(1.0, clamp(visibility, 0.0, 1.0), edgeFade * mismatchFade);
+    return mix(1.0, clamp(visibility, 0.0, 1.0), edgeFade);
 }
 
 #endif

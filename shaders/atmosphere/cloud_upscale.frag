@@ -168,6 +168,25 @@ float sample_planet_surface_radius(vec3 p, vec3 center, float planetRadius)
     return planetRadius + heightOffset + sample_planet_height_face(faceIndex, uv01, lod) * heightScale;
 }
 
+bool pos_sample_matches_selected_planet_shell(vec3 posSample, vec3 center, float planetRadius)
+{
+    vec3 radial = posSample - center;
+    float radialLen = length(radial);
+    if (radialLen <= 1e-5)
+    {
+        return false;
+    }
+
+    float heightOffset = max(pc.terrain_params.y, 0.0);
+    float heightScale = max(pc.terrain_params.x, 0.0);
+    float innerRadius = planetRadius + heightOffset;
+    float outerRadius = innerRadius + heightScale;
+
+    float snapM = max(pc.jitter_params.y, 0.0);
+    float tolerance = max(max(snapM, heightScale * 0.25), 64.0);
+    return radialLen <= (outerRadius + tolerance);
+}
+
 float planet_surface_signed_distance(vec3 camLocal,
                                      vec3 rd,
                                      vec3 center,
@@ -376,7 +395,7 @@ bool compute_ray_bounds(vec3 camLocal,
         float tRaster = dot(posSample.xyz - camLocal, rd);
         if (tRaster > 0.0)
         {
-            bool isPlanet = (posSample.w > 1.5);
+            bool isPlanet = (posSample.w > 1.5) && pos_sample_matches_selected_planet_shell(posSample.xyz, center, planetRadius);
             if (isPlanet)
             {
                 float tAnalytic = tRaster;
