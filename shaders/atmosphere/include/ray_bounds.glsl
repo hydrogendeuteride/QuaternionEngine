@@ -91,7 +91,7 @@ bool compute_primary_ray_bounds(vec3 camLocal,
         float tRaster = dot(posSample.xyz - camLocal, rd);
         if (tRaster > 0.0)
         {
-            bool isPlanet = (posSample.w > 1.5);
+            bool isPlanet = (posSample.w > 1.5) && pos_sample_matches_selected_planet_shell(posSample.xyz, center, planetRadius);
             if (isPlanet)
             {
                 float tAnalytic = tRaster;
@@ -162,7 +162,7 @@ bool compute_primary_ray_bounds_fast(vec3 camLocal,
         float tRaster = dot(posSample.xyz - camLocal, rd);
         if (tRaster > 0.0)
         {
-            bool isPlanet = (posSample.w > 1.5);
+            bool isPlanet = (posSample.w > 1.5) && pos_sample_matches_selected_planet_shell(posSample.xyz, center, planetRadius);
             if (isPlanet)
             {
                 float tAnalytic = tRaster;
@@ -243,7 +243,7 @@ bool compute_primary_ray_bounds_cloud_hybrid(vec3 camLocal,
         float tRaster = dot(posSample.xyz - camLocal, rd);
         if (tRaster > 0.0)
         {
-            bool isPlanet = (posSample.w > 1.5);
+            bool isPlanet = (posSample.w > 1.5) && pos_sample_matches_selected_planet_shell(posSample.xyz, center, planetRadius);
             if (isPlanet)
             {
                 float tAnalytic = tRaster;
