@@ -83,46 +83,59 @@ bool compute_primary_ray_bounds(vec3 camLocal,
         return false;
     }
 
+    tStart = max(tBound0, 0.0);
     tEnd = tBound1;
     vec4 posSample = texture(posTex, inUV);
     if (posSample.w > 0.0)
     {
-        float tSurf = dot(posSample.xyz - camLocal, rd);
-        if (tSurf > 0.0)
+        float tRaster = dot(posSample.xyz - camLocal, rd);
+        if (tRaster > 0.0)
         {
             bool isPlanet = (posSample.w > 1.5);
             if (isPlanet)
             {
-                float terrainTSurf = tSurf;
-                if (solve_planet_heightmap_surface_depth(camLocal, rd, center, planetRadius, terrainTSurf))
+                float tAnalytic = tRaster;
+                if (terrain_height_enabled())
                 {
-                    tSurf = terrainTSurf;
-                }
-                else
-                {
-                    float snapM = max(pc.jitter_params.y, 0.0);
-                    if (snapM > 0.0)
+                    float terrainTSurf = tRaster;
+                    if (solve_planet_heightmap_surface_depth(camLocal, rd, center, planetRadius, terrainTSurf) &&
+                        terrainTSurf > 0.0)
                     {
-                        float tP0;
-                        float tP1;
-                        if (ray_sphere_intersect(camLocal, rd, center, planetRadius, tP0, tP1))
+                        tAnalytic = terrainTSurf;
+                    }
+                }
+
+                float snapM = max(pc.jitter_params.y, 0.0);
+                if (snapM > 0.0)
+                {
+                    float tP0;
+                    float tP1;
+                    if (ray_sphere_intersect(camLocal, rd, center, planetRadius, tP0, tP1))
+                    {
+                        float tSphere = (tP0 > 0.0) ? tP0 : tP1;
+                        if (tSphere > 0.0)
                         {
-                            float tSphere = (tP0 > 0.0) ? tP0 : tP1;
-                            if (tSphere > 0.0)
+                            float rSurf = length(posSample.xyz - center);
+                            if (rSurf < planetRadius || abs(rSurf - planetRadius) <= snapM)
                             {
-                                float rSurf = length(posSample.xyz - center);
-                                if (rSurf < planetRadius) tSurf = min(tSurf, tSphere);
-                                if (abs(rSurf - planetRadius) <= snapM) tSurf = tSphere;
+                                tAnalytic = min(tAnalytic, tSphere);
                             }
                         }
                     }
                 }
+
+                float rasterWeight = compute_planet_raster_depth_weight(camLocal, center, planetRadius);
+                float tResolved = mix(tAnalytic, min(tRaster, tAnalytic), rasterWeight);
+                float surfEps = max(1.0, 0.5 * max(pc.jitter_params.y, 1.0));
+                tEnd = min(tEnd, max(tStart, tResolved - surfEps));
             }
-            tEnd = min(tEnd, tSurf);
+            else
+            {
+                tEnd = min(tEnd, tRaster);
+            }
         }
     }
 
-    tStart = max(tBound0, 0.0);
     return tEnd > tStart;
 }
 
@@ -141,16 +154,18 @@ bool compute_primary_ray_bounds_fast(vec3 camLocal,
         return false;
     }
 
+    tStart = max(tBound0, 0.0);
     tEnd = tBound1;
     vec4 posSample = texture(posTex, inUV);
     if (posSample.w > 0.0)
     {
-        float tSurf = dot(posSample.xyz - camLocal, rd);
-        if (tSurf > 0.0)
+        float tRaster = dot(posSample.xyz - camLocal, rd);
+        if (tRaster > 0.0)
         {
             bool isPlanet = (posSample.w > 1.5);
             if (isPlanet)
             {
+                float tAnalytic = tRaster;
                 bool resolvedApprox = false;
                 if (terrain_height_enabled())
                 {
@@ -162,7 +177,7 @@ bool compute_primary_ray_bounds_fast(vec3 camLocal,
                         float tApprox = (tP0 > 0.0) ? tP0 : tP1;
                         if (tApprox > 0.0)
                         {
-                            tSurf = tApprox;
+                            tAnalytic = tApprox;
                             resolvedApprox = true;
                         }
                     }
@@ -181,19 +196,27 @@ bool compute_primary_ray_bounds_fast(vec3 camLocal,
                             if (tSphere > 0.0)
                             {
                                 float rSurf = length(posSample.xyz - center);
-                                if (rSurf < planetRadius) tSurf = min(tSurf, tSphere);
-                                if (abs(rSurf - planetRadius) <= snapM) tSurf = tSphere;
+                                if (rSurf < planetRadius || abs(rSurf - planetRadius) <= snapM)
+                                {
+                                    tAnalytic = min(tAnalytic, tSphere);
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            tEnd = min(tEnd, tSurf);
+                float rasterWeight = compute_planet_raster_depth_weight(camLocal, center, planetRadius);
+                float tResolved = mix(tAnalytic, min(tRaster, tAnalytic), rasterWeight);
+                float surfEps = max(1.0, 0.5 * max(pc.jitter_params.y, 1.0));
+                tEnd = min(tEnd, max(tStart, tResolved - surfEps));
+            }
+            else
+            {
+                tEnd = min(tEnd, tRaster);
+            }
         }
     }
 
-    tStart = max(tBound0, 0.0);
     return tEnd > tStart;
 }
 
@@ -212,16 +235,18 @@ bool compute_primary_ray_bounds_cloud_hybrid(vec3 camLocal,
         return false;
     }
 
+    tStart = max(tBound0, 0.0);
     tEnd = tBound1;
     vec4 posSample = texture(posTex, inUV);
     if (posSample.w > 0.0)
     {
-        float tSurf = dot(posSample.xyz - camLocal, rd);
-        if (tSurf > 0.0)
+        float tRaster = dot(posSample.xyz - camLocal, rd);
+        if (tRaster > 0.0)
         {
             bool isPlanet = (posSample.w > 1.5);
             if (isPlanet)
             {
+                float tAnalytic = tRaster;
                 bool resolvedApprox = false;
                 bool requireExact = terrain_height_enabled();
 
@@ -244,13 +269,13 @@ bool compute_primary_ray_bounds_cloud_hybrid(vec3 camLocal,
                                                           terrainScale * CLOUD_TERRAIN_FAST_TOLERANCE_FRAC),
                                                       CLOUD_TERRAIN_FAST_TOLERANCE_MIN_M);
                                 float radialMismatch = abs(surfaceRadialLen - approxRadius);
-                                float depthMismatch = abs(tApprox - tSurf);
+                                float depthMismatch = abs(tApprox - tRaster);
                                 float viewCos = abs(dot(surfaceRadial / surfaceRadialLen, rd));
                                 if (radialMismatch <= tolerance &&
                                     depthMismatch <= tolerance &&
                                     viewCos >= CLOUD_TERRAIN_FAST_GRAZE_MIN_COS)
                                 {
-                                    tSurf = tApprox;
+                                    tAnalytic = tApprox;
                                     resolvedApprox = true;
                                     requireExact = false;
                                 }
@@ -261,10 +286,11 @@ bool compute_primary_ray_bounds_cloud_hybrid(vec3 camLocal,
 
                 if (requireExact)
                 {
-                    float terrainTSurf = tSurf;
-                    if (solve_planet_heightmap_surface_depth(camLocal, rd, center, planetRadius, terrainTSurf))
+                    float terrainTSurf = tRaster;
+                    if (solve_planet_heightmap_surface_depth(camLocal, rd, center, planetRadius, terrainTSurf) &&
+                        terrainTSurf > 0.0)
                     {
-                        tSurf = terrainTSurf;
+                        tAnalytic = terrainTSurf;
                         resolvedApprox = true;
                     }
                 }
@@ -282,18 +308,26 @@ bool compute_primary_ray_bounds_cloud_hybrid(vec3 camLocal,
                             if (tSphere > 0.0)
                             {
                                 float rSurf = length(posSample.xyz - center);
-                                if (rSurf < planetRadius) tSurf = min(tSurf, tSphere);
-                                if (abs(rSurf - planetRadius) <= snapM) tSurf = tSphere;
+                                if (rSurf < planetRadius || abs(rSurf - planetRadius) <= snapM)
+                                {
+                                    tAnalytic = min(tAnalytic, tSphere);
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            tEnd = min(tEnd, tSurf);
+                float rasterWeight = compute_planet_raster_depth_weight(camLocal, center, planetRadius);
+                float tResolved = mix(tAnalytic, min(tRaster, tAnalytic), rasterWeight);
+                float surfEps = max(1.0, 0.5 * max(pc.jitter_params.y, 1.0));
+                tEnd = min(tEnd, max(tStart, tResolved - surfEps));
+            }
+            else
+            {
+                tEnd = min(tEnd, tRaster);
+            }
         }
     }
 
-    tStart = max(tBound0, 0.0);
     return tEnd > tStart;
 }

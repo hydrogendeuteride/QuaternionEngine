@@ -96,11 +96,14 @@ void main() {
     // Expect UNORM normal map; support BC5 (RG) by reconstructing Z from XY.
     vec3 N = normalize(inNormal);
     vec3 Nw = N;
+    vec3 terrainGeomNormal = N;
+    vec3 terrainTerminatorNormal = N;
 
     if (isTerrain)
     {
-        Nw = terrain_shading_normal_from_height(inUV, inWorldPos, Nw);
-        Nw = apply_terrain_detail_normal(Nw, inUV);
+        terrainTerminatorNormal = terrain_shading_normal_from_height(inUV, inWorldPos, terrainGeomNormal);
+        Nw = terrainTerminatorNormal;
+        Nw = apply_terrain_detail_normal(Nw, inUV, PushConstants.normal_matrix);
     }
     else
     {
@@ -124,7 +127,7 @@ void main() {
     // Convention: materialData.extra[2].y > 0 => planet-style shadowing override.
     float gbuffer_flags = materialData.extra[2].y;
     vec3 Lsun = -sceneData.sunlightDirection.xyz;
-    float terrainSunVis = isTerrain ? terrain_terminator_visibility(inUV, Nw, inWorldPos, Lsun) : 1.0;
+    float terrainSunVis = isTerrain ? terrain_terminator_visibility(inUV, terrainTerminatorNormal, terrainGeomNormal, inWorldPos, Lsun) : 1.0;
     outPos = vec4(inWorldPos, encode_planet_gbuffer_pos_w(gbuffer_flags, waterMask, terrainSunVis));
     outNorm = vec4(Nw, roughness);
     outAlbedo = vec4(albedo, metallic);
