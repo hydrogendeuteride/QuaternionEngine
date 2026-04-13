@@ -1,6 +1,5 @@
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 
-#include "game/orbit/orbit_prediction_tuning.h"
 #include "game/orbit/orbit_plot_util.h"
 
 #include <algorithm>
@@ -232,102 +231,68 @@ namespace Game::PredictionDrawDetail
         emit_render_lod_segments(ctx, draw_config, perf, lod, color, dashed);
     }
 
+    namespace
+    {
+        PickWindow build_planned_window_from_policy(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
+                                                    const OrbitPredictionDrawConfig &draw_config,
+                                                    const PredictionWindowPolicyResult &policy,
+                                                    const double window_span_s)
+        {
+            PickWindow planned_window{};
+            if (traj_planned_segments.empty() || !policy.valid || !std::isfinite(policy.anchor_time_s))
+            {
+                return planned_window;
+            }
+
+            const double t0p = traj_planned_segments.front().t0_s;
+            const double t1p = traj_planned_segments.back().t0_s + traj_planned_segments.back().dt_s;
+            if (!(t1p > t0p))
+            {
+                return planned_window;
+            }
+
+            double t_plan_start = std::clamp(policy.anchor_time_s, t0p, t1p);
+            if (policy.anchor_is_future)
+            {
+                const double snapped_t_plan_start =
+                        std::clamp(snap_time_past_straddling_segment(traj_planned_segments, t_plan_start), t0p, t1p);
+                if (snapped_t_plan_start > (t_plan_start + draw_config.node_time_tolerance_s))
+                {
+                    t_plan_start = snapped_t_plan_start;
+                }
+            }
+
+            if (!(window_span_s > 0.0))
+            {
+                return planned_window;
+            }
+
+            const double t_plan_end = std::min(t_plan_start + window_span_s, t1p);
+            if (!(t_plan_end > t_plan_start))
+            {
+                return planned_window;
+            }
+
+            planned_window.valid = true;
+            planned_window.t0_s = t_plan_start;
+            planned_window.t1_s = t_plan_end;
+            planned_window.anchor_time_s = policy.anchor_time_s;
+            return planned_window;
+        }
+    } // namespace
+
+    PickWindow build_planned_draw_window(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
+                                         const OrbitPredictionDrawConfig &draw_config,
+                                         const PredictionWindowPolicyResult &policy)
+    {
+        return build_planned_window_from_policy(traj_planned_segments, draw_config, policy, policy.visual_window_s);
+    }
+
     PickWindow build_planned_pick_window(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
                                          const OrbitPredictionDrawConfig &draw_config,
-                                         const std::vector<ManeuverNode> &nodes,
-                                         const double now_s,
-                                         const double future_window_s,
-                                         const bool draw_future_segment,
-                                         const bool draw_full_orbit,
-                                         const double orbital_period_s)
+                                         const PredictionWindowPolicyResult &policy)
     {
-        PickWindow planned_window{};
-        if (traj_planned_segments.empty() || nodes.empty())
-        {
-            return planned_window;
-        }
-
-        const double t0p = traj_planned_segments.front().t0_s;
-        const double t1p = traj_planned_segments.back().t0_s + traj_planned_segments.back().dt_s;
-        if (!(t1p > t0p))
-        {
-            return planned_window;
-        }
-
-        double first_future_node_time_s = std::numeric_limits<double>::infinity();
-        double first_relevant_node_time_s = std::numeric_limits<double>::infinity();
-        for (const ManeuverNode &node : nodes)
-        {
-            if (!std::isfinite(node.time_s) ||
-                node.time_s < (t0p - draw_config.node_time_tolerance_s) ||
-                node.time_s > (t1p + draw_config.node_time_tolerance_s))
-            {
-                continue;
-            }
-
-            first_relevant_node_time_s = std::min(first_relevant_node_time_s, node.time_s);
-            if (node.time_s >= (now_s + draw_config.node_time_tolerance_s))
-            {
-                first_future_node_time_s = std::min(first_future_node_time_s, node.time_s);
-            }
-        }
-
-        const bool has_future_node = std::isfinite(first_future_node_time_s);
-        const bool has_relevant_node = std::isfinite(first_relevant_node_time_s);
-
-        double anchor_time_s = first_future_node_time_s;
-        if (!std::isfinite(anchor_time_s))
-        {
-            anchor_time_s = first_relevant_node_time_s;
-        }
-        if (!std::isfinite(anchor_time_s))
-        {
-            return planned_window;
-        }
-
-        double t_plan_start = t0p;
-        if (has_future_node)
-        {
-            t_plan_start = std::clamp(anchor_time_s, t0p, t1p);
-            const double snapped_t_plan_start =
-                    std::clamp(snap_time_past_straddling_segment(traj_planned_segments, t_plan_start), t0p, t1p);
-            if (snapped_t_plan_start > (t_plan_start + draw_config.node_time_tolerance_s))
-            {
-                t_plan_start = snapped_t_plan_start;
-            }
-        }
-        else if (has_relevant_node)
-        {
-            t_plan_start = std::clamp(now_s, t0p, t1p);
-        }
-
-        double t_plan_end = t_plan_start;
-        if (draw_future_segment && future_window_s > 0.0)
-        {
-            t_plan_end = std::min(t_plan_start + future_window_s, t1p);
-        }
-        else if (draw_full_orbit)
-        {
-            double t_full_end = t1p;
-            if (orbital_period_s > 0.0 && std::isfinite(orbital_period_s))
-            {
-                t_full_end = std::min(
-                        t_plan_start + (orbital_period_s * OrbitPredictionTuning::kFullOrbitDrawPeriodScale),
-                        t1p);
-            }
-            t_plan_end = t_full_end;
-        }
-
-        if (!(t_plan_end > t_plan_start))
-        {
-            return planned_window;
-        }
-
-        planned_window.valid = true;
-        planned_window.t0_s = t_plan_start;
-        planned_window.t1_s = t_plan_end;
-        planned_window.anchor_time_s = anchor_time_s;
-        return planned_window;
+        return build_planned_window_from_policy(traj_planned_segments, draw_config, policy, policy.pick_window_s);
     }
 
     std::size_t build_pick_segment_cache(const std::vector<orbitsim::TrajectorySegment> &traj_segments,

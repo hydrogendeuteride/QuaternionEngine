@@ -154,6 +154,15 @@ namespace Game
         double prediction_future_window_s(PredictionSubjectKey key) const;
         double maneuver_plan_preview_window_s() const;
         double maneuver_post_node_coverage_s() const;
+        PredictionTimeContext build_prediction_time_context(
+                PredictionSubjectKey key,
+                double sim_now_s,
+                double trajectory_t0_s = std::numeric_limits<double>::quiet_NaN(),
+                double trajectory_t1_s = std::numeric_limits<double>::quiet_NaN()) const;
+        PredictionWindowPolicyResult resolve_prediction_window_policy(
+                const PredictionTrackState *track,
+                const PredictionTimeContext &time_ctx,
+                bool with_maneuvers) const;
         double prediction_display_window_s(PredictionSubjectKey key,
                                            double now_s,
                                            bool with_maneuvers) const;
@@ -444,6 +453,7 @@ namespace Game
 
         bool _execute_node_armed{false};
         int _execute_node_id{-1};
+        double _maneuver_plan_epoch_s{std::numeric_limits<double>::quiet_NaN()};
 
         // Timing
         float _elapsed{0.0f};

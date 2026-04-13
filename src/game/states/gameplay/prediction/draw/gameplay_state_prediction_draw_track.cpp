@@ -161,32 +161,20 @@ namespace Game
                                     _prediction_draw_config.draw_planned_as_dashed);
         };
 
-        const double planned_draw_future_window_s = track_ctx.planned_visual_window_s;
-
         track_ctx.base_pick_window = {};
         track_ctx.planned_draw_window =
                 (track_ctx.active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty() &&
                  track_ctx.planned_window_segments && !track_ctx.planned_window_segments->empty())
-                        ? Draw::build_planned_pick_window(*track_ctx.planned_window_segments,
+                        ? Draw::build_planned_draw_window(*track_ctx.planned_window_segments,
                                                           _prediction_draw_config,
-                                                          _maneuver_state.nodes,
-                                                          track_ctx.now_s,
-                                                          planned_draw_future_window_s,
-                                                          _prediction_draw_future_segment,
-                                                          _prediction_draw_full_orbit,
-                                                          stable_cache.orbital_period_s)
+                                                          track_ctx.planned_window_policy)
                         : Draw::PickWindow{};
         track_ctx.planned_pick_window =
                 (track_ctx.active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty() &&
                  track_ctx.planned_window_segments && !track_ctx.planned_window_segments->empty())
                         ? Draw::build_planned_pick_window(*track_ctx.planned_window_segments,
                                                           _prediction_draw_config,
-                                                          _maneuver_state.nodes,
-                                                          track_ctx.now_s,
-                                                          track_ctx.planned_pick_window_s,
-                                                          _prediction_draw_future_segment,
-                                                          _prediction_draw_full_orbit,
-                                                          stable_cache.orbital_period_s)
+                                                          track_ctx.planned_window_policy)
                         : Draw::PickWindow{};
 
         if (_prediction_draw_full_orbit)

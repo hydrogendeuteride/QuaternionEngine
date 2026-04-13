@@ -344,6 +344,41 @@ namespace Game
         }
     };
 
+    enum class PredictionTimeAnchorKind : uint8_t
+    {
+        None = 0,
+        SimNow,
+        SelectedNode,
+        FirstFutureNode,
+        FirstRelevantNode,
+        PlanEpoch,
+    };
+
+    struct PredictionTimeContext
+    {
+        double sim_now_s{std::numeric_limits<double>::quiet_NaN()};
+        double plan_epoch_s{std::numeric_limits<double>::quiet_NaN()};
+        double trajectory_t0_s{std::numeric_limits<double>::quiet_NaN()};
+        double trajectory_t1_s{std::numeric_limits<double>::quiet_NaN()};
+        double selected_node_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double first_future_node_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double first_relevant_node_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double last_future_node_time_s{std::numeric_limits<double>::quiet_NaN()};
+        bool has_plan{false};
+    };
+
+    struct PredictionWindowPolicyResult
+    {
+        bool valid{false};
+        double request_window_s{0.0};
+        double visual_window_s{0.0};
+        double pick_window_s{0.0};
+        double exact_window_s{0.0};
+        double anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
+        PredictionTimeAnchorKind anchor_kind{PredictionTimeAnchorKind::None};
+        bool anchor_is_future{false};
+    };
+
     struct PredictionDragDebugTelemetry
     {
         using Clock = std::chrono::steady_clock;
