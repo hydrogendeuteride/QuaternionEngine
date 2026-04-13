@@ -56,17 +56,42 @@ bool terrain_height_enabled()
     return pc.terrain_params.x > 0.0 || pc.terrain_params.y > 0.0;
 }
 
-float sample_planet_height_face(int faceIndex, vec2 uv01)
+float compute_planet_height_sample_lod(vec3 camLocal, vec3 center, float planetRadius)
+{
+    float camAltitude = max(length(camLocal - center) - planetRadius, 0.0);
+    ivec2 baseSize = textureSize(planetHeightTexPX, 0);
+    int baseDim = max(max(baseSize.x, baseSize.y), 1);
+    float baseTexelMeters = max((2.0 * planetRadius) / float(baseDim), 1.0);
+    float targetMeters = max(baseTexelMeters, camAltitude * 0.05);
+    int maxLevel = max(textureQueryLevels(planetHeightTexPX) - 1, 0);
+    float lod = log2(max(targetMeters / baseTexelMeters, 1.0));
+    return clamp(lod, 0.0, float(maxLevel));
+}
+
+float compute_planet_raster_depth_weight(vec3 camLocal, vec3 center, float planetRadius)
+{
+    float camAltitude = max(length(camLocal - center) - planetRadius, 0.0);
+    float heightScale = max(pc.terrain_params.x, 0.0);
+    float fadeStart = max(heightScale * 8.0, planetRadius * 0.0025);
+    float fadeEnd = max(heightScale * 32.0, planetRadius * 0.02);
+    if (fadeEnd <= fadeStart)
+    {
+        return 1.0;
+    }
+    return 1.0 - smoothstep(fadeStart, fadeEnd, camAltitude);
+}
+
+float sample_planet_height_face(int faceIndex, vec2 uv01, float lod)
 {
     vec2 uv = clamp(uv01, vec2(0.0), vec2(1.0));
     switch (faceIndex)
     {
-        case 0: return textureLod(planetHeightTexPX, uv, 0.0).r;
-        case 1: return textureLod(planetHeightTexNX, uv, 0.0).r;
-        case 2: return textureLod(planetHeightTexPY, uv, 0.0).r;
-        case 3: return textureLod(planetHeightTexNY, uv, 0.0).r;
-        case 4: return textureLod(planetHeightTexPZ, uv, 0.0).r;
-        case 5: return textureLod(planetHeightTexNZ, uv, 0.0).r;
+        case 0: return textureLod(planetHeightTexPX, uv, lod).r;
+        case 1: return textureLod(planetHeightTexNX, uv, lod).r;
+        case 2: return textureLod(planetHeightTexPY, uv, lod).r;
+        case 3: return textureLod(planetHeightTexNY, uv, lod).r;
+        case 4: return textureLod(planetHeightTexPZ, uv, lod).r;
+        case 5: return textureLod(planetHeightTexNZ, uv, lod).r;
         default: return 0.0;
     }
 }
@@ -139,7 +164,8 @@ float sample_planet_surface_radius(vec3 p, vec3 center, float planetRadius)
     int faceIndex = 0;
     vec2 uv01 = vec2(0.5);
     cubesphere_direction_to_face_uv(radial / radialLen, faceIndex, uv01);
-    return planetRadius + heightOffset + sample_planet_height_face(faceIndex, uv01) * heightScale;
+    float lod = compute_planet_height_sample_lod(inCamLocal, center, planetRadius);
+    return planetRadius + heightOffset + sample_planet_height_face(faceIndex, uv01, lod) * heightScale;
 }
 
 float planet_surface_signed_distance(vec3 camLocal,
@@ -342,16 +368,18 @@ bool compute_ray_bounds(vec3 camLocal,
         return false;
     }
 
+    tStart = max(tBound0, 0.0);
     tEnd = tBound1;
     vec4 posSample = texture(posTex, inUV);
     if (posSample.w > 0.0)
     {
-        float tSurf = dot(posSample.xyz - camLocal, rd);
-        if (tSurf > 0.0)
+        float tRaster = dot(posSample.xyz - camLocal, rd);
+        if (tRaster > 0.0)
         {
             bool isPlanet = (posSample.w > 1.5);
             if (isPlanet)
             {
+                float tAnalytic = tRaster;
                 bool resolvedApprox = false;
                 bool requireExact = terrain_height_enabled();
 
@@ -374,13 +402,13 @@ bool compute_ray_bounds(vec3 camLocal,
                                                           terrainScale * CLOUD_TERRAIN_FAST_TOLERANCE_FRAC),
                                                       CLOUD_TERRAIN_FAST_TOLERANCE_MIN_M);
                                 float radialMismatch = abs(surfaceRadialLen - approxRadius);
-                                float depthMismatch = abs(tApprox - tSurf);
+                                float depthMismatch = abs(tApprox - tRaster);
                                 float viewCos = abs(dot(surfaceRadial / surfaceRadialLen, rd));
                                 if (radialMismatch <= tolerance &&
                                     depthMismatch <= tolerance &&
                                     viewCos >= CLOUD_TERRAIN_FAST_GRAZE_MIN_COS)
                                 {
-                                    tSurf = tApprox;
+                                    tAnalytic = tApprox;
                                     resolvedApprox = true;
                                     requireExact = false;
                                 }
@@ -391,10 +419,11 @@ bool compute_ray_bounds(vec3 camLocal,
 
                 if (requireExact)
                 {
-                    float terrainTSurf = tSurf;
-                    if (solve_planet_heightmap_surface_depth(camLocal, rd, center, planetRadius, terrainTSurf))
+                    float terrainTSurf = tRaster;
+                    if (solve_planet_heightmap_surface_depth(camLocal, rd, center, planetRadius, terrainTSurf) &&
+                        terrainTSurf > 0.0)
                     {
-                        tSurf = terrainTSurf;
+                        tAnalytic = terrainTSurf;
                         resolvedApprox = true;
                     }
                 }
@@ -412,18 +441,27 @@ bool compute_ray_bounds(vec3 camLocal,
                             if (tSphere > 0.0)
                             {
                                 float rSurf = length(posSample.xyz - center);
-                                if (rSurf < planetRadius) tSurf = min(tSurf, tSphere);
-                                if (abs(rSurf - planetRadius) <= snapM) tSurf = tSphere;
+                                if (rSurf < planetRadius || abs(rSurf - planetRadius) <= snapM)
+                                {
+                                    tAnalytic = min(tAnalytic, tSphere);
+                                }
                             }
                         }
                     }
                 }
+
+                float rasterWeight = compute_planet_raster_depth_weight(camLocal, center, planetRadius);
+                float tResolved = mix(tAnalytic, min(tRaster, tAnalytic), rasterWeight);
+                float surfEps = max(1.0, 0.5 * max(pc.jitter_params.y, 1.0));
+                tEnd = min(tEnd, max(tStart, tResolved - surfEps));
             }
-            tEnd = min(tEnd, tSurf);
+            else
+            {
+                tEnd = min(tEnd, tRaster);
+            }
         }
     }
 
-    tStart = max(tBound0, 0.0);
     return tEnd > tStart;
 }
 

@@ -154,6 +154,7 @@ MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, Materia
 
     matData.materialSet = descriptorAllocator.allocate(device, materialLayout);
 
+    DescriptorWriter writer;
     writer.clear();
     writer.write_buffer(0, resources.dataBuffer, sizeof(MaterialConstants), resources.dataBufferOffset,
                         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);

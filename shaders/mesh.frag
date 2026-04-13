@@ -3,6 +3,7 @@
 #version 450
 
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_buffer_reference : require
 #include "input_structures.glsl"
 #include "ibl_common.glsl"
 #include "lighting_common.glsl"
@@ -19,6 +20,25 @@ layout (location = 5) in vec3 inObjectPos;
 layout (location = 6) in vec3 inObjectNormal;
 
 layout (location = 0) out vec4 outFragColor;
+
+struct Vertex {
+    vec3 position; float uv_x;
+    vec3 normal;   float uv_y;
+    vec4 color;
+    vec4 tangent;
+};
+
+layout(buffer_reference, std430) readonly buffer VertexBuffer{
+    Vertex vertices[];
+};
+
+layout(push_constant) uniform constants
+{
+    mat4 render_matrix;
+    mat3 normal_matrix;
+    VertexBuffer vertexBuffer;
+    uint objectID;
+} PushConstants;
 
 vec3 getCameraLocalPosition() // Derived from sceneData.view (render-local coordinates).
 {
@@ -78,11 +98,14 @@ void main()
     // Expect UNORM normal map; support BC5 (RG) by reconstructing Z from XY.
     vec3 Nn = normalize(inNormal);
     vec3 N = Nn;
+    vec3 terrainGeomNormal = Nn;
+    vec3 terrainTerminatorNormal = Nn;
 
     if (isTerrain)
     {
-        N = terrain_shading_normal_from_height(inUV, inWorldPos, N);
-        N = apply_terrain_detail_normal(N, inUV);
+        terrainTerminatorNormal = terrain_shading_normal_from_height(inUV, inWorldPos, terrainGeomNormal);
+        N = terrainTerminatorNormal;
+        N = apply_terrain_detail_normal(N, inUV, PushConstants.normal_matrix);
     }
     else
     {
@@ -115,7 +138,7 @@ void main()
     }
     if (isTerrain)
     {
-        sunVis *= terrain_terminator_visibility(inUV, N, inWorldPos, Lsun);
+        sunVis *= terrain_terminator_visibility(inUV, terrainTerminatorNormal, terrainGeomNormal, inWorldPos, Lsun);
     }
     vec3 sunBRDF = evaluate_brdf(N, V, Lsun, albedo, roughness, metallic);
     vec3 direct = sunBRDF * sceneData.sunlightColor.rgb * sceneData.sunlightColor.a * sunVis;
