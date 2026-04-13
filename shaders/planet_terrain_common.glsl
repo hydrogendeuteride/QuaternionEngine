@@ -189,10 +189,13 @@ vec3 terrain_shading_normal_from_height(vec2 uv, vec3 worldPos, vec3 fallbackNor
         n = -n;
     }
 
-    return normalize(mix(fallback, n, edgeFade));
+    float agreement = clamp(dot(n, fallback), -1.0, 1.0);
+    float geometryBias = smoothstep(0.15, 0.55, 1.0 - agreement);
+    vec3 resolved = normalize(mix(n, fallback, geometryBias));
+    return normalize(mix(fallback, resolved, edgeFade));
 }
 
-vec3 apply_terrain_detail_normal(vec3 baseNormal, vec2 uv)
+vec3 apply_terrain_detail_normal(vec3 baseNormal, vec2 uv, mat3 normalMatrix)
 {
     if (!terrain_material_enabled())
     {
@@ -205,26 +208,34 @@ vec3 apply_terrain_detail_normal(vec3 baseNormal, vec2 uv)
         return baseNormal;
     }
 
-    vec3 detail_normal = texture(normalMap, uv).xyz * 2.0 - 1.0;
-    float len2 = dot(detail_normal, detail_normal);
+    vec3 detail_normal_obj = texture(normalMap, uv).xyz * 2.0 - 1.0;
+    float len2 = dot(detail_normal_obj, detail_normal_obj);
     if (len2 <= 1e-5)
     {
         return baseNormal;
     }
 
-    detail_normal *= inversesqrt(len2);
-    vec3 mixed_normal = normalize(mix(baseNormal, detail_normal, strength));
+    detail_normal_obj *= inversesqrt(len2);
+    vec3 detail_normal_ws = normalize(normalMatrix * detail_normal_obj);
+    vec3 mixed_normal = normalize(mix(baseNormal, detail_normal_ws, strength));
     return (dot(mixed_normal, baseNormal) > 0.0) ? mixed_normal : baseNormal;
 }
 
-float terrain_terminator_visibility(vec2 uv, vec3 shadedNormal, vec3 worldPos, vec3 sunLocalDir)
+float terrain_terminator_visibility(vec2 uv,
+                                    vec3 shadedNormal,
+                                    vec3 geometryNormal,
+                                    vec3 worldPos,
+                                    vec3 sunLocalDir)
 {
     if (!terrain_material_enabled() || !terrain_terminator_enabled())
     {
         return 1.0;
     }
 
-    float NdotL = dot(shadedNormal, sunLocalDir);
+    vec3 shadedN = normalize(shadedNormal);
+    vec3 geomN = normalize(geometryNormal);
+
+    float NdotL = dot(geomN, sunLocalDir);
     if (NdotL >= 0.35)
     {
         return 1.0;
@@ -299,7 +310,9 @@ float terrain_terminator_visibility(vec2 uv, vec3 shadedNormal, vec3 worldPos, v
     }
 
     float visibility = 1.0 - smoothstep(sunSlope - 0.02, sunSlope + 0.02, maxSlope);
-    return mix(1.0, clamp(visibility, 0.0, 1.0), edgeFade);
+    float agreement = clamp(dot(shadedN, geomN), 0.0, 1.0);
+    float mismatchFade = 1.0 - smoothstep(0.15, 0.45, 1.0 - agreement);
+    return mix(1.0, clamp(visibility, 0.0, 1.0), edgeFade * mismatchFade);
 }
 
 #endif
