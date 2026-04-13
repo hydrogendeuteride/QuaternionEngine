@@ -72,6 +72,12 @@ struct GLTFLoadCallbacks
     std::function<bool()> is_cancelled;     // optional, may be null
 };
 
+enum class GLTFLoadMode : uint8_t
+{
+    Full,
+    ColliderCPUOnly
+};
+
 struct LoadedGLTF : public IRenderable
 {
     // storage for all the data on a given gltf file
@@ -209,4 +215,5 @@ private:
 
 std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
                                                      std::string_view filePath,
-                                                     const GLTFLoadCallbacks *cb = nullptr);
+                                                     const GLTFLoadCallbacks *cb = nullptr,
+                                                     GLTFLoadMode mode = GLTFLoadMode::Full);

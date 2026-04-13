@@ -41,8 +41,6 @@ struct GLTFMetallic_Roughness
         uint32_t dataBufferOffset;
     };
 
-    DescriptorWriter writer;
-
     void build_pipelines(VulkanEngine *engine);
 
     void clear_resources(VkDevice device) const;

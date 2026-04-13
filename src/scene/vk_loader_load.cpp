@@ -578,6 +578,7 @@ bool load_meshes(VulkanEngine *engine,
                  const fastgltf::Asset &gltf,
                  const ProgressReporter &progress,
                  const std::vector<std::shared_ptr<GLTFMaterial> > &materials,
+                 const GLTFLoadMode mode,
                  std::vector<std::shared_ptr<MeshAsset> > &meshes)
 {
     std::vector<uint32_t> indices;
@@ -718,9 +719,22 @@ bool load_meshes(VulkanEngine *engine,
                                               primitive_vertex_count);
             }
 
-            new_surface.material = primitive.materialIndex.has_value()
-                                       ? materials[primitive.materialIndex.value()]
-                                       : materials[0];
+            if (!materials.empty())
+            {
+                const size_t material_index = primitive.materialIndex.value_or(0);
+                if (material_index < materials.size())
+                {
+                    new_surface.material = materials[material_index];
+                }
+                else
+                {
+                    new_surface.material = materials[0];
+                }
+            }
+            else
+            {
+                new_surface.material.reset();
+            }
 
             if (new_surface.count > 0)
             {
@@ -759,7 +773,10 @@ bool load_meshes(VulkanEngine *engine,
             new_mesh->bvh = build_mesh_bvh(*new_mesh, vertex_span, index_span);
         }
 
-        new_mesh->meshBuffers = engine->_resourceManager->uploadMesh(indices, vertices);
+        if (mode != GLTFLoadMode::ColliderCPUOnly)
+        {
+            new_mesh->meshBuffers = engine->_resourceManager->uploadMesh(indices, vertices);
+        }
 
         auto shrink_if_huge = [](auto &vec, size_t elem_size_bytes)
         {
@@ -1010,7 +1027,8 @@ void finalize_loaded_gltf(LoadedGLTF &file, fastgltf::Asset &gltf, const Progres
 
 std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
                                                      std::string_view filePath,
-                                                     const GLTFLoadCallbacks *cb)
+                                                     const GLTFLoadCallbacks *cb,
+                                                     GLTFLoadMode mode)
 {
     Logger::info("[GLTF] loadGltf begin: '{}'", filePath);
 
@@ -1027,21 +1045,29 @@ std::optional<std::shared_ptr<LoadedGLTF> > loadGltf(VulkanEngine *engine,
 
     fastgltf::Asset gltf = std::move(*gltf_result);
     ProgressReporter progress{cb};
-    initialize_material_descriptor_pool(engine, file, gltf, filePath);
-    progress.report(0.1f);
-    load_samplers(engine, file, gltf);
-    progress.report(0.2f);
+    if (mode != GLTFLoadMode::ColliderCPUOnly)
+    {
+        initialize_material_descriptor_pool(engine, file, gltf, filePath);
+        progress.report(0.1f);
+        load_samplers(engine, file, gltf);
+        progress.report(0.2f);
+    }
+    else
+    {
+        progress.report(0.2f);
+    }
 
     std::vector<std::shared_ptr<MeshAsset> > meshes;
     std::vector<std::shared_ptr<Node> > nodes;
     std::vector<std::shared_ptr<GLTFMaterial> > materials;
 
     const std::filesystem::path base_dir = path.parent_path();
-    if (!load_materials(engine, file, gltf, base_dir, progress, materials))
+    if (mode != GLTFLoadMode::ColliderCPUOnly &&
+        !load_materials(engine, file, gltf, base_dir, progress, materials))
     {
         return {};
     }
-    if (!load_meshes(engine, file, gltf, progress, materials, meshes))
+    if (!load_meshes(engine, file, gltf, progress, materials, mode, meshes))
     {
         return {};
     }
