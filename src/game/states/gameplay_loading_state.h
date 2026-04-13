@@ -85,6 +85,7 @@ namespace Game
         bool _jobs_finalized{false};
         bool _failed{false};
         bool _enter_gameplay_on_exit{false};
+        bool _environment_warmup_started{false};
         bool _ibl_warmup_requested{false};
     };
 } // namespace Game

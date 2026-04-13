@@ -17,12 +17,18 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <mutex>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
 
 namespace Game
 {
+    namespace
+    {
+        std::mutex g_gltf_preload_mutex;
+    }
+
     GameplayLoadingState::GameplayLoadingState(std::string scenario_asset_path)
         : _scenario_asset_path(scenario_asset_path.empty()
                                    ? std::string(kDefaultScenarioAsset)
@@ -50,6 +56,7 @@ namespace Game
         _jobs_finalized = false;
         _failed = false;
         _enter_gameplay_on_exit = false;
+        _environment_warmup_started = false;
         _ibl_warmup_requested = false;
 
         clear_preloaded_gltf_scenes();
@@ -74,7 +81,6 @@ namespace Game
         }
 
         start_preload_jobs(ctx);
-        start_environment_warmup(ctx);
     }
 
     void GameplayLoadingState::on_exit(GameStateContext &ctx)
@@ -92,8 +98,6 @@ namespace Game
     void GameplayLoadingState::on_update(GameStateContext &ctx, float dt)
     {
         _elapsed += dt;
-        update_environment_warmup(ctx);
-        _progress = compute_progress();
 
         if (ctx.input && ctx.input->key_pressed(Key::Escape))
         {
@@ -106,6 +110,14 @@ namespace Game
         {
             finalize_preload_jobs();
         }
+
+        if (!_failed && _jobs_finalized && !_environment_warmup_started)
+        {
+            start_environment_warmup(ctx);
+        }
+
+        update_environment_warmup(ctx);
+        _progress = compute_progress();
 
         if (!_failed &&
             _jobs_finalized &&
@@ -231,7 +243,13 @@ namespace Game
                     return cancelled->load(std::memory_order_acquire);
                 };
 
-                auto loaded = assets->loadGLTF(job_ptr->asset_path, &callbacks);
+                // Gameplay preload reuses renderer-owned caches and descriptor paths.
+                // Keep glTF preloads serialized to avoid cross-thread mutation races there.
+                std::optional<std::shared_ptr<LoadedGLTF>> loaded;
+                {
+                    std::lock_guard<std::mutex> lock(g_gltf_preload_mutex);
+                    loaded = assets->loadGLTF(job_ptr->asset_path, &callbacks);
+                }
                 if (job_ptr->cancelled->load(std::memory_order_acquire))
                 {
                     job_ptr->error = "Loading cancelled.";
@@ -316,9 +334,16 @@ namespace Game
 
     void GameplayLoadingState::start_environment_warmup(GameStateContext &ctx)
     {
+        if (_environment_warmup_started)
+        {
+            return;
+        }
+        _environment_warmup_started = true;
+
         VulkanEngine *renderer = ctx.renderer;
         if (!renderer || !renderer->_assetManager)
         {
+            _environment_warmup_progress = 1.0f;
             return;
         }
 
@@ -478,19 +503,38 @@ namespace Game
         {
             const uint32_t frame_index = renderer->_context->frameIndex;
             size_t resident_count = 0;
+            size_t settled_count = 0;
+            size_t failed_count = 0;
 
             for (const uint32_t handle : _environment_texture_handles)
             {
                 textures->markUsed(handle, frame_index);
-                if (textures->state(handle) == TextureCache::EntryState::Resident)
+                switch (textures->state(handle))
                 {
+                case TextureCache::EntryState::Resident:
                     ++resident_count;
+                    ++settled_count;
+                    break;
+                case TextureCache::EntryState::Evicted:
+                    ++failed_count;
+                    ++settled_count;
+                    break;
+                case TextureCache::EntryState::Loading:
+                case TextureCache::EntryState::Unloaded:
+                default:
+                    break;
                 }
             }
 
             _environment_warmup_progress =
-                    static_cast<float>(resident_count) /
+                    static_cast<float>(settled_count) /
                     static_cast<float>(_environment_texture_handles.size());
+
+            if (failed_count > 0 && _warning_text.find("environment texture") == std::string::npos)
+            {
+                _warning_text =
+                        "Some environment textures failed to warm and will use fallback resources.";
+            }
         }
         else if (_environment_texture_handles.empty())
         {
