@@ -311,8 +311,7 @@ TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheExtendsVisualWindowBeyon
     ASSERT_TRUE(track.preview_anchor.valid);
     EXPECT_DOUBLE_EQ(track.preview_anchor.visual_window_s,
                      (2.0 * Game::OrbitPredictionTuning::kSecondsPerDay) - 140.0);
-    EXPECT_DOUBLE_EQ(track.preview_anchor.exact_window_s,
-                     Game::OrbitPredictionTuning::kDragInteractivePreviewWindowMaxS);
+    EXPECT_DOUBLE_EQ(track.preview_anchor.exact_window_s, 300.0);
     EXPECT_GT(track.preview_anchor.visual_window_s, track.preview_anchor.exact_window_s);
     EXPECT_DOUBLE_EQ(track.preview_anchor.request_window_s,
                      2.0 * Game::OrbitPredictionTuning::kSecondsPerDay);
@@ -413,16 +412,16 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestKeepsUpstreamManeuversBe
     track.key = state._prediction_selection.active_subject;
     track.supports_maneuvers = true;
 
-    const bool requested = state.request_orbiter_prediction_async(track,
+    Game::OrbitPredictionService::Request queued{};
+    const bool requested = state.build_orbiter_prediction_request(track,
                                                                   WorldVec3(7'000'000.0, 0.0, 0.0),
                                                                   glm::dvec3(0.0, 7'500.0, 0.0),
                                                                   100.0,
                                                                   false,
-                                                                  true);
+                                                                  true,
+                                                                  queued);
 
     ASSERT_TRUE(requested);
-    ASSERT_EQ(state._prediction_service._pending_jobs.size(), 1u);
-    const auto &queued = state._prediction_service._pending_jobs.front().request;
     ASSERT_EQ(queued.solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
     ASSERT_EQ(queued.maneuver_impulses.size(), 2u);
     EXPECT_EQ(queued.maneuver_impulses[0].node_id, first.id);
@@ -457,20 +456,76 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestKeepsDownstreamManeuvers
     track.key = state._prediction_selection.active_subject;
     track.supports_maneuvers = true;
 
-    const bool requested = state.request_orbiter_prediction_async(track,
+    Game::OrbitPredictionService::Request queued{};
+    const bool requested = state.build_orbiter_prediction_request(track,
                                                                   WorldVec3(7'000'000.0, 0.0, 0.0),
                                                                   glm::dvec3(0.0, 7'500.0, 0.0),
                                                                   100.0,
                                                                   false,
-                                                                  true);
+                                                                  true,
+                                                                  queued);
 
     ASSERT_TRUE(requested);
-    ASSERT_EQ(state._prediction_service._pending_jobs.size(), 1u);
-    const auto &queued = state._prediction_service._pending_jobs.front().request;
     ASSERT_EQ(queued.solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
     ASSERT_EQ(queued.maneuver_impulses.size(), 2u);
     EXPECT_EQ(queued.maneuver_impulses[0].node_id, anchor.id);
     EXPECT_EQ(queued.maneuver_impulses[1].node_id, downstream.id);
+}
+
+TEST(GameplayPredictionManeuverTests, FastPreviewRequestUsesSelectedNodePreviewForAnchorState)
+{
+    Game::GameplayState state{};
+    state._orbitsim = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbitsim);
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+    state._maneuver_plan_windows.preview_window_s = 180.0;
+    state._maneuver_plan_windows.solve_margin_s = 300.0;
+    state._maneuver_plan_live_preview_active = true;
+    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+
+    Game::GameplayState::ManeuverNode upstream{};
+    upstream.id = 1;
+    upstream.time_s = 150.0;
+    state._maneuver_state.nodes.push_back(upstream);
+
+    Game::GameplayState::ManeuverNode selected{};
+    selected.id = 2;
+    selected.time_s = 240.0;
+    state._maneuver_state.selected_node_id = selected.id;
+    state._maneuver_state.nodes.push_back(selected);
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+    track.cache.trajectory_inertial = {
+            make_sample(100.0, 7'000'000.0),
+            make_sample(240.0, 7'100'000.0),
+    };
+    track.cache.maneuver_previews.push_back(Game::OrbitPredictionService::ManeuverNodePreview{
+            .node_id = selected.id,
+            .t_s = selected.time_s,
+            .valid = true,
+            .inertial_position_m = glm::dvec3(7'250'000.0, 123.0, 0.0),
+            .inertial_velocity_mps = glm::dvec3(0.0, 7'650.0, 5.0),
+    });
+
+    Game::OrbitPredictionService::Request request{};
+    const bool built = state.build_orbiter_prediction_request(track,
+                                                              WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                              glm::dvec3(0.0, 7'500.0, 0.0),
+                                                              100.0,
+                                                              false,
+                                                              true,
+                                                              request);
+
+    ASSERT_TRUE(built);
+    ASSERT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
+    ASSERT_TRUE(request.preview_patch.active);
+    ASSERT_TRUE(request.preview_patch.anchor_state_valid);
+    EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.position_m.x, 7'250'000.0);
+    EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.position_m.y, 123.0);
+    EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.velocity_mps.y, 7'650.0);
+    EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.velocity_mps.z, 5.0);
 }
 
 TEST(GameplayPredictionManeuverTests, ShouldRebuildPredictionTrackWhenCoverageFallsShort)

@@ -3,9 +3,19 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 namespace Game
 {
+    namespace
+    {
+        bool derived_requests_share_stage(const OrbitPredictionDerivedService::Request &a,
+                                          const OrbitPredictionDerivedService::Request &b)
+        {
+            return a.solver_result.publish_stage == b.solver_result.publish_stage;
+        }
+    } // namespace
+
     OrbitPredictionDerivedService::OrbitPredictionDerivedService()
     {
         const unsigned int hw_threads = std::max(1u, std::thread::hardware_concurrency());
@@ -59,6 +69,12 @@ namespace Game
 
                 if (it->generation_id == request.generation_id)
                 {
+                    if (!derived_requests_share_stage(it->request, request))
+                    {
+                        ++it;
+                        continue;
+                    }
+
                     it->request_epoch = _request_epoch;
                     it->generation_id = request.generation_id;
                     it->request = std::move(request);
@@ -154,7 +170,12 @@ namespace Game
         Request &request = job.request;
         OrbitPredictionService::Result &solver = request.solver_result;
         out.solve_quality = solver.solve_quality;
-        const bool build_planned_render_curve = true;
+        out.publish_stage = solver.publish_stage;
+        const bool preview_stage = solver.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
+        const bool preview_streaming_stage =
+                preview_stage &&
+                solver.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming;
+        const bool build_planned_render_curve = !preview_stage;
         if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
         {
             out.diagnostics.status = PredictionDerivedStatus::MissingSolverData;
@@ -228,11 +249,14 @@ namespace Game
             out.diagnostics.frame_base = request.reused_base_frame_diagnostics;
         }
 
-        PredictionCacheInternal::rebuild_prediction_metrics(
-                cache,
-                request.sim_config,
-                request.analysis_body_id,
-                cancel_requested);
+        if (!preview_stage)
+        {
+            PredictionCacheInternal::rebuild_prediction_metrics(
+                    cache,
+                    request.sim_config,
+                    request.analysis_body_id,
+                    cancel_requested);
+        }
 
         if (cancel_requested())
         {
@@ -240,6 +264,37 @@ namespace Game
             out.timings.total_ms =
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - build_start_tp).count();
             return out;
+        }
+
+        if (!solver.published_chunks.empty())
+        {
+            std::vector<double> node_times_s;
+            node_times_s.reserve(solver.maneuver_previews.size());
+            for (const OrbitPredictionService::ManeuverNodePreview &preview : solver.maneuver_previews)
+            {
+                if (std::isfinite(preview.t_s))
+                {
+                    node_times_s.push_back(preview.t_s);
+                }
+            }
+
+            PredictionChunkAssembly chunk_assembly{};
+            if (PredictionCacheInternal::rebuild_prediction_patch_chunks(chunk_assembly,
+                                                                         cache,
+                                                                         solver.published_chunks,
+                                                                         job.generation_id,
+                                                                         resolved_frame_spec,
+                                                                         request.display_frame_key,
+                                                                         request.display_frame_revision,
+                                                                         cancel_requested,
+                                                                         node_times_s))
+            {
+                out.chunk_assembly = std::move(chunk_assembly);
+                PredictionCacheInternal::flatten_chunk_assembly_to_cache(
+                        cache,
+                        out.chunk_assembly,
+                        !preview_streaming_stage && build_planned_render_curve);
+            }
         }
 
         out.cache = std::move(cache);

@@ -80,7 +80,7 @@ TEST(OrbitPredictionPlannerTests, BuildsStableChunksForReferenceHorizons)
             Game::build_prediction_solve_plan(
                     make_request(10.0, 180.0 * Game::OrbitPredictionTuning::kSecondsPerDay));
     ASSERT_TRUE(plan_180d.valid);
-    EXPECT_EQ(plan_180d.chunks.size(), 69u);
+    EXPECT_EQ(plan_180d.chunks.size(), 141u);
     EXPECT_DOUBLE_EQ(plan_180d.t0_s, 10.0);
     EXPECT_DOUBLE_EQ(plan_180d.t1_s, 10.0 + 180.0 * Game::OrbitPredictionTuning::kSecondsPerDay);
     EXPECT_EQ(plan_180d.chunks.front().profile_id, Game::OrbitPredictionService::PredictionProfileId::Near);
@@ -90,14 +90,14 @@ TEST(OrbitPredictionPlannerTests, BuildsStableChunksForReferenceHorizons)
             Game::build_prediction_solve_plan(
                     make_request(20.0, 5.0 * Game::OrbitPredictionTuning::kSecondsPerYear));
     ASSERT_TRUE(plan_5y.valid);
-    EXPECT_EQ(plan_5y.chunks.size(), 101u);
+    EXPECT_EQ(plan_5y.chunks.size(), 233u);
     EXPECT_EQ(plan_5y.chunks.back().profile_id, Game::OrbitPredictionService::PredictionProfileId::Tail);
 
     const Game::OrbitPredictionService::PredictionSolvePlan plan_20y =
             Game::build_prediction_solve_plan(
                     make_request(30.0, 20.0 * Game::OrbitPredictionTuning::kSecondsPerYear));
     ASSERT_TRUE(plan_20y.valid);
-    EXPECT_EQ(plan_20y.chunks.size(), 161u);
+    EXPECT_EQ(plan_20y.chunks.size(), 415u);
     EXPECT_EQ(plan_20y.chunks.back().profile_id, Game::OrbitPredictionService::PredictionProfileId::Tail);
 }
 
@@ -151,6 +151,36 @@ TEST(OrbitPredictionPlannerTests, InsertsManeuverAndPreviewBoundaries)
     EXPECT_NE((exact_chunks[1].boundary_flags & static_cast<uint32_t>(Flags::PreviewChunk)), 0u);
     EXPECT_FALSE(exact_chunks[0].allow_reuse);
     EXPECT_FALSE(exact_chunks[1].allow_reuse);
+
+    std::size_t preview_chunk_count = 0u;
+    std::size_t preview_anchor_count = 0u;
+    for (const Game::OrbitPredictionService::PredictionChunkPlan &chunk : plan.chunks)
+    {
+        const bool has_preview_chunk_flag =
+                (chunk.boundary_flags & static_cast<uint32_t>(Flags::PreviewChunk)) != 0u;
+        const bool has_preview_anchor_flag =
+                (chunk.boundary_flags & static_cast<uint32_t>(Flags::PreviewAnchor)) != 0u;
+
+        preview_chunk_count += has_preview_chunk_flag ? 1u : 0u;
+        preview_anchor_count += has_preview_anchor_flag ? 1u : 0u;
+
+        if (has_preview_chunk_flag)
+        {
+            EXPECT_EQ(chunk.profile_id, Profile::Exact);
+            EXPECT_GE(chunk.t0_s + kEpsilonS, request.preview_patch.anchor_time_s);
+            EXPECT_LE(chunk.t1_s,
+                      request.preview_patch.anchor_time_s + (2.0 * request.preview_patch.exact_window_s) + kEpsilonS);
+        }
+
+        if (std::abs(chunk.t1_s - request.preview_patch.anchor_time_s) <= kEpsilonS)
+        {
+            EXPECT_FALSE(has_preview_chunk_flag);
+            EXPECT_FALSE(has_preview_anchor_flag);
+        }
+    }
+
+    EXPECT_EQ(preview_chunk_count, exact_chunks.size());
+    EXPECT_EQ(preview_anchor_count, 1u);
 }
 
 TEST(OrbitPredictionPlannerTests, ResolvesChunkAdaptiveOptionsPerChunkClass)

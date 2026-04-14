@@ -82,6 +82,8 @@ namespace Game
             {
                 case OrbitPredictionService::SolveQuality::Full:
                     return "Full";
+                case OrbitPredictionService::SolveQuality::FastPreview:
+                    return "FastPreview";
             }
 
             return "Unknown";
@@ -167,6 +169,7 @@ namespace Game
         s.prediction_thrust_refresh_s = _prediction_thrust_refresh_s;
         s.prediction_sampling_policy = _prediction_sampling_policy;
         s.maneuver_plan_horizon = _maneuver_plan_horizon;
+        s.maneuver_plan_windows = _maneuver_plan_windows;
         s.orbit_plot_budget = _orbit_plot_budget;
         s.debug_draw_enabled = _debug_draw_enabled;
         s.runtime_orbiter_rails_enabled = _runtime_orbiter_rails_enabled;
@@ -187,6 +190,7 @@ namespace Game
         _prediction_thrust_refresh_s = s.prediction_thrust_refresh_s;
         _prediction_sampling_policy = s.prediction_sampling_policy;
         _maneuver_plan_horizon = s.maneuver_plan_horizon;
+        _maneuver_plan_windows = s.maneuver_plan_windows;
         _orbit_plot_budget = s.orbit_plot_budget;
         _debug_draw_enabled = s.debug_draw_enabled;
         _runtime_orbiter_rails_enabled = s.runtime_orbiter_rails_enabled;

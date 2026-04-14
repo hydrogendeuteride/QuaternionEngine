@@ -51,9 +51,12 @@ namespace Game
             bool valid{false};
             bool base_frame_reused{false};
             OrbitPredictionService::SolveQuality solve_quality{OrbitPredictionService::SolveQuality::Full};
+            OrbitPredictionService::PublishStage publish_stage{
+                    OrbitPredictionService::PublishStage::PreviewFinalizing};
             TimingStats timings{};
             OrbitPredictionDerivedDiagnostics diagnostics{};
             OrbitPredictionCache cache{};
+            PredictionChunkAssembly chunk_assembly{};
         };
 
         OrbitPredictionDerivedService();
