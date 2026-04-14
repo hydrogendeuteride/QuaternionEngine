@@ -3,6 +3,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -90,10 +91,21 @@ namespace Game
                         root,
                         "prediction_future_window_celestial_s",
                         s.prediction_sampling_policy.celestial_min_window_s));
+        const double legacy_maneuver_preview_window_s = json_opt<double>(
+                root,
+                "maneuver_plan_preview_window_s",
+                json_opt<double>(
+                        root,
+                        "prediction_future_window_planned_s",
+                        s.maneuver_plan_horizon.horizon_s));
+        const double legacy_maneuver_solve_margin_s = json_opt<double>(
+                root,
+                "maneuver_plan_solve_margin_s",
+                legacy_maneuver_preview_window_s);
         s.maneuver_plan_horizon.horizon_s = json_opt<double>(
                 root,
                 "maneuver_plan_horizon_s",
-                s.maneuver_plan_horizon.horizon_s);
+                std::max(legacy_maneuver_preview_window_s, legacy_maneuver_solve_margin_s));
 
         s.orbit_plot_budget.render_error_px = json_opt<double>(
                 root,
@@ -168,6 +180,9 @@ namespace Game
             root["orbit_plot_budget_pick_frustum_margin_ratio"] = s.orbit_plot_budget.pick_frustum_margin_ratio;
 
             // Legacy aliases kept for compatibility with older local settings files/builds.
+            root["maneuver_plan_preview_window_s"] = s.maneuver_plan_horizon.horizon_s;
+            root["maneuver_plan_solve_margin_s"] = s.maneuver_plan_horizon.horizon_s;
+            root["prediction_future_window_planned_s"] = s.maneuver_plan_horizon.horizon_s;
             root["orbit_plot_render_error_px"] = s.orbit_plot_budget.render_error_px;
             root["orbit_plot_render_max_segments_cpu"] = s.orbit_plot_budget.render_max_segments_cpu;
             root["orbit_plot_pick_max_segments"] = s.orbit_plot_budget.pick_max_segments;
