@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <string>
 
 namespace Game
 {
@@ -51,6 +52,46 @@ namespace Game
             };
             dl->AddConvexPolyFilled(pts, 4, col);
         }
+
+        std::string format_t_plus_label(const double delta_s)
+        {
+            if (!std::isfinite(delta_s))
+            {
+                return "T+n/a";
+            }
+
+            const long long rounded_seconds = static_cast<long long>(std::llround(delta_s));
+            const bool negative = rounded_seconds < 0;
+            const long long total_seconds = negative ? -rounded_seconds : rounded_seconds;
+            const long long days = total_seconds / 86'400;
+            const long long hours = (total_seconds / 3'600) % 24;
+            const long long minutes = (total_seconds / 60) % 60;
+            const long long seconds = total_seconds % 60;
+
+            char buffer[64];
+            if (days > 0)
+            {
+                std::snprintf(buffer,
+                              sizeof(buffer),
+                              "T%c%lldd %02lld:%02lld:%02lld",
+                              negative ? '-' : '+',
+                              days,
+                              hours,
+                              minutes,
+                              seconds);
+            }
+            else
+            {
+                std::snprintf(buffer,
+                              sizeof(buffer),
+                              "T%c%02lld:%02lld:%02lld",
+                              negative ? '-' : '+',
+                              hours,
+                              minutes,
+                              seconds);
+            }
+            return buffer;
+        }
     } // namespace
 
     void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
@@ -71,6 +112,9 @@ namespace Game
         };
         const auto from_t_plus_s = [&time_ctx](const double t_plus_s) {
             return time_ctx.sim_now_s + std::max(0.0, t_plus_s);
+        };
+        const auto format_t_plus_from_time_s = [&to_t_plus_s](const double absolute_time_s) {
+            return format_t_plus_label(to_t_plus_s(absolute_time_s));
         };
         const auto default_node_primary_body_id = [&]() -> orbitsim::BodyId {
             if (_prediction_analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
@@ -129,10 +173,6 @@ namespace Game
         }
 
         auto add_maneuver_node_at_time = [&](const double time_s) {
-            if (_maneuver_state.nodes.empty())
-            {
-                _maneuver_plan_epoch_s = time_ctx.sim_now_s;
-            }
             ManeuverNode n{};
             n.id = _maneuver_state.next_node_id++;
             n.time_s = time_s;
@@ -157,7 +197,6 @@ namespace Game
         {
             _maneuver_state.nodes.clear();
             _maneuver_state.selected_node_id = -1;
-            _maneuver_plan_epoch_s = std::numeric_limits<double>::quiet_NaN();
             _execute_node_armed = false;
             _execute_node_id = -1;
             _maneuver_gizmo_interaction = {};
@@ -173,17 +212,10 @@ namespace Game
         }
 
         ImGui::SeparatorText("Planner Preview");
-        float preview_window_s = static_cast<float>(_maneuver_plan_windows.preview_window_s);
-        if (ImGui::DragFloat("Plan Preview (s)", &preview_window_s, 10.0f, 0.0f, 15'552'000.0f, "%.0f"))
+        float plan_horizon_s = static_cast<float>(_maneuver_plan_horizon.horizon_s);
+        if (ImGui::DragFloat("Plan Horizon (s)", &plan_horizon_s, 10.0f, 0.0f, 15'552'000.0f, "%.0f"))
         {
-            _maneuver_plan_windows.preview_window_s = static_cast<double>(std::max(0.0f, preview_window_s));
-            mark_maneuver_plan_dirty();
-        }
-
-        float solve_margin_s = static_cast<float>(_maneuver_plan_windows.solve_margin_s);
-        if (ImGui::DragFloat("Plan Solve Margin (s)", &solve_margin_s, 10.0f, 0.0f, 15'552'000.0f, "%.0f"))
-        {
-            _maneuver_plan_windows.solve_margin_s = static_cast<double>(std::max(0.0f, solve_margin_s));
+            _maneuver_plan_horizon.horizon_s = static_cast<double>(std::max(0.0f, plan_horizon_s));
             mark_maneuver_plan_dirty();
         }
 
@@ -238,7 +270,7 @@ namespace Game
             {
                 const double requested_window_s = std::max(
                         prediction_required_window_s(*player_track, now_s, true),
-                        maneuver_plan_preview_window_s());
+                        maneuver_plan_horizon_s());
                 float progress = 1.0f;
                 if (solver_pending || derived_pending)
                 {
@@ -341,9 +373,9 @@ namespace Game
 
         if (_warp_to_time_active)
         {
-            const double remain_s = to_t_plus_s(_warp_to_time_target_s);
+            const std::string warp_label = format_t_plus_from_time_s(_warp_to_time_target_s);
             ImGui::SameLine();
-            ImGui::Text("Warping: T%+.0fs", remain_s);
+            ImGui::Text("Warping: %s", warp_label.c_str());
         }
 
         const double t_start_s = time_ctx.sim_now_s;
@@ -496,7 +528,8 @@ namespace Game
             const double dt_s = to_t_plus_s(orbit_pick->time_s);
             if (std::isfinite(dt_s))
             {
-                ImGui::Text("Orbit pick: %s  T%+.0fs", orbit_pick->ownerName.c_str(), dt_s);
+                const std::string pick_label = format_t_plus_label(dt_s);
+                ImGui::Text("Orbit pick: %s  %s", orbit_pick->ownerName.c_str(), pick_label.c_str());
             }
             else
             {
@@ -536,9 +569,8 @@ namespace Game
             dl->AddLine(ImVec2(x, p0.y), ImVec2(x, p1.y), ManeuverColors::kTimelineTick);
 
             const double t_tick = span_s * static_cast<double>(u);
-            char buf[32];
-            std::snprintf(buf, sizeof(buf), "+%.0fs", t_tick);
-            dl->AddText(ImVec2(x + 3.0f, p0.y - 16.0f), ManeuverColors::kTimelineTickText, buf);
+            const std::string tick_label = format_t_plus_label(t_tick);
+            dl->AddText(ImVec2(x + 3.0f, p0.y - 16.0f), ManeuverColors::kTimelineTickText, tick_label.c_str());
         }
 
         const ImVec2 cursor_after_bar = ImGui::GetCursorScreenPos();
@@ -586,9 +618,10 @@ namespace Game
 
             if (ImGui::IsItemHovered())
             {
+                const std::string t_plus_label = format_t_plus_from_time_s(node.time_s);
                 ImGui::BeginTooltip();
                 ImGui::Text("Node %d", node.id);
-                ImGui::Text("T%+.1fs", to_t_plus_s(node.time_s));
+                ImGui::TextUnformatted(t_plus_label.c_str());
                 ImGui::Text("DV RTN: (%.1f, %.1f, %.1f) m/s",
                             node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z);
                 ImGui::EndTooltip();
@@ -661,11 +694,12 @@ namespace Game
             node.total_dv_mps = safe_length(node.dv_rtn_mps);
 
             char label[96];
+            const std::string t_plus_label = format_t_plus_from_time_s(node.time_s);
             std::snprintf(label,
                           sizeof(label),
-                          "Node %d   T%+.0fs   DV %.1f",
+                          "Node %d   %s   DV %.1f",
                           node.id,
-                          to_t_plus_s(node.time_s),
+                          t_plus_label.c_str(),
                           node.total_dv_mps);
 
             ImGui::PushID(node.id);
@@ -708,7 +742,8 @@ namespace Game
         }
 
         ImGui::Text("Selected Node %d", sel->id);
-        ImGui::TextDisabled("T%+.1fs  |  DV %.2f m/s", to_t_plus_s(sel->time_s), safe_length(sel->dv_rtn_mps));
+        const std::string selected_t_plus_label = format_t_plus_from_time_s(sel->time_s);
+        ImGui::TextDisabled("%s  |  DV %.2f m/s", selected_t_plus_label.c_str(), safe_length(sel->dv_rtn_mps));
 
         // Navigation
         ImGui::BeginDisabled(selected_idx <= 0);
@@ -768,10 +803,19 @@ namespace Game
             ImGui::SetTooltip("Deletes the selected node and all later nodes.");
         }
 
-        float t_from_now = static_cast<float>(to_t_plus_s(sel->time_s));
-        if (ImGui::DragFloat("T+ (s)", &t_from_now, 1.0f, 0.0f, 15'552'000.0f, "%.1f"))
+        ImGui::TextDisabled("%s from now", selected_t_plus_label.c_str());
+
+        double node_time_input = sel->time_s;
+        const double min_node_time_s = time_ctx.sim_now_s;
+        if (ImGui::DragScalar("Sim Time (s)",
+                              ImGuiDataType_Double,
+                              &node_time_input,
+                              1.0f,
+                              &min_node_time_s,
+                              nullptr,
+                              "%.3f"))
         {
-            sel->time_s = from_t_plus_s(static_cast<double>(t_from_now));
+            sel->time_s = std::max(min_node_time_s, node_time_input);
             needs_sort = true;
             mark_maneuver_plan_dirty();
         }
