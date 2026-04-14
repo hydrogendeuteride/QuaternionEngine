@@ -166,7 +166,7 @@ namespace Game
         s.prediction_periodic_refresh_s = _prediction_periodic_refresh_s;
         s.prediction_thrust_refresh_s = _prediction_thrust_refresh_s;
         s.prediction_sampling_policy = _prediction_sampling_policy;
-        s.maneuver_plan_windows = _maneuver_plan_windows;
+        s.maneuver_plan_horizon = _maneuver_plan_horizon;
         s.orbit_plot_budget = _orbit_plot_budget;
         s.debug_draw_enabled = _debug_draw_enabled;
         s.runtime_orbiter_rails_enabled = _runtime_orbiter_rails_enabled;
@@ -186,7 +186,7 @@ namespace Game
         _prediction_periodic_refresh_s = s.prediction_periodic_refresh_s;
         _prediction_thrust_refresh_s = s.prediction_thrust_refresh_s;
         _prediction_sampling_policy = s.prediction_sampling_policy;
-        _maneuver_plan_windows = s.maneuver_plan_windows;
+        _maneuver_plan_horizon = s.maneuver_plan_horizon;
         _orbit_plot_budget = s.orbit_plot_budget;
         _debug_draw_enabled = s.debug_draw_enabled;
         _runtime_orbiter_rails_enabled = s.runtime_orbiter_rails_enabled;
@@ -759,8 +759,7 @@ namespace Game
                                 static_cast<double>(std::max(0.0f, celestial_min_window_s));
                     }
 
-                    ImGui::Text("Plan preview: %.0f s", _maneuver_plan_windows.preview_window_s);
-                    ImGui::Text("Plan solve margin: %.0f s", _maneuver_plan_windows.solve_margin_s);
+                    ImGui::Text("Plan horizon: %.0f s", _maneuver_plan_horizon.horizon_s);
 
                     ImGui::SeparatorText("Orbit Budget");
 

@@ -184,12 +184,7 @@ namespace Game
     {
         const PredictionTimeContext time_ctx = build_prediction_time_context(key, now_s);
         const PredictionWindowPolicyResult policy = resolve_prediction_window_policy(find_prediction_track(key), time_ctx, with_maneuvers);
-        if (policy.valid)
-        {
-            return policy.visual_window_s;
-        }
-
-        return std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(key) : 0.0);
+        return policy.valid ? policy.visual_window_s : policy.request_window_s;
     }
 
     double GameplayState::prediction_planned_exact_window_s(const PredictionTrackState &track,
@@ -223,12 +218,12 @@ namespace Game
         return policy.request_window_s;
     }
 
-    PredictionTimeContext GameplayState::build_prediction_time_context(const PredictionSubjectKey key,
+    PredictionTimeContext GameplayState::build_prediction_time_context(const PredictionSubjectKey /*key*/,
                                                                        const double sim_now_s,
                                                                        const double trajectory_t0_s,
                                                                        const double trajectory_t1_s) const
     {
-        (void) key;
+        // key is unused now but reserved for per-subject node filtering (e.g. multi-ship plans).
 
         PredictionTimeContext out{};
         out.sim_now_s = sim_now_s;
