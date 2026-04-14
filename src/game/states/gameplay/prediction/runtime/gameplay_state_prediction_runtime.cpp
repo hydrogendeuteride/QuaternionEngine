@@ -97,6 +97,13 @@ namespace Game
 
         PredictionWindowAnchor select_pick_anchor(const PredictionTimeContext &time_ctx)
         {
+            if (std::isfinite(time_ctx.selected_node_time_s) &&
+                time_ctx.selected_node_time_s + kPredictionTimeEpsilonS >= time_ctx.sim_now_s)
+            {
+                return make_window_anchor(time_ctx,
+                                          time_ctx.selected_node_time_s,
+                                          PredictionTimeAnchorKind::SelectedNode);
+            }
             if (std::isfinite(time_ctx.first_future_node_time_s))
             {
                 return make_window_anchor(time_ctx,

@@ -710,26 +710,26 @@ namespace Game
                     // --- Orbit Debug (collapsed by default) ---
                     if (ImGui::CollapsingHeader("Orbit Debug"))
                     {
-                    ImGui::TextUnformatted("Planner preview / solve margin live in Maneuver Nodes.");
+                        ImGui::TextUnformatted("Plan horizon lives in Maneuver Nodes.");
 
-                    float refresh_s = static_cast<float>(_prediction_periodic_refresh_s);
-                    if (ImGui::DragFloat("Prediction refresh (s)", &refresh_s, 1.0f, 0.0f, 36000.0f, "%.1f"))
-                    {
-                        _prediction_periodic_refresh_s = static_cast<double>(std::max(0.0f, refresh_s));
-                    }
-                    ImGui::SameLine();
-                    ImGui::TextUnformatted("(0 = never)");
+                        float refresh_s = static_cast<float>(_prediction_periodic_refresh_s);
+                        if (ImGui::DragFloat("Prediction refresh (s)", &refresh_s, 1.0f, 0.0f, 36000.0f, "%.1f"))
+                        {
+                            _prediction_periodic_refresh_s = static_cast<double>(std::max(0.0f, refresh_s));
+                        }
+                        ImGui::SameLine();
+                        ImGui::TextUnformatted("(0 = never)");
 
-                    float thrust_refresh_s = static_cast<float>(_prediction_thrust_refresh_s);
-                    if (ImGui::DragFloat("Prediction thrust refresh (s)",
-                                         &thrust_refresh_s,
-                                         0.01f,
-                                         0.0f,
-                                         2.0f,
-                                         "%.2f"))
-                    {
-                        _prediction_thrust_refresh_s = static_cast<double>(std::max(0.0f, thrust_refresh_s));
-                    }
+                        float thrust_refresh_s = static_cast<float>(_prediction_thrust_refresh_s);
+                        if (ImGui::DragFloat("Prediction thrust refresh (s)",
+                                             &thrust_refresh_s,
+                                             0.01f,
+                                             0.0f,
+                                             2.0f,
+                                             "%.2f"))
+                        {
+                            _prediction_thrust_refresh_s = static_cast<double>(std::max(0.0f, thrust_refresh_s));
+                        }
                     ImGui::SameLine();
                     ImGui::TextUnformatted("(0 = every fixed tick)");
 
