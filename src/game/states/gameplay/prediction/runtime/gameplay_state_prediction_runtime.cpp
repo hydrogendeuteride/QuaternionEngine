@@ -13,6 +13,13 @@ namespace Game
     {
         constexpr double kPredictionTimeEpsilonS = 1.0e-6;
 
+        struct PredictionWindowAnchor
+        {
+            double time_s{std::numeric_limits<double>::quiet_NaN()};
+            PredictionTimeAnchorKind kind{PredictionTimeAnchorKind::None};
+            bool is_future{false};
+        };
+
         bool node_time_in_context_range(const PredictionTimeContext &time_ctx, const double node_time_s)
         {
             if (!std::isfinite(node_time_s))
@@ -31,6 +38,72 @@ namespace Game
             }
 
             return true;
+        }
+
+        PredictionWindowAnchor make_window_anchor(const PredictionTimeContext &time_ctx,
+                                                  const double time_s,
+                                                  const PredictionTimeAnchorKind kind)
+        {
+            PredictionWindowAnchor out{};
+            out.time_s = time_s;
+            out.kind = kind;
+            out.is_future =
+                    std::isfinite(time_s) &&
+                    std::isfinite(time_ctx.sim_now_s) &&
+                    time_s + kPredictionTimeEpsilonS >= time_ctx.sim_now_s;
+            return out;
+        }
+
+        PredictionWindowAnchor select_visual_anchor(const PredictionTimeContext &time_ctx)
+        {
+            if (std::isfinite(time_ctx.selected_node_time_s) &&
+                time_ctx.selected_node_time_s + kPredictionTimeEpsilonS >= time_ctx.sim_now_s)
+            {
+                return make_window_anchor(time_ctx,
+                                          time_ctx.selected_node_time_s,
+                                          PredictionTimeAnchorKind::SelectedNode);
+            }
+            if (std::isfinite(time_ctx.first_future_node_time_s))
+            {
+                return make_window_anchor(time_ctx,
+                                          time_ctx.first_future_node_time_s,
+                                          PredictionTimeAnchorKind::FirstFutureNode);
+            }
+            return make_window_anchor(time_ctx, time_ctx.sim_now_s, PredictionTimeAnchorKind::SimNow);
+        }
+
+        PredictionWindowAnchor select_exact_anchor(const PredictionTimeContext &time_ctx)
+        {
+            if (std::isfinite(time_ctx.selected_node_time_s))
+            {
+                return make_window_anchor(time_ctx,
+                                          time_ctx.selected_node_time_s,
+                                          PredictionTimeAnchorKind::SelectedNode);
+            }
+            if (std::isfinite(time_ctx.first_future_node_time_s))
+            {
+                return make_window_anchor(time_ctx,
+                                          time_ctx.first_future_node_time_s,
+                                          PredictionTimeAnchorKind::FirstFutureNode);
+            }
+            if (std::isfinite(time_ctx.first_relevant_node_time_s))
+            {
+                return make_window_anchor(time_ctx,
+                                          time_ctx.first_relevant_node_time_s,
+                                          PredictionTimeAnchorKind::FirstRelevantNode);
+            }
+            return make_window_anchor(time_ctx, time_ctx.sim_now_s, PredictionTimeAnchorKind::SimNow);
+        }
+
+        PredictionWindowAnchor select_pick_anchor(const PredictionTimeContext &time_ctx)
+        {
+            if (std::isfinite(time_ctx.first_future_node_time_s))
+            {
+                return make_window_anchor(time_ctx,
+                                          time_ctx.first_future_node_time_s,
+                                          PredictionTimeAnchorKind::FirstFutureNode);
+            }
+            return make_window_anchor(time_ctx, time_ctx.sim_now_s, PredictionTimeAnchorKind::SimNow);
         }
     } // namespace
 
@@ -159,7 +232,6 @@ namespace Game
 
         PredictionTimeContext out{};
         out.sim_now_s = sim_now_s;
-        out.plan_epoch_s = std::isfinite(_maneuver_plan_epoch_s) ? _maneuver_plan_epoch_s : sim_now_s;
         out.trajectory_t0_s = trajectory_t0_s;
         out.trajectory_t1_s = trajectory_t1_s;
 
@@ -217,41 +289,65 @@ namespace Game
             return out;
         }
 
-        out.visual_window_s = maneuver_plan_preview_window_s();
-        out.pick_window_s = out.visual_window_s;
-        out.exact_window_s = out.visual_window_s;
+        const PredictionWindowAnchor visual_anchor = select_visual_anchor(time_ctx);
+        const PredictionWindowAnchor pick_anchor = select_pick_anchor(time_ctx);
+        const PredictionWindowAnchor exact_anchor = select_exact_anchor(time_ctx);
+        const double plan_horizon_s = maneuver_plan_horizon_s();
 
-        if (std::isfinite(time_ctx.selected_node_time_s))
+        out.visual_window_s = plan_horizon_s;
+        out.pick_window_s = plan_horizon_s;
+        out.exact_window_s = plan_horizon_s;
+        out.visual_anchor_time_s = visual_anchor.time_s;
+        out.pick_anchor_time_s = pick_anchor.time_s;
+        out.exact_anchor_time_s = exact_anchor.time_s;
+        out.visual_anchor_kind = visual_anchor.kind;
+        out.pick_anchor_kind = pick_anchor.kind;
+        out.exact_anchor_kind = exact_anchor.kind;
+        out.visual_anchor_is_future = visual_anchor.is_future;
+        out.pick_anchor_is_future = pick_anchor.is_future;
+        out.exact_anchor_is_future = exact_anchor.is_future;
+
+        if (std::isfinite(visual_anchor.time_s))
         {
-            out.anchor_time_s = time_ctx.selected_node_time_s;
-            out.anchor_kind = PredictionTimeAnchorKind::SelectedNode;
+            if (std::isfinite(time_ctx.last_future_node_time_s))
+            {
+                const double authored_plan_end_s = time_ctx.last_future_node_time_s + plan_horizon_s;
+                const double authored_plan_span_s = std::max(0.0, authored_plan_end_s - visual_anchor.time_s);
+                out.visual_window_s = std::max(out.visual_window_s, authored_plan_span_s);
+            }
+
+            if (_prediction_draw_full_orbit)
+            {
+                double orbit_visual_span_s = 0.0;
+                if (track && std::isfinite(track->cache.orbital_period_s) && track->cache.orbital_period_s > 0.0)
+                {
+                    orbit_visual_span_s =
+                            track->cache.orbital_period_s * OrbitPredictionTuning::kFullOrbitDrawPeriodScale;
+                }
+                else if (std::isfinite(time_ctx.trajectory_t1_s) && time_ctx.trajectory_t1_s > visual_anchor.time_s)
+                {
+                    orbit_visual_span_s = time_ctx.trajectory_t1_s - visual_anchor.time_s;
+                }
+
+                out.visual_window_s = std::max(out.visual_window_s, orbit_visual_span_s);
+            }
         }
-        else if (std::isfinite(time_ctx.first_future_node_time_s))
+
+        if (std::isfinite(pick_anchor.time_s) &&
+            std::isfinite(time_ctx.last_future_node_time_s))
         {
-            out.anchor_time_s = time_ctx.first_future_node_time_s;
-            out.anchor_kind = PredictionTimeAnchorKind::FirstFutureNode;
-        }
-        else if (std::isfinite(time_ctx.first_relevant_node_time_s))
-        {
-            out.anchor_time_s = time_ctx.first_relevant_node_time_s;
-            out.anchor_kind = PredictionTimeAnchorKind::FirstRelevantNode;
-        }
-        else if (std::isfinite(time_ctx.plan_epoch_s))
-        {
-            out.anchor_time_s = time_ctx.plan_epoch_s;
-            out.anchor_kind = PredictionTimeAnchorKind::PlanEpoch;
+            const double authored_plan_end_s = time_ctx.last_future_node_time_s + plan_horizon_s;
+            const double authored_plan_span_s = std::max(0.0, authored_plan_end_s - pick_anchor.time_s);
+            out.pick_window_s = std::max(out.pick_window_s, authored_plan_span_s);
         }
 
         out.valid =
-                std::isfinite(out.anchor_time_s) &&
+                std::isfinite(out.visual_anchor_time_s) &&
+                std::isfinite(out.pick_anchor_time_s) &&
+                std::isfinite(out.exact_anchor_time_s) &&
                 out.visual_window_s > 0.0 &&
                 out.pick_window_s > 0.0 &&
                 out.exact_window_s > 0.0;
-
-        out.anchor_is_future =
-                std::isfinite(out.anchor_time_s) &&
-                std::isfinite(time_ctx.sim_now_s) &&
-                out.anchor_time_s + kPredictionTimeEpsilonS >= time_ctx.sim_now_s;
 
         if (std::isfinite(time_ctx.last_future_node_time_s) &&
             std::isfinite(time_ctx.sim_now_s) &&
@@ -259,7 +355,7 @@ namespace Game
         {
             out.request_window_s = std::max(
                     out.request_window_s,
-                    std::max(0.0, time_ctx.last_future_node_time_s - time_ctx.sim_now_s) + maneuver_post_node_coverage_s());
+                    std::max(0.0, time_ctx.last_future_node_time_s - time_ctx.sim_now_s) + plan_horizon_s);
         }
 
         return out;
