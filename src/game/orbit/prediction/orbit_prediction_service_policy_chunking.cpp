@@ -133,8 +133,23 @@ namespace Game
 
         [[nodiscard]] PredictionProfileId resolve_chunk_profile_id(const OrbitPredictionService::Request &request,
                                                                    const double chunk_t0_s,
-                                                                   const double /*chunk_t1_s*/)
+                                                                   const double chunk_t1_s)
         {
+            if (request.preview_patch.active &&
+                request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+                std::isfinite(request.preview_patch.anchor_time_s) &&
+                request.preview_patch.exact_window_s > 0.0)
+            {
+                const double preview_t0_s = request.preview_patch.anchor_time_s;
+                const double preview_t1_s =
+                        request.preview_patch.anchor_time_s + (2.0 * request.preview_patch.exact_window_s);
+                const double epsilon_s = continuity_time_epsilon_s(preview_t0_s);
+                if (chunk_t0_s >= (preview_t0_s - epsilon_s) && chunk_t1_s <= (preview_t1_s + epsilon_s))
+                {
+                    return PredictionProfileId::Exact;
+                }
+            }
+
             const double elapsed_s = std::max(0.0, chunk_t0_s - request.sim_time_s);
             if (elapsed_s < OrbitPredictionTuning::kPredictionChunkBandTransferEndS)
             {
@@ -203,6 +218,31 @@ namespace Game
                                     PredictionChunkBoundaryFlags::Maneuver);
         }
 
+        if (request.preview_patch.active &&
+            request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+            std::isfinite(request.preview_patch.anchor_time_s) &&
+            request.preview_patch.exact_window_s > 0.0)
+        {
+            const double preview_t0_s = request.preview_patch.anchor_time_s;
+            const double preview_t1_s = request.preview_patch.anchor_time_s + request.preview_patch.exact_window_s;
+            const double preview_t2_s = request.preview_patch.anchor_time_s + (2.0 * request.preview_patch.exact_window_s);
+            append_planner_boundary(boundaries,
+                                    request_t0_s,
+                                    request_t1_s,
+                                    preview_t0_s,
+                                    PredictionChunkBoundaryFlags::None);
+            append_planner_boundary(boundaries,
+                                    request_t0_s,
+                                    request_t1_s,
+                                    preview_t1_s,
+                                    PredictionChunkBoundaryFlags::None);
+            append_planner_boundary(boundaries,
+                                    request_t0_s,
+                                    request_t1_s,
+                                    preview_t2_s,
+                                    PredictionChunkBoundaryFlags::None);
+        }
+
         append_time_band_boundaries(boundaries,
                                     request_t0_s,
                                     request_t1_s,
@@ -253,8 +293,26 @@ namespace Game
                 continue;
             }
 
-            const uint32_t boundary_flags = merged_boundaries[i].flags | merged_boundaries[i + 1u].flags;
+            uint32_t boundary_flags = merged_boundaries[i].flags | merged_boundaries[i + 1u].flags;
             const PredictionProfileId profile_id = resolve_chunk_profile_id(request, chunk_t0_s, chunk_t1_s);
+            if (request.preview_patch.active &&
+                request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+                std::isfinite(request.preview_patch.anchor_time_s) &&
+                request.preview_patch.exact_window_s > 0.0)
+            {
+                const double preview_t0_s = request.preview_patch.anchor_time_s;
+                const double preview_t1_s =
+                        request.preview_patch.anchor_time_s + (2.0 * request.preview_patch.exact_window_s);
+                const double epsilon_s = continuity_time_epsilon_s(preview_t0_s);
+                if (chunk_t0_s >= (preview_t0_s - epsilon_s) && chunk_t1_s <= (preview_t1_s + epsilon_s))
+                {
+                    boundary_flags |= planner_boundary_flag_bits(PredictionChunkBoundaryFlags::PreviewChunk);
+                    if (std::abs(chunk_t0_s - preview_t0_s) <= epsilon_s)
+                    {
+                        boundary_flags |= planner_boundary_flag_bits(PredictionChunkBoundaryFlags::PreviewAnchor);
+                    }
+                }
+            }
             plan.chunks.push_back(PredictionChunkPlan{
                     .chunk_id = static_cast<uint32_t>(plan.chunks.size()),
                     .t0_s = chunk_t0_s,

@@ -112,6 +112,15 @@ namespace Game
             }
             return make_window_anchor(time_ctx, time_ctx.sim_now_s, PredictionTimeAnchorKind::SimNow);
         }
+
+        [[nodiscard]] bool live_preview_drag_active(const bool with_maneuvers,
+                                                    const bool live_preview_enabled,
+                                                    const ManeuverGizmoInteraction::State gizmo_state)
+        {
+            return with_maneuvers &&
+                   live_preview_enabled &&
+                   PredictionRuntimeDetail::maneuver_drag_active(gizmo_state);
+        }
     } // namespace
 
     void GameplayState::sync_prediction_dirty_flag()
@@ -191,7 +200,71 @@ namespace Game
     {
         const PredictionTimeContext time_ctx = build_prediction_time_context(key, now_s);
         const PredictionWindowPolicyResult policy = resolve_prediction_window_policy(find_prediction_track(key), time_ctx, with_maneuvers);
+        if (live_preview_drag_active(with_maneuvers, _maneuver_plan_live_preview_active, _maneuver_gizmo_interaction.state) &&
+            std::isfinite(time_ctx.selected_node_time_s))
+        {
+            return policy.request_window_s;
+        }
         return policy.valid ? policy.visual_window_s : policy.request_window_s;
+    }
+
+    void GameplayState::refresh_prediction_preview_anchor(PredictionTrackState &track,
+                                                          const double now_s,
+                                                          const bool with_maneuvers)
+    {
+        const bool preview_drag_active =
+                track.supports_maneuvers &&
+                live_preview_drag_active(with_maneuvers, _maneuver_plan_live_preview_active, _maneuver_gizmo_interaction.state);
+        const ManeuverNode *selected = _maneuver_state.find_node(_maneuver_state.selected_node_id);
+
+        if (preview_drag_active && selected && std::isfinite(selected->time_s))
+        {
+            const double request_window_s = prediction_required_window_s(track.key, now_s, with_maneuvers);
+            const double anchor_offset_s = std::max(0.0, selected->time_s - now_s);
+            const double visual_window_s = std::max(0.0, request_window_s - anchor_offset_s);
+            const double exact_window_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
+
+            track.preview_anchor.valid = true;
+            track.preview_anchor.anchor_node_id = selected->id;
+            track.preview_anchor.anchor_time_s = selected->time_s;
+            track.preview_anchor.request_window_s = request_window_s;
+            track.preview_anchor.visual_window_s = visual_window_s;
+            track.preview_anchor.exact_window_s = exact_window_s;
+            track.preview_last_anchor_refresh_at_s = now_s;
+            if (track.preview_state == PredictionPreviewRuntimeState::Idle ||
+                track.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine)
+            {
+                track.preview_state = PredictionPreviewRuntimeState::EnterDrag;
+                track.preview_entered_at_s = now_s;
+            }
+            return;
+        }
+
+        if (track.preview_anchor.valid &&
+            track.preview_state != PredictionPreviewRuntimeState::Idle &&
+            track.preview_state != PredictionPreviewRuntimeState::AwaitFullRefine)
+        {
+            track.preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
+            track.preview_last_anchor_refresh_at_s = now_s;
+            return;
+        }
+
+        if (track.preview_state == PredictionPreviewRuntimeState::Idle)
+        {
+            track.preview_anchor = {};
+        }
+    }
+
+    double GameplayState::prediction_preview_exact_window_s(const PredictionTrackState &track,
+                                                            const double /*now_s*/,
+                                                            const bool /*with_maneuvers*/) const
+    {
+        if (track.preview_anchor.valid)
+        {
+            return track.preview_anchor.exact_window_s;
+        }
+
+        return std::max(0.0, _maneuver_plan_windows.solve_margin_s);
     }
 
     double GameplayState::prediction_planned_exact_window_s(const PredictionTrackState &track,
@@ -280,12 +353,18 @@ namespace Game
         PredictionWindowPolicyResult out{};
         out.request_window_s =
                 std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(key) : 0.0);
+        const double solve_margin_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
 
-        const bool supports_maneuver_windows =
-                with_maneuvers &&
-                track &&
-                prediction_subject_is_player(track->key) &&
-                time_ctx.has_plan;
+        if (std::isfinite(time_ctx.last_future_node_time_s) &&
+            std::isfinite(time_ctx.sim_now_s) &&
+            time_ctx.last_future_node_time_s > time_ctx.sim_now_s)
+        {
+            out.request_window_s = std::max(
+                    out.request_window_s,
+                    std::max(0.0, time_ctx.last_future_node_time_s - time_ctx.sim_now_s) + solve_margin_s);
+        }
+
+        const bool supports_maneuver_windows = with_maneuvers && time_ctx.has_plan;
         if (!supports_maneuver_windows)
         {
             return out;
@@ -308,6 +387,30 @@ namespace Game
         out.visual_anchor_is_future = visual_anchor.is_future;
         out.pick_anchor_is_future = pick_anchor.is_future;
         out.exact_anchor_is_future = exact_anchor.is_future;
+
+        if (live_preview_drag_active(with_maneuvers, _maneuver_plan_live_preview_active, _maneuver_gizmo_interaction.state) &&
+            std::isfinite(time_ctx.selected_node_time_s) &&
+            std::isfinite(time_ctx.sim_now_s))
+        {
+            const double request_end_s = time_ctx.sim_now_s + out.request_window_s;
+            const double anchored_visual_window_s = std::max(0.0, request_end_s - time_ctx.selected_node_time_s);
+            const double exact_window_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
+
+            out.visual_window_s = anchored_visual_window_s;
+            out.pick_window_s = anchored_visual_window_s;
+            out.exact_window_s = exact_window_s;
+            out.visual_anchor_time_s = time_ctx.selected_node_time_s;
+            out.pick_anchor_time_s = time_ctx.selected_node_time_s;
+            out.exact_anchor_time_s = time_ctx.selected_node_time_s;
+            out.visual_anchor_kind = PredictionTimeAnchorKind::SelectedNode;
+            out.pick_anchor_kind = PredictionTimeAnchorKind::SelectedNode;
+            out.exact_anchor_kind = PredictionTimeAnchorKind::SelectedNode;
+            out.visual_anchor_is_future = true;
+            out.pick_anchor_is_future = true;
+            out.exact_anchor_is_future = true;
+            out.valid = out.exact_window_s > 0.0;
+            return out;
+        }
 
         if (std::isfinite(visual_anchor.time_s))
         {
@@ -351,15 +454,6 @@ namespace Game
                 out.pick_window_s > 0.0 &&
                 out.exact_window_s > 0.0;
 
-        if (std::isfinite(time_ctx.last_future_node_time_s) &&
-            std::isfinite(time_ctx.sim_now_s) &&
-            time_ctx.last_future_node_time_s > time_ctx.sim_now_s)
-        {
-            out.request_window_s = std::max(
-                    out.request_window_s,
-                    std::max(0.0, time_ctx.last_future_node_time_s - time_ctx.sim_now_s) + plan_horizon_s);
-        }
-
         return out;
     }
 
@@ -382,6 +476,11 @@ namespace Game
         {
             const double dt_since_build_s = now_s - track.cache.build_time_s;
             rebuild = dt_since_build_s >= _prediction_periodic_refresh_s;
+        }
+
+        if (!rebuild && track.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine)
+        {
+            rebuild = true;
         }
 
         if (rebuild || !track.cache.valid || track.cache.trajectory_inertial.empty())

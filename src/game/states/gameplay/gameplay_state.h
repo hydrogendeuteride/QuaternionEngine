@@ -138,6 +138,15 @@ namespace Game
                                               bool thrusting,
                                               bool with_maneuvers,
                                               bool *out_throttled = nullptr);
+        bool build_orbiter_prediction_request(PredictionTrackState &track,
+                                              const WorldVec3 &subject_pos_world,
+                                              const glm::dvec3 &subject_vel_world,
+                                              double now_s,
+                                              bool thrusting,
+                                              bool with_maneuvers,
+                                              OrbitPredictionService::Request &out_request,
+                                              bool *out_interactive_request = nullptr,
+                                              bool *out_preview_request_active = nullptr);
         bool request_celestial_prediction_async(PredictionTrackState &track,
                                                 double now_s);
         void update_orbiter_prediction_track(PredictionTrackState &track,
@@ -165,6 +174,10 @@ namespace Game
         double prediction_display_window_s(PredictionSubjectKey key,
                                            double now_s,
                                            bool with_maneuvers) const;
+        void refresh_prediction_preview_anchor(PredictionTrackState &track, double now_s, bool with_maneuvers);
+        double prediction_preview_exact_window_s(const PredictionTrackState &track,
+                                                 double now_s,
+                                                 bool with_maneuvers) const;
         double prediction_planned_exact_window_s(const PredictionTrackState &track,
                                                  double now_s,
                                                  bool with_maneuvers) const;
@@ -197,6 +210,8 @@ namespace Game
         bool sample_prediction_inertial_state(const std::vector<orbitsim::TrajectorySample> &trajectory,
                                               double query_time_s,
                                               orbitsim::State &out_state) const;
+        bool resolve_prediction_preview_anchor_state(const PredictionTrackState &track,
+                                                     orbitsim::State &out_state) const;
         orbitsim::SpacecraftStateLookup build_prediction_player_lookup() const;
         orbitsim::TrajectoryFrameSpec resolve_prediction_display_frame_spec(
                 const OrbitPredictionCache &cache,
@@ -373,7 +388,9 @@ namespace Game
         double _prediction_thrust_refresh_s{0.1};    // rebuild at most this often while thrusting
         PredictionSamplingPolicy _prediction_sampling_policy{};
         ManeuverPlanHorizonSettings _maneuver_plan_horizon{};
+        ManeuverPlanWindowSettings _maneuver_plan_windows{};
         OrbitPlotBudgetSettings _orbit_plot_budget{};
+        bool _maneuver_plan_live_preview_active{false};
 
         OrbitPlotPerfStats _orbit_plot_perf{};
         OrbitPredictionDrawConfig _prediction_draw_config{};

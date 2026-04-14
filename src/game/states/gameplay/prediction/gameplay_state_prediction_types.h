@@ -232,6 +232,44 @@ namespace Game
         }
     };
 
+    struct OrbitChunk
+    {
+        uint32_t chunk_id{0};
+        uint64_t generation_id{0};
+        OrbitPredictionService::ChunkQualityState quality_state{
+                OrbitPredictionService::ChunkQualityState::Final};
+        double t0_s{std::numeric_limits<double>::quiet_NaN()};
+        double t1_s{std::numeric_limits<double>::quiet_NaN()};
+        std::vector<orbitsim::TrajectorySample> frame_samples{};
+        std::vector<orbitsim::TrajectorySegment> frame_segments{};
+        OrbitRenderCurve render_curve{};
+        bool valid{false};
+    };
+
+    struct PredictionChunkAssembly
+    {
+        bool valid{false};
+        uint64_t generation_id{0};
+        std::vector<OrbitChunk> chunks{};
+
+        void clear()
+        {
+            valid = false;
+            generation_id = 0;
+            chunks.clear();
+        }
+    };
+
+    struct PredictionPreviewOverlay
+    {
+        PredictionChunkAssembly chunk_assembly{};
+
+        void clear()
+        {
+            chunk_assembly.clear();
+        }
+    };
+
     struct PredictionLinePickCache
     {
         uint64_t generation_id{0};
@@ -383,6 +421,25 @@ namespace Game
         bool exact_anchor_is_future{false};
     };
 
+    enum class PredictionPreviewRuntimeState : uint8_t
+    {
+        Idle = 0,
+        EnterDrag,
+        DragPreviewPending,
+        PreviewStreaming,
+        AwaitFullRefine,
+    };
+
+    struct PredictionPreviewAnchor
+    {
+        bool valid{false};
+        int anchor_node_id{-1};
+        double anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double request_window_s{0.0};
+        double visual_window_s{0.0};
+        double exact_window_s{0.0};
+    };
+
     struct PredictionDragDebugTelemetry
     {
         using Clock = std::chrono::steady_clock;
@@ -460,6 +517,12 @@ namespace Game
         bool supports_maneuvers{false};
         bool is_celestial{false};
         orbitsim::BodyId auto_primary_body_id{orbitsim::kInvalidBodyId};
+        PredictionPreviewRuntimeState preview_state{PredictionPreviewRuntimeState::Idle};
+        PredictionPreviewAnchor preview_anchor{};
+        PredictionPreviewOverlay preview_overlay{};
+        double preview_entered_at_s{std::numeric_limits<double>::quiet_NaN()};
+        double preview_last_anchor_refresh_at_s{std::numeric_limits<double>::quiet_NaN()};
+        double preview_last_request_at_s{std::numeric_limits<double>::quiet_NaN()};
         double solver_ms_last{0.0};
         OrbitPredictionService::Diagnostics solver_diagnostics{};
         OrbitPredictionDerivedDiagnostics derived_diagnostics{};
@@ -480,6 +543,12 @@ namespace Game
             invalidated_while_pending = false;
             drag_debug.clear();
             auto_primary_body_id = orbitsim::kInvalidBodyId;
+            preview_state = PredictionPreviewRuntimeState::Idle;
+            preview_anchor = {};
+            preview_overlay.clear();
+            preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
+            preview_last_anchor_refresh_at_s = std::numeric_limits<double>::quiet_NaN();
+            preview_last_request_at_s = std::numeric_limits<double>::quiet_NaN();
             solver_ms_last = 0.0;
             solver_diagnostics = {};
             derived_diagnostics = {};

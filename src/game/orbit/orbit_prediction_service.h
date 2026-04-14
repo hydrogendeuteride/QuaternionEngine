@@ -32,6 +32,7 @@ namespace Game
         enum class SolveQuality : uint8_t
         {
             Full = 0,
+            FastPreview = 1,
         };
 
         enum class RequestPriority : uint8_t
@@ -120,6 +121,20 @@ namespace Game
             Maneuver = 1u << 2u,
             KnownDiscontinuity = 1u << 3u,
             TimeBand = 1u << 4u,
+            PreviewAnchor = 1u << 5u,
+            PreviewChunk = 1u << 6u,
+        };
+
+        enum class ChunkQualityState : uint8_t
+        {
+            Final = 0,
+            PreviewPatch,
+        };
+
+        enum class PublishStage : uint8_t
+        {
+            PreviewStreaming = 0,
+            PreviewFinalizing,
         };
 
         struct PredictionProfileDefinition
@@ -147,6 +162,16 @@ namespace Game
             uint32_t priority{0u};
             bool allow_reuse{true};
             bool requires_seam_validation{false};
+        };
+
+        struct PublishedChunk
+        {
+            uint32_t chunk_id{0};
+            ChunkQualityState quality_state{ChunkQualityState::Final};
+            double t0_s{std::numeric_limits<double>::quiet_NaN()};
+            double t1_s{std::numeric_limits<double>::quiet_NaN()};
+            bool includes_planned_path{false};
+            bool reused_from_cache{false};
         };
 
         struct PredictionSolvePlan
@@ -188,6 +213,16 @@ namespace Game
 
         struct Request
         {
+            struct PreviewPatchSpec
+            {
+                bool active{false};
+                bool anchor_state_valid{false};
+                double anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
+                double visual_window_s{0.0};
+                double exact_window_s{0.0};
+                orbitsim::State anchor_state_inertial{};
+            };
+
             // The worker handles both spacecraft and celestial prediction jobs.
             RequestKind kind{RequestKind::Spacecraft};
             uint64_t track_id{0};
@@ -210,6 +245,7 @@ namespace Game
             double celestial_ephemeris_dt_s{0.0};
             orbitsim::BodyId preferred_primary_body_id{orbitsim::kInvalidBodyId};
             std::vector<ManeuverImpulse> maneuver_impulses;
+            PreviewPatchSpec preview_patch{};
         };
 
         struct Result
@@ -219,6 +255,7 @@ namespace Game
             bool valid{false};
             bool baseline_reused{false};
             SolveQuality solve_quality{SolveQuality::Full};
+            PublishStage publish_stage{PublishStage::PreviewFinalizing};
             double compute_time_ms{0.0};
             Diagnostics diagnostics{};
 
@@ -231,6 +268,7 @@ namespace Game
             std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial;
             std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial_planned;
             std::vector<ManeuverNodePreview> maneuver_previews;
+            std::vector<PublishedChunk> published_chunks{};
         };
 
         struct EphemerisSamplingSpec

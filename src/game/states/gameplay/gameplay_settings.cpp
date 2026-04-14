@@ -106,6 +106,12 @@ namespace Game
                 root,
                 "maneuver_plan_horizon_s",
                 std::max(legacy_maneuver_preview_window_s, legacy_maneuver_solve_margin_s));
+        s.maneuver_plan_windows.preview_window_s = std::max(
+                0.0,
+                json_opt<double>(root, "maneuver_plan_preview_window_s", legacy_maneuver_preview_window_s));
+        s.maneuver_plan_windows.solve_margin_s = std::max(
+                0.0,
+                json_opt<double>(root, "maneuver_plan_solve_margin_s", legacy_maneuver_solve_margin_s));
 
         s.orbit_plot_budget.render_error_px = json_opt<double>(
                 root,
@@ -173,6 +179,8 @@ namespace Game
             root["prediction_sampling_orbiter_min_window_s"] = s.prediction_sampling_policy.orbiter_min_window_s;
             root["prediction_sampling_celestial_min_window_s"] = s.prediction_sampling_policy.celestial_min_window_s;
             root["maneuver_plan_horizon_s"] = s.maneuver_plan_horizon.horizon_s;
+            root["maneuver_plan_preview_window_s"] = s.maneuver_plan_windows.preview_window_s;
+            root["maneuver_plan_solve_margin_s"] = s.maneuver_plan_windows.solve_margin_s;
 
             root["orbit_plot_budget_render_error_px"] = s.orbit_plot_budget.render_error_px;
             root["orbit_plot_budget_render_max_segments_cpu"] = s.orbit_plot_budget.render_max_segments_cpu;
@@ -180,8 +188,6 @@ namespace Game
             root["orbit_plot_budget_pick_frustum_margin_ratio"] = s.orbit_plot_budget.pick_frustum_margin_ratio;
 
             // Legacy aliases kept for compatibility with older local settings files/builds.
-            root["maneuver_plan_preview_window_s"] = s.maneuver_plan_horizon.horizon_s;
-            root["maneuver_plan_solve_margin_s"] = s.maneuver_plan_horizon.horizon_s;
             root["prediction_future_window_planned_s"] = s.maneuver_plan_horizon.horizon_s;
             root["orbit_plot_render_error_px"] = s.orbit_plot_budget.render_error_px;
             root["orbit_plot_render_max_segments_cpu"] = s.orbit_plot_budget.render_max_segments_cpu;
