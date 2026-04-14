@@ -90,20 +90,10 @@ namespace Game
                         root,
                         "prediction_future_window_celestial_s",
                         s.prediction_sampling_policy.celestial_min_window_s));
-        s.maneuver_plan_windows.preview_window_s = json_opt<double>(
+        s.maneuver_plan_horizon.horizon_s = json_opt<double>(
                 root,
-                "maneuver_plan_preview_window_s",
-                json_opt<double>(
-                        root,
-                        "prediction_future_window_planned_s",
-                        s.maneuver_plan_windows.preview_window_s));
-        s.maneuver_plan_windows.solve_margin_s = json_opt<double>(
-                root,
-                "maneuver_plan_solve_margin_s",
-                json_opt<double>(
-                        root,
-                        "prediction_future_window_planned_s",
-                        s.maneuver_plan_windows.solve_margin_s));
+                "maneuver_plan_horizon_s",
+                s.maneuver_plan_horizon.horizon_s);
 
         s.orbit_plot_budget.render_error_px = json_opt<double>(
                 root,
@@ -170,13 +160,7 @@ namespace Game
 
             root["prediction_sampling_orbiter_min_window_s"] = s.prediction_sampling_policy.orbiter_min_window_s;
             root["prediction_sampling_celestial_min_window_s"] = s.prediction_sampling_policy.celestial_min_window_s;
-            root["maneuver_plan_preview_window_s"] = s.maneuver_plan_windows.preview_window_s;
-            root["maneuver_plan_solve_margin_s"] = s.maneuver_plan_windows.solve_margin_s;
-
-            // Legacy aliases kept for compatibility with older local settings files/builds.
-            root["prediction_future_window_orbiter_s"] = s.prediction_sampling_policy.orbiter_min_window_s;
-            root["prediction_future_window_celestial_s"] = s.prediction_sampling_policy.celestial_min_window_s;
-            root["prediction_future_window_planned_s"] = s.maneuver_plan_windows.preview_window_s;
+            root["maneuver_plan_horizon_s"] = s.maneuver_plan_horizon.horizon_s;
 
             root["orbit_plot_budget_render_error_px"] = s.orbit_plot_budget.render_error_px;
             root["orbit_plot_budget_render_max_segments_cpu"] = s.orbit_plot_budget.render_max_segments_cpu;

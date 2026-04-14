@@ -307,15 +307,10 @@ namespace Game
         return std::max(0.0, _prediction_sampling_policy.orbiter_min_window_s);
     }
 
-    double GameplayState::maneuver_plan_preview_window_s() const
-    {
-        return std::max(0.0, _maneuver_plan_windows.preview_window_s);
-    }
-
-    double GameplayState::maneuver_post_node_coverage_s() const
+    double GameplayState::maneuver_plan_horizon_s() const
     {
         return std::max(OrbitPredictionTuning::kPostNodeCoverageMinS,
-                        std::max(0.0, _maneuver_plan_windows.solve_margin_s));
+                        std::max(0.0, _maneuver_plan_horizon.horizon_s));
     }
 
     GameplayState::PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key)

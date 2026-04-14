@@ -81,11 +81,6 @@ namespace Game
                                                         const bool removed_execute,
                                                         const int hint_index)
     {
-        if (_maneuver_state.nodes.empty())
-        {
-            _maneuver_plan_epoch_s = std::numeric_limits<double>::quiet_NaN();
-        }
-
         if (removed_selected)
         {
             if (_maneuver_state.nodes.empty())

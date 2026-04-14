@@ -152,8 +152,7 @@ namespace Game
         void sync_prediction_dirty_flag();
         std::vector<PredictionSubjectKey> collect_visible_prediction_subjects() const;
         double prediction_future_window_s(PredictionSubjectKey key) const;
-        double maneuver_plan_preview_window_s() const;
-        double maneuver_post_node_coverage_s() const;
+        double maneuver_plan_horizon_s() const;
         PredictionTimeContext build_prediction_time_context(
                 PredictionSubjectKey key,
                 double sim_now_s,
@@ -373,7 +372,7 @@ namespace Game
         double _prediction_periodic_refresh_s{0.0}; // 0 = never (cache is extended when horizon runs out)
         double _prediction_thrust_refresh_s{0.1};    // rebuild at most this often while thrusting
         PredictionSamplingPolicy _prediction_sampling_policy{};
-        ManeuverPlanWindowSettings _maneuver_plan_windows{};
+        ManeuverPlanHorizonSettings _maneuver_plan_horizon{};
         OrbitPlotBudgetSettings _orbit_plot_budget{};
 
         OrbitPlotPerfStats _orbit_plot_perf{};
@@ -453,7 +452,6 @@ namespace Game
 
         bool _execute_node_armed{false};
         int _execute_node_id{-1};
-        double _maneuver_plan_epoch_s{std::numeric_limits<double>::quiet_NaN()};
 
         // Timing
         float _elapsed{0.0f};

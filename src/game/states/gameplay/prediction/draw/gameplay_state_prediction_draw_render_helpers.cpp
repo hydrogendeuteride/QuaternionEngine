@@ -235,11 +235,12 @@ namespace Game::PredictionDrawDetail
     {
         PickWindow build_planned_window_from_policy(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
                                                     const OrbitPredictionDrawConfig &draw_config,
-                                                    const PredictionWindowPolicyResult &policy,
+                                                    const double anchor_time_s,
+                                                    const bool anchor_is_future,
                                                     const double window_span_s)
         {
             PickWindow planned_window{};
-            if (traj_planned_segments.empty() || !policy.valid || !std::isfinite(policy.anchor_time_s))
+            if (traj_planned_segments.empty() || !std::isfinite(anchor_time_s))
             {
                 return planned_window;
             }
@@ -251,8 +252,8 @@ namespace Game::PredictionDrawDetail
                 return planned_window;
             }
 
-            double t_plan_start = std::clamp(policy.anchor_time_s, t0p, t1p);
-            if (policy.anchor_is_future)
+            double t_plan_start = std::clamp(anchor_time_s, t0p, t1p);
+            if (anchor_is_future)
             {
                 const double snapped_t_plan_start =
                         std::clamp(snap_time_past_straddling_segment(traj_planned_segments, t_plan_start), t0p, t1p);
@@ -276,7 +277,7 @@ namespace Game::PredictionDrawDetail
             planned_window.valid = true;
             planned_window.t0_s = t_plan_start;
             planned_window.t1_s = t_plan_end;
-            planned_window.anchor_time_s = policy.anchor_time_s;
+            planned_window.anchor_time_s = anchor_time_s;
             return planned_window;
         }
     } // namespace
@@ -285,14 +286,30 @@ namespace Game::PredictionDrawDetail
                                          const OrbitPredictionDrawConfig &draw_config,
                                          const PredictionWindowPolicyResult &policy)
     {
-        return build_planned_window_from_policy(traj_planned_segments, draw_config, policy, policy.visual_window_s);
+        if (!policy.valid)
+        {
+            return {};
+        }
+        return build_planned_window_from_policy(traj_planned_segments,
+                                                draw_config,
+                                                policy.visual_anchor_time_s,
+                                                policy.visual_anchor_is_future,
+                                                policy.visual_window_s);
     }
 
     PickWindow build_planned_pick_window(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
                                          const OrbitPredictionDrawConfig &draw_config,
                                          const PredictionWindowPolicyResult &policy)
     {
-        return build_planned_window_from_policy(traj_planned_segments, draw_config, policy, policy.pick_window_s);
+        if (!policy.valid)
+        {
+            return {};
+        }
+        return build_planned_window_from_policy(traj_planned_segments,
+                                                draw_config,
+                                                policy.pick_anchor_time_s,
+                                                policy.pick_anchor_is_future,
+                                                policy.pick_window_s);
     }
 
     std::size_t build_pick_segment_cache(const std::vector<orbitsim::TrajectorySegment> &traj_segments,
