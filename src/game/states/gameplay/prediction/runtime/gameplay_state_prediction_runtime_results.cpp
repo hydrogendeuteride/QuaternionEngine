@@ -195,7 +195,8 @@ namespace Game
         track->derived_request_pending = false;
         // Do NOT clear request_pending here — a newer solver request may already be in-flight.
         // Only the solver completion path and request submission paths manage that flag.
-        const bool keep_dirty_for_followup = track->invalidated_while_pending;
+        // Preserve an already-queued refine request when a late preview-derived result arrives after drag end.
+        const bool keep_dirty_for_followup = track->dirty || track->invalidated_while_pending;
         track->invalidated_while_pending = false;
 
         OrbitPredictionCache cache_to_publish{};
