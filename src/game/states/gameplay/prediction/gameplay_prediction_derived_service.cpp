@@ -290,10 +290,13 @@ namespace Game
                                                                          node_times_s))
             {
                 out.chunk_assembly = std::move(chunk_assembly);
-                PredictionCacheInternal::flatten_chunk_assembly_to_cache(
-                        cache,
-                        out.chunk_assembly,
-                        !preview_streaming_stage && build_planned_render_curve);
+                if (!preview_stage)
+                {
+                    PredictionCacheInternal::flatten_chunk_assembly_to_cache(
+                            cache,
+                            out.chunk_assembly,
+                            build_planned_render_curve);
+                }
             }
         }
 

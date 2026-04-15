@@ -698,14 +698,15 @@ namespace Game::PredictionCacheInternal
             chunk.t1_s = published_chunk.t1_s;
             chunk.frame_samples = std::move(clipped_samples);
             chunk.frame_segments = std::move(clipped_segments);
-            chunk.render_curve = OrbitRenderCurve::build(chunk.frame_segments);
+            // Preview chunks are flattened back into the track cache; no current draw path consumes per-chunk curves.
+            chunk.render_curve.clear();
             chunk.valid = !chunk.frame_segments.empty();
             out_assembly.chunks.push_back(std::move(chunk));
         }
 
         out_assembly.generation_id = generation_id;
         out_assembly.valid = !out_assembly.chunks.empty();
-        if (out_assembly.valid)
+        if (diagnostics && out_assembly.valid)
         {
             OrbitPredictionCache diagnostics_cache = cache;
             diagnostics_cache.trajectory_segments_frame_planned.clear();

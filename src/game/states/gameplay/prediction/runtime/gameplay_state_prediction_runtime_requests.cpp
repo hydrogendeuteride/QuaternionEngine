@@ -232,6 +232,8 @@ namespace Game
                 preview_request_active
                         ? OrbitPredictionService::SolveQuality::FastPreview
                         : OrbitPredictionService::SolveQuality::Full;
+        const double preview_exact_window_s =
+                preview_request_active ? prediction_preview_exact_window_s(track, now_s, with_maneuvers) : 0.0;
 
         OrbitPredictionService::Request request{};
         request.track_id = track.key.track_id();
@@ -248,16 +250,24 @@ namespace Game
                 track.key,
                 track.is_celestial,
                 interactive_request);
-        request.future_window_s = preview_request_active
-                                          ? track.preview_anchor.request_window_s
-                                          : prediction_required_window_s(track, now_s, with_maneuvers);
+        if (preview_request_active)
+        {
+            const double anchor_offset_s = std::max(0.0, track.preview_anchor.anchor_time_s - now_s);
+            // Live preview only needs enough horizon to reach the selected node and cover the exact patch window.
+            request.future_window_s = std::min(track.preview_anchor.request_window_s,
+                                               anchor_offset_s + (2.0 * preview_exact_window_s));
+        }
+        else
+        {
+            request.future_window_s = prediction_required_window_s(track, now_s, with_maneuvers);
+        }
 
         if (preview_request_active)
         {
             request.preview_patch.active = true;
             request.preview_patch.anchor_time_s = track.preview_anchor.anchor_time_s;
             request.preview_patch.visual_window_s = track.preview_anchor.visual_window_s;
-            request.preview_patch.exact_window_s = prediction_preview_exact_window_s(track, now_s, with_maneuvers);
+            request.preview_patch.exact_window_s = preview_exact_window_s;
             orbitsim::State anchor_state{};
             if (resolve_prediction_preview_anchor_state(track, anchor_state))
             {
@@ -427,7 +437,15 @@ namespace Game
             return;
         }
 
-        if (should_defer_solver_request_until_publish(track))
+        const bool live_preview_drag_pending_override =
+                track.dirty &&
+                track.supports_maneuvers &&
+                track.key == _prediction_selection.active_subject &&
+                with_maneuvers &&
+                _maneuver_plan_live_preview_active &&
+                PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
+        if (!live_preview_drag_pending_override &&
+            should_defer_solver_request_until_publish(track))
         {
             return;
         }

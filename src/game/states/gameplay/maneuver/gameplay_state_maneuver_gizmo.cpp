@@ -598,6 +598,9 @@ namespace Game
 
             if (PredictionTrackState *track = active_prediction_track())
             {
+                // Let the runtime submit a fresher preview even while an older drag solve is still in flight.
+                track->dirty = true;
+                track->invalidated_while_pending = track->request_pending || track->derived_request_pending;
                 const orbitsim::TrajectoryFrameSpec display_frame_spec =
                         track->cache.resolved_frame_spec_valid ? track->cache.resolved_frame_spec
                                                                : _prediction_frame_selection.spec;
