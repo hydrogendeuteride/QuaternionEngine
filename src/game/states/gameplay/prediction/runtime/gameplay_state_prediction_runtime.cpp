@@ -121,6 +121,19 @@ namespace Game
                    live_preview_enabled &&
                    PredictionRuntimeDetail::maneuver_drag_active(gizmo_state);
         }
+
+        [[nodiscard]] double resolve_live_preview_visual_window_s(const double request_window_s,
+                                                                  const double anchor_offset_s,
+                                                                  const double configured_preview_window_s)
+        {
+            const double available_window_s = std::max(0.0, request_window_s - std::max(0.0, anchor_offset_s));
+            const double preview_window_s = std::max(0.0, configured_preview_window_s);
+            if (preview_window_s <= 0.0)
+            {
+                return available_window_s;
+            }
+            return std::min(available_window_s, preview_window_s);
+        }
     } // namespace
 
     void GameplayState::sync_prediction_dirty_flag()
@@ -200,11 +213,6 @@ namespace Game
     {
         const PredictionTimeContext time_ctx = build_prediction_time_context(key, now_s);
         const PredictionWindowPolicyResult policy = resolve_prediction_window_policy(find_prediction_track(key), time_ctx, with_maneuvers);
-        if (live_preview_drag_active(with_maneuvers, _maneuver_plan_live_preview_active, _maneuver_gizmo_interaction.state) &&
-            std::isfinite(time_ctx.selected_node_time_s))
-        {
-            return policy.request_window_s;
-        }
         return policy.valid ? policy.visual_window_s : policy.request_window_s;
     }
 
@@ -221,7 +229,9 @@ namespace Game
         {
             const double request_window_s = prediction_required_window_s(track.key, now_s, with_maneuvers);
             const double anchor_offset_s = std::max(0.0, selected->time_s - now_s);
-            const double visual_window_s = std::max(0.0, request_window_s - anchor_offset_s);
+            const double visual_window_s = resolve_live_preview_visual_window_s(request_window_s,
+                                                                                anchor_offset_s,
+                                                                                _maneuver_plan_windows.preview_window_s);
             const double exact_window_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
 
             track.preview_anchor.valid = true;
@@ -354,17 +364,20 @@ namespace Game
         out.request_window_s =
                 std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(key) : 0.0);
         const double solve_margin_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
+        const bool supports_maneuver_windows = with_maneuvers && time_ctx.has_plan;
+        const double plan_horizon_s = maneuver_plan_horizon_s();
 
         if (std::isfinite(time_ctx.last_future_node_time_s) &&
             std::isfinite(time_ctx.sim_now_s) &&
             time_ctx.last_future_node_time_s > time_ctx.sim_now_s)
         {
+            const double post_node_coverage_s =
+                    supports_maneuver_windows ? plan_horizon_s : solve_margin_s;
             out.request_window_s = std::max(
                     out.request_window_s,
-                    std::max(0.0, time_ctx.last_future_node_time_s - time_ctx.sim_now_s) + solve_margin_s);
+                    std::max(0.0, time_ctx.last_future_node_time_s - time_ctx.sim_now_s) + post_node_coverage_s);
         }
 
-        const bool supports_maneuver_windows = with_maneuvers && time_ctx.has_plan;
         if (!supports_maneuver_windows)
         {
             return out;
@@ -373,7 +386,6 @@ namespace Game
         const PredictionWindowAnchor visual_anchor = select_visual_anchor(time_ctx);
         const PredictionWindowAnchor pick_anchor = select_pick_anchor(time_ctx);
         const PredictionWindowAnchor exact_anchor = select_exact_anchor(time_ctx);
-        const double plan_horizon_s = maneuver_plan_horizon_s();
 
         out.visual_window_s = plan_horizon_s;
         out.pick_window_s = plan_horizon_s;
@@ -392,8 +404,10 @@ namespace Game
             std::isfinite(time_ctx.selected_node_time_s) &&
             std::isfinite(time_ctx.sim_now_s))
         {
-            const double request_end_s = time_ctx.sim_now_s + out.request_window_s;
-            const double anchored_visual_window_s = std::max(0.0, request_end_s - time_ctx.selected_node_time_s);
+            const double anchor_offset_s = std::max(0.0, time_ctx.selected_node_time_s - time_ctx.sim_now_s);
+            const double anchored_visual_window_s = resolve_live_preview_visual_window_s(out.request_window_s,
+                                                                                         anchor_offset_s,
+                                                                                         _maneuver_plan_windows.preview_window_s);
             const double exact_window_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
 
             out.visual_window_s = anchored_visual_window_s;
@@ -408,7 +422,10 @@ namespace Game
             out.visual_anchor_is_future = true;
             out.pick_anchor_is_future = true;
             out.exact_anchor_is_future = true;
-            out.valid = out.exact_window_s > 0.0;
+            out.valid =
+                    out.visual_window_s > 0.0 &&
+                    out.pick_window_s > 0.0 &&
+                    out.exact_window_s > 0.0;
             return out;
         }
 
