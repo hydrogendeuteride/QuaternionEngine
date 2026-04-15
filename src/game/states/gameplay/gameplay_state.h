@@ -390,7 +390,7 @@ namespace Game
         ManeuverPlanHorizonSettings _maneuver_plan_horizon{};
         ManeuverPlanWindowSettings _maneuver_plan_windows{};
         OrbitPlotBudgetSettings _orbit_plot_budget{};
-        bool _maneuver_plan_live_preview_active{false};
+        bool _maneuver_plan_live_preview_active{true};
 
         OrbitPlotPerfStats _orbit_plot_perf{};
         OrbitPredictionDrawConfig _prediction_draw_config{};

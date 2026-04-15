@@ -128,6 +128,9 @@ namespace Game
 
         out.identity_frame_transform = Draw::frame_transform_is_identity(out.frame_to_world);
         out.use_base_adaptive_curve = !out.stable_cache->render_curve_frame.empty();
+        out.use_planned_adaptive_curve =
+                track.preview_state != PredictionPreviewRuntimeState::PreviewStreaming &&
+                !out.planned_cache->render_curve_frame_planned.empty();
 
         out.world_basis_draw_ctx = out.draw_ctx;
         if (!out.identity_frame_transform)

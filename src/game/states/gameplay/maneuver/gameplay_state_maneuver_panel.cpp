@@ -219,6 +219,26 @@ namespace Game
             mark_maneuver_plan_dirty();
         }
 
+        if (ImGui::Checkbox("Live Preview", &_maneuver_plan_live_preview_active))
+        {
+            if (!_maneuver_plan_live_preview_active)
+            {
+                for (PredictionTrackState &track : _prediction_tracks)
+                {
+                    if (!track.supports_maneuvers)
+                    {
+                        continue;
+                    }
+
+                    track.preview_state = PredictionPreviewRuntimeState::Idle;
+                    track.preview_anchor = {};
+                    track.preview_overlay.clear();
+                    track.pick_cache.clear();
+                }
+            }
+            mark_maneuver_plan_dirty();
+        }
+
         if (player_track)
         {
             const bool has_plan = !_maneuver_state.nodes.empty();

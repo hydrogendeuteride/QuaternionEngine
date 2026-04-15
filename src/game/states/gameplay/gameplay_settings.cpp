@@ -112,6 +112,10 @@ namespace Game
         s.maneuver_plan_windows.solve_margin_s = std::max(
                 0.0,
                 json_opt<double>(root, "maneuver_plan_solve_margin_s", legacy_maneuver_solve_margin_s));
+        s.maneuver_plan_live_preview_active = json_opt<bool>(
+                root,
+                "maneuver_plan_live_preview_active",
+                s.maneuver_plan_live_preview_active);
 
         s.orbit_plot_budget.render_error_px = json_opt<double>(
                 root,
@@ -181,6 +185,7 @@ namespace Game
             root["maneuver_plan_horizon_s"] = s.maneuver_plan_horizon.horizon_s;
             root["maneuver_plan_preview_window_s"] = s.maneuver_plan_windows.preview_window_s;
             root["maneuver_plan_solve_margin_s"] = s.maneuver_plan_windows.solve_margin_s;
+            root["maneuver_plan_live_preview_active"] = s.maneuver_plan_live_preview_active;
 
             root["orbit_plot_budget_render_error_px"] = s.orbit_plot_budget.render_error_px;
             root["orbit_plot_budget_render_max_segments_cpu"] = s.orbit_plot_budget.render_max_segments_cpu;

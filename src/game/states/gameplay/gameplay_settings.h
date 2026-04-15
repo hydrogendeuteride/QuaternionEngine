@@ -49,6 +49,7 @@ namespace Game
         PredictionSamplingPolicy prediction_sampling_policy{};
         ManeuverPlanHorizonSettings maneuver_plan_horizon{};
         ManeuverPlanWindowSettings maneuver_plan_windows{};
+        bool maneuver_plan_live_preview_active{true};
 
         // Orbit plot rendering
         OrbitPlotBudgetSettings orbit_plot_budget{};
