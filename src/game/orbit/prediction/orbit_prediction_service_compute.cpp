@@ -33,6 +33,88 @@ namespace Game
                    a.chunk_t1_s == b.chunk_t1_s &&
                    a.profile_id == b.profile_id;
         }
+
+        void append_published_chunk(std::vector<OrbitPredictionService::PublishedChunk> &dst,
+                                    const PlannedChunkPacket &packet,
+                                    const uint32_t chunk_id,
+                                    const OrbitPredictionService::ChunkQualityState quality_state)
+        {
+            dst.push_back(OrbitPredictionService::PublishedChunk{
+                    .chunk_id = chunk_id,
+                    .quality_state = quality_state,
+                    .t0_s = packet.chunk.t0_s,
+                    .t1_s = packet.chunk.t1_s,
+                    .includes_planned_path = !packet.segments.empty(),
+                    .reused_from_cache = packet.reused_from_cache,
+            });
+        }
+
+        OrbitPredictionService::AdaptiveStageDiagnostics merge_adaptive_stage_diagnostics(
+                OrbitPredictionService::AdaptiveStageDiagnostics lhs,
+                const OrbitPredictionService::AdaptiveStageDiagnostics &rhs)
+        {
+            const double lhs_dt_weight = static_cast<double>(lhs.accepted_segments);
+            const double rhs_dt_weight = static_cast<double>(rhs.accepted_segments);
+            const bool lhs_has_dt = lhs_dt_weight > 0.0;
+            const bool rhs_has_dt = rhs_dt_weight > 0.0;
+
+            lhs.requested_duration_s += rhs.requested_duration_s;
+            lhs.covered_duration_s += rhs.covered_duration_s;
+            lhs.accepted_segments += rhs.accepted_segments;
+            lhs.rejected_splits += rhs.rejected_splits;
+            lhs.forced_boundary_splits += rhs.forced_boundary_splits;
+            lhs.frame_resegmentation_count += rhs.frame_resegmentation_count;
+
+            if (rhs_has_dt)
+            {
+                lhs.min_dt_s = lhs_has_dt ? std::min(lhs.min_dt_s, rhs.min_dt_s) : rhs.min_dt_s;
+                lhs.max_dt_s = lhs_has_dt ? std::max(lhs.max_dt_s, rhs.max_dt_s) : rhs.max_dt_s;
+            }
+
+            if ((lhs_dt_weight + rhs_dt_weight) > 0.0)
+            {
+                const double lhs_avg = std::isfinite(lhs.avg_dt_s) ? lhs.avg_dt_s : 0.0;
+                const double rhs_avg = std::isfinite(rhs.avg_dt_s) ? rhs.avg_dt_s : 0.0;
+                lhs.avg_dt_s =
+                        ((lhs_avg * lhs_dt_weight) + (rhs_avg * rhs_dt_weight)) / (lhs_dt_weight + rhs_dt_weight);
+            }
+
+            lhs.hard_cap_hit = lhs.hard_cap_hit || rhs.hard_cap_hit;
+            lhs.cancelled = lhs.cancelled || rhs.cancelled;
+            lhs.cache_reused = lhs.cache_reused || rhs.cache_reused;
+            return lhs;
+        }
+
+        void append_planned_samples(std::vector<orbitsim::TrajectorySample> &dst,
+                                    const std::vector<orbitsim::TrajectorySample> &src)
+        {
+            if (src.empty())
+            {
+                return;
+            }
+
+            if (!dst.empty())
+            {
+                const double time_epsilon_s = continuity_time_epsilon_s(src.front().t_s);
+                if (std::abs(dst.back().t_s - src.front().t_s) <= time_epsilon_s)
+                {
+                    dst.pop_back();
+                }
+            }
+
+            dst.insert(dst.end(), src.begin(), src.end());
+        }
+
+        void merge_planned_outputs(PlannedSolveOutput &dst, const PlannedSolveOutput &src)
+        {
+            dst.segments.insert(dst.segments.end(), src.segments.begin(), src.segments.end());
+            append_planned_samples(dst.samples, src.samples);
+            dst.previews.insert(dst.previews.end(), src.previews.begin(), src.previews.end());
+            dst.chunk_reused.insert(dst.chunk_reused.end(), src.chunk_reused.begin(), src.chunk_reused.end());
+            dst.end_state = src.end_state;
+            dst.diagnostics = merge_adaptive_stage_diagnostics(dst.diagnostics, src.diagnostics);
+            dst.status = src.status;
+        }
     } // namespace
 
     void OrbitPredictionService::compute_prediction(const PendingJob &job)
@@ -506,88 +588,6 @@ namespace Game
                 return;
             }
 
-            const auto append_published_chunk =
-                    [](std::vector<PublishedChunk> &dst,
-                       const PlannedChunkPacket &packet,
-                       const uint32_t chunk_id,
-                       const ChunkQualityState quality_state) {
-                        dst.push_back(PublishedChunk{
-                                .chunk_id = chunk_id,
-                                .quality_state = quality_state,
-                                .t0_s = packet.chunk.t0_s,
-                                .t1_s = packet.chunk.t1_s,
-                                .includes_planned_path = !packet.segments.empty(),
-                                .reused_from_cache = packet.reused_from_cache,
-                        });
-                    };
-
-            const auto merge_adaptive_stage_diagnostics =
-                    [](AdaptiveStageDiagnostics lhs,
-                       const AdaptiveStageDiagnostics &rhs) {
-                        const double lhs_dt_weight = static_cast<double>(lhs.accepted_segments);
-                        const double rhs_dt_weight = static_cast<double>(rhs.accepted_segments);
-                        const bool lhs_has_dt = lhs_dt_weight > 0.0;
-                        const bool rhs_has_dt = rhs_dt_weight > 0.0;
-
-                        lhs.requested_duration_s += rhs.requested_duration_s;
-                        lhs.covered_duration_s += rhs.covered_duration_s;
-                        lhs.accepted_segments += rhs.accepted_segments;
-                        lhs.rejected_splits += rhs.rejected_splits;
-                        lhs.forced_boundary_splits += rhs.forced_boundary_splits;
-                        lhs.frame_resegmentation_count += rhs.frame_resegmentation_count;
-
-                        if (rhs_has_dt)
-                        {
-                            lhs.min_dt_s = lhs_has_dt ? std::min(lhs.min_dt_s, rhs.min_dt_s) : rhs.min_dt_s;
-                            lhs.max_dt_s = lhs_has_dt ? std::max(lhs.max_dt_s, rhs.max_dt_s) : rhs.max_dt_s;
-                        }
-
-                        if ((lhs_dt_weight + rhs_dt_weight) > 0.0)
-                        {
-                            const double lhs_avg = std::isfinite(lhs.avg_dt_s) ? lhs.avg_dt_s : 0.0;
-                            const double rhs_avg = std::isfinite(rhs.avg_dt_s) ? rhs.avg_dt_s : 0.0;
-                            lhs.avg_dt_s =
-                                    ((lhs_avg * lhs_dt_weight) + (rhs_avg * rhs_dt_weight)) / (lhs_dt_weight + rhs_dt_weight);
-                        }
-
-                        lhs.hard_cap_hit = lhs.hard_cap_hit || rhs.hard_cap_hit;
-                        lhs.cancelled = lhs.cancelled || rhs.cancelled;
-                        lhs.cache_reused = lhs.cache_reused || rhs.cache_reused;
-                        return lhs;
-                    };
-
-            const auto append_planned_samples =
-                    [](std::vector<orbitsim::TrajectorySample> &dst,
-                       const std::vector<orbitsim::TrajectorySample> &src) {
-                        if (src.empty())
-                        {
-                            return;
-                        }
-
-                        if (!dst.empty())
-                        {
-                            const double time_epsilon_s = continuity_time_epsilon_s(src.front().t_s);
-                            if (std::abs(dst.back().t_s - src.front().t_s) <= time_epsilon_s)
-                            {
-                                dst.pop_back();
-                            }
-                        }
-
-                        dst.insert(dst.end(), src.begin(), src.end());
-                    };
-
-            const auto merge_planned_outputs =
-                    [&merge_adaptive_stage_diagnostics, &append_planned_samples](PlannedSolveOutput &dst,
-                                                                                  const PlannedSolveOutput &src) {
-                        dst.segments.insert(dst.segments.end(), src.segments.begin(), src.segments.end());
-                        append_planned_samples(dst.samples, src.samples);
-                        dst.previews.insert(dst.previews.end(), src.previews.begin(), src.previews.end());
-                        dst.chunk_reused.insert(dst.chunk_reused.end(), src.chunk_reused.begin(), src.chunk_reused.end());
-                        dst.end_state = src.end_state;
-                        dst.diagnostics = merge_adaptive_stage_diagnostics(dst.diagnostics, src.diagnostics);
-                        dst.status = src.status;
-                    };
-
             const auto make_stage_result =
                     [&out, &sync_result_stage_counts](const PlannedSolveOutput &stage_output,
                                                       const std::vector<PublishedChunk> &published_chunks,
@@ -734,7 +734,6 @@ namespace Game
                                                       preview_summary.end_state,
                                                       [&finalizing_stage_output,
                                                        &finalizing_stage_chunks,
-                                                       &append_published_chunk,
                                                        published_chunk_base_id =
                                                                static_cast<uint32_t>(preview_stage_chunks.size())](
                                                               PlannedChunkPacket &&chunk_packet) {
@@ -774,7 +773,7 @@ namespace Game
                                                   0u,
                                                   solve_plan.chunks.size(),
                                                   ship_sc.state,
-                                                  [&planned, &published_chunks, &append_published_chunk](PlannedChunkPacket &&chunk_packet) {
+                                                  [&planned, &published_chunks](PlannedChunkPacket &&chunk_packet) {
                                                       append_published_chunk(published_chunks,
                                                                              chunk_packet,
                                                                              static_cast<uint32_t>(published_chunks.size()),
