@@ -175,7 +175,7 @@ namespace Game
         const bool preview_streaming_stage =
                 preview_stage &&
                 solver.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming;
-        const bool build_planned_render_curve = !preview_stage;
+        const bool build_planned_render_curve = !preview_streaming_stage;
         if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
         {
             out.diagnostics.status = PredictionDerivedStatus::MissingSolverData;

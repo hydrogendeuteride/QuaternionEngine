@@ -157,6 +157,12 @@ namespace Game
             return;
         }
 
+        if (result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+            result.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming)
+        {
+            track->preview_state = PredictionPreviewRuntimeState::PreviewStreaming;
+        }
+
         WorldVec3 build_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 build_vel_world{0.0};
         glm::vec3 build_vel_local{0.0f};

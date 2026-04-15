@@ -87,6 +87,7 @@ namespace Game::PredictionDrawDetail
         bool direct_world_polyline{false};
         bool identity_frame_transform{true};
         bool use_base_adaptive_curve{false};
+        bool use_planned_adaptive_curve{false};
         OrbitDrawWindowContext draw_ctx{};
         OrbitDrawWindowContext world_basis_draw_ctx{};
         glm::vec4 track_color_full{1.0f};

@@ -81,6 +81,32 @@ namespace Game
             out.diagnostics.trajectory_segment_count = out.diagnostics.trajectory_base.accepted_segments;
             out.diagnostics.trajectory_segment_count_planned = out.diagnostics.trajectory_planned.accepted_segments;
         };
+        const auto ensure_single_publish_chunk_metadata = [](Result &result) {
+            if (!result.published_chunks.empty())
+            {
+                return;
+            }
+
+            const bool has_planned_path = !result.trajectory_segments_inertial_planned.empty();
+            const std::vector<orbitsim::TrajectorySegment> &segments =
+                    has_planned_path ? result.trajectory_segments_inertial_planned
+                                     : result.trajectory_segments_inertial;
+            if (segments.empty())
+            {
+                return;
+            }
+
+            result.published_chunks.push_back(PublishedChunk{
+                    .chunk_id = 0u,
+                    .quality_state = ChunkQualityState::Final,
+                    .t0_s = segments.front().t0_s,
+                    .t1_s = prediction_segment_end_time(segments.back()),
+                    .includes_planned_path = has_planned_path,
+                    .reused_from_cache = has_planned_path
+                                                 ? result.diagnostics.trajectory_planned.cache_reused
+                                                 : result.baseline_reused,
+            });
+        };
 
         // Invalid inputs produce an invalid result rather than throwing on the worker thread.
         if (!std::isfinite(request.sim_time_s))
@@ -239,6 +265,7 @@ namespace Game
             sync_stage_counts();
             out.trajectory_inertial = std::move(traj_inertial);
             out.trajectory_segments_inertial = std::move(traj_segments_inertial);
+            ensure_single_publish_chunk_metadata(out);
             out.valid = true;
             out.diagnostics.status = Status::Success;
             publish(std::move(out));
@@ -494,6 +521,73 @@ namespace Game
                         });
                     };
 
+            const auto merge_adaptive_stage_diagnostics =
+                    [](AdaptiveStageDiagnostics lhs,
+                       const AdaptiveStageDiagnostics &rhs) {
+                        const double lhs_dt_weight = static_cast<double>(lhs.accepted_segments);
+                        const double rhs_dt_weight = static_cast<double>(rhs.accepted_segments);
+                        const bool lhs_has_dt = lhs_dt_weight > 0.0;
+                        const bool rhs_has_dt = rhs_dt_weight > 0.0;
+
+                        lhs.requested_duration_s += rhs.requested_duration_s;
+                        lhs.covered_duration_s += rhs.covered_duration_s;
+                        lhs.accepted_segments += rhs.accepted_segments;
+                        lhs.rejected_splits += rhs.rejected_splits;
+                        lhs.forced_boundary_splits += rhs.forced_boundary_splits;
+                        lhs.frame_resegmentation_count += rhs.frame_resegmentation_count;
+
+                        if (rhs_has_dt)
+                        {
+                            lhs.min_dt_s = lhs_has_dt ? std::min(lhs.min_dt_s, rhs.min_dt_s) : rhs.min_dt_s;
+                            lhs.max_dt_s = lhs_has_dt ? std::max(lhs.max_dt_s, rhs.max_dt_s) : rhs.max_dt_s;
+                        }
+
+                        if ((lhs_dt_weight + rhs_dt_weight) > 0.0)
+                        {
+                            const double lhs_avg = std::isfinite(lhs.avg_dt_s) ? lhs.avg_dt_s : 0.0;
+                            const double rhs_avg = std::isfinite(rhs.avg_dt_s) ? rhs.avg_dt_s : 0.0;
+                            lhs.avg_dt_s =
+                                    ((lhs_avg * lhs_dt_weight) + (rhs_avg * rhs_dt_weight)) / (lhs_dt_weight + rhs_dt_weight);
+                        }
+
+                        lhs.hard_cap_hit = lhs.hard_cap_hit || rhs.hard_cap_hit;
+                        lhs.cancelled = lhs.cancelled || rhs.cancelled;
+                        lhs.cache_reused = lhs.cache_reused || rhs.cache_reused;
+                        return lhs;
+                    };
+
+            const auto append_planned_samples =
+                    [](std::vector<orbitsim::TrajectorySample> &dst,
+                       const std::vector<orbitsim::TrajectorySample> &src) {
+                        if (src.empty())
+                        {
+                            return;
+                        }
+
+                        if (!dst.empty())
+                        {
+                            const double time_epsilon_s = continuity_time_epsilon_s(src.front().t_s);
+                            if (std::abs(dst.back().t_s - src.front().t_s) <= time_epsilon_s)
+                            {
+                                dst.pop_back();
+                            }
+                        }
+
+                        dst.insert(dst.end(), src.begin(), src.end());
+                    };
+
+            const auto merge_planned_outputs =
+                    [&merge_adaptive_stage_diagnostics, &append_planned_samples](PlannedSolveOutput &dst,
+                                                                                  const PlannedSolveOutput &src) {
+                        dst.segments.insert(dst.segments.end(), src.segments.begin(), src.segments.end());
+                        append_planned_samples(dst.samples, src.samples);
+                        dst.previews.insert(dst.previews.end(), src.previews.begin(), src.previews.end());
+                        dst.chunk_reused.insert(dst.chunk_reused.end(), src.chunk_reused.begin(), src.chunk_reused.end());
+                        dst.end_state = src.end_state;
+                        dst.diagnostics = merge_adaptive_stage_diagnostics(dst.diagnostics, src.diagnostics);
+                        dst.status = src.status;
+                    };
+
             const auto make_stage_result =
                     [&out, &sync_result_stage_counts](const PlannedSolveOutput &stage_output,
                                                       const std::vector<PublishedChunk> &published_chunks,
@@ -633,20 +727,41 @@ namespace Game
                     PlannedSolveOutput finalizing_stage_output{};
                     std::vector<PublishedChunk> finalizing_stage_chunks;
                     const PlannedSolveRangeSummary finalizing_summary =
-                            solve_and_publish_stage(preview_end_index,
-                                                    solve_plan.chunks.size(),
-                                                    preview_summary.end_state,
-                                                    PublishStage::PreviewFinalizing,
-                                                    ChunkQualityState::Final,
-                                                    static_cast<uint32_t>(preview_stage_chunks.size()),
-                                                    finalizing_stage_output,
-                                                    finalizing_stage_chunks);
+                            solve_planned_chunk_range(ctx,
+                                                      solve_plan,
+                                                      preview_end_index,
+                                                      solve_plan.chunks.size(),
+                                                      preview_summary.end_state,
+                                                      [&finalizing_stage_output,
+                                                       &finalizing_stage_chunks,
+                                                       &append_published_chunk,
+                                                       published_chunk_base_id =
+                                                               static_cast<uint32_t>(preview_stage_chunks.size())](
+                                                              PlannedChunkPacket &&chunk_packet) {
+                                                          const uint32_t published_chunk_id =
+                                                                  published_chunk_base_id +
+                                                                  static_cast<uint32_t>(finalizing_stage_chunks.size());
+                                                          append_published_chunk(finalizing_stage_chunks,
+                                                                                 chunk_packet,
+                                                                                 published_chunk_id,
+                                                                                 ChunkQualityState::Final);
+                                                          append_planned_chunk_packet(finalizing_stage_output,
+                                                                                      std::move(chunk_packet));
+                                                          return true;
+                                                      });
+                    apply_planned_range_summary(finalizing_stage_output, finalizing_summary);
                     if (finalizing_stage_output.status != Status::Success ||
                         finalizing_summary.status != Status::Success)
                     {
                         fail(finalizing_summary.status);
                         return;
                     }
+
+                    PlannedSolveOutput combined_stage_output = preview_stage_output;
+                    merge_planned_outputs(combined_stage_output, finalizing_stage_output);
+                    publish(make_stage_result(combined_stage_output,
+                                              finalizing_stage_chunks,
+                                              PublishStage::PreviewFinalizing));
                 }
             }
             else
@@ -694,6 +809,7 @@ namespace Game
         {
             return;
         }
+        ensure_single_publish_chunk_metadata(out);
         out.valid = true;
         out.diagnostics.status = Status::Success;
         publish(std::move(out));

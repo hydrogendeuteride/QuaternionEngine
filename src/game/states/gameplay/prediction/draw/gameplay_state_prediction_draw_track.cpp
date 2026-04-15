@@ -136,7 +136,7 @@ namespace Game
                 return;
             }
 
-            if (!cache.render_curve_frame_planned.empty())
+            if (track_ctx.use_planned_adaptive_curve)
             {
                 Draw::draw_adaptive_curve_window(track_ctx.draw_ctx,
                                                  _prediction_draw_config,
