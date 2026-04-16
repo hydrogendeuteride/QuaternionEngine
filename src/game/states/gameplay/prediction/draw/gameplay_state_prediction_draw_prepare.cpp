@@ -7,6 +7,10 @@
 namespace Game
 {
     namespace Draw = PredictionDrawDetail;
+    namespace
+    {
+        constexpr double kPredictionTimeEpsilonS = 1.0e-6;
+    }
 
     bool GameplayState::build_orbit_prediction_track_draw_context(
             PredictionTrackState &track,
@@ -162,6 +166,38 @@ namespace Game
             const PredictionTimeContext time_ctx =
                     build_prediction_time_context(track.key, out.now_s, planned_segments_t0_s, planned_segments_t1_s);
             out.planned_window_policy = resolve_prediction_window_policy(&track, time_ctx, true);
+            if (out.active_player_track)
+            {
+                const PredictionTimeContext authored_plan_ctx = build_prediction_time_context(track.key, out.now_s);
+                if (authored_plan_ctx.has_plan &&
+                    (std::isfinite(authored_plan_ctx.first_relevant_node_time_s) ||
+                     std::isfinite(authored_plan_ctx.first_future_node_time_s)))
+                {
+                    const double authored_plan_start_s =
+                            std::isfinite(authored_plan_ctx.first_relevant_node_time_s)
+                                    ? authored_plan_ctx.first_relevant_node_time_s
+                                    : authored_plan_ctx.first_future_node_time_s;
+                    const double authored_plan_end_s =
+                            std::isfinite(authored_plan_start_s)
+                                    ? std::max(authored_plan_start_s + maneuver_plan_horizon_s(),
+                                               authored_plan_ctx.last_future_node_time_s)
+                                    : std::numeric_limits<double>::quiet_NaN();
+                    if (std::isfinite(authored_plan_start_s) &&
+                        authored_plan_end_s > (authored_plan_start_s + kPredictionTimeEpsilonS))
+                    {
+                        out.planned_window_policy.visual_window_start_time_s =
+                                authored_plan_start_s;
+                        out.planned_window_policy.pick_window_start_time_s =
+                                authored_plan_start_s;
+                    }
+
+                    if (std::isfinite(authored_plan_end_s))
+                    {
+                        out.planned_window_policy.visual_window_end_time_s = authored_plan_end_s;
+                        out.planned_window_policy.pick_window_end_time_s = authored_plan_end_s;
+                    }
+                }
+            }
             out.planned_visual_window_s = out.planned_window_policy.visual_window_s;
             out.planned_exact_window_s = out.planned_window_policy.exact_window_s;
             out.planned_pick_window_s = out.planned_window_policy.pick_window_s;

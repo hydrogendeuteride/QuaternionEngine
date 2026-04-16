@@ -13,7 +13,9 @@ namespace Game
             const Draw::PredictionGlobalDrawContext &global_ctx,
             Draw::PredictionTrackDrawContext &track_ctx)
     {
-        if (!global_ctx.picking || !track_ctx.active_player_track)
+        // During maneuver-axis drags, orbit hover/pick feedback is not actionable and
+        // rebuilding line-pick LOD every frame is wasted work.
+        if (!global_ctx.picking || !track_ctx.active_player_track || track_ctx.maneuver_drag_active)
         {
             return;
         }

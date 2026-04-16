@@ -129,10 +129,13 @@ namespace Game
             return false;
         }
 
+        const OrbitPredictionCache &anchor_cache =
+                track.authoritative_cache.valid ? track.authoritative_cache : track.cache;
+
         constexpr double kPreviewAnchorTimeMatchEpsilonS = 1.0e-6;
         const auto preview_it =
-                std::find_if(track.cache.maneuver_previews.begin(),
-                             track.cache.maneuver_previews.end(),
+                std::find_if(anchor_cache.maneuver_previews.begin(),
+                             anchor_cache.maneuver_previews.end(),
                              [&track](const OrbitPredictionService::ManeuverNodePreview &preview) {
                                  return preview.valid &&
                                         preview.node_id == track.preview_anchor.anchor_node_id &&
@@ -142,17 +145,17 @@ namespace Game
                                         detail::finite_vec3(preview.inertial_position_m) &&
                                         detail::finite_vec3(preview.inertial_velocity_mps);
                              });
-        if (preview_it != track.cache.maneuver_previews.end())
+        if (preview_it != anchor_cache.maneuver_previews.end())
         {
             out_state.position_m = preview_it->inertial_position_m;
             out_state.velocity_mps = preview_it->inertial_velocity_mps;
             return true;
         }
 
-        return PredictionCacheInternal::sample_prediction_inertial_state(track.cache.trajectory_segments_inertial_planned,
+        return PredictionCacheInternal::sample_prediction_inertial_state(anchor_cache.trajectory_segments_inertial_planned,
                                                                          track.preview_anchor.anchor_time_s,
                                                                          out_state) ||
-               sample_prediction_inertial_state(track.cache.trajectory_inertial_planned,
+               sample_prediction_inertial_state(anchor_cache.trajectory_inertial_planned,
                                                 track.preview_anchor.anchor_time_s,
                                                 out_state) ||
                PredictionCacheInternal::sample_prediction_inertial_state(track.cache.trajectory_segments_inertial,
@@ -438,7 +441,7 @@ namespace Game
         }
 
         const bool live_preview_drag_pending_override =
-                track.dirty &&
+                (track.dirty || track.invalidated_while_pending) &&
                 track.supports_maneuvers &&
                 track.key == _prediction_selection.active_subject &&
                 with_maneuvers &&

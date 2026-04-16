@@ -58,11 +58,36 @@ struct RenderGraph::Impl
     RGResourceRegistry resources;
     std::vector<Pass> passes;
 
-    // --- Timing data for last executed frame ---
-    VkQueryPool timestampPool = VK_NULL_HANDLE; // holds 2 queries per pass (begin/end)
-    std::vector<float> lastGpuMillis; // per pass
-    std::vector<float> lastCpuMillis; // per pass (command recording time)
-    std::vector<bool> wroteTimestamps; // per pass; true if queries were written in last execute
+    struct FrameTimingState
+    {
+        VkQueryPool timestampPool = VK_NULL_HANDLE; // holds 2 queries per pass (begin/end)
+        std::vector<bool> wroteTimestamps; // per pass; true if queries were written in this frame slot
+        std::vector<RenderGraph::RGDebugPassInfo> passInfos; // snapshot for this frame slot
+    };
+
+    std::vector<FrameTimingState> frameTimings;
+    std::vector<RenderGraph::RGDebugPassInfo> lastResolvedPassInfos;
+
+    FrameTimingState &ensure_frame_timing(const uint32_t frame_slot)
+    {
+        if (frameTimings.size() <= frame_slot)
+        {
+            frameTimings.resize(frame_slot + 1);
+        }
+        return frameTimings[frame_slot];
+    }
+
+    void destroy_timestamp_pool(FrameTimingState &timing)
+    {
+        if (timing.timestampPool == VK_NULL_HANDLE || !context || !context->getDevice())
+        {
+            timing.timestampPool = VK_NULL_HANDLE;
+            return;
+        }
+
+        vkDestroyQueryPool(context->getDevice()->device(), timing.timestampPool, nullptr);
+        timing.timestampPool = VK_NULL_HANDLE;
+    }
 };
 
 RenderGraph::RenderGraph()
@@ -86,13 +111,19 @@ void RenderGraph::clear()
 
 void RenderGraph::shutdown()
 {
-	// If a timestamp pool exists, ensure the GPU is not using it and destroy it.
-	if (_impl->timestampPool != VK_NULL_HANDLE && _impl->context && _impl->context->getDevice())
+	bool waitedForIdle = false;
+	for (auto &timing : _impl->frameTimings)
 	{
-		// Be conservative here: make sure the graphics queue is idle before destroying.
-		vkQueueWaitIdle(_impl->context->getDevice()->graphicsQueue());
-		vkDestroyQueryPool(_impl->context->getDevice()->device(), _impl->timestampPool, nullptr);
-		_impl->timestampPool = VK_NULL_HANDLE;
+		if (timing.timestampPool == VK_NULL_HANDLE)
+		{
+			continue;
+		}
+		if (!waitedForIdle && _impl->context && _impl->context->getDevice())
+		{
+			vkQueueWaitIdle(_impl->context->getDevice()->graphicsQueue());
+			waitedForIdle = true;
+		}
+		_impl->destroy_timestamp_pool(timing);
 	}
 }
 
@@ -943,26 +974,39 @@ bool RenderGraph::compile()
 	return true;
 }
 
-void RenderGraph::execute(VkCommandBuffer cmd)
+void RenderGraph::execute(VkCommandBuffer cmd, uint32_t frame_slot)
 {
-	// Create/reset timestamp query pool for this execution (2 queries per pass)
-	if (_impl->timestampPool != VK_NULL_HANDLE)
+	Impl::FrameTimingState &timing = _impl->ensure_frame_timing(frame_slot);
+	_impl->destroy_timestamp_pool(timing);
+
+	timing.passInfos.clear();
+	timing.passInfos.reserve(_impl->passes.size());
+	for (const auto &p : _impl->passes)
 	{
-		vkDestroyQueryPool(_impl->context->getDevice()->device(), _impl->timestampPool, nullptr);
-		_impl->timestampPool = VK_NULL_HANDLE;
+		RGDebugPassInfo info{};
+		info.name = p.name;
+		info.type = p.type;
+		info.enabled = p.enabled;
+		info.imageReads = static_cast<uint32_t>(p.imageReads.size());
+		info.imageWrites = static_cast<uint32_t>(p.imageWrites.size());
+		info.bufferReads = static_cast<uint32_t>(p.bufferReads.size());
+		info.bufferWrites = static_cast<uint32_t>(p.bufferWrites.size());
+		info.colorAttachmentCount = static_cast<uint32_t>(p.colorAttachments.size());
+		info.hasDepth = p.hasDepth;
+		timing.passInfos.push_back(std::move(info));
 	}
+
 	const uint32_t queryCount = static_cast<uint32_t>(_impl->passes.size() * 2);
 	if (queryCount > 0)
 	{
 		VkQueryPoolCreateInfo qpci{.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
 		qpci.queryType = VK_QUERY_TYPE_TIMESTAMP;
 		qpci.queryCount = queryCount;
-		VK_CHECK(vkCreateQueryPool(_impl->context->getDevice()->device(), &qpci, nullptr, &_impl->timestampPool));
-		vkCmdResetQueryPool(cmd, _impl->timestampPool, 0, queryCount);
+		VK_CHECK(vkCreateQueryPool(_impl->context->getDevice()->device(), &qpci, nullptr, &timing.timestampPool));
+		vkCmdResetQueryPool(cmd, timing.timestampPool, 0, queryCount);
 	}
 
-	_impl->lastCpuMillis.assign(_impl->passes.size(), -1.0f);
-	_impl->wroteTimestamps.assign(_impl->passes.size(), false);
+	timing.wroteTimestamps.assign(_impl->passes.size(), false);
 
 	for (size_t passIndex = 0; passIndex < _impl->passes.size(); ++passIndex)
 	{
@@ -988,10 +1032,10 @@ void RenderGraph::execute(VkCommandBuffer cmd)
 		}
 
 		// Timestamp begin and CPU start after barriers
-		if (_impl->timestampPool != VK_NULL_HANDLE)
+		if (timing.timestampPool != VK_NULL_HANDLE)
 		{
 			const uint32_t qidx = static_cast<uint32_t>(passIndex * 2 + 0);
-			vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _impl->timestampPool, qidx);
+			vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, timing.timestampPool, qidx);
 		}
 		auto cpuStart = std::chrono::high_resolution_clock::now();
 
@@ -1099,12 +1143,15 @@ void RenderGraph::execute(VkCommandBuffer cmd)
 
 		// CPU end and timestamp end
 		auto cpuEnd = std::chrono::high_resolution_clock::now();
-		_impl->lastCpuMillis[passIndex] = std::chrono::duration<float, std::milli>(cpuEnd - cpuStart).count();
-		if (_impl->timestampPool != VK_NULL_HANDLE)
+		if (passIndex < timing.passInfos.size())
+		{
+			timing.passInfos[passIndex].cpuMillis = std::chrono::duration<float, std::milli>(cpuEnd - cpuStart).count();
+		}
+		if (timing.timestampPool != VK_NULL_HANDLE)
 		{
 			const uint32_t qidx = static_cast<uint32_t>(passIndex * 2 + 1);
-			vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _impl->timestampPool, qidx);
-			_impl->wroteTimestamps[passIndex] = true;
+			vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, timing.timestampPool, qidx);
+			timing.wroteTimestamps[passIndex] = true;
 		}
 
 		if (_impl->context && _impl->context->getDevice())
@@ -1272,6 +1319,12 @@ namespace
 // --- Debug helpers ---
 void RenderGraph::debug_get_passes(std::vector<RGDebugPassInfo> &out) const
 {
+	if (!_impl->lastResolvedPassInfos.empty())
+	{
+		out = _impl->lastResolvedPassInfos;
+		return;
+	}
+
 	out.clear();
 	out.reserve(_impl->passes.size());
 	for (const auto &p: _impl->passes)
@@ -1286,9 +1339,6 @@ void RenderGraph::debug_get_passes(std::vector<RGDebugPassInfo> &out) const
 		info.bufferWrites = static_cast<uint32_t>(p.bufferWrites.size());
 		info.colorAttachmentCount = static_cast<uint32_t>(p.colorAttachments.size());
 		info.hasDepth = p.hasDepth;
-		size_t idx = &p - _impl->passes.data();
-		if (idx < _impl->lastGpuMillis.size()) info.gpuMillis = _impl->lastGpuMillis[idx];
-		if (idx < _impl->lastCpuMillis.size()) info.cpuMillis = _impl->lastCpuMillis[idx];
 		out.push_back(std::move(info));
 	}
 }
@@ -1463,54 +1513,52 @@ RGImageHandle RenderGraph::import_swapchain_image(uint32_t index)
 	return import_image(d);
 }
 
-void RenderGraph::resolve_timings()
+void RenderGraph::resolve_timings(uint32_t frame_slot)
 {
-	if (_impl->timestampPool == VK_NULL_HANDLE || _impl->passes.empty())
+	Impl::FrameTimingState &timing = _impl->ensure_frame_timing(frame_slot);
+	if (timing.timestampPool == VK_NULL_HANDLE || timing.passInfos.empty())
 	{
-		_impl->lastGpuMillis.assign(_impl->passes.size(), -1.0f);
+		_impl->lastResolvedPassInfos.clear();
 		return;
 	}
 
-	const uint32_t queryCount = static_cast<uint32_t>(_impl->passes.size() * 2);
-	std::vector<uint64_t> results(queryCount, 0);
-	const VkResult queryResult = vkGetQueryPoolResults(
-		_impl->context->getDevice()->device(), _impl->timestampPool,
-		0, queryCount,
-		sizeof(uint64_t) * results.size(), results.data(), sizeof(uint64_t),
-		VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-	if (queryResult != VK_SUCCESS)
-	{
-		_impl->lastGpuMillis.assign(_impl->passes.size(), -1.0f);
-		Logger::warn("[RenderGraph] vkGetQueryPoolResults failed: {}", string_VkResult(queryResult));
-		return;
-	}
 	VkPhysicalDeviceProperties props{};
 	vkGetPhysicalDeviceProperties(_impl->context->getDevice()->physicalDevice(), &props);
 	const double tickNs = props.limits.timestampPeriod;
 
-	_impl->lastGpuMillis.assign(_impl->passes.size(), -1.0f);
-	for (size_t i = 0; i < _impl->passes.size(); ++i)
+	for (auto &info : timing.passInfos)
 	{
-		if (!_impl->wroteTimestamps.empty() && !_impl->wroteTimestamps[i])
+		info.gpuMillis = -1.0f;
+	}
+
+	for (size_t i = 0; i < timing.passInfos.size(); ++i)
+	{
+		if (i >= timing.wroteTimestamps.size() || !timing.wroteTimestamps[i])
 		{
-			_impl->lastGpuMillis[i] = -1.0f;
 			continue;
 		}
-		const uint64_t t0 = results[i * 2 + 0];
-		const uint64_t t1 = results[i * 2 + 1];
+
+		uint64_t results[2] = {};
+		const VkResult queryResult = vkGetQueryPoolResults(
+			_impl->context->getDevice()->device(), timing.timestampPool,
+			static_cast<uint32_t>(i * 2), 2,
+			sizeof(results), results, sizeof(uint64_t),
+			VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+		if (queryResult != VK_SUCCESS)
+		{
+			Logger::warn("[RenderGraph] vkGetQueryPoolResults failed: {}", string_VkResult(queryResult));
+			continue;
+		}
+
+		const uint64_t t0 = results[0];
+		const uint64_t t1 = results[1];
 		if (t1 > t0)
 		{
 			double ns = double(t1 - t0) * tickNs;
-			_impl->lastGpuMillis[i] = static_cast<float>(ns / 1.0e6);
-		}
-		else
-		{
-			_impl->lastGpuMillis[i] = -1.0f;
+			timing.passInfos[i].gpuMillis = static_cast<float>(ns / 1.0e6);
 		}
 	}
 
-	// Ensure any pending work that might still reference the pool is complete
-	vkQueueWaitIdle(_impl->context->getDevice()->graphicsQueue());
-	vkDestroyQueryPool(_impl->context->getDevice()->device(), _impl->timestampPool, nullptr);
-	_impl->timestampPool = VK_NULL_HANDLE;
+	_impl->lastResolvedPassInfos = timing.passInfos;
+	_impl->destroy_timestamp_pool(timing);
 }

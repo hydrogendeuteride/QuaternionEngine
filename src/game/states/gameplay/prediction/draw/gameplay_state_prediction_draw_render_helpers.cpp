@@ -237,7 +237,9 @@ namespace Game::PredictionDrawDetail
                                                     const OrbitPredictionDrawConfig &draw_config,
                                                     const double anchor_time_s,
                                                     const bool anchor_is_future,
-                                                    const double window_span_s)
+                                                    const double window_span_s,
+                                                    const double window_start_time_s = std::numeric_limits<double>::quiet_NaN(),
+                                                    const double window_end_time_s = std::numeric_limits<double>::quiet_NaN())
         {
             PickWindow planned_window{};
             if (traj_planned_segments.empty() || !std::isfinite(anchor_time_s))
@@ -268,7 +270,22 @@ namespace Game::PredictionDrawDetail
                 return planned_window;
             }
 
-            const double t_plan_end = std::min(t_plan_start + window_span_s, t1p);
+            double anchored_plan_end = std::min(t_plan_start + window_span_s, t1p);
+            if (std::isfinite(window_end_time_s))
+            {
+                anchored_plan_end = std::clamp(window_end_time_s, t0p, t1p);
+            }
+            if (!(anchored_plan_end > t_plan_start))
+            {
+                return planned_window;
+            }
+
+            if (std::isfinite(window_start_time_s))
+            {
+                t_plan_start = std::clamp(window_start_time_s, t0p, anchored_plan_end);
+            }
+
+            const double t_plan_end = anchored_plan_end;
             if (!(t_plan_end > t_plan_start))
             {
                 return planned_window;
@@ -294,7 +311,9 @@ namespace Game::PredictionDrawDetail
                                                 draw_config,
                                                 policy.visual_anchor_time_s,
                                                 policy.visual_anchor_is_future,
-                                                policy.visual_window_s);
+                                                policy.visual_window_s,
+                                                policy.visual_window_start_time_s,
+                                                policy.visual_window_end_time_s);
     }
 
     PickWindow build_planned_pick_window(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
@@ -309,7 +328,9 @@ namespace Game::PredictionDrawDetail
                                                 draw_config,
                                                 policy.pick_anchor_time_s,
                                                 policy.pick_anchor_is_future,
-                                                policy.pick_window_s);
+                                                policy.pick_window_s,
+                                                policy.pick_window_start_time_s,
+                                                policy.pick_window_end_time_s);
     }
 
     std::size_t build_pick_segment_cache(const std::vector<orbitsim::TrajectorySegment> &traj_segments,

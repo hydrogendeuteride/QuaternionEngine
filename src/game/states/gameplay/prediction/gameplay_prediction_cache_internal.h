@@ -646,18 +646,20 @@ namespace Game::PredictionCacheInternal
             const OrbitPredictionCache &cache,
             const std::vector<OrbitPredictionService::PublishedChunk> &published_chunks,
             const uint64_t generation_id,
-            const orbitsim::TrajectoryFrameSpec & /*resolved_frame_spec*/,
+            const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
             const uint64_t /*display_frame_key*/,
             const uint64_t /*display_frame_revision*/,
             const CancelCheck &cancel_requested = {},
             const std::vector<double> &node_times_s = {},
-            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr)
+            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr,
+            const bool build_chunk_render_curves = false)
     {
         out_assembly.clear();
         if (diagnostics)
         {
             *diagnostics = {};
         }
+        (void) resolved_frame_spec;
 
         for (const OrbitPredictionService::PublishedChunk &published_chunk : published_chunks)
         {
@@ -698,8 +700,14 @@ namespace Game::PredictionCacheInternal
             chunk.t1_s = published_chunk.t1_s;
             chunk.frame_samples = std::move(clipped_samples);
             chunk.frame_segments = std::move(clipped_segments);
-            // Preview chunks are flattened back into the track cache; no current draw path consumes per-chunk curves.
-            chunk.render_curve.clear();
+            if (build_chunk_render_curves && !chunk.frame_segments.empty())
+            {
+                chunk.render_curve = OrbitRenderCurve::build(chunk.frame_segments);
+            }
+            else
+            {
+                chunk.render_curve.clear();
+            }
             chunk.valid = !chunk.frame_segments.empty();
             out_assembly.chunks.push_back(std::move(chunk));
         }

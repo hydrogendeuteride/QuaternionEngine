@@ -1561,6 +1561,93 @@ TEST(GameplayPredictionManeuverTests, PreviewDerivedResultsAccumulatePlannedChun
     EXPECT_DOUBLE_EQ(state._prediction_tracks.front().preview_overlay.chunk_assembly.chunks[2].t1_s, 30.0);
 }
 
+TEST(GameplayPredictionManeuverTests, PreviewDerivedResultRestoresExistingPlannedCacheWhenAuthoritativeSeedIsMissing)
+{
+    Game::GameplayState state{};
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.preview_state = Game::PredictionPreviewRuntimeState::PreviewStreaming;
+    track.cache.valid = true;
+    track.cache.generation_id = 4;
+    track.cache.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(30.0, 7'300'000.0)};
+    track.cache.trajectory_segments_inertial = {make_segment(0.0, 30.0, 7'000'000.0, 7'300'000.0)};
+    track.cache.trajectory_frame = track.cache.trajectory_inertial;
+    track.cache.trajectory_segments_frame = track.cache.trajectory_segments_inertial;
+    track.cache.trajectory_inertial_planned = {
+            make_sample(0.0, 7'000'000.0),
+            make_sample(10.0, 7'100'000.0),
+            make_sample(20.0, 7'200'000.0),
+            make_sample(30.0, 7'300'000.0),
+    };
+    track.cache.trajectory_segments_inertial_planned = {
+            make_segment(0.0, 10.0, 7'000'000.0, 7'100'000.0),
+            make_segment(10.0, 20.0, 7'100'000.0, 7'200'000.0),
+            make_segment(20.0, 30.0, 7'200'000.0, 7'300'000.0),
+    };
+    track.cache.trajectory_frame_planned = track.cache.trajectory_inertial_planned;
+    track.cache.trajectory_segments_frame_planned = track.cache.trajectory_segments_inertial_planned;
+    track.cache.maneuver_previews = {
+            Game::OrbitPredictionService::ManeuverNodePreview{
+                    .node_id = 1,
+                    .t_s = 10.0,
+                    .valid = true,
+                    .inertial_position_m = glm::dvec3(7'100'000.0, 1.0, 0.0),
+                    .inertial_velocity_mps = glm::dvec3(0.0, 7'500.0, 0.0),
+            },
+    };
+    state._prediction_tracks.push_back(track);
+
+    Game::OrbitPredictionDerivedService::Result result{};
+    result.track_id = state._prediction_tracks.front().key.track_id();
+    result.generation_id = 5;
+    result.valid = true;
+    result.solve_quality = Game::OrbitPredictionService::SolveQuality::FastPreview;
+    result.publish_stage = Game::OrbitPredictionService::PublishStage::PreviewStreaming;
+    result.cache.valid = true;
+    result.cache.generation_id = 5;
+    result.cache.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(30.0, 7'300'000.0)};
+    result.cache.trajectory_segments_inertial = {make_segment(0.0, 30.0, 7'000'000.0, 7'300'000.0)};
+    result.cache.trajectory_frame = result.cache.trajectory_inertial;
+    result.cache.trajectory_segments_frame = result.cache.trajectory_segments_inertial;
+    result.cache.trajectory_inertial_planned = {
+            make_sample(10.0, 7'150'000.0),
+            make_sample(20.0, 7'250'000.0),
+    };
+    result.cache.trajectory_segments_inertial_planned = {
+            make_segment(10.0, 20.0, 7'150'000.0, 7'250'000.0),
+    };
+    result.cache.trajectory_frame_planned = result.cache.trajectory_inertial_planned;
+    result.cache.trajectory_segments_frame_planned = result.cache.trajectory_segments_inertial_planned;
+    result.cache.maneuver_previews = {
+            Game::OrbitPredictionService::ManeuverNodePreview{
+                    .node_id = 1,
+                    .t_s = 10.0,
+                    .valid = true,
+                    .inertial_position_m = glm::dvec3(7'150'000.0, 2.0, 0.0),
+                    .inertial_velocity_mps = glm::dvec3(0.0, 7'600.0, 0.0),
+            },
+    };
+    result.chunk_assembly.valid = true;
+    result.chunk_assembly.generation_id = 5;
+    result.chunk_assembly.chunks = {
+            make_chunk(1u, 5u, 10.0, 20.0, 7'150'000.0, 7'250'000.0),
+    };
+
+    state.apply_completed_prediction_derived_result(std::move(result));
+
+    ASSERT_EQ(state._prediction_tracks.size(), 1u);
+    const Game::PredictionTrackState &updated_track = state._prediction_tracks.front();
+    EXPECT_TRUE(updated_track.authoritative_cache.valid);
+    ASSERT_EQ(updated_track.cache.trajectory_segments_inertial_planned.size(), 3u);
+    EXPECT_DOUBLE_EQ(updated_track.cache.trajectory_segments_inertial_planned.front().t0_s, 0.0);
+    EXPECT_DOUBLE_EQ(updated_track.cache.trajectory_segments_inertial_planned.back().t0_s, 20.0);
+    ASSERT_EQ(updated_track.cache.maneuver_previews.size(), 1u);
+    EXPECT_DOUBLE_EQ(updated_track.cache.maneuver_previews.front().inertial_position_m.x, 7'100'000.0);
+    ASSERT_EQ(updated_track.preview_overlay.chunk_assembly.chunks.size(), 1u);
+    EXPECT_DOUBLE_EQ(updated_track.preview_overlay.chunk_assembly.chunks.front().t0_s, 10.0);
+}
+
 TEST(GameplayPredictionManeuverTests, PreviewFinalizingDerivedResultKeepsAnchorStateAvailableForNextPreview)
 {
     Game::GameplayState state{};

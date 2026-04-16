@@ -1599,7 +1599,7 @@ void VulkanEngine::draw()
 
         if (_renderGraph->compile())
         {
-            _renderGraph->execute(cmd);
+            _renderGraph->execute(cmd, static_cast<uint32_t>(_frameNumber % FRAME_OVERLAP));
         }
     }
 
@@ -1792,7 +1792,7 @@ void VulkanEngine::run()
         get_current_frame()._deletionQueue.flush();
         if (_renderGraph)
         {
-            _renderGraph->resolve_timings();
+            _renderGraph->resolve_timings(static_cast<uint32_t>(_frameNumber % FRAME_OVERLAP));
         }
 
         if (_ui)

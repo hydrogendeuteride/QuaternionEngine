@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace Game
 {
@@ -161,6 +162,56 @@ namespace Game
                                     _prediction_draw_config.draw_planned_as_dashed);
         };
 
+        const auto draw_planned_window_from_chunk = [&](const OrbitChunk &chunk,
+                                                        const double window_t0_s,
+                                                        const double window_t1_s,
+                                                        const glm::vec4 &color) {
+            if (!(window_t1_s > window_t0_s))
+            {
+                return false;
+            }
+
+            if (track_ctx.direct_world_polyline && chunk.frame_samples.size() >= 2)
+            {
+                Draw::draw_polyline_window(track_ctx.draw_ctx,
+                                           _prediction_draw_config,
+                                           chunk.frame_samples,
+                                           window_t0_s,
+                                           window_t1_s,
+                                           color,
+                                           false);
+                return true;
+            }
+
+            if (!chunk.render_curve.empty())
+            {
+                Draw::draw_adaptive_curve_window(track_ctx.draw_ctx,
+                                                 _prediction_draw_config,
+                                                 _orbit_plot_perf,
+                                                 chunk.render_curve,
+                                                 window_t0_s,
+                                                 window_t1_s,
+                                                 color,
+                                                 false);
+                return true;
+            }
+
+            if (chunk.frame_segments.empty())
+            {
+                return false;
+            }
+
+            Draw::draw_orbit_window(track_ctx.draw_ctx,
+                                    _prediction_draw_config,
+                                    _orbit_plot_perf,
+                                    chunk.frame_segments,
+                                    window_t0_s,
+                                    window_t1_s,
+                                    color,
+                                    false);
+            return true;
+        };
+
         track_ctx.base_pick_window = {};
         track_ctx.planned_draw_window =
                 (track_ctx.active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty() &&
@@ -263,9 +314,115 @@ namespace Game
             return;
         }
 
-        draw_planned_window_from_cache(planned_cache,
-                                       track_ctx.planned_draw_window.t0_s,
-                                       track_ctx.planned_draw_window.t1_s,
-                                       track_ctx.track_color_plan);
+        const double planned_window_t0_s = track_ctx.planned_draw_window.t0_s;
+        const double planned_window_t1_s = track_ctx.planned_draw_window.t1_s;
+        const glm::vec4 preview_plan_color = glm::vec4(track_ctx.track_color_plan.r,
+                                                       track_ctx.track_color_plan.g,
+                                                       track_ctx.track_color_plan.b,
+                                                       std::clamp(std::max(track_ctx.track_color_plan.a, 0.98f), 0.0f, 1.0f));
+        const glm::vec4 stale_plan_color = glm::vec4(track_ctx.track_color_plan.r,
+                                                     track_ctx.track_color_plan.g,
+                                                     track_ctx.track_color_plan.b,
+                                                     track_ctx.track_color_plan.a * 0.35f);
+        const PredictionChunkAssembly &preview_assembly = track_ctx.track->preview_overlay.chunk_assembly;
+        if (!preview_assembly.valid || preview_assembly.chunks.empty())
+        {
+            const bool preview_fallback_active =
+                    track_ctx.track->preview_anchor.valid &&
+                    track_ctx.track->preview_state != PredictionPreviewRuntimeState::Idle &&
+                    track_ctx.track->preview_state != PredictionPreviewRuntimeState::AwaitFullRefine &&
+                    std::isfinite(track_ctx.track->preview_anchor.anchor_time_s) &&
+                    track_ctx.track->preview_anchor.visual_window_s > 0.0;
+            if (preview_fallback_active)
+            {
+                const double preview_t0_s = std::clamp(track_ctx.track->preview_anchor.anchor_time_s,
+                                                       planned_window_t0_s,
+                                                       planned_window_t1_s);
+                const double preview_t1_s =
+                        std::min(planned_window_t1_s,
+                                 preview_t0_s + track_ctx.track->preview_anchor.visual_window_s);
+                if (preview_t0_s > planned_window_t0_s)
+                {
+                    draw_planned_window_from_cache(planned_cache,
+                                                   planned_window_t0_s,
+                                                   preview_t0_s,
+                                                   track_ctx.track_color_plan);
+                }
+                if (preview_t1_s > preview_t0_s)
+                {
+                    draw_planned_window_from_cache(planned_cache,
+                                                   preview_t0_s,
+                                                   preview_t1_s,
+                                                   preview_plan_color);
+                }
+                if (!track_ctx.maneuver_drag_active && preview_t1_s < planned_window_t1_s)
+                {
+                    draw_planned_window_from_cache(planned_cache,
+                                                   preview_t1_s,
+                                                   planned_window_t1_s,
+                                                   stale_plan_color);
+                }
+                return;
+            }
+            if (track_ctx.maneuver_drag_active && std::isfinite(track_ctx.planned_draw_window.anchor_time_s))
+            {
+                draw_planned_window_from_cache(planned_cache,
+                                               planned_window_t0_s,
+                                               std::min(planned_window_t1_s,
+                                                        track_ctx.planned_draw_window.anchor_time_s),
+                                               track_ctx.track_color_plan);
+                return;
+            }
+            draw_planned_window_from_cache(planned_cache,
+                                           planned_window_t0_s,
+                                           planned_window_t1_s,
+                                           track_ctx.track_color_plan);
+            return;
+        }
+
+        std::vector<std::pair<double, double>> covered_ranges;
+        covered_ranges.reserve(preview_assembly.chunks.size());
+        double first_preview_t0_s = std::numeric_limits<double>::infinity();
+        _orbit_plot_perf.planned_chunk_count = static_cast<uint32_t>(preview_assembly.chunks.size());
+        for (const OrbitChunk &chunk : preview_assembly.chunks)
+        {
+            const double clipped_t0_s = std::max(planned_window_t0_s, chunk.t0_s);
+            const double clipped_t1_s = std::min(planned_window_t1_s, chunk.t1_s);
+            if (!(clipped_t1_s > clipped_t0_s))
+            {
+                continue;
+            }
+
+            if (!draw_planned_window_from_chunk(chunk, clipped_t0_s, clipped_t1_s, preview_plan_color))
+            {
+                continue;
+            }
+
+            covered_ranges.emplace_back(clipped_t0_s, clipped_t1_s);
+            first_preview_t0_s = std::min(first_preview_t0_s, clipped_t0_s);
+            ++_orbit_plot_perf.planned_chunks_drawn;
+        }
+
+        const std::vector<std::pair<double, double>> uncovered_ranges =
+                Draw::compute_uncovered_ranges(planned_window_t0_s, planned_window_t1_s, covered_ranges);
+        _orbit_plot_perf.planned_fallback_range_count = static_cast<uint32_t>(uncovered_ranges.size());
+        const double drag_prefix_cutoff_s =
+                track_ctx.maneuver_drag_active && std::isfinite(track_ctx.planned_draw_window.anchor_time_s)
+                        ? track_ctx.planned_draw_window.anchor_time_s
+                        : first_preview_t0_s;
+        for (const auto &[range_t0_s, range_t1_s] : uncovered_ranges)
+        {
+            const bool prefix_range =
+                    !std::isfinite(drag_prefix_cutoff_s) ||
+                    range_t1_s <= (drag_prefix_cutoff_s + 1.0e-6);
+            if (track_ctx.maneuver_drag_active && !prefix_range)
+            {
+                continue;
+            }
+            draw_planned_window_from_cache(planned_cache,
+                                           range_t0_s,
+                                           range_t1_s,
+                                           prefix_range ? track_ctx.track_color_plan : stale_plan_color);
+        }
     }
 } // namespace Game
