@@ -165,6 +165,148 @@ namespace Game::PredictionCacheInternal
         return resample_segments_uniform(segments, std::max<std::size_t>(total_sample_budget, 2));
     }
 
+    inline void append_unique_prediction_sample(std::vector<orbitsim::TrajectorySample> &dst,
+                                                const orbitsim::TrajectorySample &sample)
+    {
+        if (!dst.empty() && std::abs(dst.back().t_s - sample.t_s) <= 1.0e-9)
+        {
+            dst.back() = sample;
+            return;
+        }
+        dst.push_back(sample);
+    }
+
+    inline std::vector<orbitsim::TrajectorySample> collect_segment_boundary_samples(
+            const std::vector<orbitsim::TrajectorySegment> &segments)
+    {
+        std::vector<orbitsim::TrajectorySample> out;
+        if (segments.empty())
+        {
+            return out;
+        }
+
+        out.reserve(segments.size() + 1u);
+        for (const orbitsim::TrajectorySegment &segment : segments)
+        {
+            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.t0_s))
+            {
+                continue;
+            }
+
+            append_unique_prediction_sample(out,
+                                            orbitsim::TrajectorySample{
+                                                    .t_s = segment.t0_s,
+                                                    .position_m = segment.start.position_m,
+                                                    .velocity_mps = segment.start.velocity_mps,
+                                            });
+
+            append_unique_prediction_sample(out,
+                                            orbitsim::TrajectorySample{
+                                                    .t_s = prediction_segment_end_time(segment),
+                                                    .position_m = segment.end.position_m,
+                                                    .velocity_mps = segment.end.velocity_mps,
+                                            });
+        }
+
+        return out;
+    }
+
+    inline bool slice_trajectory_segments_from_cursor(
+            const std::vector<orbitsim::TrajectorySegment> &segments,
+            const double t0_s,
+            const double t1_s,
+            std::size_t &cursor,
+            std::vector<orbitsim::TrajectorySegment> &out_segments)
+    {
+        out_segments.clear();
+        if (segments.empty() || !std::isfinite(t0_s) || !std::isfinite(t1_s) || !(t1_s > t0_s))
+        {
+            return true;
+        }
+
+        cursor = std::min(cursor, segments.size());
+        while (cursor < segments.size())
+        {
+            const orbitsim::TrajectorySegment &segment = segments[cursor];
+            const double seg_t0_s = segment.t0_s;
+            const double seg_t1_s = prediction_segment_end_time(segment);
+            if (!(segment.dt_s > 0.0) || !std::isfinite(seg_t0_s) || !std::isfinite(seg_t1_s) || !(seg_t1_s > seg_t0_s))
+            {
+                ++cursor;
+                continue;
+            }
+            if (seg_t1_s <= t0_s)
+            {
+                ++cursor;
+                continue;
+            }
+            break;
+        }
+
+        out_segments.reserve(8u);
+        std::size_t i = cursor;
+        for (; i < segments.size(); ++i)
+        {
+            const orbitsim::TrajectorySegment &segment = segments[i];
+            const double seg_t0_s = segment.t0_s;
+            const double seg_t1_s = prediction_segment_end_time(segment);
+            if (!(segment.dt_s > 0.0) || !std::isfinite(seg_t0_s) || !std::isfinite(seg_t1_s) || !(seg_t1_s > seg_t0_s))
+            {
+                continue;
+            }
+            if (seg_t0_s >= t1_s)
+            {
+                break;
+            }
+
+            const double overlap_t0_s = std::max(seg_t0_s, t0_s);
+            const double overlap_t1_s = std::min(seg_t1_s, t1_s);
+            if (!(overlap_t1_s > overlap_t0_s))
+            {
+                continue;
+            }
+
+            orbitsim::State start_state = segment.start;
+            orbitsim::State end_state = segment.end;
+            if (overlap_t0_s > seg_t0_s && !eval_segment_state(segment, overlap_t0_s, start_state))
+            {
+                return false;
+            }
+            if (overlap_t1_s < seg_t1_s && !eval_segment_state(segment, overlap_t1_s, end_state))
+            {
+                return false;
+            }
+
+            std::uint32_t flags = segment.flags;
+            if (overlap_t0_s > seg_t0_s || overlap_t1_s < seg_t1_s)
+            {
+                flags |= orbitsim::kTrajectorySegmentFlagForcedBoundary;
+            }
+
+            out_segments.push_back(orbitsim::TrajectorySegment{
+                    .t0_s = overlap_t0_s,
+                    .dt_s = overlap_t1_s - overlap_t0_s,
+                    .start = start_state,
+                    .end = end_state,
+                    .flags = flags,
+            });
+
+            if (seg_t1_s >= t1_s)
+            {
+                break;
+            }
+        }
+
+        const double cursor_advance_epsilon_s = continuity_time_epsilon_s(t1_s);
+        while (cursor < segments.size() &&
+               prediction_segment_end_time(segments[cursor]) <= (t1_s + cursor_advance_epsilon_s))
+        {
+            ++cursor;
+        }
+
+        return true;
+    }
+
     inline void update_derived_diagnostics(OrbitPredictionDerivedDiagnostics *diagnostics,
                                            const OrbitPredictionCache &cache,
                                            const PredictionDerivedStatus status)
@@ -661,6 +803,13 @@ namespace Game::PredictionCacheInternal
         }
         (void) resolved_frame_spec;
 
+        out_assembly.chunks.reserve(published_chunks.size());
+        std::size_t segment_cursor = 0;
+        double previous_chunk_t0_s = -std::numeric_limits<double>::infinity();
+        std::size_t total_chunk_segment_count = 0;
+        std::size_t total_chunk_sample_count = 0;
+        double total_chunk_duration_s = 0.0;
+
         for (const OrbitPredictionService::PublishedChunk &published_chunk : published_chunks)
         {
             if (cancel_requested && cancel_requested())
@@ -677,10 +826,23 @@ namespace Game::PredictionCacheInternal
                 continue;
             }
 
-            std::vector<orbitsim::TrajectorySegment> clipped_segments =
-                    slice_trajectory_segments(cache.trajectory_segments_frame_planned,
-                                              published_chunk.t0_s,
-                                              published_chunk.t1_s);
+            const double chunk_order_epsilon_s = continuity_time_epsilon_s(published_chunk.t0_s);
+            if (published_chunk.t0_s < (previous_chunk_t0_s - chunk_order_epsilon_s))
+            {
+                segment_cursor = 0;
+            }
+            previous_chunk_t0_s = published_chunk.t0_s;
+
+            std::vector<orbitsim::TrajectorySegment> clipped_segments{};
+            if (!slice_trajectory_segments_from_cursor(cache.trajectory_segments_frame_planned,
+                                                       published_chunk.t0_s,
+                                                       published_chunk.t1_s,
+                                                       segment_cursor,
+                                                       clipped_segments))
+            {
+                update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::ContinuityFailed);
+                return false;
+            }
             if (clipped_segments.empty() || !validate_trajectory_segment_continuity(clipped_segments))
             {
                 update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::ContinuityFailed);
@@ -709,6 +871,9 @@ namespace Game::PredictionCacheInternal
                 chunk.render_curve.clear();
             }
             chunk.valid = !chunk.frame_segments.empty();
+            total_chunk_segment_count += chunk.frame_segments.size();
+            total_chunk_sample_count += chunk.frame_samples.size();
+            total_chunk_duration_s += prediction_segment_span_s(chunk.frame_segments);
             out_assembly.chunks.push_back(std::move(chunk));
         }
 
@@ -716,21 +881,13 @@ namespace Game::PredictionCacheInternal
         out_assembly.valid = !out_assembly.chunks.empty();
         if (diagnostics && out_assembly.valid)
         {
-            OrbitPredictionCache diagnostics_cache = cache;
-            diagnostics_cache.trajectory_segments_frame_planned.clear();
-            diagnostics_cache.trajectory_frame_planned.clear();
-            for (const OrbitChunk &chunk : out_assembly.chunks)
-            {
-                diagnostics_cache.trajectory_segments_frame_planned.insert(
-                        diagnostics_cache.trajectory_segments_frame_planned.end(),
-                        chunk.frame_segments.begin(),
-                        chunk.frame_segments.end());
-                diagnostics_cache.trajectory_frame_planned.insert(
-                        diagnostics_cache.trajectory_frame_planned.end(),
-                        chunk.frame_samples.begin(),
-                        chunk.frame_samples.end());
-            }
-            update_derived_diagnostics(diagnostics, diagnostics_cache, PredictionDerivedStatus::Success);
+            diagnostics->status = PredictionDerivedStatus::Success;
+            diagnostics->frame_segment_count = cache.trajectory_segments_frame.size();
+            diagnostics->frame_segment_count_planned = total_chunk_segment_count;
+            diagnostics->frame_sample_count = cache.trajectory_frame.size();
+            diagnostics->frame_sample_count_planned = total_chunk_sample_count;
+            diagnostics->frame_planned.accepted_segments = total_chunk_segment_count;
+            diagnostics->frame_planned.covered_duration_s = total_chunk_duration_s;
         }
         return out_assembly.valid;
     }
@@ -748,6 +905,16 @@ namespace Game::PredictionCacheInternal
             return;
         }
 
+        std::size_t total_segment_count = 0;
+        std::size_t total_sample_count = 0;
+        for (const OrbitChunk &chunk : assembly.chunks)
+        {
+            total_segment_count += chunk.frame_segments.size();
+            total_sample_count += chunk.frame_samples.size();
+        }
+        cache.trajectory_segments_frame_planned.reserve(total_segment_count);
+        cache.trajectory_frame_planned.reserve(total_sample_count);
+
         for (const OrbitChunk &chunk : assembly.chunks)
         {
             cache.trajectory_segments_frame_planned.insert(cache.trajectory_segments_frame_planned.end(),
@@ -756,13 +923,7 @@ namespace Game::PredictionCacheInternal
 
             for (const orbitsim::TrajectorySample &sample : chunk.frame_samples)
             {
-                if (!cache.trajectory_frame_planned.empty() &&
-                    std::abs(cache.trajectory_frame_planned.back().t_s - sample.t_s) <= 1.0e-9)
-                {
-                    cache.trajectory_frame_planned.back() = sample;
-                    continue;
-                }
-                cache.trajectory_frame_planned.push_back(sample);
+                append_unique_prediction_sample(cache.trajectory_frame_planned, sample);
             }
         }
 
