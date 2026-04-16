@@ -20,8 +20,16 @@ namespace Game
 
         bool frame_supports_live_base_frame_reuse(const orbitsim::TrajectoryFrameSpec &spec)
         {
-            return spec.type != orbitsim::TrajectoryFrameType::Inertial &&
-                   spec.type != orbitsim::TrajectoryFrameType::LVLH;
+            switch (spec.type)
+            {
+                case orbitsim::TrajectoryFrameType::Inertial:
+                case orbitsim::TrajectoryFrameType::BodyCenteredInertial:
+                case orbitsim::TrajectoryFrameType::BodyFixed:
+                case orbitsim::TrajectoryFrameType::Synodic:
+                case orbitsim::TrajectoryFrameType::LVLH:
+                    return true;
+            }
+            return false;
         }
 
         bool base_trajectory_signature_matches(const OrbitPredictionCache &cache,

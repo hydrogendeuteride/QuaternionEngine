@@ -125,6 +125,7 @@ namespace Game
             {
                 return;
             }
+            const bool dashed = _prediction_draw_config.draw_planned_as_dashed && !track_ctx.maneuver_drag_active;
             if (track_ctx.direct_world_polyline)
             {
                 Draw::draw_polyline_window(track_ctx.draw_ctx,
@@ -133,7 +134,7 @@ namespace Game
                                            window_t0_s,
                                            window_t1_s,
                                            color,
-                                           _prediction_draw_config.draw_planned_as_dashed);
+                                           dashed);
                 return;
             }
 
@@ -146,7 +147,7 @@ namespace Game
                                                  window_t0_s,
                                                  window_t1_s,
                                                  color,
-                                                 _prediction_draw_config.draw_planned_as_dashed);
+                                                 dashed);
                 return;
             }
 
@@ -159,7 +160,7 @@ namespace Game
                                     window_t0_s,
                                     window_t1_s,
                                     color,
-                                    _prediction_draw_config.draw_planned_as_dashed);
+                                    dashed);
         };
 
         const auto draw_planned_window_from_chunk = [&](const OrbitChunk &chunk,

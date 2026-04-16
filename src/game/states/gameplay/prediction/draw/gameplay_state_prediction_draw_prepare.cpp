@@ -103,10 +103,11 @@ namespace Game
         out.i_hi = Draw::lower_bound_sample_index(*out.traj_base, out.now_s);
         if (out.i_hi >= out.traj_base->size())
         {
-            return false;
+            out.i_hi = out.traj_base->size() - 1;
         }
 
-        out.align_delta = Draw::compute_align_delta(*out.traj_base,
+        out.align_delta = Draw::compute_align_delta(*out.traj_base_segments,
+                                                    *out.traj_base,
                                                     out.i_hi,
                                                     out.subject_pos_world,
                                                     out.now_s,
@@ -128,7 +129,9 @@ namespace Game
         out.draw_ctx.render_error_px = global_ctx.render_error_px;
         out.draw_ctx.render_max_segments =
                 static_cast<std::size_t>(std::max(1, _orbit_plot_budget.render_max_segments_cpu));
-        out.draw_ctx.line_overlay_boost = std::clamp(_prediction_line_overlay_boost, 0.0f, 1.0f);
+        out.draw_ctx.line_overlay_boost = out.maneuver_drag_active
+                                                  ? 0.0f
+                                                  : std::clamp(_prediction_line_overlay_boost, 0.0f, 1.0f);
 
         out.identity_frame_transform = Draw::frame_transform_is_identity(out.frame_to_world);
         out.use_base_adaptive_curve = !out.stable_cache->render_curve_frame.empty();
@@ -150,7 +153,7 @@ namespace Game
         {
             out.track_color_plan.a = out.track_color_future.a;
         }
-        if (!out.is_active)
+        if (!out.maneuver_drag_active && !out.is_active)
         {
             out.draw_ctx.line_overlay_boost = std::clamp(_prediction_line_overlay_boost * 0.35f, 0.0f, 1.0f);
         }

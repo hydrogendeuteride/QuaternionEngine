@@ -192,7 +192,54 @@ namespace Game::PredictionDrawDetail
         return transform_local(local);
     }
 
-    WorldVec3 compute_align_delta(const std::vector<orbitsim::TrajectorySample> &traj_base,
+    namespace
+    {
+        bool sample_segment_world(const WorldVec3 &frame_origin_world,
+                                  const glm::dmat3 &frame_to_world,
+                                  const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                                  const double t_s,
+                                  WorldVec3 &out_world)
+        {
+            if (traj_segments.empty() || !std::isfinite(t_s))
+            {
+                return false;
+            }
+
+            const orbitsim::TrajectorySegment *selected = nullptr;
+            for (const orbitsim::TrajectorySegment &segment : traj_segments)
+            {
+                if (!(segment.dt_s > 0.0) || !std::isfinite(segment.t0_s))
+                {
+                    continue;
+                }
+
+                const double seg_t1_s = segment.t0_s + segment.dt_s;
+                if (!std::isfinite(seg_t1_s))
+                {
+                    continue;
+                }
+
+                selected = &segment;
+                if (t_s <= seg_t1_s)
+                {
+                    break;
+                }
+            }
+
+            if (!selected)
+            {
+                return false;
+            }
+
+            const double sample_t_s = std::clamp(t_s, selected->t0_s, selected->t0_s + selected->dt_s);
+            out_world = frame_origin_world +
+                        WorldVec3(frame_to_world * OrbitPlotUtil::eval_segment_local_position(*selected, sample_t_s));
+            return true;
+        }
+    }
+
+    WorldVec3 compute_align_delta(const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                                  const std::vector<orbitsim::TrajectorySample> &traj_base,
                                   const std::size_t i_hi,
                                   const WorldVec3 &ship_pos_world,
                                   const double now_s,
@@ -200,7 +247,11 @@ namespace Game::PredictionDrawDetail
                                   const glm::dmat3 &frame_to_world)
     {
         WorldVec3 predicted_now_world{0.0, 0.0, 0.0};
-        if (i_hi > 0)
+        if (!traj_segments.empty() &&
+            sample_segment_world(frame_origin_world, frame_to_world, traj_segments, now_s, predicted_now_world))
+        {
+        }
+        else if (i_hi > 0)
         {
             predicted_now_world = sample_polyline_world(frame_origin_world, frame_to_world, traj_base, i_hi - 1, i_hi, now_s);
         }

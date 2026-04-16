@@ -134,7 +134,8 @@ namespace Game::PredictionDrawDetail
                                     std::size_t i_lo,
                                     std::size_t i_hi,
                                     double t_s);
-    WorldVec3 compute_align_delta(const std::vector<orbitsim::TrajectorySample> &traj_base,
+    WorldVec3 compute_align_delta(const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                                  const std::vector<orbitsim::TrajectorySample> &traj_base,
                                   std::size_t i_hi,
                                   const WorldVec3 &ship_pos_world,
                                   double now_s,
