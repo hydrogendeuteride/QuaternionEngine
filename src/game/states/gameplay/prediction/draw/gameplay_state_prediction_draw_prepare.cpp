@@ -10,6 +10,48 @@ namespace Game
     namespace
     {
         constexpr double kPredictionTimeEpsilonS = 1.0e-6;
+
+        [[nodiscard]] bool preview_pick_clamp_active(const PredictionTrackState &track)
+        {
+            if (track.preview_state == PredictionPreviewRuntimeState::PreviewStreaming ||
+                track.preview_state == PredictionPreviewRuntimeState::DragPreviewPending)
+            {
+                return true;
+            }
+
+            const PredictionChunkAssembly &assembly = track.preview_overlay.chunk_assembly;
+            return track.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine &&
+                   assembly.valid &&
+                   !assembly.chunks.empty();
+        }
+
+        [[nodiscard]] double resolve_preview_pick_coverage_end_s(const PredictionTrackState &track)
+        {
+            double preview_coverage_end_s = std::numeric_limits<double>::quiet_NaN();
+            const PredictionChunkAssembly &assembly = track.preview_overlay.chunk_assembly;
+            if (assembly.valid && !assembly.chunks.empty())
+            {
+                for (const OrbitChunk &chunk : assembly.chunks)
+                {
+                    if (std::isfinite(chunk.t1_s))
+                    {
+                        preview_coverage_end_s = std::isfinite(preview_coverage_end_s)
+                                                         ? std::max(preview_coverage_end_s, chunk.t1_s)
+                                                         : chunk.t1_s;
+                    }
+                }
+                return preview_coverage_end_s;
+            }
+
+            if (track.preview_anchor.valid &&
+                std::isfinite(track.preview_anchor.anchor_time_s) &&
+                track.preview_anchor.exact_window_s > 0.0)
+            {
+                return track.preview_anchor.anchor_time_s + (2.0 * track.preview_anchor.exact_window_s);
+            }
+
+            return std::numeric_limits<double>::quiet_NaN();
+        }
     }
 
     bool GameplayState::build_orbit_prediction_track_draw_context(
@@ -181,10 +223,11 @@ namespace Game
                                     ? authored_plan_ctx.first_relevant_node_time_s
                                     : authored_plan_ctx.first_future_node_time_s;
                     const double authored_plan_end_s =
-                            std::isfinite(authored_plan_start_s)
-                                    ? std::max(authored_plan_start_s + maneuver_plan_horizon_s(),
-                                               authored_plan_ctx.last_future_node_time_s)
-                                    : std::numeric_limits<double>::quiet_NaN();
+                            std::isfinite(authored_plan_ctx.last_future_node_time_s)
+                                    ? (authored_plan_ctx.last_future_node_time_s + maneuver_plan_horizon_s())
+                                    : (std::isfinite(authored_plan_start_s)
+                                               ? (authored_plan_start_s + maneuver_plan_horizon_s())
+                                               : std::numeric_limits<double>::quiet_NaN());
                     if (std::isfinite(authored_plan_start_s) &&
                         authored_plan_end_s > (authored_plan_start_s + kPredictionTimeEpsilonS))
                     {
@@ -198,6 +241,26 @@ namespace Game
                     {
                         out.planned_window_policy.visual_window_end_time_s = authored_plan_end_s;
                         out.planned_window_policy.pick_window_end_time_s = authored_plan_end_s;
+                    }
+                }
+
+                // Clamp picking to the preview patch while the preview overlay is
+                // active so stale tail geometry stays visible but cannot be selected.
+                if (preview_pick_clamp_active(track))
+                {
+                    const double preview_coverage_end_s = resolve_preview_pick_coverage_end_s(track);
+                    if (std::isfinite(preview_coverage_end_s))
+                    {
+                        if (std::isfinite(out.planned_window_policy.pick_window_end_time_s))
+                        {
+                            out.planned_window_policy.pick_window_end_time_s =
+                                    std::min(out.planned_window_policy.pick_window_end_time_s,
+                                             preview_coverage_end_s);
+                        }
+                        else
+                        {
+                            out.planned_window_policy.pick_window_end_time_s = preview_coverage_end_s;
+                        }
                     }
                 }
             }

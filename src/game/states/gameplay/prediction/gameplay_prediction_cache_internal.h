@@ -794,7 +794,8 @@ namespace Game::PredictionCacheInternal
             const CancelCheck &cancel_requested = {},
             const std::vector<double> &node_times_s = {},
             OrbitPredictionDerivedDiagnostics *diagnostics = nullptr,
-            const bool build_chunk_render_curves = false)
+            const bool build_chunk_render_curves = false,
+            const bool use_dense_chunk_samples = true)
     {
         out_assembly.clear();
         if (diagnostics)
@@ -850,9 +851,11 @@ namespace Game::PredictionCacheInternal
             }
 
             std::vector<orbitsim::TrajectorySample> clipped_samples =
-                    sample_prediction_segments(clipped_segments,
-                                               std::max<std::size_t>(2u, clipped_segments.size() + 1u),
-                                               node_times_s);
+                    use_dense_chunk_samples
+                            ? sample_prediction_segments(clipped_segments,
+                                                         std::max<std::size_t>(2u, clipped_segments.size() + 1u),
+                                                         node_times_s)
+                            : collect_segment_boundary_samples(clipped_segments);
 
             OrbitChunk chunk{};
             chunk.chunk_id = published_chunk.chunk_id;
