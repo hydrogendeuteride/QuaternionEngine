@@ -15,8 +15,8 @@ Lightweight render graph that builds a per‑frame DAG from pass declarations, c
 - Each pass registers its work by calling `register_graph(graph, ...)` and declaring resources via a builder.
 - The graph appends a present chain (copy HDR `drawImage` → swapchain, then transition to `PRESENT`), optionally inserting ImGui before present.
 - `compile()` topologically sorts passes by data dependencies (read/write hazards: RAW/WAW/WAR) and computes per‑pass barriers using `VkDependencyInfo` with `Vk*MemoryBarrier2`.
-- `execute(cmd)` creates timestamp query pools, emits barriers, begins dynamic rendering if attachments were declared, calls the pass record lambda, ends rendering, and records GPU/CPU timings.
-- `resolve_timings()` retrieves GPU timestamp results after the fence is signaled, converting them to milliseconds.
+- `execute(cmd, frame_slot)` creates frame-slot timestamp query pools, emits barriers, begins dynamic rendering if attachments were declared, calls the pass record lambda, ends rendering, and records GPU/CPU timings.
+- `resolve_timings(frame_slot)` retrieves GPU timestamp results for the waited frame slot after that slot's fence is signaled, converting them to milliseconds.
 
 ### Core API
 
@@ -39,8 +39,8 @@ Lightweight render graph that builds a per‑frame DAG from pass declarations, c
 
 **Compilation and Execution:**
 - `RenderGraph::compile()` — Build topological ordering (Kahn's algorithm) and per‑pass `VkImageMemoryBarrier2` / `VkBufferMemoryBarrier2` lists. Returns false on error. See `src/render/graph/graph.cpp:123`.
-- `RenderGraph::execute(cmd)` — Creates timestamp query pool, emits barriers via `vkCmdPipelineBarrier2`, begins dynamic rendering if attachments exist, invokes record callbacks, ends rendering, and writes GPU timestamps. See `src/render/graph/graph.cpp:874`.
-- `RenderGraph::resolve_timings()` — Fetch GPU timestamp results after fence wait and convert to milliseconds. Must be called before next `execute()`. See `src/render/graph/graph.cpp:1314`.
+- `RenderGraph::execute(cmd, frame_slot)` — Creates/recycles a frame-slot timestamp query pool, emits barriers via `vkCmdPipelineBarrier2`, begins dynamic rendering if attachments exist, invokes record callbacks, ends rendering, and writes GPU timestamps. See `src/render/graph/graph.cpp:946`.
+- `RenderGraph::resolve_timings(frame_slot)` — Fetch GPU timestamp results for the waited frame slot and convert to milliseconds. See `src/render/graph/graph.cpp:1466`.
 
 **Import Helpers:**
 - `import_draw_image()`, `import_depth_image()`, `import_gbuffer_position()`, `import_gbuffer_normal()`, `import_gbuffer_albedo()`, `import_gbuffer_extra()`, `import_id_buffer()`, `import_swapchain_image(index)` — Convenience wrappers for engine-owned images. See `src/render/graph/graph.cpp:1147–1312`.
@@ -214,9 +214,9 @@ See `src/render/graph/graph.cpp:927–1012`.
 ### Profiling and Timing
 
 **GPU Timing (Timestamps):**
-- Per-frame `VkQueryPool` with 2 queries per pass (begin/end). Created in `execute()`, destroyed in `resolve_timings()` or next `execute()`.
+- Per-frame-slot `VkQueryPool` with 2 queries per pass (begin/end). Created in `execute(cmd, frame_slot)` and recycled when that frame slot is reused after its fence is waited.
 - `vkCmdWriteTimestamp2()` at `ALL_COMMANDS_BIT` stage before/after pass recording (see `src/render/graph/graph.cpp:919–923`, `1028–1032`).
-- `resolve_timings()` fetches results with `VK_QUERY_RESULT_WAIT_BIT`, converts ticks to milliseconds using `timestampPeriod`. See `src/render/graph/graph.cpp:1314–1355`.
+- `resolve_timings(frame_slot)` fetches results with `VK_QUERY_RESULT_WAIT_BIT`, converts ticks to milliseconds using `timestampPeriod`, and only queries passes that actually wrote timestamps.
 
 **CPU Timing:**
 - `std::chrono::high_resolution_clock` measures command recording duration (`cpuStart`/`cpuEnd`). See `src/render/graph/graph.cpp:924`, `1026`.

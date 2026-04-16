@@ -215,7 +215,8 @@ namespace GameRuntime
             _renderer->get_current_frame()._deletionQueue.flush();
             if (_renderer->_renderGraph)
             {
-                _renderer->_renderGraph->resolve_timings();
+                _renderer->_renderGraph->resolve_timings(
+                    static_cast<uint32_t>(_renderer->_frameNumber % FRAME_OVERLAP));
             }
 
             // --- ImGui --- //

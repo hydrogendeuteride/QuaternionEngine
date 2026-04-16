@@ -475,8 +475,10 @@ namespace Game
         _maneuver_gizmo_interaction.applied_delta = false;
         if (PredictionTrackState *track = active_prediction_track())
         {
+            track->dirty = true;
             track->invalidated_while_pending = track->request_pending || track->derived_request_pending;
             (void) drag_display_reference_time_s;
+            sync_prediction_dirty_flag();
 
             PredictionDragDebugTelemetry &debug = track->drag_debug;
             const auto now_tp = PredictionDragDebugTelemetry::Clock::now();

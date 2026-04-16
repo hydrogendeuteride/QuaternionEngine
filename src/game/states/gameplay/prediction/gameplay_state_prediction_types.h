@@ -232,6 +232,26 @@ namespace Game
         }
     };
 
+    inline void clear_prediction_cache_planned_data(OrbitPredictionCache &cache)
+    {
+        cache.trajectory_inertial_planned.clear();
+        cache.trajectory_segments_inertial_planned.clear();
+        cache.trajectory_frame_planned.clear();
+        cache.trajectory_segments_frame_planned.clear();
+        cache.render_curve_frame_planned.clear();
+        cache.maneuver_previews.clear();
+    }
+
+    inline void copy_prediction_cache_planned_data(OrbitPredictionCache &dst, const OrbitPredictionCache &src)
+    {
+        dst.trajectory_inertial_planned = src.trajectory_inertial_planned;
+        dst.trajectory_segments_inertial_planned = src.trajectory_segments_inertial_planned;
+        dst.trajectory_frame_planned = src.trajectory_frame_planned;
+        dst.trajectory_segments_frame_planned = src.trajectory_segments_frame_planned;
+        dst.render_curve_frame_planned = src.render_curve_frame_planned;
+        dst.maneuver_previews = src.maneuver_previews;
+    }
+
     struct OrbitChunk
     {
         uint32_t chunk_id{0};
@@ -410,6 +430,10 @@ namespace Game
         double visual_window_s{0.0};
         double pick_window_s{0.0};
         double exact_window_s{0.0};
+        double visual_window_start_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double visual_window_end_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double pick_window_start_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double pick_window_end_time_s{std::numeric_limits<double>::quiet_NaN()};
         double visual_anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
         double pick_anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
         double exact_anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
@@ -502,6 +526,7 @@ namespace Game
         PredictionSubjectKey key{};
         std::string label{};
         OrbitPredictionCache cache{};
+        OrbitPredictionCache authoritative_cache{};
         PredictionLinePickCache pick_cache{};
         bool dirty{true};
         bool request_pending{false};
@@ -530,6 +555,7 @@ namespace Game
         void clear_runtime()
         {
             cache.clear();
+            authoritative_cache.clear();
             pick_cache.clear();
             dirty = true;
             request_pending = false;

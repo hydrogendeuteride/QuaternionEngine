@@ -150,6 +150,29 @@ namespace Game
                       [](const OrbitChunk &a, const OrbitChunk &b) { return a.chunk_id < b.chunk_id; });
             dst.valid = !dst.chunks.empty();
         }
+
+        bool cache_has_planned_data(const OrbitPredictionCache &cache)
+        {
+            return !cache.trajectory_inertial_planned.empty() ||
+                   !cache.trajectory_segments_inertial_planned.empty() ||
+                   !cache.trajectory_frame_planned.empty() ||
+                   !cache.trajectory_segments_frame_planned.empty() ||
+                   !cache.maneuver_previews.empty();
+        }
+
+        void restore_authoritative_planned_data(const PredictionTrackState &track, OrbitPredictionCache &cache)
+        {
+            if (track.authoritative_cache.valid && cache_has_planned_data(track.authoritative_cache))
+            {
+                copy_prediction_cache_planned_data(cache, track.authoritative_cache);
+                return;
+            }
+
+            if (track.cache.valid && cache_has_planned_data(track.cache))
+            {
+                copy_prediction_cache_planned_data(cache, track.cache);
+            }
+        }
     } // namespace
 
     void GameplayState::apply_completed_prediction_derived_result(OrbitPredictionDerivedService::Result result)
@@ -248,14 +271,13 @@ namespace Game
 
         if (result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview)
         {
-            merge_preview_chunk_assembly(track->preview_overlay.chunk_assembly, result.chunk_assembly);
-            if (track->preview_overlay.chunk_assembly.valid)
+            if (!track->authoritative_cache.valid && track->cache.valid && cache_has_planned_data(track->cache))
             {
-                PredictionCacheInternal::flatten_chunk_assembly_to_cache(
-                        cache_to_publish,
-                        track->preview_overlay.chunk_assembly,
-                        false);
+                track->authoritative_cache = track->cache;
             }
+
+            merge_preview_chunk_assembly(track->preview_overlay.chunk_assembly, result.chunk_assembly);
+            restore_authoritative_planned_data(*track, cache_to_publish);
 
             if (result.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming)
             {
@@ -271,6 +293,7 @@ namespace Game
         }
         else
         {
+            track->authoritative_cache = cache_to_publish;
             track->preview_overlay.clear();
             track->preview_state = PredictionPreviewRuntimeState::Idle;
             if (!drag_preview_active_now)

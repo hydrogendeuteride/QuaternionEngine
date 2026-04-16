@@ -176,6 +176,7 @@ namespace Game
                 preview_stage &&
                 solver.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming;
         const bool build_planned_render_curve = !preview_streaming_stage;
+        const bool build_chunk_render_curves = preview_stage;
         if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
         {
             out.diagnostics.status = PredictionDerivedStatus::MissingSolverData;
@@ -287,7 +288,9 @@ namespace Game
                                                                          request.display_frame_key,
                                                                          request.display_frame_revision,
                                                                          cancel_requested,
-                                                                         node_times_s))
+                                                                         node_times_s,
+                                                                         &out.diagnostics,
+                                                                         build_chunk_render_curves))
             {
                 out.chunk_assembly = std::move(chunk_assembly);
                 if (!preview_stage)
