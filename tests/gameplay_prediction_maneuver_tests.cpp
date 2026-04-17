@@ -582,7 +582,7 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestKeepsDownstreamManeuvers
     EXPECT_EQ(queued.maneuver_impulses[1].node_id, downstream.id);
 }
 
-TEST(GameplayPredictionManeuverTests, FastPreviewRequestSeparatesDisplayWindowFromPreviewPatchWindow)
+TEST(GameplayPredictionManeuverTests, FastPreviewRequestCapsHorizonToExactPatchWindow)
 {
     Game::GameplayState state{};
     state._orbitsim = make_reference_orbitsim(100.0);
@@ -618,11 +618,12 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestSeparatesDisplayWindowFr
     ASSERT_TRUE(built);
     ASSERT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
     ASSERT_TRUE(request.preview_patch.active);
-    EXPECT_DOUBLE_EQ(request.future_window_s, 2.0 * Game::OrbitPredictionTuning::kSecondsPerDay);
+    EXPECT_DOUBLE_EQ(request.future_window_s, 740.0);
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_time_s, selected.time_s);
     EXPECT_DOUBLE_EQ(request.preview_patch.visual_window_s, 180.0);
     EXPECT_DOUBLE_EQ(request.preview_patch.exact_window_s, 300.0);
     EXPECT_GT(request.future_window_s, request.preview_patch.visual_window_s);
+    EXPECT_LT(request.future_window_s, 2.0 * Game::OrbitPredictionTuning::kSecondsPerDay);
 }
 
 TEST(GameplayPredictionManeuverTests, FastPreviewRequestUsesSelectedNodePreviewForAnchorState)
@@ -846,7 +847,7 @@ TEST(GameplayPredictionManeuverTests, ShouldRebuildPredictionTrackWhenManeuverCo
     EXPECT_TRUE(state.should_rebuild_prediction_track(track, 10.0, 0.016f, false, true));
 }
 
-TEST(GameplayPredictionManeuverTests, AwaitFullRefineOnlyTriggersRebuildAfterPendingWorkClears)
+TEST(GameplayPredictionManeuverTests, AwaitFullRefineWaitsForPendingWork)
 {
     Game::GameplayState state{};
     state._prediction_sampling_policy.orbiter_min_window_s = 5.0;
@@ -1703,8 +1704,7 @@ TEST(GameplayPredictionManeuverTests, ReusedBaseFrameDerivedResultPreservesBaseD
     EXPECT_EQ(state._prediction_tracks.front().derived_diagnostics.status, Game::PredictionDerivedStatus::Success);
 }
 
-TEST(GameplayPredictionManeuverTests,
-     LateFullStreamingDerivedResultKeepsFinalDerivedPendingAndDoesNotRetriggerAwaitFullRefine)
+TEST(GameplayPredictionManeuverTests, FullStreamingDerivedResultKeepsFinalPending)
 {
     Game::GameplayState state{};
     state._prediction_sampling_policy.orbiter_min_window_s = 5.0;
@@ -1744,8 +1744,7 @@ TEST(GameplayPredictionManeuverTests,
     EXPECT_FALSE(state.should_rebuild_prediction_track(updated_track, 10.0, 0.016f, false, false));
 }
 
-TEST(GameplayPredictionManeuverTests,
-     DerivedRefreshWaitsForAuthoritativePublishEvenWhenVisibleCacheMatchesLatestGeneration)
+TEST(GameplayPredictionManeuverTests, DerivedRefreshWaitsForAuthoritativePublish)
 {
     Game::GameplayState state{};
 
