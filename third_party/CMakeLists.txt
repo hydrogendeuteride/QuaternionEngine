@@ -100,6 +100,10 @@ add_library(orbitsim INTERFACE)
 target_include_directories(orbitsim INTERFACE orbitsim/include)
 target_link_libraries(orbitsim INTERFACE glm)
 
+# toml++ (header-only)
+add_library(tomlplusplus INTERFACE)
+target_include_directories(tomlplusplus INTERFACE tomlplusplus/include)
+
 # MikkTSpace (optional)
 add_library(mikktspace STATIC MikkTSpace/mikktspace.c)
 target_include_directories(mikktspace PUBLIC MikkTSpace)

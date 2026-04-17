@@ -356,9 +356,11 @@ namespace vkutil
 
 namespace Game
 {
-    ThrustInput ShipController::read_input(const InputState *input, bool ui_capture_keyboard, bool &sas_toggle_prev_down)
+    ThrustInput ShipController::read_input(const InputState *input, const ShipKeybinds *binds,
+                                           bool ui_capture_keyboard, bool &sas_toggle_prev_down)
     {
         (void) input;
+        (void) binds;
         (void) ui_capture_keyboard;
         sas_toggle_prev_down = false;
         if (g_has_ship_controller_input_override)

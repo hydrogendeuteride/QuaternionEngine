@@ -185,7 +185,7 @@ target_include_directories(vulkan_engine SYSTEM PUBLIC
 
 option(ENABLE_MIKKTS "Use MikkTSpace for tangent generation" ON)
 
-target_link_libraries(vulkan_engine PUBLIC vma glm Vulkan::Vulkan fmt::fmt stb_image SDL2::SDL2 vkbootstrap imgui fastgltf::fastgltf ImGuizmo BVH2 orbitsim miniaudio)
+target_link_libraries(vulkan_engine PUBLIC vma glm Vulkan::Vulkan fmt::fmt stb_image SDL2::SDL2 vkbootstrap imgui fastgltf::fastgltf ImGuizmo BVH2 orbitsim miniaudio tomlplusplus)
 if (TARGET miniaudio_libvorbis)
   target_link_libraries(vulkan_engine PUBLIC miniaudio_libvorbis)
   target_compile_definitions(vulkan_engine PUBLIC VULKAN_ENGINE_AUDIO_LIBVORBIS=1)
