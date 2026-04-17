@@ -34,19 +34,42 @@ namespace Game
                    a.profile_id == b.profile_id;
         }
 
-        void append_published_chunk(std::vector<OrbitPredictionService::PublishedChunk> &dst,
-                                    const PlannedChunkPacket &packet,
-                                    const uint32_t chunk_id,
-                                    const OrbitPredictionService::ChunkQualityState quality_state)
+        OrbitPredictionService::PublishedChunk make_published_chunk(
+                const PlannedChunkPacket &packet,
+                const uint32_t chunk_id,
+                const OrbitPredictionService::ChunkQualityState quality_state)
         {
-            dst.push_back(OrbitPredictionService::PublishedChunk{
+            return OrbitPredictionService::PublishedChunk{
                     .chunk_id = chunk_id,
                     .quality_state = quality_state,
                     .t0_s = packet.chunk.t0_s,
                     .t1_s = packet.chunk.t1_s,
                     .includes_planned_path = !packet.segments.empty(),
                     .reused_from_cache = packet.reused_from_cache,
-            });
+            };
+        }
+
+        void append_published_chunk(std::vector<OrbitPredictionService::PublishedChunk> &dst,
+                                    const PlannedChunkPacket &packet,
+                                    const uint32_t chunk_id,
+                                    const OrbitPredictionService::ChunkQualityState quality_state)
+        {
+            dst.push_back(make_published_chunk(packet, chunk_id, quality_state));
+        }
+
+        OrbitPredictionService::StreamedPlannedChunk make_streamed_planned_chunk(
+                const PlannedChunkPacket &packet,
+                const OrbitPredictionService::PublishedChunk &published_chunk)
+        {
+            OrbitPredictionService::StreamedPlannedChunk streamed_chunk{};
+            streamed_chunk.published_chunk = published_chunk;
+            streamed_chunk.trajectory_segments_inertial = packet.segments;
+            streamed_chunk.trajectory_inertial = packet.samples;
+            streamed_chunk.maneuver_previews = packet.previews;
+            streamed_chunk.diagnostics = packet.diagnostics;
+            streamed_chunk.start_state = packet.start_state;
+            streamed_chunk.end_state = packet.end_state;
+            return streamed_chunk;
         }
 
         OrbitPredictionService::AdaptiveStageDiagnostics merge_adaptive_stage_diagnostics(
@@ -591,7 +614,9 @@ namespace Game
             const auto make_stage_result =
                     [&out, &sync_result_stage_counts](const PlannedSolveOutput &stage_output,
                                                       const std::vector<PublishedChunk> &published_chunks,
-                                                      const PublishStage publish_stage) {
+                                                      const PublishStage publish_stage,
+                                                      std::vector<StreamedPlannedChunk> streamed_planned_chunks = {},
+                                                      const bool include_cumulative_planned = true) {
                         Result stage_result = out;
                         stage_result.valid = true;
                         stage_result.publish_stage = publish_stage;
@@ -599,10 +624,14 @@ namespace Game
                         stage_result.diagnostics.trajectory_sample_count_planned = stage_output.samples.size();
                         stage_result.diagnostics.status = Status::Success;
                         sync_result_stage_counts(stage_result);
-                        stage_result.trajectory_segments_inertial_planned = stage_output.segments;
-                        stage_result.trajectory_inertial_planned = stage_output.samples;
-                        stage_result.maneuver_previews = stage_output.previews;
+                        if (include_cumulative_planned)
+                        {
+                            stage_result.trajectory_segments_inertial_planned = stage_output.segments;
+                            stage_result.trajectory_inertial_planned = stage_output.samples;
+                            stage_result.maneuver_previews = stage_output.previews;
+                        }
                         stage_result.published_chunks = published_chunks;
+                        stage_result.streamed_planned_chunks = std::move(streamed_planned_chunks);
                         return stage_result;
                     };
 
@@ -760,31 +789,92 @@ namespace Game
                     merge_planned_outputs(combined_stage_output, finalizing_stage_output);
                     publish(make_stage_result(combined_stage_output,
                                               finalizing_stage_chunks,
-                                              PublishStage::PreviewFinalizing));
+                                              PublishStage::Final));
                 }
             }
             else
             {
                 PlannedSolveOutput planned{};
                 std::vector<PublishedChunk> published_chunks;
+                std::vector<PublishedChunk> pending_stream_published_chunks;
+                std::vector<StreamedPlannedChunk> pending_stream_chunks;
+                const bool full_streaming_active =
+                        planned_request.solve_quality == SolveQuality::Full &&
+                        planned_request.full_stream_publish.active;
+                const double full_stream_min_publish_interval_s =
+                        (planned_request.full_stream_publish.min_publish_interval_s > 0.0)
+                                ? planned_request.full_stream_publish.min_publish_interval_s
+                                : OrbitPredictionTuning::kFullStreamPublishMinIntervalS;
+                std::chrono::steady_clock::time_point last_full_stream_publish_tp = compute_start;
+                bool published_any_full_stream_batch = false;
+                const auto flush_full_stream_batch = [&](const bool force_publish) {
+                    if (!full_streaming_active || pending_stream_published_chunks.empty())
+                    {
+                        return true;
+                    }
+
+                    const auto now_tp = std::chrono::steady_clock::now();
+                    const double elapsed_since_last_publish_s =
+                            std::chrono::duration<double>(now_tp - last_full_stream_publish_tp).count();
+                    if (!force_publish &&
+                        published_any_full_stream_batch &&
+                        elapsed_since_last_publish_s < full_stream_min_publish_interval_s)
+                    {
+                        return true;
+                    }
+
+                    if (!publish(make_stage_result(planned,
+                                                   pending_stream_published_chunks,
+                                                   PublishStage::FullStreaming,
+                                                   std::move(pending_stream_chunks),
+                                                   false)))
+                    {
+                        pending_stream_published_chunks.clear();
+                        pending_stream_chunks.clear();
+                        return false;
+                    }
+
+                    pending_stream_published_chunks.clear();
+                    pending_stream_chunks.clear();
+                    last_full_stream_publish_tp = now_tp;
+                    published_any_full_stream_batch = true;
+                    return true;
+                };
                 const PlannedSolveRangeSummary planned_summary =
                         solve_planned_chunk_range(ctx,
                                                   solve_plan,
                                                   0u,
                                                   solve_plan.chunks.size(),
                                                   ship_sc.state,
-                                                  [&planned, &published_chunks](PlannedChunkPacket &&chunk_packet) {
-                                                      append_published_chunk(published_chunks,
-                                                                             chunk_packet,
-                                                                             static_cast<uint32_t>(published_chunks.size()),
-                                                                             ChunkQualityState::Final);
+                                                  [&planned,
+                                                   &published_chunks,
+                                                   &pending_stream_published_chunks,
+                                                   &pending_stream_chunks,
+                                                   &flush_full_stream_batch,
+                                                   full_streaming_active](PlannedChunkPacket &&chunk_packet) {
+                                                      const PublishedChunk published_chunk = make_published_chunk(
+                                                              chunk_packet,
+                                                              static_cast<uint32_t>(published_chunks.size()),
+                                                              ChunkQualityState::Final);
+                                                      published_chunks.push_back(published_chunk);
+                                                      if (full_streaming_active)
+                                                      {
+                                                          pending_stream_published_chunks.push_back(published_chunk);
+                                                          pending_stream_chunks.push_back(
+                                                                  make_streamed_planned_chunk(chunk_packet, published_chunk));
+                                                      }
                                                       append_planned_chunk_packet(planned, std::move(chunk_packet));
-                                                      return true;
+                                                      return flush_full_stream_batch(false);
                                                   });
                 apply_planned_range_summary(planned, planned_summary);
                 if (planned.status != Status::Success)
                 {
                     fail(planned.status);
+                    return;
+                }
+                if (!flush_full_stream_batch(true))
+                {
+                    cancel();
                     return;
                 }
 

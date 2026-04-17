@@ -234,6 +234,7 @@ TEST(PredictionCacheInternalTests, RebuildPredictionPatchChunksClipsStraddlingSe
                     .flags = 0u,
             },
     };
+    cache.trajectory_segments_frame_planned = cache.trajectory_segments_inertial_planned;
 
     const std::vector<Game::OrbitPredictionService::PublishedChunk> published_chunks = {
             Game::OrbitPredictionService::PublishedChunk{

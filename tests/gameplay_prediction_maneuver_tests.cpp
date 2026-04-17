@@ -701,6 +701,90 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestFallsBackToInertialCache
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.velocity_mps.y, 7'500.0);
 }
 
+TEST(GameplayPredictionManeuverTests, FullRequestEnablesFullStreamPublishForActivePlayerWithManeuvers)
+{
+    Game::GameplayState state{};
+    state._orbitsim = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbitsim);
+
+    Game::OrbiterInfo player{};
+    player.entity = Game::EntityId{1};
+    player.is_player = true;
+    state._orbiters.push_back(player);
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+
+    Game::GameplayState::ManeuverNode node{};
+    node.id = 7;
+    node.time_s = 240.0;
+    state._maneuver_state.nodes.push_back(node);
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+
+    Game::OrbitPredictionService::Request request{};
+    const bool built = state.build_orbiter_prediction_request(track,
+                                                              WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                              glm::dvec3(0.0, 7'500.0, 0.0),
+                                                              100.0,
+                                                              false,
+                                                              true,
+                                                              request);
+
+    ASSERT_TRUE(built);
+    EXPECT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::Full);
+    EXPECT_EQ(request.maneuver_impulses.size(), 1u);
+    EXPECT_TRUE(request.full_stream_publish.active);
+}
+
+TEST(GameplayPredictionManeuverTests, FullRequestKeepsFullStreamPublishDisabledOutsideActivePlayerManeuverRefine)
+{
+    Game::GameplayState state{};
+    state._orbitsim = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbitsim);
+
+    Game::OrbiterInfo player{};
+    player.entity = Game::EntityId{1};
+    player.is_player = true;
+    state._orbiters.push_back(player);
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+
+    Game::GameplayState::ManeuverNode node{};
+    node.id = 9;
+    node.time_s = 240.0;
+    state._maneuver_state.nodes.push_back(node);
+
+    Game::PredictionTrackState active_track{};
+    active_track.key = state._prediction_selection.active_subject;
+    active_track.supports_maneuvers = true;
+
+    Game::OrbitPredictionService::Request no_maneuver_request{};
+    ASSERT_TRUE(state.build_orbiter_prediction_request(active_track,
+                                                       WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                       glm::dvec3(0.0, 7'500.0, 0.0),
+                                                       100.0,
+                                                       false,
+                                                       false,
+                                                       no_maneuver_request));
+    EXPECT_FALSE(no_maneuver_request.full_stream_publish.active);
+
+    Game::PredictionTrackState overlay_track{};
+    overlay_track.key = {Game::PredictionSubjectKind::Orbiter, 2};
+    overlay_track.supports_maneuvers = true;
+
+    Game::OrbitPredictionService::Request overlay_request{};
+    ASSERT_TRUE(state.build_orbiter_prediction_request(overlay_track,
+                                                       WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                       glm::dvec3(0.0, 7'500.0, 0.0),
+                                                       100.0,
+                                                       false,
+                                                       true,
+                                                       overlay_request));
+    EXPECT_EQ(overlay_request.solve_quality, Game::OrbitPredictionService::SolveQuality::Full);
+    EXPECT_EQ(overlay_request.maneuver_impulses.size(), 1u);
+    EXPECT_FALSE(overlay_request.full_stream_publish.active);
+}
+
 TEST(GameplayPredictionManeuverTests, ShouldRebuildPredictionTrackWhenCoverageFallsShort)
 {
     Game::GameplayState state{};
@@ -1379,6 +1463,123 @@ TEST(GameplayPredictionManeuverTests, DerivedPreviewFinalizingBuildRestoresPlann
     EXPECT_TRUE(result.cache.valid);
     EXPECT_FALSE(result.cache.trajectory_segments_frame_planned.empty());
     EXPECT_FALSE(result.cache.render_curve_frame_planned.empty());
+}
+
+TEST(GameplayPredictionManeuverTests, DerivedFullStreamingBuildUsesStreamedChunkPayloadWithoutFlatteningPlannedCache)
+{
+    Game::OrbitPredictionDerivedService service{};
+    Game::OrbitPredictionDerivedService::PendingJob job = make_prediction_derived_job(
+            Game::OrbitPredictionService::SolveQuality::Full,
+            Game::OrbitPredictionService::PublishStage::FullStreaming);
+
+    Game::OrbitPredictionService::Result &solver = job.request.solver_result;
+    solver.trajectory_inertial_planned.clear();
+    solver.trajectory_segments_inertial_planned.clear();
+    solver.maneuver_previews.clear();
+    solver.published_chunks = {
+            Game::OrbitPredictionService::PublishedChunk{
+                    .chunk_id = 3u,
+                    .quality_state = Game::OrbitPredictionService::ChunkQualityState::Final,
+                    .t0_s = 0.0,
+                    .t1_s = 10.0,
+                    .includes_planned_path = true,
+            },
+    };
+
+    Game::OrbitPredictionService::StreamedPlannedChunk streamed_chunk{};
+    streamed_chunk.published_chunk = solver.published_chunks.front();
+    streamed_chunk.trajectory_inertial = {
+            make_sample(0.0, 7'000'000.0),
+            make_sample(10.0, 7'150'000.0),
+    };
+    streamed_chunk.trajectory_segments_inertial = {
+            make_segment(0.0, 10.0, 7'000'000.0, 7'150'000.0),
+    };
+    solver.streamed_planned_chunks = {std::move(streamed_chunk)};
+
+    Game::OrbitPredictionDerivedService::Result result = service.build_cache(std::move(job));
+
+    ASSERT_TRUE(result.valid);
+    EXPECT_TRUE(result.cache.valid);
+    EXPECT_TRUE(result.cache.trajectory_segments_frame_planned.empty());
+    EXPECT_TRUE(result.cache.render_curve_frame_planned.empty());
+    ASSERT_TRUE(result.chunk_assembly.valid);
+    ASSERT_EQ(result.chunk_assembly.chunks.size(), 1u);
+    EXPECT_EQ(result.chunk_assembly.chunks.front().chunk_id, 3u);
+    EXPECT_DOUBLE_EQ(result.chunk_assembly.chunks.front().t0_s, 0.0);
+    EXPECT_DOUBLE_EQ(result.chunk_assembly.chunks.front().t1_s, 10.0);
+    EXPECT_FALSE(result.chunk_assembly.chunks.front().render_curve.empty());
+    EXPECT_EQ(result.diagnostics.status, Game::PredictionDerivedStatus::Success);
+}
+
+TEST(GameplayPredictionManeuverTests, DerivedFullStreamingRequestMergesPendingChunksForSameGeneration)
+{
+    Game::OrbitPredictionDerivedService service{};
+    const uint64_t track_id = 17u;
+    {
+        std::lock_guard<std::mutex> lock(service._mutex);
+        service._tracks_in_flight.insert(track_id);
+    }
+
+    const auto make_request = [track_id](const uint32_t chunk_id,
+                                         const double t0_s,
+                                         const double t1_s,
+                                         const double x0_m,
+                                         const double x1_m) {
+        Game::OrbitPredictionDerivedService::Request request{};
+        request.track_id = track_id;
+        request.generation_id = 9u;
+        request.display_frame_key = 1u;
+        request.display_frame_revision = 1u;
+        request.analysis_body_id = 1;
+        request.resolved_frame_spec = orbitsim::TrajectoryFrameSpec::inertial();
+
+        Game::OrbitPredictionService::Result &solver = request.solver_result;
+        solver.valid = true;
+        solver.solve_quality = Game::OrbitPredictionService::SolveQuality::Full;
+        solver.publish_stage = Game::OrbitPredictionService::PublishStage::FullStreaming;
+        solver.trajectory_inertial = {
+                make_sample(0.0, 7'000'000.0),
+                make_sample(20.0, 7'200'000.0),
+        };
+        solver.trajectory_segments_inertial = {
+                make_segment(0.0, 20.0, 7'000'000.0, 7'200'000.0),
+        };
+        solver.published_chunks = {
+                Game::OrbitPredictionService::PublishedChunk{
+                        .chunk_id = chunk_id,
+                        .quality_state = Game::OrbitPredictionService::ChunkQualityState::Final,
+                        .t0_s = t0_s,
+                        .t1_s = t1_s,
+                        .includes_planned_path = true,
+                },
+        };
+
+        Game::OrbitPredictionService::StreamedPlannedChunk streamed_chunk{};
+        streamed_chunk.published_chunk = solver.published_chunks.front();
+        streamed_chunk.trajectory_inertial = {
+                make_sample(t0_s, x0_m),
+                make_sample(t1_s, x1_m),
+        };
+        streamed_chunk.trajectory_segments_inertial = {
+                make_segment(t0_s, t1_s, x0_m, x1_m),
+        };
+        solver.streamed_planned_chunks = {std::move(streamed_chunk)};
+        return request;
+    };
+
+    service.request(make_request(0u, 0.0, 10.0, 7'000'000.0, 7'100'000.0));
+    service.request(make_request(1u, 10.0, 20.0, 7'100'000.0, 7'200'000.0));
+
+    std::lock_guard<std::mutex> lock(service._mutex);
+    ASSERT_EQ(service._pending_jobs.size(), 1u);
+    const Game::OrbitPredictionService::Result &merged_solver = service._pending_jobs.front().request.solver_result;
+    ASSERT_EQ(merged_solver.published_chunks.size(), 2u);
+    EXPECT_EQ(merged_solver.published_chunks[0].chunk_id, 0u);
+    EXPECT_EQ(merged_solver.published_chunks[1].chunk_id, 1u);
+    ASSERT_EQ(merged_solver.streamed_planned_chunks.size(), 2u);
+    EXPECT_EQ(merged_solver.streamed_planned_chunks[0].published_chunk.chunk_id, 0u);
+    EXPECT_EQ(merged_solver.streamed_planned_chunks[1].published_chunk.chunk_id, 1u);
 }
 
 TEST(GameplayPredictionManeuverTests, GameplayDefaultsEnableLivePreview)
