@@ -11,10 +11,15 @@ namespace Game
         double celestial_min_window_s{21600.0};
     };
 
+    struct ManeuverPlanHorizonSettings
+    {
+        double horizon_s{600.0};
+    };
+
     struct ManeuverPlanWindowSettings
     {
-        double preview_window_s{600.0};
-        double solve_margin_s{600.0};
+        double preview_window_s{180.0};
+        double solve_margin_s{300.0};
     };
 
     struct OrbitPlotBudgetSettings
@@ -42,7 +47,9 @@ namespace Game
 
         // Prediction sampling / plan windows
         PredictionSamplingPolicy prediction_sampling_policy{};
+        ManeuverPlanHorizonSettings maneuver_plan_horizon{};
         ManeuverPlanWindowSettings maneuver_plan_windows{};
+        bool maneuver_plan_live_preview_active{true};
 
         // Orbit plot rendering
         OrbitPlotBudgetSettings orbit_plot_budget{};

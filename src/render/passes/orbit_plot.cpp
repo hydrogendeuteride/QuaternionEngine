@@ -13,8 +13,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstring>
-
 namespace
 {
     struct OrbitPlotPushConstants
@@ -203,8 +201,8 @@ void OrbitPlotPass::draw_orbit_plot(VkCommandBuffer cmd,
         origin_world = ctx_local->scene->get_world_origin();
     }
 
-    OrbitPlotSystem::LineVertexLists lists = plot->build_line_vertices(origin_world);
-    if (lists.vertices.empty())
+    const OrbitPlotSystem::LineVertexCounts counts = plot->count_line_vertices();
+    if (counts.depth_vertex_count == 0 && counts.overlay_vertex_count == 0)
     {
         return;
     }
@@ -224,17 +222,19 @@ void OrbitPlotPass::draw_orbit_plot(VkCommandBuffer cmd,
     max_upload_vertices &= ~std::size_t(1);
     max_upload_vertices = std::max<std::size_t>(2ull, max_upload_vertices);
 
-    uint32_t depth_vertex_count = lists.depth_vertex_count & ~1u;
-    uint32_t overlay_vertex_count = lists.overlay_vertex_count & ~1u;
+    uint32_t depth_vertex_count = counts.depth_vertex_count & ~1u;
+    uint32_t overlay_vertex_count = counts.overlay_vertex_count & ~1u;
     bool upload_cap_hit = false;
 
-    if (lists.vertices.size() > max_upload_vertices)
+    const std::size_t total_vertex_count =
+            static_cast<std::size_t>(depth_vertex_count) + static_cast<std::size_t>(overlay_vertex_count);
+    if (total_vertex_count > max_upload_vertices)
     {
         upload_cap_hit = true;
         depth_vertex_count = static_cast<uint32_t>(std::min<std::size_t>(max_upload_vertices, depth_vertex_count));
         depth_vertex_count &= ~1u;
 
-        if (depth_vertex_count >= lists.depth_vertex_count)
+        if (depth_vertex_count >= counts.depth_vertex_count)
         {
             const std::size_t remaining_vertices = max_upload_vertices - static_cast<std::size_t>(depth_vertex_count);
             overlay_vertex_count = static_cast<uint32_t>(std::min<std::size_t>(remaining_vertices, overlay_vertex_count));
@@ -288,7 +288,10 @@ void OrbitPlotPass::draw_orbit_plot(VkCommandBuffer cmd,
         return;
     }
 
-    std::memcpy(slot.buffer.info.pMappedData, lists.vertices.data(), upload_bytes);
+    plot->write_line_vertices(origin_world,
+                              reinterpret_cast<OrbitPlotVertex *>(slot.buffer.info.pMappedData),
+                              depth_vertex_count,
+                              overlay_vertex_count);
     vmaFlushAllocation(dm->allocator(), slot.buffer.allocation, 0, upload_bytes);
 
     VkBufferDeviceAddressInfo addr_info{};

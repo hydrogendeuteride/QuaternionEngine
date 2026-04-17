@@ -290,6 +290,10 @@ namespace Game
 
                 if (changed)
                 {
+                    if (PredictionTrackState *track = active_prediction_track())
+                    {
+                        track->preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
+                    }
                     mark_maneuver_plan_dirty();
                 }
                 refresh_after_interaction = true;

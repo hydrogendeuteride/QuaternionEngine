@@ -232,6 +232,106 @@ namespace Game
         }
     };
 
+    inline void clear_prediction_cache_planned_data(OrbitPredictionCache &cache)
+    {
+        cache.trajectory_inertial_planned.clear();
+        cache.trajectory_segments_inertial_planned.clear();
+        cache.trajectory_frame_planned.clear();
+        cache.trajectory_segments_frame_planned.clear();
+        cache.render_curve_frame_planned.clear();
+        cache.maneuver_previews.clear();
+    }
+
+    inline void copy_prediction_cache_planned_data(OrbitPredictionCache &dst, const OrbitPredictionCache &src)
+    {
+        dst.trajectory_inertial_planned = src.trajectory_inertial_planned;
+        dst.trajectory_segments_inertial_planned = src.trajectory_segments_inertial_planned;
+        dst.trajectory_frame_planned = src.trajectory_frame_planned;
+        dst.trajectory_segments_frame_planned = src.trajectory_segments_frame_planned;
+        dst.render_curve_frame_planned = src.render_curve_frame_planned;
+        dst.maneuver_previews = src.maneuver_previews;
+    }
+
+    struct OrbitChunk
+    {
+        uint32_t chunk_id{0};
+        uint64_t generation_id{0};
+        OrbitPredictionService::ChunkQualityState quality_state{
+                OrbitPredictionService::ChunkQualityState::Final};
+        double t0_s{std::numeric_limits<double>::quiet_NaN()};
+        double t1_s{std::numeric_limits<double>::quiet_NaN()};
+        std::vector<orbitsim::TrajectorySample> frame_samples{};
+        std::vector<orbitsim::TrajectorySegment> frame_segments{};
+        OrbitRenderCurve render_curve{};
+        bool valid{false};
+    };
+
+    struct PredictionChunkAssembly
+    {
+        bool valid{false};
+        uint64_t generation_id{0};
+        std::vector<OrbitChunk> chunks{};
+
+        void clear()
+        {
+            valid = false;
+            generation_id = 0;
+            chunks.clear();
+        }
+    };
+
+    struct PredictionPreviewOverlay
+    {
+        PredictionChunkAssembly chunk_assembly{};
+
+        void clear()
+        {
+            chunk_assembly.clear();
+        }
+    };
+
+    struct PredictionFrameBoundChunkOverlay
+    {
+        PredictionChunkAssembly chunk_assembly{};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
+
+        [[nodiscard]] bool matches_generation(uint64_t generation_id,
+                                              uint64_t frame_key,
+                                              uint64_t frame_revision) const
+        {
+            return chunk_assembly.generation_id == generation_id &&
+                   display_frame_key == frame_key &&
+                   display_frame_revision == frame_revision;
+        }
+
+        [[nodiscard]] bool ready_for_draw(uint64_t generation_id,
+                                          uint64_t frame_key,
+                                          uint64_t frame_revision) const
+        {
+            return chunk_assembly.valid &&
+                   !chunk_assembly.chunks.empty() &&
+                   matches_generation(generation_id, frame_key, frame_revision);
+        }
+
+        void reset_for_generation(uint64_t generation_id,
+                                  uint64_t frame_key,
+                                  uint64_t frame_revision)
+        {
+            chunk_assembly.clear();
+            chunk_assembly.generation_id = generation_id;
+            display_frame_key = frame_key;
+            display_frame_revision = frame_revision;
+        }
+
+        void clear()
+        {
+            chunk_assembly.clear();
+            display_frame_key = 0;
+            display_frame_revision = 0;
+        }
+    };
+
     struct PredictionLinePickCache
     {
         uint64_t generation_id{0};
@@ -344,6 +444,68 @@ namespace Game
         }
     };
 
+    enum class PredictionTimeAnchorKind : uint8_t
+    {
+        None = 0,
+        SimNow,
+        SelectedNode,
+        FirstFutureNode,
+        FirstRelevantNode,
+    };
+
+    struct PredictionTimeContext
+    {
+        double sim_now_s{std::numeric_limits<double>::quiet_NaN()};
+        double trajectory_t0_s{std::numeric_limits<double>::quiet_NaN()};
+        double trajectory_t1_s{std::numeric_limits<double>::quiet_NaN()};
+        double selected_node_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double first_future_node_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double first_relevant_node_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double last_future_node_time_s{std::numeric_limits<double>::quiet_NaN()};
+        bool has_plan{false};
+    };
+
+    struct PredictionWindowPolicyResult
+    {
+        bool valid{false};
+        double request_window_s{0.0};
+        double visual_window_s{0.0};
+        double pick_window_s{0.0};
+        double exact_window_s{0.0};
+        double visual_window_start_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double visual_window_end_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double pick_window_start_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double pick_window_end_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double visual_anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double pick_anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double exact_anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
+        PredictionTimeAnchorKind visual_anchor_kind{PredictionTimeAnchorKind::None};
+        PredictionTimeAnchorKind pick_anchor_kind{PredictionTimeAnchorKind::None};
+        PredictionTimeAnchorKind exact_anchor_kind{PredictionTimeAnchorKind::None};
+        bool visual_anchor_is_future{false};
+        bool pick_anchor_is_future{false};
+        bool exact_anchor_is_future{false};
+    };
+
+    enum class PredictionPreviewRuntimeState : uint8_t
+    {
+        Idle = 0,
+        EnterDrag,
+        DragPreviewPending,
+        PreviewStreaming,
+        AwaitFullRefine,
+    };
+
+    struct PredictionPreviewAnchor
+    {
+        bool valid{false};
+        int anchor_node_id{-1};
+        double anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
+        double request_window_s{0.0};
+        double visual_window_s{0.0};
+        double exact_window_s{0.0};
+    };
+
     struct PredictionDragDebugTelemetry
     {
         using Clock = std::chrono::steady_clock;
@@ -406,6 +568,7 @@ namespace Game
         PredictionSubjectKey key{};
         std::string label{};
         OrbitPredictionCache cache{};
+        OrbitPredictionCache authoritative_cache{};
         PredictionLinePickCache pick_cache{};
         bool dirty{true};
         bool request_pending{false};
@@ -421,6 +584,13 @@ namespace Game
         bool supports_maneuvers{false};
         bool is_celestial{false};
         orbitsim::BodyId auto_primary_body_id{orbitsim::kInvalidBodyId};
+        PredictionPreviewRuntimeState preview_state{PredictionPreviewRuntimeState::Idle};
+        PredictionPreviewAnchor preview_anchor{};
+        PredictionPreviewOverlay preview_overlay{};
+        PredictionFrameBoundChunkOverlay full_stream_overlay{};
+        double preview_entered_at_s{std::numeric_limits<double>::quiet_NaN()};
+        double preview_last_anchor_refresh_at_s{std::numeric_limits<double>::quiet_NaN()};
+        double preview_last_request_at_s{std::numeric_limits<double>::quiet_NaN()};
         double solver_ms_last{0.0};
         OrbitPredictionService::Diagnostics solver_diagnostics{};
         OrbitPredictionDerivedDiagnostics derived_diagnostics{};
@@ -428,6 +598,7 @@ namespace Game
         void clear_runtime()
         {
             cache.clear();
+            authoritative_cache.clear();
             pick_cache.clear();
             dirty = true;
             request_pending = false;
@@ -441,6 +612,13 @@ namespace Game
             invalidated_while_pending = false;
             drag_debug.clear();
             auto_primary_body_id = orbitsim::kInvalidBodyId;
+            preview_state = PredictionPreviewRuntimeState::Idle;
+            preview_anchor = {};
+            preview_overlay.clear();
+            full_stream_overlay.clear();
+            preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
+            preview_last_anchor_refresh_at_s = std::numeric_limits<double>::quiet_NaN();
+            preview_last_request_at_s = std::numeric_limits<double>::quiet_NaN();
             solver_ms_last = 0.0;
             solver_diagnostics = {};
             derived_diagnostics = {};

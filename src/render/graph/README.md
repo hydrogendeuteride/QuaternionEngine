@@ -67,8 +67,8 @@ compile()
   ├─ track image layouts across passes
   └─ record resource lifetime (firstUse/lastUse)
 
-execute(cmd)
-  ├─ create GPU timestamp query pool
+execute(cmd, frame_slot)
+  ├─ create/recycle GPU timestamp query pool for that frame slot
   ├─ for each enabled pass:
   │   ├─ emit debug label
   │   ├─ pipeline barrier (pre-pass)
@@ -78,8 +78,8 @@ execute(cmd)
   │   └─ write GPU timestamp
   └─ measure CPU time per pass
 
-resolve_timings()
-  └─ read back GPU timestamps → per-pass ms
+resolve_timings(frame_slot)
+  └─ read back GPU timestamps for the waited frame slot → per-pass ms
 ───────────────────────────────────────────────────
 
 shutdown()

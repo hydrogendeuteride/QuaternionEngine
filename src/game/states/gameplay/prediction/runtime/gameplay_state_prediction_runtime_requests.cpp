@@ -120,19 +120,71 @@ namespace Game
 
     } // namespace
 
-    bool GameplayState::request_orbiter_prediction_async(PredictionTrackState &track,
+    bool GameplayState::resolve_prediction_preview_anchor_state(const PredictionTrackState &track,
+                                                                orbitsim::State &out_state) const
+    {
+        out_state = {};
+        if (!track.preview_anchor.valid || !std::isfinite(track.preview_anchor.anchor_time_s))
+        {
+            return false;
+        }
+
+        const OrbitPredictionCache &anchor_cache =
+                track.authoritative_cache.valid ? track.authoritative_cache : track.cache;
+
+        constexpr double kPreviewAnchorTimeMatchEpsilonS = 1.0e-6;
+        const auto preview_it =
+                std::find_if(anchor_cache.maneuver_previews.begin(),
+                             anchor_cache.maneuver_previews.end(),
+                             [&track](const OrbitPredictionService::ManeuverNodePreview &preview) {
+                                 return preview.valid &&
+                                        preview.node_id == track.preview_anchor.anchor_node_id &&
+                                        std::isfinite(preview.t_s) &&
+                                        std::abs(preview.t_s - track.preview_anchor.anchor_time_s) <=
+                                                kPreviewAnchorTimeMatchEpsilonS &&
+                                        detail::finite_vec3(preview.inertial_position_m) &&
+                                        detail::finite_vec3(preview.inertial_velocity_mps);
+                             });
+        if (preview_it != anchor_cache.maneuver_previews.end())
+        {
+            out_state.position_m = preview_it->inertial_position_m;
+            out_state.velocity_mps = preview_it->inertial_velocity_mps;
+            return true;
+        }
+
+        return PredictionCacheInternal::sample_prediction_inertial_state(anchor_cache.trajectory_segments_inertial_planned,
+                                                                         track.preview_anchor.anchor_time_s,
+                                                                         out_state) ||
+               sample_prediction_inertial_state(anchor_cache.trajectory_inertial_planned,
+                                                track.preview_anchor.anchor_time_s,
+                                                out_state) ||
+               PredictionCacheInternal::sample_prediction_inertial_state(track.cache.trajectory_segments_inertial,
+                                                                         track.preview_anchor.anchor_time_s,
+                                                                         out_state) ||
+               sample_prediction_inertial_state(track.cache.trajectory_inertial,
+                                                track.preview_anchor.anchor_time_s,
+                                                out_state);
+    }
+
+    bool GameplayState::build_orbiter_prediction_request(PredictionTrackState &track,
                                                          const WorldVec3 &subject_pos_world,
                                                          const glm::dvec3 &subject_vel_world,
                                                          const double now_s,
                                                          const bool thrusting,
                                                          const bool with_maneuvers,
-                                                         bool *out_throttled)
+                                                         OrbitPredictionService::Request &out_request,
+                                                         bool *out_interactive_request,
+                                                         bool *out_preview_request_active)
     {
-        // Package the current spacecraft state into a worker request.
-        if (out_throttled)
+        if (out_interactive_request)
         {
-            *out_throttled = false;
+            *out_interactive_request = false;
         }
+        if (out_preview_request_active)
+        {
+            *out_preview_request_active = false;
+        }
+
         if (!_orbitsim)
         {
             return false;
@@ -154,6 +206,8 @@ namespace Game
             return false;
         }
 
+        refresh_prediction_preview_anchor(track, now_s, with_maneuvers);
+
         const bool interactive_request =
                 prediction_request_is_interactive(
                         _prediction_selection,
@@ -163,15 +217,26 @@ namespace Game
                         now_s,
                         thrusting,
                         with_maneuvers);
-        if (prediction_request_is_throttled(track, interactive_request))
+        const bool preview_request_active =
+                track.preview_anchor.valid &&
+                track.supports_maneuvers &&
+                with_maneuvers &&
+                _maneuver_plan_live_preview_active &&
+                PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
+        if (out_interactive_request)
         {
-            if (out_throttled)
-            {
-                *out_throttled = true;
-            }
-            return false;
+            *out_interactive_request = interactive_request;
         }
-        const OrbitPredictionService::SolveQuality solve_quality = OrbitPredictionService::SolveQuality::Full;
+        if (out_preview_request_active)
+        {
+            *out_preview_request_active = preview_request_active;
+        }
+        const OrbitPredictionService::SolveQuality solve_quality =
+                preview_request_active
+                        ? OrbitPredictionService::SolveQuality::FastPreview
+                        : OrbitPredictionService::SolveQuality::Full;
+        const double preview_exact_window_s =
+                preview_request_active ? prediction_preview_exact_window_s(track, now_s, with_maneuvers) : 0.0;
 
         OrbitPredictionService::Request request{};
         request.track_id = track.key.track_id();
@@ -188,7 +253,31 @@ namespace Game
                 track.key,
                 track.is_celestial,
                 interactive_request);
-        request.future_window_s = prediction_required_window_s(track, now_s, with_maneuvers);
+        if (preview_request_active)
+        {
+            const double anchor_offset_s = std::max(0.0, track.preview_anchor.anchor_time_s - now_s);
+            // Live preview only needs enough horizon to reach the selected node and cover the exact patch window.
+            request.future_window_s = std::min(track.preview_anchor.request_window_s,
+                                               anchor_offset_s + (2.0 * preview_exact_window_s));
+        }
+        else
+        {
+            request.future_window_s = prediction_required_window_s(track, now_s, with_maneuvers);
+        }
+
+        if (preview_request_active)
+        {
+            request.preview_patch.active = true;
+            request.preview_patch.anchor_time_s = track.preview_anchor.anchor_time_s;
+            request.preview_patch.visual_window_s = track.preview_anchor.visual_window_s;
+            request.preview_patch.exact_window_s = preview_exact_window_s;
+            orbitsim::State anchor_state{};
+            if (resolve_prediction_preview_anchor_state(track, anchor_state))
+            {
+                request.preview_patch.anchor_state_valid = true;
+                request.preview_patch.anchor_state_inertial = anchor_state;
+            }
+        }
 
         const orbitsim::TrajectoryFrameSpec display_frame_spec =
                 track.cache.resolved_frame_spec_valid ? track.cache.resolved_frame_spec : _prediction_frame_selection.spec;
@@ -233,8 +322,63 @@ namespace Game
             }
         }
 
+        request.full_stream_publish.active =
+                solve_quality == OrbitPredictionService::SolveQuality::Full &&
+                track.key == _prediction_selection.active_subject &&
+                prediction_subject_is_player(track.key) &&
+                !request.maneuver_impulses.empty();
+
+        out_request = std::move(request);
+        return true;
+    }
+
+    bool GameplayState::request_orbiter_prediction_async(PredictionTrackState &track,
+                                                         const WorldVec3 &subject_pos_world,
+                                                         const glm::dvec3 &subject_vel_world,
+                                                         const double now_s,
+                                                         const bool thrusting,
+                                                         const bool with_maneuvers,
+                                                         bool *out_throttled)
+    {
+        // Package the current spacecraft state into a worker request.
+        if (out_throttled)
+        {
+            *out_throttled = false;
+        }
+
+        OrbitPredictionService::Request request{};
+        bool interactive_request = false;
+        bool preview_request_active = false;
+        if (!build_orbiter_prediction_request(track,
+                                              subject_pos_world,
+                                              subject_vel_world,
+                                              now_s,
+                                              thrusting,
+                                              with_maneuvers,
+                                              request,
+                                              &interactive_request,
+                                              &preview_request_active))
+        {
+            return false;
+        }
+
+        if (prediction_request_is_throttled(track, interactive_request))
+        {
+            if (out_throttled)
+            {
+                *out_throttled = true;
+            }
+            return false;
+        }
+
+        const OrbitPredictionService::SolveQuality submitted_quality = request.solve_quality;
         const uint64_t generation_id = _prediction_service.request(std::move(request));
-        mark_prediction_request_submitted(track, generation_id, now_s, solve_quality);
+        mark_prediction_request_submitted(track, generation_id, now_s, submitted_quality);
+        if (preview_request_active)
+        {
+            track.preview_state = PredictionPreviewRuntimeState::DragPreviewPending;
+            track.preview_last_request_at_s = now_s;
+        }
         return true;
     }
 
@@ -302,7 +446,15 @@ namespace Game
             return;
         }
 
-        if (should_defer_solver_request_until_publish(track))
+        const bool live_preview_drag_pending_override =
+                (track.dirty || track.invalidated_while_pending) &&
+                track.supports_maneuvers &&
+                track.key == _prediction_selection.active_subject &&
+                with_maneuvers &&
+                _maneuver_plan_live_preview_active &&
+                PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
+        if (!live_preview_drag_pending_override &&
+            should_defer_solver_request_until_publish(track))
         {
             return;
         }

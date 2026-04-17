@@ -28,7 +28,7 @@ gameplay/
   The `GameplayState` class, derived from `IGameState`. Declares all private methods and member state for the gameplay mode: simulation stepping, orbit prediction, maneuver nodes, time warp, scene setup, orbiter management, and UI drawing. Owns `GameWorld`, `PhysicsWorld`, `OrbitalScenario`, prediction services, and maneuver plan state.
 
 - `gameplay_settings.h`
-  `GameplaySettings` struct with prediction draw toggles, timing parameters, `PredictionSamplingPolicy`, `ManeuverPlanWindowSettings`, `OrbitPlotBudgetSettings`, and debug flags. Also declares `load_gameplay_settings()` / `save_gameplay_settings()` for JSON persistence.
+  `GameplaySettings` struct with prediction draw toggles, timing parameters, `PredictionSamplingPolicy`, `ManeuverPlanHorizonSettings`, `OrbitPlotBudgetSettings`, and debug flags. Also declares `load_gameplay_settings()` / `save_gameplay_settings()` for JSON persistence.
 
 - `orbit_helpers.h`
   Runtime data types for the orbital scenario:

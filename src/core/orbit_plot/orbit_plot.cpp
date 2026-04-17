@@ -4,7 +4,8 @@
 
 namespace
 {
-    static void push_line(std::vector<OrbitPlotVertex> &dst,
+    static void push_line(OrbitPlotVertex *dst,
+                          uint32_t &vertex_index,
                           const glm::vec3 &a,
                           const glm::vec3 &b,
                           const glm::vec4 &color)
@@ -17,8 +18,8 @@ namespace
         v1.position = b;
         v1.color = color;
 
-        dst.push_back(v0);
-        dst.push_back(v1);
+        dst[vertex_index++] = v0;
+        dst[vertex_index++] = v1;
     }
 } // namespace
 
@@ -83,6 +84,62 @@ std::span<const OrbitPlotSystem::LineCommand> OrbitPlotSystem::active_lines() co
     return std::span<const LineCommand>(_active_lines.data(), _active_lines.size());
 }
 
+OrbitPlotSystem::LineVertexCounts OrbitPlotSystem::count_line_vertices() const
+{
+    LineVertexCounts out{};
+    if (!_settings.enabled || _active_lines.empty())
+    {
+        return out;
+    }
+
+    for (const LineCommand &cmd : _active_lines)
+    {
+        uint32_t &vertex_count =
+                (cmd.depth == OrbitPlotDepth::DepthTested) ? out.depth_vertex_count : out.overlay_vertex_count;
+        vertex_count += 2u;
+    }
+
+    return out;
+}
+
+void OrbitPlotSystem::write_line_vertices(const WorldVec3 &origin_world,
+                                          OrbitPlotVertex *dst,
+                                          const uint32_t depth_vertex_count,
+                                          const uint32_t overlay_vertex_count) const
+{
+    if (!_settings.enabled || _active_lines.empty() || dst == nullptr)
+    {
+        return;
+    }
+
+    OrbitPlotVertex *const depth_dst = dst;
+    OrbitPlotVertex *const overlay_dst = dst + depth_vertex_count;
+    uint32_t depth_write_index = 0;
+    uint32_t overlay_write_index = 0;
+
+    for (const LineCommand &cmd : _active_lines)
+    {
+        OrbitPlotVertex *bucket_dst = depth_dst;
+        uint32_t *bucket_write_index = &depth_write_index;
+        uint32_t bucket_limit = depth_vertex_count;
+        if (cmd.depth == OrbitPlotDepth::AlwaysOnTop)
+        {
+            bucket_dst = overlay_dst;
+            bucket_write_index = &overlay_write_index;
+            bucket_limit = overlay_vertex_count;
+        }
+
+        if ((*bucket_write_index + 2u) > bucket_limit)
+        {
+            continue;
+        }
+
+        const glm::vec3 a = world_to_local(cmd.a_world, origin_world);
+        const glm::vec3 b = world_to_local(cmd.b_world, origin_world);
+        push_line(bucket_dst, *bucket_write_index, a, b, cmd.color);
+    }
+}
+
 OrbitPlotSystem::LineVertexLists OrbitPlotSystem::build_line_vertices(const WorldVec3 &origin_world) const
 {
     LineVertexLists out{};
@@ -91,26 +148,18 @@ OrbitPlotSystem::LineVertexLists OrbitPlotSystem::build_line_vertices(const Worl
         return out;
     }
 
-    std::vector<OrbitPlotVertex> depth_vertices{};
-    std::vector<OrbitPlotVertex> overlay_vertices{};
-    depth_vertices.reserve(_active_lines.size() * 2);
-    overlay_vertices.reserve(_active_lines.size() * 2);
-
-    for (const LineCommand &cmd : _active_lines)
+    const LineVertexCounts counts = count_line_vertices();
+    out.depth_vertex_count = counts.depth_vertex_count;
+    out.overlay_vertex_count = counts.overlay_vertex_count;
+    out.vertices.resize(static_cast<std::size_t>(counts.depth_vertex_count) +
+                        static_cast<std::size_t>(counts.overlay_vertex_count));
+    if (!out.vertices.empty())
     {
-        std::vector<OrbitPlotVertex> &dst =
-                (cmd.depth == OrbitPlotDepth::DepthTested) ? depth_vertices : overlay_vertices;
-
-        const glm::vec3 a = world_to_local(cmd.a_world, origin_world);
-        const glm::vec3 b = world_to_local(cmd.b_world, origin_world);
-        push_line(dst, a, b, cmd.color);
+        write_line_vertices(origin_world,
+                            out.vertices.data(),
+                            out.depth_vertex_count,
+                            out.overlay_vertex_count);
     }
-
-    out.depth_vertex_count = static_cast<uint32_t>(depth_vertices.size());
-    out.overlay_vertex_count = static_cast<uint32_t>(overlay_vertices.size());
-    out.vertices.reserve(depth_vertices.size() + overlay_vertices.size());
-    out.vertices.insert(out.vertices.end(), depth_vertices.begin(), depth_vertices.end());
-    out.vertices.insert(out.vertices.end(), overlay_vertices.begin(), overlay_vertices.end());
     return out;
 }
 
