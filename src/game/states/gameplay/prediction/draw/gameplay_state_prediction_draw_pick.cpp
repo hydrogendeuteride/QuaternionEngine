@@ -13,7 +13,9 @@ namespace Game
             const Draw::PredictionGlobalDrawContext &global_ctx,
             Draw::PredictionTrackDrawContext &track_ctx)
     {
-        if (!global_ctx.picking || !track_ctx.active_player_track)
+        // During maneuver-axis drags, orbit hover/pick feedback is not actionable and
+        // rebuilding line-pick LOD every frame is wasted work.
+        if (!global_ctx.picking || !track_ctx.active_player_track || track_ctx.maneuver_drag_active)
         {
             return;
         }
@@ -245,7 +247,7 @@ namespace Game
                 return;
             }
 
-            const bool planned_pick_uses_adaptive_curve = !planned_cache.render_curve_frame_planned.empty();
+            const bool planned_pick_uses_adaptive_curve = track_ctx.use_planned_adaptive_curve;
             pick_settings.max_segments = std::max<std::size_t>(1, remaining_pick_budget);
             const bool rebuild_cache = Draw::should_rebuild_pick_cache(track.pick_cache,
                                                                        planned_cache.generation_id,
@@ -271,7 +273,7 @@ namespace Game
                 rebuilt_pick_cache = true;
                 track.pick_cache.planned_segments.clear();
                 bool cap_hit = false;
-                if (!planned_cache.render_curve_frame_planned.empty())
+                if (planned_pick_uses_adaptive_curve)
                 {
                     build_pick_curve_cache(planned_cache.render_curve_frame_planned,
                                            track_ctx.planned_pick_window.t0_s,

@@ -49,8 +49,8 @@ public:
 	// Build internal state for this frame (no-op in v1)
 	bool compile();
 
-    // Execute in insertion order (skips disabled passes)
-    void execute(VkCommandBuffer cmd);
+    // Execute in insertion order (skips disabled passes) for the given frame slot.
+    void execute(VkCommandBuffer cmd, uint32_t frame_slot);
 
 	// Convenience import helpers (read from EngineContext::swapchain)
 	RGImageHandle import_draw_image();
@@ -122,8 +122,8 @@ public:
     void debug_get_images(std::vector<RGDebugImageInfo>& out) const;
     void debug_get_buffers(std::vector<RGDebugBufferInfo>& out) const;
 
-    // Resolve GPU timestamps from the previous execute() call. Call after waiting on the render fence.
-    void resolve_timings();
+    // Resolve GPU timestamps recorded into the given frame slot after waiting on that slot's render fence.
+    void resolve_timings(uint32_t frame_slot);
 
 private:
     struct Impl;

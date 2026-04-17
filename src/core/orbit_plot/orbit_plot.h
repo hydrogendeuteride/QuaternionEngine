@@ -42,6 +42,12 @@ public:
         uint32_t overlay_vertex_count = 0;
     };
 
+    struct LineVertexCounts
+    {
+        uint32_t depth_vertex_count = 0;
+        uint32_t overlay_vertex_count = 0;
+    };
+
     struct Stats
     {
         uint32_t active_line_count = 0;
@@ -83,6 +89,11 @@ public:
 
     bool has_active_lines() const;
     std::span<const LineCommand> active_lines() const;
+    LineVertexCounts count_line_vertices() const;
+    void write_line_vertices(const WorldVec3 &origin_world,
+                             OrbitPlotVertex *dst,
+                             uint32_t depth_vertex_count,
+                             uint32_t overlay_vertex_count) const;
     LineVertexLists build_line_vertices(const WorldVec3 &origin_world) const;
 
     void record_upload_stats(std::size_t upload_bytes,

@@ -20,8 +20,16 @@ namespace Game
 
         bool frame_supports_live_base_frame_reuse(const orbitsim::TrajectoryFrameSpec &spec)
         {
-            return spec.type != orbitsim::TrajectoryFrameType::Inertial &&
-                   spec.type != orbitsim::TrajectoryFrameType::LVLH;
+            switch (spec.type)
+            {
+                case orbitsim::TrajectoryFrameType::Inertial:
+                case orbitsim::TrajectoryFrameType::BodyCenteredInertial:
+                case orbitsim::TrajectoryFrameType::BodyFixed:
+                case orbitsim::TrajectoryFrameType::Synodic:
+                case orbitsim::TrajectoryFrameType::LVLH:
+                    return true;
+            }
+            return false;
         }
 
         bool base_trajectory_signature_matches(const OrbitPredictionCache &cache,
@@ -157,6 +165,16 @@ namespace Game
             return;
         }
 
+        const bool full_streaming_result =
+                result.solve_quality == OrbitPredictionService::SolveQuality::Full &&
+                result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
+
+        if (result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+            result.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming)
+        {
+            track->preview_state = PredictionPreviewRuntimeState::PreviewStreaming;
+        }
+
         WorldVec3 build_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 build_vel_world{0.0};
         glm::vec3 build_vel_local{0.0f};
@@ -229,7 +247,10 @@ namespace Game
         _prediction_derived_service.request(derived_request);
         mark_prediction_derived_request_submitted(*track, derived_request);
 
-        track->request_pending = false;
+        // Full-stream publishes are intermediate batches from the same solve generation.
+        // Keep the request pending until the final publish so AwaitFullRefine does not
+        // immediately enqueue a newer generation and discard the rest of this stream.
+        track->request_pending = full_streaming_result;
 
         // If the input changed while this solve was in-flight, promote straight to dirty so the
         // next update tick can submit a fresh solver request without waiting for derived to finish.

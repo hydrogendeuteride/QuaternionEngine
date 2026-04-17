@@ -87,11 +87,13 @@ namespace Game::PredictionDrawDetail
         bool direct_world_polyline{false};
         bool identity_frame_transform{true};
         bool use_base_adaptive_curve{false};
+        bool use_planned_adaptive_curve{false};
         OrbitDrawWindowContext draw_ctx{};
         OrbitDrawWindowContext world_basis_draw_ctx{};
         glm::vec4 track_color_full{1.0f};
         glm::vec4 track_color_future{1.0f};
         glm::vec4 track_color_plan{1.0f};
+        PredictionWindowPolicyResult planned_window_policy{};
         double future_window_s{0.0};
         double planned_visual_window_s{0.0};
         double planned_exact_window_s{0.0};
@@ -132,7 +134,13 @@ namespace Game::PredictionDrawDetail
                                     std::size_t i_lo,
                                     std::size_t i_hi,
                                     double t_s);
-    WorldVec3 compute_align_delta(const std::vector<orbitsim::TrajectorySample> &traj_base,
+    bool sample_prediction_path_world(const OrbitDrawWindowContext &ctx,
+                                      const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                                      const std::vector<orbitsim::TrajectorySample> &traj_samples,
+                                      double t_s,
+                                      WorldVec3 &out_world);
+    WorldVec3 compute_align_delta(const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                                  const std::vector<orbitsim::TrajectorySample> &traj_base,
                                   std::size_t i_hi,
                                   const WorldVec3 &ship_pos_world,
                                   double now_s,
@@ -158,14 +166,12 @@ namespace Game::PredictionDrawDetail
             double t_start_s,
             double t_end_s,
             std::vector<std::pair<double, double>> covered_ranges);
+    PickWindow build_planned_draw_window(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
+                                         const OrbitPredictionDrawConfig &draw_config,
+                                         const PredictionWindowPolicyResult &policy);
     PickWindow build_planned_pick_window(const std::vector<orbitsim::TrajectorySegment> &traj_planned_segments,
                                          const OrbitPredictionDrawConfig &draw_config,
-                                         const std::vector<ManeuverNode> &nodes,
-                                         double now_s,
-                                         double future_window_s,
-                                         bool draw_future_segment,
-                                         bool draw_full_orbit,
-                                         double orbital_period_s);
+                                         const PredictionWindowPolicyResult &policy);
     std::size_t build_pick_segment_cache(const std::vector<orbitsim::TrajectorySegment> &traj_segments,
                                          const WorldVec3 &ref_body_world,
                                          const glm::dmat3 &frame_to_world,

@@ -82,6 +82,8 @@ namespace Game
             {
                 case OrbitPredictionService::SolveQuality::Full:
                     return "Full";
+                case OrbitPredictionService::SolveQuality::FastPreview:
+                    return "FastPreview";
             }
 
             return "Unknown";
@@ -166,7 +168,9 @@ namespace Game
         s.prediction_periodic_refresh_s = _prediction_periodic_refresh_s;
         s.prediction_thrust_refresh_s = _prediction_thrust_refresh_s;
         s.prediction_sampling_policy = _prediction_sampling_policy;
+        s.maneuver_plan_horizon = _maneuver_plan_horizon;
         s.maneuver_plan_windows = _maneuver_plan_windows;
+        s.maneuver_plan_live_preview_active = _maneuver_plan_live_preview_active;
         s.orbit_plot_budget = _orbit_plot_budget;
         s.debug_draw_enabled = _debug_draw_enabled;
         s.runtime_orbiter_rails_enabled = _runtime_orbiter_rails_enabled;
@@ -186,7 +190,9 @@ namespace Game
         _prediction_periodic_refresh_s = s.prediction_periodic_refresh_s;
         _prediction_thrust_refresh_s = s.prediction_thrust_refresh_s;
         _prediction_sampling_policy = s.prediction_sampling_policy;
+        _maneuver_plan_horizon = s.maneuver_plan_horizon;
         _maneuver_plan_windows = s.maneuver_plan_windows;
+        _maneuver_plan_live_preview_active = s.maneuver_plan_live_preview_active;
         _orbit_plot_budget = s.orbit_plot_budget;
         _debug_draw_enabled = s.debug_draw_enabled;
         _runtime_orbiter_rails_enabled = s.runtime_orbiter_rails_enabled;
@@ -710,26 +716,26 @@ namespace Game
                     // --- Orbit Debug (collapsed by default) ---
                     if (ImGui::CollapsingHeader("Orbit Debug"))
                     {
-                    ImGui::TextUnformatted("Planner preview / solve margin live in Maneuver Nodes.");
+                        ImGui::TextUnformatted("Plan horizon lives in Maneuver Nodes.");
 
-                    float refresh_s = static_cast<float>(_prediction_periodic_refresh_s);
-                    if (ImGui::DragFloat("Prediction refresh (s)", &refresh_s, 1.0f, 0.0f, 36000.0f, "%.1f"))
-                    {
-                        _prediction_periodic_refresh_s = static_cast<double>(std::max(0.0f, refresh_s));
-                    }
-                    ImGui::SameLine();
-                    ImGui::TextUnformatted("(0 = never)");
+                        float refresh_s = static_cast<float>(_prediction_periodic_refresh_s);
+                        if (ImGui::DragFloat("Prediction refresh (s)", &refresh_s, 1.0f, 0.0f, 36000.0f, "%.1f"))
+                        {
+                            _prediction_periodic_refresh_s = static_cast<double>(std::max(0.0f, refresh_s));
+                        }
+                        ImGui::SameLine();
+                        ImGui::TextUnformatted("(0 = never)");
 
-                    float thrust_refresh_s = static_cast<float>(_prediction_thrust_refresh_s);
-                    if (ImGui::DragFloat("Prediction thrust refresh (s)",
-                                         &thrust_refresh_s,
-                                         0.01f,
-                                         0.0f,
-                                         2.0f,
-                                         "%.2f"))
-                    {
-                        _prediction_thrust_refresh_s = static_cast<double>(std::max(0.0f, thrust_refresh_s));
-                    }
+                        float thrust_refresh_s = static_cast<float>(_prediction_thrust_refresh_s);
+                        if (ImGui::DragFloat("Prediction thrust refresh (s)",
+                                             &thrust_refresh_s,
+                                             0.01f,
+                                             0.0f,
+                                             2.0f,
+                                             "%.2f"))
+                        {
+                            _prediction_thrust_refresh_s = static_cast<double>(std::max(0.0f, thrust_refresh_s));
+                        }
                     ImGui::SameLine();
                     ImGui::TextUnformatted("(0 = every fixed tick)");
 
@@ -759,8 +765,7 @@ namespace Game
                                 static_cast<double>(std::max(0.0f, celestial_min_window_s));
                     }
 
-                    ImGui::Text("Plan preview: %.0f s", _maneuver_plan_windows.preview_window_s);
-                    ImGui::Text("Plan solve margin: %.0f s", _maneuver_plan_windows.solve_margin_s);
+                    ImGui::Text("Plan horizon: %.0f s", _maneuver_plan_horizon.horizon_s);
 
                     ImGui::SeparatorText("Orbit Budget");
 

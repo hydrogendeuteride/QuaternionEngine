@@ -53,6 +53,8 @@ namespace Game
         _environment_texture_handles.clear();
         _environment_warmup_progress = 0.0f;
         _ibl_paths = {};
+        _saved_texture_cache_max_loads_per_pump.reset();
+        _saved_texture_cache_max_bytes_per_pump.reset();
         _jobs_finalized = false;
         _failed = false;
         _enter_gameplay_on_exit = false;
@@ -69,6 +71,14 @@ namespace Game
             return;
         }
 
+        if (TextureCache *textures = ctx.renderer->_textureCache.get())
+        {
+            _saved_texture_cache_max_loads_per_pump = textures->maxLoadsPerPump();
+            _saved_texture_cache_max_bytes_per_pump = textures->maxBytesPerPump();
+            textures->setMaxLoadsPerPump(std::max(textures->maxLoadsPerPump(), kLoadingMaxLoadsPerPump));
+            textures->setMaxBytesPerPump(std::max(textures->maxBytesPerPump(), kLoadingMaxBytesPerPump));
+        }
+
         const std::string scenario_path = ctx.renderer->_assetManager->assetPath(_scenario_asset_path);
         if (auto loaded = load_scenario_config(scenario_path))
         {
@@ -81,12 +91,26 @@ namespace Game
         }
 
         start_preload_jobs(ctx);
+        if (!_failed)
+        {
+            start_environment_warmup(ctx);
+        }
     }
 
     void GameplayLoadingState::on_exit(GameStateContext &ctx)
     {
         cancel_and_join_jobs();
-        (void)ctx;
+        if (TextureCache *textures = ctx.renderer ? ctx.renderer->_textureCache.get() : nullptr)
+        {
+            if (_saved_texture_cache_max_loads_per_pump.has_value())
+            {
+                textures->setMaxLoadsPerPump(*_saved_texture_cache_max_loads_per_pump);
+            }
+            if (_saved_texture_cache_max_bytes_per_pump.has_value())
+            {
+                textures->setMaxBytesPerPump(*_saved_texture_cache_max_bytes_per_pump);
+            }
+        }
 
         if (!_enter_gameplay_on_exit)
         {
@@ -111,18 +135,19 @@ namespace Game
             finalize_preload_jobs();
         }
 
-        if (!_failed && _jobs_finalized && !_environment_warmup_started)
+        update_environment_warmup(ctx);
+        const bool ready_to_enter =
+                !_failed &&
+                _jobs_finalized &&
+                environment_warmup_complete(ctx) &&
+                _elapsed >= kMinimumVisibleSeconds;
+        _progress = compute_progress();
+        if (!ready_to_enter)
         {
-            start_environment_warmup(ctx);
+            _progress = std::min(_progress, 0.99f);
         }
 
-        update_environment_warmup(ctx);
-        _progress = compute_progress();
-
-        if (!_failed &&
-            _jobs_finalized &&
-            environment_warmup_complete(ctx) &&
-            _elapsed >= kMinimumVisibleSeconds)
+        if (ready_to_enter)
         {
             _enter_gameplay_on_exit = true;
             _pending = StateTransition::switch_to<GameplayState>(std::move(_scenario_config));
@@ -629,9 +654,11 @@ namespace Game
 
     float GameplayLoadingState::compute_progress()
     {
+        const bool tracking_environment_textures = !_environment_texture_handles.empty();
+
         if (_jobs.empty())
         {
-            if (_ibl_warmup_requested || !_environment_texture_handles.empty())
+            if (tracking_environment_textures)
             {
                 _status_text = "Warming environment textures...";
                 return 0.9f + 0.1f * std::clamp(_environment_warmup_progress, 0.0f, 1.0f);
@@ -676,7 +703,7 @@ namespace Game
 
         if (!status_set && !_failed)
         {
-            if (_ibl_warmup_requested || !_environment_texture_handles.empty())
+            if (tracking_environment_textures)
             {
                 _status_text = "Finalizing gameplay scene and warming environment...";
             }
@@ -687,7 +714,7 @@ namespace Game
         }
 
         const float job_progress = total_progress / static_cast<float>(_jobs.size());
-        if (_ibl_warmup_requested || !_environment_texture_handles.empty())
+        if (tracking_environment_textures)
         {
             return job_progress * 0.9f + 0.1f * std::clamp(_environment_warmup_progress, 0.0f, 1.0f);
         }
@@ -709,15 +736,10 @@ namespace Game
 
     bool GameplayLoadingState::environment_warmup_complete(GameStateContext &ctx) const
     {
+        (void) ctx;
         const bool textures_ready =
                 _environment_texture_handles.empty() || _environment_warmup_progress >= 0.999f;
-        if (!_ibl_warmup_requested)
-        {
-            return textures_ready;
-        }
-
-        const VulkanEngine *renderer = ctx.renderer;
-        return textures_ready && renderer && global_ibl_ready(*renderer);
+        return textures_ready;
     }
 
     bool GameplayLoadingState::global_ibl_ready(const VulkanEngine &renderer) const

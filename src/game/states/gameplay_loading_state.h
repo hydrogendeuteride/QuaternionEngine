@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -70,6 +71,8 @@ namespace Game
 
         static constexpr float kMinimumVisibleSeconds = 0.2f;
         static constexpr std::string_view kDefaultScenarioAsset = "scenarios/default_gameplay.json";
+        static constexpr int kLoadingMaxLoadsPerPump = 16;
+        static constexpr size_t kLoadingMaxBytesPerPump = 256ull * 1024ull * 1024ull;
 
         std::string _scenario_asset_path;
         ScenarioConfig _scenario_config{};
@@ -82,6 +85,8 @@ namespace Game
         float _progress{0.0f};
         float _elapsed{0.0f};
         float _environment_warmup_progress{0.0f};
+        std::optional<int> _saved_texture_cache_max_loads_per_pump;
+        std::optional<size_t> _saved_texture_cache_max_bytes_per_pump;
         bool _jobs_finalized{false};
         bool _failed{false};
         bool _enter_gameplay_on_exit{false};

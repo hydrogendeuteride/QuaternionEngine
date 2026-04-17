@@ -117,6 +117,7 @@ namespace Game::OrbitPredictionTuning
 
     // Maneuver/planner interactive rebuild cap.
     inline constexpr double kDragRebuildMinIntervalS = 1.0 / 15.0; // 15 Hz
+    inline constexpr double kFullStreamPublishMinIntervalS = 1.0 / 30.0; // 30 Hz
     inline constexpr double kDragStalePreviewGraceS = 0.10;
     inline constexpr double kDragInteractivePreviewWindowMaxS = 43'200.0; // 12 hours
 }
