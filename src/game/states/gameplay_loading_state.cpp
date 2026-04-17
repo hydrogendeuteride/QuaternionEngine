@@ -50,7 +50,8 @@ namespace Game
         _error_text.clear();
         _warning_text.clear();
         _jobs.clear();
-        _environment_texture_handles.clear();
+        _environment_required_texture_handles.clear();
+        _environment_optional_texture_handles.clear();
         _environment_warmup_progress = 0.0f;
         _ibl_paths = {};
         _saved_texture_cache_max_loads_per_pump.reset();
@@ -102,6 +103,11 @@ namespace Game
         cancel_and_join_jobs();
         if (TextureCache *textures = ctx.renderer ? ctx.renderer->_textureCache.get() : nullptr)
         {
+            for (const uint32_t handle : _environment_required_texture_handles)
+            {
+                textures->unpin(handle);
+            }
+
             if (_saved_texture_cache_max_loads_per_pump.has_value())
             {
                 textures->setMaxLoadsPerPump(*_saved_texture_cache_max_loads_per_pump);
@@ -378,6 +384,9 @@ namespace Game
 
         if (textures && samplers)
         {
+            std::unordered_set<uint32_t> queued_handles;
+            queued_handles.reserve(64);
+
             const VkSampler tile_sampler = samplers->linearClampEdge() != VK_NULL_HANDLE
                                                ? samplers->linearClampEdge()
                                                : samplers->defaultLinear();
@@ -386,6 +395,7 @@ namespace Game
             auto enqueue_texture = [&](const std::string &absolute_path,
                                        const bool srgb,
                                        const VkSampler sampler,
+                                       const bool required,
                                        const TextureCache::TextureKey::ChannelsHint channels =
                                                TextureCache::TextureKey::ChannelsHint::Auto) {
                 if (absolute_path.empty() || !std::filesystem::exists(absolute_path))
@@ -401,15 +411,26 @@ namespace Game
                 key.channels = channels;
 
                 const TextureCache::TextureHandle handle = textures->request(key, sampler);
-                if (handle != TextureCache::InvalidHandle)
+                if (handle == TextureCache::InvalidHandle || !queued_handles.insert(handle).second)
                 {
-                    _environment_texture_handles.push_back(handle);
+                    return;
+                }
+
+                if (required)
+                {
+                    textures->pin(handle);
+                    _environment_required_texture_handles.push_back(handle);
+                }
+                else
+                {
+                    _environment_optional_texture_handles.push_back(handle);
                 }
             };
 
             auto enqueue_cube_faces = [&](const std::string &dir,
                                           const bool srgb,
                                           const VkSampler sampler,
+                                          const bool required,
                                           const TextureCache::TextureKey::ChannelsHint channels,
                                           const bool allow_png_fallback) {
                 if (dir.empty())
@@ -428,7 +449,7 @@ namespace Game
                         absolute = assets->assetPath(dir + "/" + face_name + ".png");
                     }
 
-                    enqueue_texture(absolute, srgb, sampler, channels);
+                    enqueue_texture(absolute, srgb, sampler, required, channels);
                 }
             };
 
@@ -442,16 +463,19 @@ namespace Game
                 enqueue_cube_faces(cdef.albedo_dir,
                                    true,
                                    tile_sampler,
+                                   true,
                                    TextureCache::TextureKey::ChannelsHint::Auto,
                                    false);
                 enqueue_cube_faces(cdef.emission_dir,
                                    true,
                                    tile_sampler,
+                                   false,
                                    TextureCache::TextureKey::ChannelsHint::Auto,
                                    true);
                 enqueue_cube_faces(cdef.specular_dir,
                                    false,
                                    specular_sampler,
+                                   false,
                                    TextureCache::TextureKey::ChannelsHint::R,
                                    true);
             }
@@ -465,11 +489,11 @@ namespace Game
                 }
 
                 const auto &mat = orbiter.material;
-                enqueue_texture(assets->assetPath(mat.albedo), true, samplers->defaultLinear());
-                enqueue_texture(assets->assetPath(mat.normal), false, samplers->defaultLinear());
-                enqueue_texture(assets->assetPath(mat.metal_rough), false, samplers->defaultLinear());
-                enqueue_texture(assets->assetPath(mat.occlusion), false, samplers->defaultLinear());
-                enqueue_texture(assets->assetPath(mat.emissive), true, samplers->defaultLinear());
+                enqueue_texture(assets->assetPath(mat.albedo), true, samplers->defaultLinear(), true);
+                enqueue_texture(assets->assetPath(mat.normal), false, samplers->defaultLinear(), true);
+                enqueue_texture(assets->assetPath(mat.metal_rough), false, samplers->defaultLinear(), true);
+                enqueue_texture(assets->assetPath(mat.occlusion), false, samplers->defaultLinear(), true);
+                enqueue_texture(assets->assetPath(mat.emissive), true, samplers->defaultLinear(), true);
             }
 
             const auto &env = _scenario_config.environment;
@@ -479,7 +503,14 @@ namespace Game
                 enqueue_texture(assets->assetPath(env.rocket_plume_noise),
                                 false,
                                 samplers->defaultLinear(),
+                                true,
                                 TextureCache::TextureKey::ChannelsHint::R);
+            }
+
+            if ((!_environment_required_texture_handles.empty() || !_environment_optional_texture_handles.empty()) &&
+                renderer->_resourceManager)
+            {
+                textures->pumpLoads(*renderer->_resourceManager, renderer->get_current_frame());
             }
         }
 
@@ -524,25 +555,33 @@ namespace Game
         VulkanEngine *renderer = ctx.renderer;
         TextureCache *textures = renderer ? renderer->_textureCache.get() : nullptr;
 
-        if (textures && renderer && renderer->_context && !_environment_texture_handles.empty())
-        {
-            const uint32_t frame_index = renderer->_context->frameIndex;
-            size_t resident_count = 0;
-            size_t settled_count = 0;
-            size_t failed_count = 0;
+        auto pump_handle_set = [&](const std::vector<uint32_t> &handles,
+                                   const uint32_t frame_index,
+                                   bool count_toward_progress,
+                                   size_t &settled_count,
+                                   size_t &failed_count) {
+            if (!textures)
+            {
+                return;
+            }
 
-            for (const uint32_t handle : _environment_texture_handles)
+            for (const uint32_t handle : handles)
             {
                 textures->markUsed(handle, frame_index);
                 switch (textures->state(handle))
                 {
                 case TextureCache::EntryState::Resident:
-                    ++resident_count;
-                    ++settled_count;
+                    if (count_toward_progress)
+                    {
+                        ++settled_count;
+                    }
                     break;
                 case TextureCache::EntryState::Evicted:
                     ++failed_count;
-                    ++settled_count;
+                    if (count_toward_progress)
+                    {
+                        ++settled_count;
+                    }
                     break;
                 case TextureCache::EntryState::Loading:
                 case TextureCache::EntryState::Unloaded:
@@ -550,10 +589,36 @@ namespace Game
                     break;
                 }
             }
+        };
 
-            _environment_warmup_progress =
-                    static_cast<float>(settled_count) /
-                    static_cast<float>(_environment_texture_handles.size());
+        if (textures && renderer && renderer->_context &&
+            (!_environment_required_texture_handles.empty() || !_environment_optional_texture_handles.empty()))
+        {
+            const uint32_t frame_index = renderer->_context->frameIndex;
+            size_t settled_count = 0;
+            size_t failed_count = 0;
+
+            pump_handle_set(_environment_required_texture_handles,
+                            frame_index,
+                            true,
+                            settled_count,
+                            failed_count);
+            pump_handle_set(_environment_optional_texture_handles,
+                            frame_index,
+                            false,
+                            settled_count,
+                            failed_count);
+
+            if (_environment_required_texture_handles.empty())
+            {
+                _environment_warmup_progress = 1.0f;
+            }
+            else
+            {
+                _environment_warmup_progress =
+                        static_cast<float>(settled_count) /
+                        static_cast<float>(_environment_required_texture_handles.size());
+            }
 
             if (failed_count > 0 && _warning_text.find("environment texture") == std::string::npos)
             {
@@ -561,7 +626,7 @@ namespace Game
                         "Some environment textures failed to warm and will use fallback resources.";
             }
         }
-        else if (_environment_texture_handles.empty())
+        else if (_environment_required_texture_handles.empty())
         {
             _environment_warmup_progress = 1.0f;
         }
@@ -654,7 +719,7 @@ namespace Game
 
     float GameplayLoadingState::compute_progress()
     {
-        const bool tracking_environment_textures = !_environment_texture_handles.empty();
+        const bool tracking_environment_textures = !_environment_required_texture_handles.empty();
 
         if (_jobs.empty())
         {
@@ -738,7 +803,7 @@ namespace Game
     {
         (void) ctx;
         const bool textures_ready =
-                _environment_texture_handles.empty() || _environment_warmup_progress >= 0.999f;
+                _environment_required_texture_handles.empty() || _environment_warmup_progress >= 0.999f;
         return textures_ready;
     }
 
