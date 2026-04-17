@@ -217,6 +217,14 @@ namespace Game
             return;
         }
 
+        const bool completes_latest_derived_request =
+                track->latest_requested_derived_generation_id != 0 &&
+                result.generation_id == track->latest_requested_derived_generation_id &&
+                result.display_frame_key == track->latest_requested_derived_display_frame_key &&
+                result.display_frame_revision == track->latest_requested_derived_display_frame_revision &&
+                result.analysis_body_id == track->latest_requested_derived_analysis_body_id &&
+                result.publish_stage == track->latest_requested_derived_publish_stage;
+
         PredictionDragDebugTelemetry &debug = track->drag_debug;
         debug.last_result_solve_quality = result.solve_quality;
         PredictionRuntimeDetail::update_last_and_peak(
@@ -228,7 +236,10 @@ namespace Game
         debug.flattened_planned_segments_last = result.cache.trajectory_segments_frame_planned.size();
         debug.flattened_planned_samples_last = result.cache.trajectory_frame_planned.size();
 
-        track->derived_request_pending = false;
+        if (completes_latest_derived_request)
+        {
+            track->derived_request_pending = false;
+        }
         // Do NOT clear request_pending here — a newer solver request may already be in-flight.
         // Only the solver completion path and request submission paths manage that flag.
         // Preserve an already-queued refine request when a late preview-derived result arrives after drag end.

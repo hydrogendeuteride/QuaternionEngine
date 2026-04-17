@@ -873,6 +873,7 @@ namespace Game
         track.latest_requested_derived_display_frame_key = request.display_frame_key;
         track.latest_requested_derived_display_frame_revision = request.display_frame_revision;
         track.latest_requested_derived_analysis_body_id = request.analysis_body_id;
+        track.latest_requested_derived_publish_stage = request.solver_result.publish_stage;
     }
 
     bool GameplayState::request_prediction_derived_refresh(PredictionTrackState &track, double display_time_s)
@@ -1024,6 +1025,7 @@ namespace Game
             track.latest_requested_derived_display_frame_key = 0;
             track.latest_requested_derived_display_frame_revision = 0;
             track.latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
+            track.latest_requested_derived_publish_stage = OrbitPredictionService::PublishStage::Final;
             track.pick_cache.clear();
             (void) request_prediction_derived_refresh(track);
         }
