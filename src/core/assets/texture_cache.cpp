@@ -60,6 +60,7 @@ void TextureCache::cleanup()
     }
     if (!_context || !_context->getResources()) return;
     auto *rm = _context->getResources();
+    std::lock_guard<std::mutex> entriesLock(_entriesMutex);
     for (TextureHandle h = 0; h < _entries.size(); ++h)
     {
         auto &e = _entries[h];
@@ -82,6 +83,8 @@ void TextureCache::cleanup()
 
 TextureCache::TextureHandle TextureCache::request(const TextureKey &key, VkSampler sampler)
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
+
     // Ensure we have a valid, stable hash for deduplication.
     TextureKey normKey = key;
     if (normKey.hash == 0)
@@ -155,6 +158,7 @@ TextureCache::TextureHandle TextureCache::request(const TextureKey &key, VkSampl
 void TextureCache::watchBinding(TextureHandle handle, VkDescriptorSet set, uint32_t binding,
                                 VkSampler sampler, VkImageView fallbackView)
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     if (handle == InvalidHandle) return;
     if (handle >= _entries.size()) return;
     Entry &e = _entries[handle];
@@ -186,6 +190,7 @@ void TextureCache::watchBinding(TextureHandle handle, VkDescriptorSet set, uint3
 void TextureCache::watchBindingReplace(TextureHandle handle, VkDescriptorSet set, uint32_t binding,
                                        VkSampler sampler, VkImageView fallbackView)
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     if (set == VK_NULL_HANDLE) return;
 
     // Remove any existing watches for this exact binding so future uploads won't re-patch it.
@@ -270,6 +275,7 @@ void TextureCache::watchBindingReplace(TextureHandle handle, VkDescriptorSet set
 
 void TextureCache::unwatchSet(VkDescriptorSet set)
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     if (set == VK_NULL_HANDLE) return;
     auto it = _setToHandles.find(set);
     if (it == _setToHandles.end()) return;
@@ -288,6 +294,7 @@ void TextureCache::unwatchSet(VkDescriptorSet set)
 
 void TextureCache::markUsed(TextureHandle handle, uint32_t frameIndex)
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     if (handle == InvalidHandle) return;
     if (handle >= _entries.size()) return;
     _entries[handle].lastUsedFrame = frameIndex;
@@ -295,6 +302,7 @@ void TextureCache::markUsed(TextureHandle handle, uint32_t frameIndex)
 
 void TextureCache::markSetUsed(VkDescriptorSet set, uint32_t frameIndex)
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     auto it = _setToHandles.find(set);
     if (it == _setToHandles.end()) return;
     for (TextureHandle h : it->second)
@@ -308,6 +316,7 @@ void TextureCache::markSetUsed(VkDescriptorSet set, uint32_t frameIndex)
 
 void TextureCache::pin(TextureHandle handle)
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     if (handle == InvalidHandle) return;
     if (handle >= _entries.size()) return;
     _entries[handle].pinned = true;
@@ -315,6 +324,7 @@ void TextureCache::pin(TextureHandle handle)
 
 void TextureCache::unpin(TextureHandle handle)
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     if (handle == InvalidHandle) return;
     if (handle >= _entries.size()) return;
     _entries[handle].pinned = false;
@@ -322,6 +332,7 @@ void TextureCache::unpin(TextureHandle handle)
 
 bool TextureCache::isPinned(TextureHandle handle) const
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     if (handle == InvalidHandle) return false;
     if (handle >= _entries.size()) return false;
     return _entries[handle].pinned;
@@ -427,6 +438,7 @@ static std::vector<uint8_t> downscale_half(const unsigned char* src, int w, int 
 
 void TextureCache::startLoad(Entry &e, ResourceManager & /*rm*/)
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     // Legacy synchronous path retained for completeness but not used by pumpLoads now.
     enqueueDecode(e);
 }
@@ -467,6 +479,7 @@ void TextureCache::patchToFallback(const Entry &e)
 
 void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     // Simple throttle to avoid massive spikes.
     int started = 0;
     const uint32_t now = _context ? _context->frameIndex : 0u;
@@ -512,6 +525,7 @@ void TextureCache::pumpLoads(ResourceManager &rm, FrameResources &)
 
 void TextureCache::evictToBudget(size_t budgetBytes)
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     if (_residentBytes <= budgetBytes) return;
 
     // Gather candidates
@@ -558,6 +572,7 @@ void TextureCache::evictToBudget(size_t budgetBytes)
 
 bool TextureCache::unload(TextureHandle handle, bool drop_source_bytes)
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     if (handle == InvalidHandle) return false;
     if (handle >= _entries.size()) return false;
 
@@ -1145,6 +1160,7 @@ bool TextureCache::tryMakeSpace(size_t bytesNeeded, uint32_t now)
 
 void TextureCache::debugSnapshot(std::vector<DebugRow> &outRows, DebugStats &outStats) const
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     outRows.clear();
     outStats = DebugStats{};
     outStats.residentBytes = _residentBytes;
@@ -1184,13 +1200,27 @@ void TextureCache::debugSnapshot(std::vector<DebugRow> &outRows, DebugStats &out
 
 TextureCache::EntryState TextureCache::state(TextureHandle handle) const
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     if (handle == InvalidHandle) return EntryState::Unloaded;
     if (handle >= _entries.size()) return EntryState::Unloaded;
     return _entries[handle].state;
 }
 
+size_t TextureCache::residentBytes() const
+{
+    std::lock_guard<std::mutex> lock(_entriesMutex);
+    return _residentBytes;
+}
+
+size_t TextureCache::cpuSourceBytes() const
+{
+    std::lock_guard<std::mutex> lock(_entriesMutex);
+    return _cpuSourceBytes;
+}
+
 VkImageView TextureCache::imageView(TextureHandle handle) const
 {
+    std::lock_guard<std::mutex> lock(_entriesMutex);
     if (handle == InvalidHandle) return VK_NULL_HANDLE;
     if (handle >= _entries.size()) return VK_NULL_HANDLE;
 

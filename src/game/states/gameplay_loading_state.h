@@ -77,7 +77,8 @@ namespace Game
         std::string _scenario_asset_path;
         ScenarioConfig _scenario_config{};
         std::vector<std::unique_ptr<PreloadJob>> _jobs;
-        std::vector<uint32_t> _environment_texture_handles;
+        std::vector<uint32_t> _environment_required_texture_handles;
+        std::vector<uint32_t> _environment_optional_texture_handles;
         GameAPI::IBLPaths _ibl_paths{};
         std::string _status_text;
         std::string _error_text;
