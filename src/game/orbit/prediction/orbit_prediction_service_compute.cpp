@@ -195,7 +195,7 @@ namespace Game
             const bool has_planned_path = !result.trajectory_segments_inertial_planned.empty();
             const std::vector<orbitsim::TrajectorySegment> &segments =
                     has_planned_path ? result.trajectory_segments_inertial_planned
-                                     : result.trajectory_segments_inertial;
+                                     : result.resolved_trajectory_segments_inertial();
             if (segments.empty())
             {
                 return;
@@ -611,15 +611,38 @@ namespace Game
                 return;
             }
 
+            std::shared_ptr<const Result::CoreData> staged_core_data{};
+            const auto shared_core_data_for_staged_publish = [&out, &staged_core_data]() {
+                if (staged_core_data)
+                {
+                    return staged_core_data;
+                }
+
+                auto core_data = std::make_shared<Result::CoreData>();
+                core_data->shared_ephemeris = out.shared_ephemeris;
+                core_data->massive_bodies = out.massive_bodies;
+                core_data->trajectory_inertial = out.trajectory_inertial;
+                core_data->trajectory_segments_inertial = out.trajectory_segments_inertial;
+                staged_core_data = std::move(core_data);
+                return staged_core_data;
+            };
             const auto make_stage_result =
-                    [&out, &sync_result_stage_counts](const PlannedSolveOutput &stage_output,
-                                                      const std::vector<PublishedChunk> &published_chunks,
-                                                      const PublishStage publish_stage,
-                                                      std::vector<StreamedPlannedChunk> streamed_planned_chunks = {},
-                                                      const bool include_cumulative_planned = true) {
-                        Result stage_result = out;
+                    [&out, &sync_result_stage_counts, &shared_core_data_for_staged_publish](
+                            const PlannedSolveOutput &stage_output,
+                            const std::vector<PublishedChunk> &published_chunks,
+                            const PublishStage publish_stage,
+                            std::vector<StreamedPlannedChunk> streamed_planned_chunks = {},
+                            const bool include_cumulative_planned = true) {
+                        Result stage_result{};
+                        stage_result.track_id = out.track_id;
+                        stage_result.generation_id = out.generation_id;
                         stage_result.valid = true;
+                        stage_result.baseline_reused = out.baseline_reused;
+                        stage_result.solve_quality = out.solve_quality;
                         stage_result.publish_stage = publish_stage;
+                        stage_result.diagnostics = out.diagnostics;
+                        stage_result.build_time_s = out.build_time_s;
+                        stage_result.set_shared_core_data(shared_core_data_for_staged_publish());
                         stage_result.diagnostics.trajectory_planned = stage_output.diagnostics;
                         stage_result.diagnostics.trajectory_sample_count_planned = stage_output.samples.size();
                         stage_result.diagnostics.status = Status::Success;

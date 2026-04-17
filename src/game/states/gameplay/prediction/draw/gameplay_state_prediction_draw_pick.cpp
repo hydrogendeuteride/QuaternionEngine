@@ -98,7 +98,7 @@ namespace Game
             }
 
             out_cap_hit = lod.cap_hit;
-            _orbit_plot_perf.pick_cap_hit_last_frame = out_cap_hit;
+            _orbit_plot_perf.pick_cap_hit_last_frame = _orbit_plot_perf.pick_cap_hit_last_frame || out_cap_hit;
             if (out_cap_hit)
             {
                 ++_orbit_plot_perf.pick_cap_hits_total;
@@ -234,21 +234,26 @@ namespace Game
             pick_group_planned != Draw::kInvalidPickGroup &&
             remaining_pick_budget > 0)
         {
-            if (track_ctx.direct_world_polyline && !planned_cache.trajectory_frame_planned.empty())
-            {
-                Draw::emit_polyline_pick_segments(track_ctx.draw_ctx,
-                                                  global_ctx.picking,
-                                                  pick_group_planned,
-                                                  planned_cache.trajectory_frame_planned,
-                                                  track_ctx.planned_pick_window.t0_s,
-                                                  track_ctx.planned_pick_window.t1_s,
-                                                  remaining_pick_budget,
-                                                  _orbit_plot_perf);
-                return;
-            }
-
-            const bool planned_pick_uses_adaptive_curve = track_ctx.use_planned_adaptive_curve;
-            pick_settings.max_segments = std::max<std::size_t>(1, remaining_pick_budget);
+            const PredictionChunkAssembly &preview_assembly = track.preview_overlay.chunk_assembly;
+            const PredictionChunkAssembly *full_stream_assembly =
+                    track.full_stream_overlay.ready_for_draw(planned_cache.generation_id,
+                                                             planned_cache.display_frame_key,
+                                                             planned_cache.display_frame_revision)
+                            ? &track.full_stream_overlay.chunk_assembly
+                            : nullptr;
+            const bool preview_overlay_active = preview_assembly.valid && !preview_assembly.chunks.empty();
+            const bool full_stream_overlay_active = full_stream_assembly && !full_stream_assembly->chunks.empty();
+            const auto assembly_has_pick_curve = [](const PredictionChunkAssembly &assembly) {
+                return std::any_of(assembly.chunks.begin(),
+                                   assembly.chunks.end(),
+                                   [](const OrbitChunk &chunk) { return !chunk.render_curve.empty(); });
+            };
+            const bool overlay_pick_active = preview_overlay_active || full_stream_overlay_active;
+            const bool planned_pick_uses_adaptive_curve =
+                    overlay_pick_active
+                            ? ((preview_overlay_active && assembly_has_pick_curve(preview_assembly)) ||
+                               (full_stream_overlay_active && assembly_has_pick_curve(*full_stream_assembly)))
+                            : track_ctx.use_planned_adaptive_curve;
             const bool rebuild_cache = Draw::should_rebuild_pick_cache(track.pick_cache,
                                                                        planned_cache.generation_id,
                                                                        planned_cache.display_frame_key,
@@ -272,9 +277,249 @@ namespace Game
             {
                 rebuilt_pick_cache = true;
                 track.pick_cache.planned_segments.clear();
-                bool cap_hit = false;
-                if (planned_pick_uses_adaptive_curve)
+                const auto build_pick_polyline_segments =
+                        [&](const std::vector<orbitsim::TrajectorySample> &traj,
+                            const double t_start_s,
+                            const double t_end_s,
+                            const std::size_t max_segments,
+                            std::vector<PickingSystem::LinePickSegmentData> &out_segments) {
+                            out_segments.clear();
+                            if (traj.size() < 2 || max_segments == 0)
+                            {
+                                return std::size_t{0};
+                            }
+
+                            out_segments.reserve(std::min(max_segments, traj.size() - 1u));
+                            std::size_t emitted = 0;
+                            for (std::size_t i = 1; i < traj.size() && emitted < max_segments; ++i)
+                            {
+                                const double seg_t0_s = traj[i - 1].t_s;
+                                const double seg_t1_s = traj[i].t_s;
+                                const double clip_t0_s = std::max(seg_t0_s, t_start_s);
+                                const double clip_t1_s = std::min(seg_t1_s, t_end_s);
+                                if (!(clip_t1_s > clip_t0_s))
+                                {
+                                    continue;
+                                }
+
+                                const WorldVec3 a_world =
+                                        Draw::sample_polyline_world(track_ctx.ref_body_world,
+                                                                    track_ctx.frame_to_world,
+                                                                    traj,
+                                                                    i - 1,
+                                                                    i,
+                                                                    clip_t0_s) +
+                                        track_ctx.align_delta;
+                                const WorldVec3 b_world =
+                                        Draw::sample_polyline_world(track_ctx.ref_body_world,
+                                                                    track_ctx.frame_to_world,
+                                                                    traj,
+                                                                    i - 1,
+                                                                    i,
+                                                                    clip_t1_s) +
+                                        track_ctx.align_delta;
+                                out_segments.push_back(PickingSystem::LinePickSegmentData{
+                                        .a_world = a_world,
+                                        .b_world = b_world,
+                                        .a_time_s = clip_t0_s,
+                                        .b_time_s = clip_t1_s,
+                                });
+                                ++emitted;
+                            }
+
+                            _orbit_plot_perf.pick_segments_before_cull += static_cast<uint32_t>(emitted);
+                            _orbit_plot_perf.pick_segments += static_cast<uint32_t>(emitted);
+                            return emitted;
+                        };
+                const auto append_chunk_pick_segments =
+                        [&](const OrbitChunk &chunk, const double t_start_s, const double t_end_s, const std::size_t budget_left) {
+                            if (!(t_end_s > t_start_s) || budget_left == 0)
+                            {
+                                return std::size_t{0};
+                            }
+
+                            std::vector<PickingSystem::LinePickSegmentData> chunk_segments;
+                            bool cap_hit = false;
+                            std::size_t emitted = 0;
+                            pick_settings.max_segments = std::max<std::size_t>(1, budget_left);
+                            if (track_ctx.direct_world_polyline && chunk.frame_samples.size() >= 2)
+                            {
+                                emitted = build_pick_polyline_segments(chunk.frame_samples,
+                                                                       t_start_s,
+                                                                       t_end_s,
+                                                                       budget_left,
+                                                                       chunk_segments);
+                            }
+                            else if (!chunk.render_curve.empty())
+                            {
+                                emitted = build_pick_curve_cache(chunk.render_curve,
+                                                                 t_start_s,
+                                                                 t_end_s,
+                                                                 chunk_segments,
+                                                                 cap_hit);
+                            }
+                            else if (!chunk.frame_segments.empty())
+                            {
+                                emitted = Draw::build_pick_segment_cache(chunk.frame_segments,
+                                                                         track_ctx.ref_body_world,
+                                                                         track_ctx.frame_to_world,
+                                                                         track_ctx.align_delta,
+                                                                         global_ctx.render_frustum,
+                                                                         pick_settings,
+                                                                         t_start_s,
+                                                                         t_end_s,
+                                                                         pick_anchor_times_span,
+                                                                         false,
+                                                                         chunk_segments,
+                                                                         cap_hit,
+                                                                         _orbit_plot_perf);
+                            }
+
+                            if (emitted == 0 || chunk_segments.empty())
+                            {
+                                return std::size_t{0};
+                            }
+
+                            track.pick_cache.planned_segments.insert(track.pick_cache.planned_segments.end(),
+                                                                     chunk_segments.begin(),
+                                                                     chunk_segments.end());
+                            return chunk_segments.size();
+                        };
+                const auto append_chunk_assembly_pick_ranges =
+                        [&](const PredictionChunkAssembly &assembly,
+                            const std::vector<std::pair<double, double>> *masked_ranges,
+                            std::vector<std::pair<double, double>> &out_covered_ranges) {
+                            std::size_t emitted_total = 0;
+                            for (const OrbitChunk &chunk : assembly.chunks)
+                            {
+                                const double clipped_t0_s = std::max(track_ctx.planned_pick_window.t0_s, chunk.t0_s);
+                                const double clipped_t1_s = std::min(track_ctx.planned_pick_window.t1_s, chunk.t1_s);
+                                if (!(clipped_t1_s > clipped_t0_s))
+                                {
+                                    continue;
+                                }
+
+                                std::vector<std::pair<double, double>> pick_ranges;
+                                if (masked_ranges && !masked_ranges->empty())
+                                {
+                                    pick_ranges = Draw::compute_uncovered_ranges(clipped_t0_s, clipped_t1_s, *masked_ranges);
+                                }
+                                else
+                                {
+                                    pick_ranges.emplace_back(clipped_t0_s, clipped_t1_s);
+                                }
+
+                                for (const auto &[range_t0_s, range_t1_s] : pick_ranges)
+                                {
+                                    const std::size_t budget_left =
+                                            (remaining_pick_budget > emitted_total)
+                                                    ? (remaining_pick_budget - emitted_total)
+                                                    : 0u;
+                                    if (budget_left == 0)
+                                    {
+                                        return emitted_total;
+                                    }
+
+                                    const std::size_t emitted =
+                                            append_chunk_pick_segments(chunk, range_t0_s, range_t1_s, budget_left);
+                                    if (emitted == 0)
+                                    {
+                                        continue;
+                                    }
+
+                                    out_covered_ranges.emplace_back(range_t0_s, range_t1_s);
+                                    emitted_total += emitted;
+                                }
+                            }
+                            return emitted_total;
+                        };
+
+                if (overlay_pick_active)
                 {
+                    std::vector<std::pair<double, double>> covered_ranges;
+                    if (preview_overlay_active)
+                    {
+                        covered_ranges.reserve(preview_assembly.chunks.size());
+                        append_chunk_assembly_pick_ranges(preview_assembly, nullptr, covered_ranges);
+                    }
+
+                    if (full_stream_overlay_active)
+                    {
+                        std::vector<std::pair<double, double>> full_stream_covered_ranges;
+                        full_stream_covered_ranges.reserve(full_stream_assembly->chunks.size());
+                        append_chunk_assembly_pick_ranges(*full_stream_assembly,
+                                                          preview_overlay_active ? &covered_ranges : nullptr,
+                                                          full_stream_covered_ranges);
+                    }
+                    else if (preview_overlay_active)
+                    {
+                        const std::vector<std::pair<double, double>> uncovered_ranges =
+                                Draw::compute_uncovered_ranges(track_ctx.planned_pick_window.t0_s,
+                                                               track_ctx.planned_pick_window.t1_s,
+                                                               covered_ranges);
+                        for (const auto &[range_t0_s, range_t1_s] : uncovered_ranges)
+                        {
+                            const std::size_t budget_left =
+                                    remaining_pick_budget > track.pick_cache.planned_segments.size()
+                                            ? (remaining_pick_budget - track.pick_cache.planned_segments.size())
+                                            : 0u;
+                            if (budget_left == 0)
+                            {
+                                break;
+                            }
+
+                            if (track_ctx.direct_world_polyline && !planned_cache.trajectory_frame_planned.empty())
+                            {
+                                std::vector<PickingSystem::LinePickSegmentData> fallback_segments;
+                                build_pick_polyline_segments(planned_cache.trajectory_frame_planned,
+                                                             range_t0_s,
+                                                             range_t1_s,
+                                                             budget_left,
+                                                             fallback_segments);
+                                track.pick_cache.planned_segments.insert(track.pick_cache.planned_segments.end(),
+                                                                         fallback_segments.begin(),
+                                                                         fallback_segments.end());
+                            }
+                            else
+                            {
+                                std::vector<PickingSystem::LinePickSegmentData> fallback_segments;
+                                bool cap_hit = false;
+                                pick_settings.max_segments = std::max<std::size_t>(1, budget_left);
+                                const std::vector<orbitsim::TrajectorySegment> &pick_planned_segments =
+                                        track_ctx.identity_frame_transform
+                                                ? planned_cache.trajectory_segments_frame_planned
+                                                : Draw::planned_segments_world_basis(track_ctx, planned_cache);
+                                Draw::build_pick_segment_cache(pick_planned_segments,
+                                                               track_ctx.ref_body_world,
+                                                               track_ctx.frame_to_world,
+                                                               track_ctx.align_delta,
+                                                               global_ctx.render_frustum,
+                                                               pick_settings,
+                                                               range_t0_s,
+                                                               range_t1_s,
+                                                               pick_anchor_times_span,
+                                                               !track_ctx.identity_frame_transform,
+                                                               fallback_segments,
+                                                               cap_hit,
+                                                               _orbit_plot_perf);
+                                track.pick_cache.planned_segments.insert(track.pick_cache.planned_segments.end(),
+                                                                         fallback_segments.begin(),
+                                                                         fallback_segments.end());
+                            }
+                        }
+                    }
+                }
+                else if (track_ctx.direct_world_polyline && !planned_cache.trajectory_frame_planned.empty())
+                {
+                    build_pick_polyline_segments(planned_cache.trajectory_frame_planned,
+                                                 track_ctx.planned_pick_window.t0_s,
+                                                 track_ctx.planned_pick_window.t1_s,
+                                                 remaining_pick_budget,
+                                                 track.pick_cache.planned_segments);
+                }
+                else if (planned_pick_uses_adaptive_curve)
+                {
+                    bool cap_hit = false;
                     build_pick_curve_cache(planned_cache.render_curve_frame_planned,
                                            track_ctx.planned_pick_window.t0_s,
                                            track_ctx.planned_pick_window.t1_s,
@@ -283,6 +528,8 @@ namespace Game
                 }
                 else
                 {
+                    bool cap_hit = false;
+                    pick_settings.max_segments = std::max<std::size_t>(1, remaining_pick_budget);
                     const std::vector<orbitsim::TrajectorySegment> &pick_planned_segments =
                             track_ctx.identity_frame_transform
                                     ? planned_cache.trajectory_segments_frame_planned
