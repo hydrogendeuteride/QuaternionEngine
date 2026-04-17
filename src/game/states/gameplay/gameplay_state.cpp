@@ -90,6 +90,13 @@ namespace Game
             {
                 apply_settings(*loaded_settings);
             }
+
+            const std::string keybinds_path =
+                    ctx.renderer->_assetManager->assetPath(_keybinds_rel_path);
+            if (auto loaded_keybinds = load_keybinds(keybinds_path))
+            {
+                _keybinds = std::move(*loaded_keybinds);
+            }
         }
 
         setup_scene(ctx);
@@ -316,6 +323,7 @@ namespace Game
         comp_ctx.api = ctx.api;
         comp_ctx.input = ctx.input;
         comp_ctx.physics = _physics.get();
+        comp_ctx.keybinds = &_keybinds;
         comp_ctx.ui_capture_keyboard = ctx.renderer && ctx.renderer->ui() && ctx.renderer->ui()->wantCaptureKeyboard();
         comp_ctx.interpolation_alpha = alpha;
         return comp_ctx;

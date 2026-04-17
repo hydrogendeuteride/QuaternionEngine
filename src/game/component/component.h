@@ -21,6 +21,7 @@ namespace Game
 {
     class Entity;
     class GameWorld;
+    struct Keybinds;
 
     // ============================================================================
     // ComponentContext: Shared data passed to all component callbacks
@@ -31,6 +32,7 @@ namespace Game
         GameWorld *world{nullptr};
         GameAPI::Engine *api{nullptr};
         const InputState *input{nullptr};
+        const Keybinds *keybinds{nullptr};
         Physics::PhysicsWorld *physics{nullptr};
         bool ui_capture_keyboard{false};
         float interpolation_alpha{0.0f};

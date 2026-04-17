@@ -2,6 +2,7 @@
 
 #include "game/component/component.h"
 #include "core/input/input_system.h"
+#include "game/input/keybinds.h"
 
 #include <glm/vec3.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -38,9 +39,9 @@ namespace Game
 
         void on_fixed_update(ComponentContext &ctx, float fixed_dt) override;
 
-        // Key input only; does not touch physics.
-        static ThrustInput read_input(const InputState *input, bool ui_capture_keyboard,
-                                      bool &sas_toggle_prev_down);
+        // Key input only; does not touch physics. Pass nullptr for `binds` to use default bindings.
+        static ThrustInput read_input(const InputState *input, const ShipKeybinds *binds,
+                                      bool ui_capture_keyboard, bool &sas_toggle_prev_down);
 
         // Config
         float thrust_force() const { return _thrust_force; }
