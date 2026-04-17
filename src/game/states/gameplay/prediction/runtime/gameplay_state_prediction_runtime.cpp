@@ -134,6 +134,35 @@ namespace Game
             }
             return std::min(available_window_s, preview_window_s);
         }
+
+        [[nodiscard]] bool solve_already_reported_horizon_shortfall(
+                const OrbitPredictionService::AdaptiveStageDiagnostics &diag,
+                const double required_ahead_s,
+                const double coverage_epsilon_s)
+        {
+            if (!(required_ahead_s > 0.0) ||
+                !std::isfinite(required_ahead_s) ||
+                !(diag.requested_duration_s > 0.0) ||
+                !std::isfinite(diag.requested_duration_s))
+            {
+                return false;
+            }
+
+            const double requested_duration_s = std::max(0.0, diag.requested_duration_s);
+            const double covered_duration_s = std::max(0.0, diag.covered_duration_s);
+            if (required_ahead_s > (requested_duration_s + coverage_epsilon_s))
+            {
+                return false;
+            }
+
+            if ((covered_duration_s + coverage_epsilon_s) >= required_ahead_s)
+            {
+                return false;
+            }
+
+            return diag.hard_cap_hit ||
+                   (covered_duration_s + coverage_epsilon_s) < (requested_duration_s - coverage_epsilon_s);
+        }
     } // namespace
 
     void GameplayState::sync_prediction_dirty_flag()
@@ -521,7 +550,24 @@ namespace Game
         // Add a small epsilon so tiny fixed-step jitter does not trigger rebuild churn.
         const double coverage_epsilon_s =
                 std::max(1.0e-3, std::min(0.25, std::max(0.0, static_cast<double>(fixed_dt)) * 0.5));
-        return (cache_end_s - now_s + coverage_epsilon_s) < required_ahead_s;
+        if ((cache_end_s - now_s + coverage_epsilon_s) >= required_ahead_s)
+        {
+            return false;
+        }
+
+        // A completed solve can still under-cover the requested horizon (for example when
+        // the adaptive integrator hits a cap). Re-requesting the same horizon immediately
+        // just spins the solver without changing the visible result.
+        if (track.solver_diagnostics.status == OrbitPredictionService::Status::Success &&
+            solve_already_reported_horizon_shortfall(
+                    track.solver_diagnostics.trajectory_base,
+                    required_ahead_s,
+                    coverage_epsilon_s))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     void GameplayState::update_prediction(GameStateContext &ctx, float fixed_dt)

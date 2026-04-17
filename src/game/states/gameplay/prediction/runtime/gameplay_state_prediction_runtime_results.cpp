@@ -117,7 +117,7 @@ namespace Game
             }
         }
 
-        void merge_preview_chunk_assembly(PredictionChunkAssembly &dst, const PredictionChunkAssembly &src)
+        void merge_chunk_assembly(PredictionChunkAssembly &dst, const PredictionChunkAssembly &src)
         {
             if (!src.valid)
             {
@@ -149,6 +149,19 @@ namespace Game
                       dst.chunks.end(),
                       [](const OrbitChunk &a, const OrbitChunk &b) { return a.chunk_id < b.chunk_id; });
             dst.valid = !dst.chunks.empty();
+        }
+
+        void merge_frame_bound_chunk_overlay(PredictionFrameBoundChunkOverlay &dst,
+                                             const PredictionChunkAssembly &src,
+                                             const uint64_t generation_id,
+                                             const uint64_t display_frame_key,
+                                             const uint64_t display_frame_revision)
+        {
+            if (!dst.matches_generation(generation_id, display_frame_key, display_frame_revision))
+            {
+                dst.reset_for_generation(generation_id, display_frame_key, display_frame_revision);
+            }
+            merge_chunk_assembly(dst.chunk_assembly, src);
         }
 
         bool cache_has_planned_data(const OrbitPredictionCache &cache)
@@ -268,15 +281,24 @@ namespace Game
                 track->supports_maneuvers &&
                 _maneuver_plan_live_preview_active &&
                 PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
+        const bool full_streaming_result =
+                result.solve_quality == OrbitPredictionService::SolveQuality::Full &&
+                result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
 
         if (result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview)
         {
+            if (!track->full_stream_overlay.matches_generation(result.generation_id,
+                                                               result.display_frame_key,
+                                                               result.display_frame_revision))
+            {
+                track->full_stream_overlay.clear();
+            }
             if (!track->authoritative_cache.valid && track->cache.valid && cache_has_planned_data(track->cache))
             {
                 track->authoritative_cache = track->cache;
             }
 
-            merge_preview_chunk_assembly(track->preview_overlay.chunk_assembly, result.chunk_assembly);
+            merge_chunk_assembly(track->preview_overlay.chunk_assembly, result.chunk_assembly);
             restore_authoritative_planned_data(*track, cache_to_publish);
 
             if (result.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming)
@@ -290,20 +312,43 @@ namespace Game
                                 ? PredictionPreviewRuntimeState::PreviewStreaming
                                 : PredictionPreviewRuntimeState::Idle;
             }
+
+            track->cache = std::move(cache_to_publish);
+            track->pick_cache.clear();
+        }
+        else if (full_streaming_result)
+        {
+            const bool already_seeded_for_generation =
+                    track->full_stream_overlay.matches_generation(result.generation_id,
+                                                                  result.display_frame_key,
+                                                                  result.display_frame_revision);
+            if (!already_seeded_for_generation)
+            {
+                restore_authoritative_planned_data(*track, cache_to_publish);
+                track->cache = std::move(cache_to_publish);
+                track->pick_cache.clear();
+            }
+
+            merge_frame_bound_chunk_overlay(track->full_stream_overlay,
+                                            result.chunk_assembly,
+                                            result.generation_id,
+                                            result.display_frame_key,
+                                            result.display_frame_revision);
         }
         else
         {
             track->authoritative_cache = cache_to_publish;
             track->preview_overlay.clear();
+            track->full_stream_overlay.clear();
             track->preview_state = PredictionPreviewRuntimeState::Idle;
             if (!drag_preview_active_now)
             {
                 track->preview_anchor = {};
             }
+            track->cache = std::move(cache_to_publish);
+            track->pick_cache.clear();
         }
 
-        track->cache = std::move(cache_to_publish);
-        track->pick_cache.clear();
         track->dirty = keep_dirty_for_followup;
 
         const auto derived_apply_end_tp = PredictionDragDebugTelemetry::Clock::now();
