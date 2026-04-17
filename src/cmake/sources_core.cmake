@@ -13,6 +13,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   # core/input
   core/input/input_system.h
   core/input/input_system.cpp
+  core/input/keybinds.h
+  core/input/keybinds.cpp
 
   # core/ui
   core/ui/imgui_system.h
