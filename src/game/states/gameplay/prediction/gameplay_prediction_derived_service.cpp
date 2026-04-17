@@ -9,15 +9,44 @@ namespace Game
 {
     namespace
     {
-        bool derived_requests_share_stage(const OrbitPredictionDerivedService::Request &a,
-                                          const OrbitPredictionDerivedService::Request &b)
-        {
-            return a.solver_result.publish_stage == b.solver_result.publish_stage;
-        }
-
         bool request_is_full_streaming_stage(const OrbitPredictionDerivedService::Request &request)
         {
             return request.solver_result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
+        }
+
+        bool request_is_preview_streaming_stage(const OrbitPredictionDerivedService::Request &request)
+        {
+            return request.solver_result.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming;
+        }
+
+        uint8_t derived_request_track_priority_rank(const OrbitPredictionService::RequestPriority priority)
+        {
+            switch (priority)
+            {
+                case OrbitPredictionService::RequestPriority::ActiveInteractiveTrack:
+                case OrbitPredictionService::RequestPriority::ActiveTrack:
+                    return 3u;
+                case OrbitPredictionService::RequestPriority::Overlay:
+                    return 2u;
+                case OrbitPredictionService::RequestPriority::BackgroundOrbiter:
+                    return 1u;
+                case OrbitPredictionService::RequestPriority::BackgroundCelestial:
+                    return 0u;
+            }
+            return 0u;
+        }
+
+        uint8_t derived_request_stage_priority_rank(const OrbitPredictionDerivedService::Request &request)
+        {
+            if (request_is_preview_streaming_stage(request))
+            {
+                return 2u;
+            }
+            if (request_is_full_streaming_stage(request))
+            {
+                return 0u;
+            }
+            return 1u;
         }
 
         bool derived_requests_share_context(const OrbitPredictionDerivedService::Request &a,
@@ -135,56 +164,95 @@ namespace Game
     {
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            _latest_requested_generation_by_track[request.track_id] = request.generation_id;
-
-            auto it = _pending_jobs.begin();
-            while (it != _pending_jobs.end())
+            const auto latest_it = _latest_requested_generation_by_track.find(request.track_id);
+            if (latest_it != _latest_requested_generation_by_track.end() &&
+                request.generation_id < latest_it->second)
             {
-                if (it->track_id != request.track_id)
-                {
-                    ++it;
-                    continue;
-                }
-
-                if (it->generation_id < request.generation_id)
-                {
-                    it = _pending_jobs.erase(it);
-                    continue;
-                }
-
-                if (it->generation_id == request.generation_id)
-                {
-                    if (!derived_requests_share_stage(it->request, request))
-                    {
-                        ++it;
-                        continue;
-                    }
-
-                    it->request_epoch = _request_epoch;
-                    it->generation_id = request.generation_id;
-                    if (request_is_full_streaming_stage(it->request) &&
-                        request_is_full_streaming_stage(request) &&
-                        derived_requests_share_context(it->request, request))
-                    {
-                        merge_pending_full_stream_request(it->request, std::move(request));
-                    }
-                    else
-                    {
-                        it->request = std::move(request);
-                    }
-                    _cv.notify_one();
-                    return;
-                }
-
-                ++it;
+                return;
             }
+            _latest_requested_generation_by_track[request.track_id] = request.generation_id;
 
             PendingJob job{};
             job.track_id = request.track_id;
             job.request_epoch = _request_epoch;
             job.generation_id = request.generation_id;
+            job.enqueue_serial = _next_enqueue_serial++;
             job.request = std::move(request);
-            _pending_jobs.push_back(std::move(job));
+
+            const auto job_precedes = [](const PendingJob &candidate, const PendingJob &queued) {
+                const uint8_t candidate_track_priority =
+                        derived_request_track_priority_rank(candidate.request.priority);
+                const uint8_t queued_track_priority =
+                        derived_request_track_priority_rank(queued.request.priority);
+                if (candidate_track_priority != queued_track_priority)
+                {
+                    return candidate_track_priority > queued_track_priority;
+                }
+
+                const uint8_t candidate_stage_priority =
+                        derived_request_stage_priority_rank(candidate.request);
+                const uint8_t queued_stage_priority =
+                        derived_request_stage_priority_rank(queued.request);
+                if (candidate_stage_priority != queued_stage_priority)
+                {
+                    return candidate_stage_priority > queued_stage_priority;
+                }
+
+                if (candidate.generation_id != queued.generation_id)
+                {
+                    return candidate.generation_id > queued.generation_id;
+                }
+
+                return candidate.enqueue_serial > queued.enqueue_serial;
+            };
+
+            auto it = _pending_jobs.begin();
+            while (it != _pending_jobs.end())
+            {
+                if (it->track_id != job.track_id)
+                {
+                    ++it;
+                    continue;
+                }
+
+                if (it->generation_id > job.generation_id)
+                {
+                    return;
+                }
+
+                if (it->generation_id < job.generation_id)
+                {
+                    it = _pending_jobs.erase(it);
+                    continue;
+                }
+
+                if (it->generation_id == job.generation_id)
+                {
+                    if (request_is_full_streaming_stage(it->request) &&
+                        request_is_full_streaming_stage(job.request) &&
+                        derived_requests_share_context(it->request, job.request))
+                    {
+                        Request merged_request = std::move(it->request);
+                        merge_pending_full_stream_request(merged_request, std::move(job.request));
+                        job.request = std::move(merged_request);
+                    }
+
+                    // Same-generation derived requests target the same authoritative solver result.
+                    // Keep only the newest pending job so full-stream backlogs do not delay final refreshes.
+                    it = _pending_jobs.erase(it);
+                    continue;
+                }
+
+                ++it;
+            }
+
+            const auto insert_it =
+                    std::find_if(_pending_jobs.begin(),
+                                 _pending_jobs.end(),
+                                 [&job_precedes, &job](const PendingJob &queued) {
+                                     return job_precedes(job, queued);
+                                 });
+            _pending_jobs.insert(insert_it, std::move(job));
         }
         _cv.notify_one();
     }
@@ -206,6 +274,7 @@ namespace Game
     {
         std::lock_guard<std::mutex> lock(_mutex);
         ++_request_epoch;
+        _next_enqueue_serial = 1;
         _pending_jobs.clear();
         _completed.clear();
         _latest_requested_generation_by_track.clear();

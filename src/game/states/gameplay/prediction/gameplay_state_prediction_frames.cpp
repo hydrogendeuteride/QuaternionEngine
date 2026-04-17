@@ -944,6 +944,10 @@ namespace Game
         OrbitPredictionDerivedService::Request derived_request{};
         derived_request.track_id = track.key.track_id();
         derived_request.generation_id = track.cache.generation_id;
+        derived_request.priority = PredictionRuntimeDetail::classify_prediction_subject_priority(
+                _prediction_selection,
+                track.key,
+                track.is_celestial);
         derived_request.solver_result = build_prediction_solver_result_from_cache(track.key.track_id(), track.cache);
         derived_request.build_pos_world = build_pos_world;
         derived_request.build_vel_world = build_vel_world;
