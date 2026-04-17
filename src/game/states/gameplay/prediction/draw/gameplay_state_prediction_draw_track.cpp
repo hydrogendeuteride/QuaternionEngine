@@ -171,6 +171,7 @@ namespace Game
             {
                 return false;
             }
+            const bool dashed = _prediction_draw_config.draw_planned_as_dashed && !track_ctx.maneuver_drag_active;
 
             if (track_ctx.direct_world_polyline && chunk.frame_samples.size() >= 2)
             {
@@ -180,7 +181,7 @@ namespace Game
                                            window_t0_s,
                                            window_t1_s,
                                            color,
-                                           false);
+                                           dashed);
                 return true;
             }
 
@@ -193,7 +194,7 @@ namespace Game
                                                  window_t0_s,
                                                  window_t1_s,
                                                  color,
-                                                 false);
+                                                 dashed);
                 return true;
             }
 
@@ -209,7 +210,7 @@ namespace Game
                                     window_t0_s,
                                     window_t1_s,
                                     color,
-                                    false);
+                                    dashed);
             return true;
         };
 
@@ -326,6 +327,133 @@ namespace Game
                                                      track_ctx.track_color_plan.b,
                                                      track_ctx.track_color_plan.a * 0.35f);
         const PredictionChunkAssembly &preview_assembly = track_ctx.track->preview_overlay.chunk_assembly;
+        const PredictionChunkAssembly *full_stream_assembly =
+                track_ctx.track->full_stream_overlay.ready_for_draw(planned_cache.generation_id,
+                                                                    planned_cache.display_frame_key,
+                                                                    planned_cache.display_frame_revision)
+                        ? &track_ctx.track->full_stream_overlay.chunk_assembly
+                        : nullptr;
+        const auto draw_chunk_assembly_ranges =
+                [&](const PredictionChunkAssembly &assembly,
+                    const glm::vec4 &color,
+                    const std::vector<std::pair<double, double>> *masked_ranges,
+                    std::vector<std::pair<double, double>> &out_drawn_ranges) {
+                    _orbit_plot_perf.planned_chunk_count += static_cast<uint32_t>(assembly.chunks.size());
+                    for (const OrbitChunk &chunk : assembly.chunks)
+                    {
+                        const double clipped_t0_s = std::max(planned_window_t0_s, chunk.t0_s);
+                        const double clipped_t1_s = std::min(planned_window_t1_s, chunk.t1_s);
+                        if (!(clipped_t1_s > clipped_t0_s))
+                        {
+                            continue;
+                        }
+
+                        std::vector<std::pair<double, double>> draw_ranges;
+                        if (masked_ranges && !masked_ranges->empty())
+                        {
+                            draw_ranges = Draw::compute_uncovered_ranges(clipped_t0_s, clipped_t1_s, *masked_ranges);
+                        }
+                        else
+                        {
+                            draw_ranges.emplace_back(clipped_t0_s, clipped_t1_s);
+                        }
+
+                        bool drew_chunk = false;
+                        for (const auto &[range_t0_s, range_t1_s] : draw_ranges)
+                        {
+                            if (!draw_planned_window_from_chunk(chunk, range_t0_s, range_t1_s, color))
+                            {
+                                continue;
+                            }
+
+                            out_drawn_ranges.emplace_back(range_t0_s, range_t1_s);
+                            drew_chunk = true;
+                        }
+
+                        if (drew_chunk)
+                        {
+                            ++_orbit_plot_perf.planned_chunks_drawn;
+                        }
+                    }
+                };
+        const auto preview_tail_matches_planned_cache = [&]() {
+            if (!preview_assembly.valid || preview_assembly.chunks.empty())
+            {
+                return false;
+            }
+            if (planned_cache.trajectory_segments_frame_planned.empty() &&
+                planned_cache.trajectory_frame_planned.size() < 2)
+            {
+                return false;
+            }
+
+            constexpr std::size_t kSamplesPerChunk = 5u;
+            constexpr std::size_t kMaxTotalSamples = 24u;
+            constexpr double kMaxPointErrorPx = 1.75;
+            constexpr double kMaxAverageErrorPx = 0.85;
+
+            double total_error_px = 0.0;
+            std::size_t sample_count = 0u;
+            for (const OrbitChunk &chunk : preview_assembly.chunks)
+            {
+                const double clipped_t0_s = std::max(planned_window_t0_s, chunk.t0_s);
+                const double clipped_t1_s = std::min(planned_window_t1_s, chunk.t1_s);
+                if (!(clipped_t1_s > clipped_t0_s))
+                {
+                    continue;
+                }
+
+                const std::size_t samples_this_chunk =
+                        std::min<std::size_t>(kSamplesPerChunk, kMaxTotalSamples - sample_count);
+                if (samples_this_chunk == 0u)
+                {
+                    break;
+                }
+
+                for (std::size_t i = 0; i < samples_this_chunk; ++i)
+                {
+                    const double u =
+                            (samples_this_chunk > 1u) ? static_cast<double>(i) / static_cast<double>(samples_this_chunk - 1u)
+                                                      : 0.5;
+                    const double sample_t_s = clipped_t0_s + ((clipped_t1_s - clipped_t0_s) * u);
+
+                    WorldVec3 preview_world{0.0};
+                    WorldVec3 planned_world{0.0};
+                    if (!Draw::sample_prediction_path_world(track_ctx.draw_ctx,
+                                                            chunk.frame_segments,
+                                                            chunk.frame_samples,
+                                                            sample_t_s,
+                                                            preview_world) ||
+                        !Draw::sample_prediction_path_world(track_ctx.draw_ctx,
+                                                            planned_cache.trajectory_segments_frame_planned,
+                                                            planned_cache.trajectory_frame_planned,
+                                                            sample_t_s,
+                                                            planned_world))
+                    {
+                        continue;
+                    }
+
+                    const double error_m = glm::length(glm::dvec3(preview_world - planned_world));
+                    const WorldVec3 error_mid_world =
+                            WorldVec3(glm::mix(glm::dvec3(preview_world), glm::dvec3(planned_world), 0.5));
+                    const double meters_per_px =
+                            std::max(1.0e-6, Draw::meters_per_px_at_world(track_ctx.draw_ctx, error_mid_world));
+                    const double error_px = error_m / meters_per_px;
+                    if (!std::isfinite(error_px) || error_px > kMaxPointErrorPx)
+                    {
+                        return false;
+                    }
+
+                    total_error_px += error_px;
+                    ++sample_count;
+                }
+            }
+
+            return sample_count > 0u &&
+                   (total_error_px / static_cast<double>(sample_count)) <= kMaxAverageErrorPx;
+        };
+        const glm::vec4 tail_plan_color =
+                preview_tail_matches_planned_cache() ? preview_plan_color : stale_plan_color;
         if (!preview_assembly.valid || preview_assembly.chunks.empty())
         {
             const bool preview_fallback_active =
@@ -365,6 +493,18 @@ namespace Game
                 }
                 return;
             }
+            if (full_stream_assembly)
+            {
+                std::vector<std::pair<double, double>> full_stream_covered_ranges;
+                full_stream_covered_ranges.reserve(full_stream_assembly->chunks.size());
+                draw_chunk_assembly_ranges(
+                        *full_stream_assembly,
+                        track_ctx.track_color_plan,
+                        nullptr,
+                        full_stream_covered_ranges);
+                _orbit_plot_perf.planned_fallback_range_count = 0;
+                return;
+            }
             if (track_ctx.maneuver_drag_active && std::isfinite(track_ctx.planned_draw_window.anchor_time_s))
             {
                 draw_planned_window_from_cache(planned_cache,
@@ -384,7 +524,7 @@ namespace Game
         std::vector<std::pair<double, double>> covered_ranges;
         covered_ranges.reserve(preview_assembly.chunks.size());
         double first_preview_t0_s = std::numeric_limits<double>::infinity();
-        _orbit_plot_perf.planned_chunk_count = static_cast<uint32_t>(preview_assembly.chunks.size());
+        _orbit_plot_perf.planned_chunk_count += static_cast<uint32_t>(preview_assembly.chunks.size());
         for (const OrbitChunk &chunk : preview_assembly.chunks)
         {
             const double clipped_t0_s = std::max(planned_window_t0_s, chunk.t0_s);
@@ -402,6 +542,19 @@ namespace Game
             covered_ranges.emplace_back(clipped_t0_s, clipped_t1_s);
             first_preview_t0_s = std::min(first_preview_t0_s, clipped_t0_s);
             ++_orbit_plot_perf.planned_chunks_drawn;
+        }
+
+        if (full_stream_assembly)
+        {
+            std::vector<std::pair<double, double>> full_stream_covered_ranges;
+            full_stream_covered_ranges.reserve(full_stream_assembly->chunks.size());
+            draw_chunk_assembly_ranges(
+                    *full_stream_assembly,
+                    track_ctx.track_color_plan,
+                    &covered_ranges,
+                    full_stream_covered_ranges);
+            _orbit_plot_perf.planned_fallback_range_count = 0;
+            return;
         }
 
         const std::vector<std::pair<double, double>> uncovered_ranges =
@@ -423,7 +576,7 @@ namespace Game
             draw_planned_window_from_cache(planned_cache,
                                            range_t0_s,
                                            range_t1_s,
-                                           prefix_range ? track_ctx.track_color_plan : stale_plan_color);
+                                           prefix_range ? track_ctx.track_color_plan : tail_plan_color);
         }
     }
 } // namespace Game

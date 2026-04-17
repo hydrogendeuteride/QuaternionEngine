@@ -134,6 +134,11 @@ namespace Game::PredictionDrawDetail
                                     std::size_t i_lo,
                                     std::size_t i_hi,
                                     double t_s);
+    bool sample_prediction_path_world(const OrbitDrawWindowContext &ctx,
+                                      const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                                      const std::vector<orbitsim::TrajectorySample> &traj_samples,
+                                      double t_s,
+                                      WorldVec3 &out_world);
     WorldVec3 compute_align_delta(const std::vector<orbitsim::TrajectorySegment> &traj_segments,
                                   const std::vector<orbitsim::TrajectorySample> &traj_base,
                                   std::size_t i_hi,

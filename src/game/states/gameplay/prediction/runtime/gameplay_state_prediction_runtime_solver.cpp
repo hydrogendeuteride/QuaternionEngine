@@ -165,6 +165,10 @@ namespace Game
             return;
         }
 
+        const bool full_streaming_result =
+                result.solve_quality == OrbitPredictionService::SolveQuality::Full &&
+                result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
+
         if (result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
             result.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming)
         {
@@ -243,7 +247,10 @@ namespace Game
         _prediction_derived_service.request(derived_request);
         mark_prediction_derived_request_submitted(*track, derived_request);
 
-        track->request_pending = false;
+        // Full-stream publishes are intermediate batches from the same solve generation.
+        // Keep the request pending until the final publish so AwaitFullRefine does not
+        // immediately enqueue a newer generation and discard the rest of this stream.
+        track->request_pending = full_streaming_result;
 
         // If the input changed while this solve was in-flight, promote straight to dirty so the
         // next update tick can submit a fresh solver request without waiting for derived to finish.

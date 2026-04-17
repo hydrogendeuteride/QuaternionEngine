@@ -290,6 +290,48 @@ namespace Game
         }
     };
 
+    struct PredictionFrameBoundChunkOverlay
+    {
+        PredictionChunkAssembly chunk_assembly{};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
+
+        [[nodiscard]] bool matches_generation(uint64_t generation_id,
+                                              uint64_t frame_key,
+                                              uint64_t frame_revision) const
+        {
+            return chunk_assembly.generation_id == generation_id &&
+                   display_frame_key == frame_key &&
+                   display_frame_revision == frame_revision;
+        }
+
+        [[nodiscard]] bool ready_for_draw(uint64_t generation_id,
+                                          uint64_t frame_key,
+                                          uint64_t frame_revision) const
+        {
+            return chunk_assembly.valid &&
+                   !chunk_assembly.chunks.empty() &&
+                   matches_generation(generation_id, frame_key, frame_revision);
+        }
+
+        void reset_for_generation(uint64_t generation_id,
+                                  uint64_t frame_key,
+                                  uint64_t frame_revision)
+        {
+            chunk_assembly.clear();
+            chunk_assembly.generation_id = generation_id;
+            display_frame_key = frame_key;
+            display_frame_revision = frame_revision;
+        }
+
+        void clear()
+        {
+            chunk_assembly.clear();
+            display_frame_key = 0;
+            display_frame_revision = 0;
+        }
+    };
+
     struct PredictionLinePickCache
     {
         uint64_t generation_id{0};
@@ -545,6 +587,7 @@ namespace Game
         PredictionPreviewRuntimeState preview_state{PredictionPreviewRuntimeState::Idle};
         PredictionPreviewAnchor preview_anchor{};
         PredictionPreviewOverlay preview_overlay{};
+        PredictionFrameBoundChunkOverlay full_stream_overlay{};
         double preview_entered_at_s{std::numeric_limits<double>::quiet_NaN()};
         double preview_last_anchor_refresh_at_s{std::numeric_limits<double>::quiet_NaN()};
         double preview_last_request_at_s{std::numeric_limits<double>::quiet_NaN()};
@@ -572,6 +615,7 @@ namespace Game
             preview_state = PredictionPreviewRuntimeState::Idle;
             preview_anchor = {};
             preview_overlay.clear();
+            full_stream_overlay.clear();
             preview_entered_at_s = std::numeric_limits<double>::quiet_NaN();
             preview_last_anchor_refresh_at_s = std::numeric_limits<double>::quiet_NaN();
             preview_last_request_at_s = std::numeric_limits<double>::quiet_NaN();
