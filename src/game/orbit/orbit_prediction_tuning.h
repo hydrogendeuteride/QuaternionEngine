@@ -116,6 +116,7 @@ namespace Game::OrbitPredictionTuning
     inline constexpr double kThrustHorizonMaxS = 172'800.0; // 48 hours
 
     // Maneuver/planner interactive rebuild cap.
+    inline constexpr double kPreviewExactWindowMinS = 120.0;
     inline constexpr double kDragRebuildMinIntervalS = 1.0 / 15.0; // 15 Hz
     inline constexpr double kFullStreamPublishMinIntervalS = 1.0 / 30.0; // 30 Hz
     inline constexpr double kDragStalePreviewGraceS = 0.10;

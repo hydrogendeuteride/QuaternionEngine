@@ -21,6 +21,8 @@ namespace Game
         {
             uint64_t track_id{0};
             uint64_t generation_id{0};
+            OrbitPredictionService::RequestPriority priority{
+                    OrbitPredictionService::RequestPriority::BackgroundOrbiter};
             OrbitPredictionService::Result solver_result{};
             bool reuse_existing_base_frame{false};
             OrbitPredictionService::AdaptiveStageDiagnostics reused_base_frame_diagnostics{};
@@ -75,6 +77,7 @@ namespace Game
             uint64_t track_id{0};
             uint64_t request_epoch{0};
             uint64_t generation_id{0};
+            uint64_t enqueue_serial{0};
             Request request{};
         };
 
@@ -96,6 +99,7 @@ namespace Game
         std::deque<Result> _completed{};
 
         uint64_t _request_epoch{1};
+        uint64_t _next_enqueue_serial{1};
         std::unordered_map<uint64_t, uint64_t> _latest_requested_generation_by_track{};
         std::unordered_set<uint64_t> _tracks_in_flight{};
     };

@@ -33,6 +33,11 @@ namespace Game
     double resolve_prediction_integrator_max_step_s(const OrbitPredictionService::Request &request,
                                                     const double /*resolved_horizon_s*/)
     {
+        if (request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview)
+        {
+            return OrbitPredictionTuning::kPredictionIntegratorMaxStepPreviewS;
+        }
+
         if (request_needs_control_sensitive_prediction(request))
         {
             return OrbitPredictionTuning::kPredictionIntegratorMaxStepControlledS;
