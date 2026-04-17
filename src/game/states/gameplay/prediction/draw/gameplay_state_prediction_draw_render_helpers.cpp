@@ -389,7 +389,7 @@ namespace Game::PredictionDrawDetail
         }
         const std::size_t emitted = out_segments.size();
         out_cap_hit = lod.cap_hit;
-        perf.pick_cap_hit_last_frame = out_cap_hit;
+        perf.pick_cap_hit_last_frame = perf.pick_cap_hit_last_frame || out_cap_hit;
         if (out_cap_hit)
         {
             ++perf.pick_cap_hits_total;

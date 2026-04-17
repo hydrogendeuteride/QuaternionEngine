@@ -18,6 +18,44 @@ namespace Game::PredictionRuntimeDetail
         return state == ManeuverGizmoInteraction::State::DragAxis;
     }
 
+    inline OrbitPredictionService::RequestPriority classify_prediction_subject_priority(
+            const PredictionSelectionState &selection,
+            const PredictionSubjectKey key,
+            const bool is_celestial)
+    {
+        if (selection.active_subject == key)
+        {
+            return OrbitPredictionService::RequestPriority::ActiveTrack;
+        }
+
+        for (const auto &overlay : selection.overlay_subjects)
+        {
+            if (overlay == key)
+            {
+                return OrbitPredictionService::RequestPriority::Overlay;
+            }
+        }
+
+        return is_celestial
+                       ? OrbitPredictionService::RequestPriority::BackgroundCelestial
+                       : OrbitPredictionService::RequestPriority::BackgroundOrbiter;
+    }
+
+    inline OrbitPredictionService::RequestPriority classify_prediction_request_priority(
+            const PredictionSelectionState &selection,
+            const PredictionSubjectKey key,
+            const bool is_celestial,
+            const bool interactive)
+    {
+        OrbitPredictionService::RequestPriority priority =
+                classify_prediction_subject_priority(selection, key, is_celestial);
+        if (interactive && priority == OrbitPredictionService::RequestPriority::ActiveTrack)
+        {
+            priority = OrbitPredictionService::RequestPriority::ActiveInteractiveTrack;
+        }
+        return priority;
+    }
+
     inline double elapsed_ms(const PredictionDragDebugTelemetry::TimePoint &start_tp,
                              const PredictionDragDebugTelemetry::TimePoint &end_tp)
     {

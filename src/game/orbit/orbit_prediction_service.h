@@ -270,6 +270,14 @@ namespace Game
 
         struct Result
         {
+            struct CoreData
+            {
+                SharedCelestialEphemeris shared_ephemeris{};
+                std::vector<orbitsim::MassiveBody> massive_bodies{};
+                std::vector<orbitsim::TrajectorySample> trajectory_inertial{};
+                std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial{};
+            };
+
             uint64_t track_id{0};
             uint64_t generation_id{0};
             bool valid{false};
@@ -290,6 +298,50 @@ namespace Game
             std::vector<ManeuverNodePreview> maneuver_previews;
             std::vector<PublishedChunk> published_chunks{};
             std::vector<StreamedPlannedChunk> streamed_planned_chunks{};
+
+            [[nodiscard]] const SharedCelestialEphemeris &resolved_shared_ephemeris() const
+            {
+                return _shared_core_data ? _shared_core_data->shared_ephemeris : shared_ephemeris;
+            }
+
+            [[nodiscard]] const std::vector<orbitsim::MassiveBody> &resolved_massive_bodies() const
+            {
+                return _shared_core_data ? _shared_core_data->massive_bodies : massive_bodies;
+            }
+
+            [[nodiscard]] const std::vector<orbitsim::TrajectorySample> &resolved_trajectory_inertial() const
+            {
+                return _shared_core_data ? _shared_core_data->trajectory_inertial : trajectory_inertial;
+            }
+
+            [[nodiscard]] const std::vector<orbitsim::TrajectorySegment> &resolved_trajectory_segments_inertial() const
+            {
+                return _shared_core_data ? _shared_core_data->trajectory_segments_inertial : trajectory_segments_inertial;
+            }
+
+            [[nodiscard]] std::vector<orbitsim::MassiveBody> take_massive_bodies()
+            {
+                return _shared_core_data ? _shared_core_data->massive_bodies : std::move(massive_bodies);
+            }
+
+            [[nodiscard]] std::vector<orbitsim::TrajectorySample> take_trajectory_inertial()
+            {
+                return _shared_core_data ? _shared_core_data->trajectory_inertial : std::move(trajectory_inertial);
+            }
+
+            [[nodiscard]] std::vector<orbitsim::TrajectorySegment> take_trajectory_segments_inertial()
+            {
+                return _shared_core_data ? _shared_core_data->trajectory_segments_inertial
+                                         : std::move(trajectory_segments_inertial);
+            }
+
+            void set_shared_core_data(std::shared_ptr<const CoreData> shared_core_data)
+            {
+                _shared_core_data = std::move(shared_core_data);
+            }
+
+        private:
+            std::shared_ptr<const CoreData> _shared_core_data{};
         };
 
         struct EphemerisSamplingSpec
