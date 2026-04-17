@@ -120,12 +120,13 @@ namespace Game
         const auto draw_planned_window_from_cache = [&](OrbitPredictionCache &cache,
                                                         const double window_t0_s,
                                                         const double window_t1_s,
-                                                        const glm::vec4 &color) {
+                                                        const glm::vec4 &color,
+                                                        const bool force_solid = false) {
             if (!(window_t1_s > window_t0_s))
             {
                 return;
             }
-            const bool dashed = _prediction_draw_config.draw_planned_as_dashed && !track_ctx.maneuver_drag_active;
+            const bool dashed = _prediction_draw_config.draw_planned_as_dashed && !force_solid;
             if (track_ctx.direct_world_polyline)
             {
                 Draw::draw_polyline_window(track_ctx.draw_ctx,
@@ -166,12 +167,13 @@ namespace Game
         const auto draw_planned_window_from_chunk = [&](const OrbitChunk &chunk,
                                                         const double window_t0_s,
                                                         const double window_t1_s,
-                                                        const glm::vec4 &color) {
+                                                        const glm::vec4 &color,
+                                                        const bool force_solid = false) {
             if (!(window_t1_s > window_t0_s))
             {
                 return false;
             }
-            const bool dashed = _prediction_draw_config.draw_planned_as_dashed && !track_ctx.maneuver_drag_active;
+            const bool dashed = _prediction_draw_config.draw_planned_as_dashed && !force_solid;
 
             if (track_ctx.direct_world_polyline && chunk.frame_samples.size() >= 2)
             {
@@ -361,7 +363,11 @@ namespace Game
                         bool drew_chunk = false;
                         for (const auto &[range_t0_s, range_t1_s] : draw_ranges)
                         {
-                            if (!draw_planned_window_from_chunk(chunk, range_t0_s, range_t1_s, color))
+                            if (!draw_planned_window_from_chunk(chunk,
+                                                                range_t0_s,
+                                                                range_t1_s,
+                                                                color,
+                                                                track_ctx.maneuver_drag_active))
                             {
                                 continue;
                             }
@@ -482,7 +488,8 @@ namespace Game
                     draw_planned_window_from_cache(planned_cache,
                                                    preview_t0_s,
                                                    preview_t1_s,
-                                                   preview_plan_color);
+                                                   preview_plan_color,
+                                                   track_ctx.maneuver_drag_active);
                 }
                 if (!track_ctx.maneuver_drag_active && preview_t1_s < planned_window_t1_s)
                 {
@@ -534,7 +541,11 @@ namespace Game
                 continue;
             }
 
-            if (!draw_planned_window_from_chunk(chunk, clipped_t0_s, clipped_t1_s, preview_plan_color))
+            if (!draw_planned_window_from_chunk(chunk,
+                                                clipped_t0_s,
+                                                clipped_t1_s,
+                                                preview_plan_color,
+                                                track_ctx.maneuver_drag_active))
             {
                 continue;
             }
