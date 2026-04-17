@@ -322,6 +322,12 @@ namespace Game
             }
         }
 
+        request.full_stream_publish.active =
+                solve_quality == OrbitPredictionService::SolveQuality::Full &&
+                track.key == _prediction_selection.active_subject &&
+                prediction_subject_is_player(track.key) &&
+                !request.maneuver_impulses.empty();
+
         out_request = std::move(request);
         return true;
     }

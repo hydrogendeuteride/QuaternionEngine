@@ -14,6 +14,91 @@ namespace Game
         {
             return a.solver_result.publish_stage == b.solver_result.publish_stage;
         }
+
+        bool request_is_full_streaming_stage(const OrbitPredictionDerivedService::Request &request)
+        {
+            return request.solver_result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
+        }
+
+        bool derived_requests_share_context(const OrbitPredictionDerivedService::Request &a,
+                                            const OrbitPredictionDerivedService::Request &b)
+        {
+            return a.display_frame_key == b.display_frame_key &&
+                   a.display_frame_revision == b.display_frame_revision &&
+                   a.analysis_body_id == b.analysis_body_id &&
+                   a.reuse_existing_base_frame == b.reuse_existing_base_frame &&
+                   a.resolved_frame_spec.type == b.resolved_frame_spec.type &&
+                   a.resolved_frame_spec.primary_body_id == b.resolved_frame_spec.primary_body_id &&
+                   a.resolved_frame_spec.secondary_body_id == b.resolved_frame_spec.secondary_body_id &&
+                   a.resolved_frame_spec.target_spacecraft_id == b.resolved_frame_spec.target_spacecraft_id;
+        }
+
+        void merge_published_chunks(std::vector<OrbitPredictionService::PublishedChunk> &dst,
+                                    const std::vector<OrbitPredictionService::PublishedChunk> &src)
+        {
+            for (const OrbitPredictionService::PublishedChunk &chunk : src)
+            {
+                auto existing = std::find_if(dst.begin(),
+                                             dst.end(),
+                                             [&chunk](const OrbitPredictionService::PublishedChunk &candidate) {
+                                                 return candidate.chunk_id == chunk.chunk_id;
+                                             });
+                if (existing != dst.end())
+                {
+                    *existing = chunk;
+                    continue;
+                }
+                dst.push_back(chunk);
+            }
+
+            std::sort(dst.begin(),
+                      dst.end(),
+                      [](const OrbitPredictionService::PublishedChunk &a,
+                         const OrbitPredictionService::PublishedChunk &b) { return a.chunk_id < b.chunk_id; });
+        }
+
+        void merge_streamed_planned_chunks(std::vector<OrbitPredictionService::StreamedPlannedChunk> &dst,
+                                           const std::vector<OrbitPredictionService::StreamedPlannedChunk> &src)
+        {
+            for (const OrbitPredictionService::StreamedPlannedChunk &chunk : src)
+            {
+                auto existing = std::find_if(dst.begin(),
+                                             dst.end(),
+                                             [&chunk](const OrbitPredictionService::StreamedPlannedChunk &candidate) {
+                                                 return candidate.published_chunk.chunk_id ==
+                                                        chunk.published_chunk.chunk_id;
+                                             });
+                if (existing != dst.end())
+                {
+                    *existing = chunk;
+                    continue;
+                }
+                dst.push_back(chunk);
+            }
+
+            std::sort(dst.begin(),
+                      dst.end(),
+                      [](const OrbitPredictionService::StreamedPlannedChunk &a,
+                         const OrbitPredictionService::StreamedPlannedChunk &b) {
+                          return a.published_chunk.chunk_id < b.published_chunk.chunk_id;
+                      });
+        }
+
+        void merge_pending_full_stream_request(OrbitPredictionDerivedService::Request &dst,
+                                               OrbitPredictionDerivedService::Request src)
+        {
+            std::vector<OrbitPredictionService::PublishedChunk> merged_published_chunks =
+                    dst.solver_result.published_chunks;
+            merge_published_chunks(merged_published_chunks, src.solver_result.published_chunks);
+
+            std::vector<OrbitPredictionService::StreamedPlannedChunk> merged_streamed_chunks =
+                    dst.solver_result.streamed_planned_chunks;
+            merge_streamed_planned_chunks(merged_streamed_chunks, src.solver_result.streamed_planned_chunks);
+
+            src.solver_result.published_chunks = std::move(merged_published_chunks);
+            src.solver_result.streamed_planned_chunks = std::move(merged_streamed_chunks);
+            dst = std::move(src);
+        }
     } // namespace
 
     OrbitPredictionDerivedService::OrbitPredictionDerivedService()
@@ -77,7 +162,16 @@ namespace Game
 
                     it->request_epoch = _request_epoch;
                     it->generation_id = request.generation_id;
-                    it->request = std::move(request);
+                    if (request_is_full_streaming_stage(it->request) &&
+                        request_is_full_streaming_stage(request) &&
+                        derived_requests_share_context(it->request, request))
+                    {
+                        merge_pending_full_stream_request(it->request, std::move(request));
+                    }
+                    else
+                    {
+                        it->request = std::move(request);
+                    }
                     _cv.notify_one();
                     return;
                 }
@@ -175,8 +269,11 @@ namespace Game
         const bool preview_streaming_stage =
                 preview_stage &&
                 solver.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming;
-        const bool build_planned_render_curve = !preview_streaming_stage;
-        const bool build_chunk_render_curves = false;
+        const bool full_streaming_stage =
+                !preview_stage &&
+                solver.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
+        const bool build_planned_render_curve = !preview_streaming_stage && !full_streaming_stage;
+        const bool build_chunk_render_curves = full_streaming_stage;
         const bool use_dense_chunk_samples = !preview_stage;
         if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
         {
@@ -268,7 +365,29 @@ namespace Game
             return out;
         }
 
-        if (!solver.published_chunks.empty())
+        OrbitPredictionDerivedDiagnostics chunk_diagnostics{};
+        if (full_streaming_stage)
+        {
+            if (!solver.streamed_planned_chunks.empty())
+            {
+                PredictionChunkAssembly chunk_assembly{};
+                if (PredictionCacheInternal::rebuild_prediction_streamed_chunk_assembly(
+                            chunk_assembly,
+                            cache,
+                            solver.streamed_planned_chunks,
+                            job.generation_id,
+                            resolved_frame_spec,
+                            request.player_lookup_segments_inertial,
+                            cancel_requested,
+                            &chunk_diagnostics,
+                            build_chunk_render_curves,
+                            use_dense_chunk_samples))
+                {
+                    out.chunk_assembly = std::move(chunk_assembly);
+                }
+            }
+        }
+        else if (!solver.published_chunks.empty())
         {
             std::vector<double> node_times_s;
             node_times_s.reserve(solver.maneuver_previews.size());
@@ -290,19 +409,32 @@ namespace Game
                                                                          request.display_frame_revision,
                                                                          cancel_requested,
                                                                          node_times_s,
-                                                                         &out.diagnostics,
+                                                                         &chunk_diagnostics,
                                                                          build_chunk_render_curves,
                                                                          use_dense_chunk_samples))
             {
                 out.chunk_assembly = std::move(chunk_assembly);
                 if (!preview_stage)
                 {
+                    const auto flatten_start_tp = std::chrono::steady_clock::now();
                     PredictionCacheInternal::flatten_chunk_assembly_to_cache(
                             cache,
                             out.chunk_assembly,
                             build_planned_render_curve);
+                    out.timings.flatten_ms =
+                            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                                      flatten_start_tp)
+                                    .count();
                 }
             }
+        }
+
+        if (chunk_diagnostics.status != PredictionDerivedStatus::None)
+        {
+            out.diagnostics.status = chunk_diagnostics.status;
+            out.diagnostics.frame_planned = chunk_diagnostics.frame_planned;
+            out.diagnostics.frame_segment_count_planned = chunk_diagnostics.frame_segment_count_planned;
+            out.diagnostics.frame_sample_count_planned = chunk_diagnostics.frame_sample_count_planned;
         }
 
         out.cache = std::move(cache);
