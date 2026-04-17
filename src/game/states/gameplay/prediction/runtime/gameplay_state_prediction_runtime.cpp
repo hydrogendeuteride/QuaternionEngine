@@ -298,12 +298,19 @@ namespace Game
                                                             const double /*now_s*/,
                                                             const bool /*with_maneuvers*/) const
     {
-        if (track.preview_anchor.valid)
+        const double configured_exact_window_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
+        double preview_exact_cap_s = std::max(OrbitPredictionTuning::kPreviewExactWindowMinS,
+                                              _maneuver_plan_windows.preview_window_s);
+        if (track.preview_anchor.valid && track.preview_anchor.visual_window_s > 0.0)
         {
-            return track.preview_anchor.exact_window_s;
+            // Keep drag previews centered on the immediately visible patch instead of solving the
+            // full post-drag refine window on every gizmo move.
+            preview_exact_cap_s =
+                    std::max(OrbitPredictionTuning::kPreviewExactWindowMinS,
+                             track.preview_anchor.visual_window_s);
         }
 
-        return std::max(0.0, _maneuver_plan_windows.solve_margin_s);
+        return std::min(configured_exact_window_s, preview_exact_cap_s);
     }
 
     double GameplayState::prediction_planned_exact_window_s(const PredictionTrackState &track,
