@@ -109,10 +109,10 @@ public:
     EntryState state(TextureHandle handle) const;
     // Returns the default image view for a Resident texture, otherwise VK_NULL_HANDLE.
     VkImageView imageView(TextureHandle handle) const;
-    size_t residentBytes() const { return _residentBytes; }
+    size_t residentBytes() const;
     // CPU-side source bytes currently retained (compressed image payloads kept
     // for potential re-decode). Only applies to entries created with Bytes keys.
-    size_t cpuSourceBytes() const { return _cpuSourceBytes; }
+    size_t cpuSourceBytes() const;
     // Bytes uploaded during the most recent pumpLoads() call.
     size_t uploaded_bytes_last_pump() const { return _lastPumpUploadedBytes.load(std::memory_order_relaxed); }
     // Pending decode jobs waiting on worker threads.
@@ -184,6 +184,7 @@ private:
     size_t _residentBytes{0};
     size_t _cpuSourceBytes{0};
     std::atomic<size_t> _lastPumpUploadedBytes{0};
+    mutable std::mutex _entriesMutex;
 
     // Controls
     int _maxLoadsPerPump{4};
