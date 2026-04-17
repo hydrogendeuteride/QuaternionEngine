@@ -345,6 +345,7 @@ namespace Game
                                             result.generation_id,
                                             result.display_frame_key,
                                             result.display_frame_revision);
+            track->pick_cache.clear();
         }
         else
         {

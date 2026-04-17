@@ -272,10 +272,13 @@ namespace Game
         const bool full_streaming_stage =
                 !preview_stage &&
                 solver.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
+        const bool rebuild_metrics = !preview_stage && !full_streaming_stage;
         const bool build_planned_render_curve = !preview_streaming_stage && !full_streaming_stage;
         const bool build_chunk_render_curves = full_streaming_stage;
-        const bool use_dense_chunk_samples = !preview_stage;
-        if (!solver.valid || solver.trajectory_inertial.size() < 2 || solver.trajectory_segments_inertial.empty())
+        const bool use_dense_chunk_samples = !preview_stage && !full_streaming_stage;
+        if (!solver.valid ||
+            solver.resolved_trajectory_inertial().size() < 2 ||
+            solver.resolved_trajectory_segments_inertial().empty())
         {
             out.diagnostics.status = PredictionDerivedStatus::MissingSolverData;
             out.timings.total_ms =
@@ -288,11 +291,11 @@ namespace Game
         cache.build_time_s = solver.build_time_s;
         cache.build_pos_world = request.build_pos_world;
         cache.build_vel_world = request.build_vel_world;
-        cache.shared_ephemeris = solver.shared_ephemeris;
-        cache.massive_bodies = std::move(solver.massive_bodies);
-        cache.trajectory_inertial = std::move(solver.trajectory_inertial);
+        cache.shared_ephemeris = solver.resolved_shared_ephemeris();
+        cache.massive_bodies = solver.take_massive_bodies();
+        cache.trajectory_inertial = solver.take_trajectory_inertial();
         cache.trajectory_inertial_planned = std::move(solver.trajectory_inertial_planned);
-        cache.trajectory_segments_inertial = std::move(solver.trajectory_segments_inertial);
+        cache.trajectory_segments_inertial = solver.take_trajectory_segments_inertial();
         cache.trajectory_segments_inertial_planned = std::move(solver.trajectory_segments_inertial_planned);
         cache.maneuver_previews = std::move(solver.maneuver_previews);
         cache.valid = true;
@@ -348,7 +351,7 @@ namespace Game
             out.diagnostics.frame_base = request.reused_base_frame_diagnostics;
         }
 
-        if (!preview_stage)
+        if (rebuild_metrics)
         {
             PredictionCacheInternal::rebuild_prediction_metrics(
                     cache,
