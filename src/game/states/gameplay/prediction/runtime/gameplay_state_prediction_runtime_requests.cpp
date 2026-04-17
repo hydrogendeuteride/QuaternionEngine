@@ -44,6 +44,10 @@ namespace Game
                                                const OrbitPredictionService::SolveQuality solve_quality)
         {
             track.latest_requested_generation_id = generation_id;
+            if (solve_quality == OrbitPredictionService::SolveQuality::Full)
+            {
+                track.latest_requested_authoritative_generation_id = generation_id;
+            }
             track.request_pending = true;
             track.derived_request_pending = false;
             track.pending_solve_quality = solve_quality;

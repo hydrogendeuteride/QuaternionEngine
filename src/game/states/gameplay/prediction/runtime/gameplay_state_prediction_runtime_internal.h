@@ -35,8 +35,13 @@ namespace Game::PredictionRuntimeDetail
         return track.cache.valid ? track.cache.generation_id : 0u;
     }
 
+    inline uint64_t authoritative_generation_id(const PredictionTrackState &track)
+    {
+        return track.authoritative_cache.valid ? track.authoritative_cache.generation_id : 0u;
+    }
+
     inline bool latest_solver_generation_published(const PredictionTrackState &track)
     {
-        return track.latest_requested_generation_id <= visible_generation_id(track);
+        return track.latest_requested_authoritative_generation_id <= authoritative_generation_id(track);
     }
 } // namespace Game::PredictionRuntimeDetail
