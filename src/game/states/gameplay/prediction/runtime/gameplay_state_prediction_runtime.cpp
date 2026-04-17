@@ -526,7 +526,7 @@ namespace Game
 
         if (!rebuild && track.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine)
         {
-            rebuild = true;
+            rebuild = !track.request_pending && !track.derived_request_pending;
         }
 
         if (rebuild || !track.cache.valid || track.cache.trajectory_inertial.empty())

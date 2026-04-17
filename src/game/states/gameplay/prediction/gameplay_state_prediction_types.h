@@ -574,10 +574,13 @@ namespace Game
         bool request_pending{false};
         bool derived_request_pending{false};
         uint64_t latest_requested_generation_id{0};
+        uint64_t latest_requested_authoritative_generation_id{0};
         uint64_t latest_requested_derived_generation_id{0};
         uint64_t latest_requested_derived_display_frame_key{0};
         uint64_t latest_requested_derived_display_frame_revision{0};
         orbitsim::BodyId latest_requested_derived_analysis_body_id{orbitsim::kInvalidBodyId};
+        OrbitPredictionService::PublishStage latest_requested_derived_publish_stage{
+                OrbitPredictionService::PublishStage::Final};
         OrbitPredictionService::SolveQuality pending_solve_quality{OrbitPredictionService::SolveQuality::Full};
         bool invalidated_while_pending{false};
         PredictionDragDebugTelemetry drag_debug{};
@@ -604,10 +607,12 @@ namespace Game
             request_pending = false;
             derived_request_pending = false;
             latest_requested_generation_id = 0;
+            latest_requested_authoritative_generation_id = 0;
             latest_requested_derived_generation_id = 0;
             latest_requested_derived_display_frame_key = 0;
             latest_requested_derived_display_frame_revision = 0;
             latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
+            latest_requested_derived_publish_stage = OrbitPredictionService::PublishStage::Final;
             pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             invalidated_while_pending = false;
             drag_debug.clear();
