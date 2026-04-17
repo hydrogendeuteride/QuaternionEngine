@@ -160,6 +160,7 @@ namespace Game
             track->latest_requested_derived_display_frame_key = 0;
             track->latest_requested_derived_display_frame_revision = 0;
             track->latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
+            track->latest_requested_derived_publish_stage = OrbitPredictionService::PublishStage::Final;
             track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
             track->dirty = true;
             return;

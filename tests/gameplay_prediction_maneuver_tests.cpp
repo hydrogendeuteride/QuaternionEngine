@@ -88,6 +88,28 @@ namespace
         return chunk;
     }
 
+    Game::OrbitPredictionCache make_prediction_cache(const uint64_t generation_id,
+                                                     const double t0_s,
+                                                     const double t1_s,
+                                                     const double x0_m,
+                                                     const double x1_m)
+    {
+        Game::OrbitPredictionCache cache{};
+        cache.valid = true;
+        cache.generation_id = generation_id;
+        cache.build_time_s = t0_s;
+        cache.trajectory_inertial = {
+                make_sample(t0_s, x0_m),
+                make_sample(t1_s, x1_m),
+        };
+        cache.trajectory_segments_inertial = {
+                make_segment(t0_s, t1_s, x0_m, x1_m),
+        };
+        cache.trajectory_frame = cache.trajectory_inertial;
+        cache.trajectory_segments_frame = cache.trajectory_segments_inertial;
+        return cache;
+    }
+
     Game::OrbitPredictionService::Request make_prediction_request(const double time_s,
                                                                   const double future_window_s = 120.0)
     {
@@ -822,6 +844,24 @@ TEST(GameplayPredictionManeuverTests, ShouldRebuildPredictionTrackWhenManeuverCo
     track.cache.trajectory_segments_inertial = {make_segment(0.0, 60.0, 7'000'000.0, 7'050'000.0)};
 
     EXPECT_TRUE(state.should_rebuild_prediction_track(track, 10.0, 0.016f, false, true));
+}
+
+TEST(GameplayPredictionManeuverTests, AwaitFullRefineOnlyTriggersRebuildAfterPendingWorkClears)
+{
+    Game::GameplayState state{};
+    state._prediction_sampling_policy.orbiter_min_window_s = 5.0;
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.preview_state = Game::PredictionPreviewRuntimeState::AwaitFullRefine;
+    track.cache = make_prediction_cache(5u, 0.0, 20.0, 7'000'000.0, 7'200'000.0);
+    track.dirty = false;
+    track.derived_request_pending = true;
+
+    EXPECT_FALSE(state.should_rebuild_prediction_track(track, 10.0, 0.016f, false, false));
+
+    track.derived_request_pending = false;
+    EXPECT_TRUE(state.should_rebuild_prediction_track(track, 10.0, 0.016f, false, false));
 }
 
 TEST(GameplayPredictionManeuverTests, BuildEphemerisSamplingSpecAllowsFutureWindowBeyondLegacyCap)
@@ -1661,6 +1701,64 @@ TEST(GameplayPredictionManeuverTests, ReusedBaseFrameDerivedResultPreservesBaseD
     ASSERT_EQ(state._prediction_tracks.size(), 1u);
     EXPECT_EQ(state._prediction_tracks.front().derived_diagnostics.frame_base.accepted_segments, 11u);
     EXPECT_EQ(state._prediction_tracks.front().derived_diagnostics.status, Game::PredictionDerivedStatus::Success);
+}
+
+TEST(GameplayPredictionManeuverTests,
+     LateFullStreamingDerivedResultKeepsFinalDerivedPendingAndDoesNotRetriggerAwaitFullRefine)
+{
+    Game::GameplayState state{};
+    state._prediction_sampling_policy.orbiter_min_window_s = 5.0;
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.preview_state = Game::PredictionPreviewRuntimeState::AwaitFullRefine;
+    track.cache = make_prediction_cache(8u, 0.0, 20.0, 7'000'000.0, 7'200'000.0);
+    track.dirty = false;
+    track.latest_requested_generation_id = 9u;
+    track.latest_requested_authoritative_generation_id = 9u;
+    track.derived_request_pending = true;
+    track.latest_requested_derived_generation_id = 9u;
+    track.latest_requested_derived_display_frame_key = 1u;
+    track.latest_requested_derived_display_frame_revision = 1u;
+    track.latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
+    track.latest_requested_derived_publish_stage = Game::OrbitPredictionService::PublishStage::Final;
+    state._prediction_tracks.push_back(track);
+
+    Game::OrbitPredictionDerivedService::Result result{};
+    result.track_id = state._prediction_tracks.front().key.track_id();
+    result.generation_id = 9u;
+    result.display_frame_key = 1u;
+    result.display_frame_revision = 1u;
+    result.analysis_body_id = orbitsim::kInvalidBodyId;
+    result.valid = true;
+    result.solve_quality = Game::OrbitPredictionService::SolveQuality::Full;
+    result.publish_stage = Game::OrbitPredictionService::PublishStage::FullStreaming;
+    result.cache = make_prediction_cache(9u, 0.0, 20.0, 7'050'000.0, 7'250'000.0);
+
+    state.apply_completed_prediction_derived_result(std::move(result));
+
+    ASSERT_EQ(state._prediction_tracks.size(), 1u);
+    const Game::PredictionTrackState &updated_track = state._prediction_tracks.front();
+    EXPECT_TRUE(updated_track.derived_request_pending);
+    EXPECT_EQ(updated_track.cache.generation_id, 9u);
+    EXPECT_FALSE(state.should_rebuild_prediction_track(updated_track, 10.0, 0.016f, false, false));
+}
+
+TEST(GameplayPredictionManeuverTests,
+     DerivedRefreshWaitsForAuthoritativePublishEvenWhenVisibleCacheMatchesLatestGeneration)
+{
+    Game::GameplayState state{};
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.cache = make_prediction_cache(9u, 0.0, 20.0, 7'000'000.0, 7'200'000.0);
+    track.authoritative_cache = make_prediction_cache(8u, 0.0, 20.0, 7'000'000.0, 7'150'000.0);
+    track.latest_requested_generation_id = 9u;
+    track.latest_requested_authoritative_generation_id = 9u;
+
+    EXPECT_FALSE(state.request_prediction_derived_refresh(track, 10.0));
+    EXPECT_FALSE(track.derived_request_pending);
+    EXPECT_EQ(track.latest_requested_derived_generation_id, 0u);
 }
 
 TEST(GameplayPredictionManeuverTests, PreviewDerivedResultsAccumulatePlannedChunkAssemblyAcrossStages)
