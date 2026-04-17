@@ -12,8 +12,8 @@
 
 namespace Game
 {
-    ThrustInput ShipController::read_input(const InputState *input, const bool ui_capture_keyboard,
-                                           bool &sas_toggle_prev_down)
+    ThrustInput ShipController::read_input(const InputState *input, const ShipKeybinds *binds,
+                                           const bool ui_capture_keyboard, bool &sas_toggle_prev_down)
     {
         ThrustInput out{};
         if (!input)
@@ -24,54 +24,52 @@ namespace Game
 
         const bool allow_keyboard = !ui_capture_keyboard;
 
-        // --- SAS toggle (T key, edge-triggered) ---
-        // fixed_update may run multiple times per frame; use key_down edge detection.
-        const bool sas_toggle_down = input->key_down(Key::T);
+        // Fall back to defaults when no bindings are configured.
+        ShipKeybinds default_binds{};
+        const ShipKeybinds &kb = binds ? *binds : default_binds;
+
+        auto pressed = [&](const Key k) {
+            return k != Key::Unknown && input->key_down(k);
+        };
+
+        // --- SAS toggle (edge-triggered; fixed_update may run multiple times per frame) ---
+        const bool sas_toggle_down = pressed(kb.sas_toggle);
         if (allow_keyboard && sas_toggle_down && !sas_toggle_prev_down)
         {
             out.sas_toggled = true;
         }
         sas_toggle_prev_down = sas_toggle_down;
 
-        // --- Translation input (local frame) ---
         glm::vec3 local_thrust{0.0f};
-
         if (allow_keyboard)
         {
-            if (input->key_down(Key::W)) local_thrust.z -= 1.0f; // forward = -Z
-            if (input->key_down(Key::S)) local_thrust.z += 1.0f; // back    = +Z
-            if (input->key_down(Key::A)) local_thrust.x -= 1.0f; // left    = -X
-            if (input->key_down(Key::D)) local_thrust.x += 1.0f; // right   = +X
-            if (input->key_down(Key::Space))    local_thrust.y += 1.0f; // up   = +Y
-            if (input->key_down(Key::LeftCtrl)) local_thrust.y -= 1.0f; // down = -Y
+            if (pressed(kb.thrust_forward)) local_thrust.z -= 1.0f;
+            if (pressed(kb.thrust_back))    local_thrust.z += 1.0f;
+            if (pressed(kb.thrust_left))    local_thrust.x -= 1.0f;
+            if (pressed(kb.thrust_right))   local_thrust.x += 1.0f;
+            if (pressed(kb.thrust_up))      local_thrust.y += 1.0f;
+            if (pressed(kb.thrust_down))    local_thrust.y -= 1.0f;
         }
-
-        // Normalize so diagonal thrust isn't stronger
         if (glm::length(local_thrust) > 0.0f)
         {
             local_thrust = glm::normalize(local_thrust);
         }
-
         out.local_thrust_dir = local_thrust;
 
-        // --- Rotation input (local frame) ---
         glm::vec3 local_torque{0.0f};
-
         if (allow_keyboard)
         {
-            if (input->key_down(Key::ArrowUp))   local_torque.x -= 1.0f; // pitch up   = -X
-            if (input->key_down(Key::ArrowDown)) local_torque.x += 1.0f; // pitch down = +X
-            if (input->key_down(Key::ArrowLeft))  local_torque.y += 1.0f; // yaw left   = +Y
-            if (input->key_down(Key::ArrowRight)) local_torque.y -= 1.0f; // yaw right  = -Y
-            if (input->key_down(Key::Q)) local_torque.z -= 1.0f; // roll left  = -Z
-            if (input->key_down(Key::E)) local_torque.z += 1.0f; // roll right = +Z
+            if (pressed(kb.pitch_up))   local_torque.x -= 1.0f;
+            if (pressed(kb.pitch_down)) local_torque.x += 1.0f;
+            if (pressed(kb.yaw_left))   local_torque.y += 1.0f;
+            if (pressed(kb.yaw_right))  local_torque.y -= 1.0f;
+            if (pressed(kb.roll_left))  local_torque.z -= 1.0f;
+            if (pressed(kb.roll_right)) local_torque.z += 1.0f;
         }
-
         if (glm::length(local_torque) > 0.0f)
         {
             local_torque = glm::normalize(local_torque);
         }
-
         out.local_torque_dir = local_torque;
 
         return out;
@@ -81,7 +79,8 @@ namespace Game
     {
         _thrust_applied_this_tick = false;
 
-        const ThrustInput input = read_input(ctx.input, ctx.ui_capture_keyboard, _sas_toggle_prev_down);
+        const ShipKeybinds *ship_binds = ctx.keybinds ? &ctx.keybinds->ship : nullptr;
+        const ThrustInput input = read_input(ctx.input, ship_binds, ctx.ui_capture_keyboard, _sas_toggle_prev_down);
         if (input.sas_toggled)
         {
             _sas_enabled = !_sas_enabled;

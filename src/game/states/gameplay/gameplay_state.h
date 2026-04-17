@@ -6,6 +6,7 @@
 #include "game/states/gameplay/prediction/gameplay_prediction_derived_service.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
 #include "game/states/gameplay/gameplay_settings.h"
+#include "game/input/keybinds.h"
 #include "game/states/gameplay/scenario/scenario_config.h"
 #include "orbit_helpers.h"
 #include "frame_monitor.h"
@@ -340,6 +341,10 @@ namespace Game
         std::string _settings_rel_path{"settings/gameplay.json"};
         std::string _settings_io_status{};
         bool _settings_io_status_ok{true};
+
+        // Input keybindings (TOML). Loaded on_enter; starts from struct defaults.
+        Keybinds _keybinds{};
+        std::string _keybinds_rel_path{"settings/keybinds.toml"};
         std::string _scenario_io_status{};
         bool _scenario_io_status_ok{true};
 

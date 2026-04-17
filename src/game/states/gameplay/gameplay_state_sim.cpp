@@ -1126,7 +1126,7 @@ namespace Game
             }
 
             // Reuse ship-controller bindings, but apply them directly to the rails state instead of rigid-body physics.
-            ThrustInput input = ShipController::read_input(ctx.input, ui_capture_keyboard,
+            ThrustInput input = ShipController::read_input(ctx.input, &_keybinds.ship, ui_capture_keyboard,
                                                            player_orbiter->rails.sas_toggle_prev_down);
             if (input.sas_toggled)
             {

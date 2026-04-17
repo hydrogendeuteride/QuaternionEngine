@@ -12,6 +12,10 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/component/ship_controller.h
   game/component/ship_controller.cpp
 
+  # game/input
+  game/input/keybinds.h
+  game/input/keybinds.cpp
+
   # game/orbit
   game/orbit/orbit_prediction_math.h
   game/orbit/orbit_prediction_math.cpp
