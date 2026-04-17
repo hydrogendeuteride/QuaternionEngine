@@ -235,6 +235,10 @@ namespace Game
         OrbitPredictionDerivedService::Request derived_request{};
         derived_request.track_id = result.track_id;
         derived_request.generation_id = result.generation_id;
+        derived_request.priority = PredictionRuntimeDetail::classify_prediction_subject_priority(
+                _prediction_selection,
+                track->key,
+                track->is_celestial);
         derived_request.solver_result = std::move(result);
         derived_request.reuse_existing_base_frame =
                 can_reuse_existing_base_frame_cache(*track,

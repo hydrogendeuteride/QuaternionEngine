@@ -12,32 +12,6 @@ namespace Game
 {
     namespace
     {
-        OrbitPredictionService::RequestPriority classify_prediction_request_priority(
-                const PredictionSelectionState &selection,
-                const PredictionSubjectKey key,
-                const bool is_celestial,
-                const bool interactive)
-        {
-            if (selection.active_subject == key)
-            {
-                return interactive
-                               ? OrbitPredictionService::RequestPriority::ActiveInteractiveTrack
-                               : OrbitPredictionService::RequestPriority::ActiveTrack;
-            }
-
-            for (const auto &overlay : selection.overlay_subjects)
-            {
-                if (overlay == key)
-                {
-                    return OrbitPredictionService::RequestPriority::Overlay;
-                }
-            }
-
-            return is_celestial
-                           ? OrbitPredictionService::RequestPriority::BackgroundCelestial
-                           : OrbitPredictionService::RequestPriority::BackgroundOrbiter;
-        }
-
         void mark_prediction_request_submitted(PredictionTrackState &track,
                                                const uint64_t generation_id,
                                                const double now_s,
@@ -252,7 +226,7 @@ namespace Game
         request.ship_bary_velocity_mps = ship_bary_vel_mps;
         request.thrusting = thrusting;
         request.solve_quality = solve_quality;
-        request.priority = classify_prediction_request_priority(
+        request.priority = PredictionRuntimeDetail::classify_prediction_request_priority(
                 _prediction_selection,
                 track.key,
                 track.is_celestial,
@@ -407,7 +381,7 @@ namespace Game
         request.massive_bodies = _orbitsim->sim.massive_bodies();
         request.shared_ephemeris = track.cache.shared_ephemeris;
         request.subject_body_id = body->id;
-        request.priority = classify_prediction_request_priority(
+        request.priority = PredictionRuntimeDetail::classify_prediction_request_priority(
                 _prediction_selection,
                 track.key,
                 true,
