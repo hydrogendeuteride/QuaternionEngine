@@ -212,7 +212,11 @@ target_link_libraries(gameplay_time_warp_transition_tests PRIVATE
 add_test(NAME gameplay_time_warp_transition_tests COMMAND gameplay_time_warp_transition_tests)
 
 add_executable(gameplay_prediction_maneuver_tests
-  gameplay_prediction_maneuver_tests.cpp
+  gameplay_prediction_maneuver_runtime_window_tests.cpp
+  gameplay_prediction_maneuver_lifecycle_tests.cpp
+  gameplay_prediction_maneuver_service_tests.cpp
+  gameplay_prediction_maneuver_runtime_results_tests.cpp
+  gameplay_prediction_maneuver_derived_results_tests.cpp
   gameplay_prediction_maneuver_test_stubs.cpp
   "${PROJECT_SOURCE_DIR}/src/game/entity.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_math.cpp"

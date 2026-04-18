@@ -148,6 +148,8 @@ namespace Game
         {
             return;
         }
+        const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle_before_apply =
+                PredictionRuntimeDetail::describe_prediction_track_lifecycle(*track);
 
         const OrbitPredictionService::AdaptiveStageDiagnostics previous_frame_base_diagnostics =
                 track->derived_diagnostics.frame_base;
@@ -170,12 +172,8 @@ namespace Game
             return;
         }
 
-        const bool full_streaming_result =
-                result.solve_quality == OrbitPredictionService::SolveQuality::Full &&
-                result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
-
-        if (result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
-            result.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming)
+        if (PredictionRuntimeDetail::prediction_track_is_preview_streaming_publish(result.solve_quality,
+                                                                                   result.publish_stage))
         {
             track->preview_state = PredictionPreviewRuntimeState::PreviewStreaming;
         }
@@ -259,11 +257,13 @@ namespace Game
         // Full-stream publishes are intermediate batches from the same solve generation.
         // Keep the request pending until the final publish so AwaitFullRefine does not
         // immediately enqueue a newer generation and discard the rest of this stream.
-        track->request_pending = full_streaming_result;
+        track->request_pending = PredictionRuntimeDetail::prediction_track_should_keep_request_pending_after_solver_publish(
+                derived_request.solver_result.solve_quality,
+                derived_request.solver_result.publish_stage);
 
         // If the input changed while this solve was in-flight, promote straight to dirty so the
         // next update tick can submit a fresh solver request without waiting for derived to finish.
-        if (track->invalidated_while_pending)
+        if (PredictionRuntimeDetail::prediction_track_should_promote_dirty_after_solver_publish(lifecycle_before_apply))
         {
             track->dirty = true;
             track->invalidated_while_pending = false;

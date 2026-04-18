@@ -1,4 +1,5 @@
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
+#include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 
 #include <algorithm>
@@ -462,10 +463,11 @@ namespace Game
                 preview_tail_matches_planned_cache() ? preview_plan_color : stale_plan_color;
         if (!preview_assembly.valid || preview_assembly.chunks.empty())
         {
+            const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
+                    PredictionRuntimeDetail::describe_prediction_track_lifecycle(*track_ctx.track);
             const bool preview_fallback_active =
                     track_ctx.track->preview_anchor.valid &&
-                    track_ctx.track->preview_state != PredictionPreviewRuntimeState::Idle &&
-                    track_ctx.track->preview_state != PredictionPreviewRuntimeState::AwaitFullRefine &&
+                    PredictionRuntimeDetail::prediction_track_preview_fallback_active(lifecycle) &&
                     std::isfinite(track_ctx.track->preview_anchor.anchor_time_s) &&
                     track_ctx.track->preview_anchor.visual_window_s > 0.0;
             if (preview_fallback_active)

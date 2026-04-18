@@ -92,7 +92,7 @@ Drawing and picking implementation split files. Not included outside the predict
 Runtime orchestration split files. Not included outside the prediction module.
 
 - `gameplay_state_prediction_runtime_internal.h`
-  Inline helpers: `maneuver_drag_active`, `elapsed_ms`, `update_last_and_peak`, `visible_generation_id`, `latest_solver_generation_published`.
+  Inline helpers: `maneuver_drag_active`, `elapsed_ms`, `update_last_and_peak`, `visible_generation_id`, `latest_solver_generation_published`, and lifecycle classification helpers layered over the current track flags/overlays.
 
 - `gameplay_state_prediction_runtime.cpp`
   Top-level runtime update entry point called from `GameplayState::on_update()` / `on_fixed_update()`.
