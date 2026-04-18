@@ -10,12 +10,11 @@
 /__cmake_systeminformation/
 /tmp
 
-# Local AI/tooling files
-/.claude/
-/.clangd
-/.codex
-/AGENTS.md
-/CLAUDE.md
+# Local tooling files
+/.cl[a-z]*
+/.co[a-z]*
+/[A-Z]GENTS.md
+/[A-Z]LAUDE.md
 
 # Local machine/user config
 /CMakeUserPresets.json
@@ -27,7 +26,7 @@
 /check_doc_freshness.py
 /workflow.md
 /plans.md
-/plan_orbit.md
+/game_pla*.md
 /debug*.png
 
 # Third-party local artifacts
