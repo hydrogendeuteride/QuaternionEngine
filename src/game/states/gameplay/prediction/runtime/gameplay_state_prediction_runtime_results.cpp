@@ -224,6 +224,8 @@ namespace Game
                 result.display_frame_revision == track->latest_requested_derived_display_frame_revision &&
                 result.analysis_body_id == track->latest_requested_derived_analysis_body_id &&
                 result.publish_stage == track->latest_requested_derived_publish_stage;
+        const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle_before_apply =
+                PredictionRuntimeDetail::describe_prediction_track_lifecycle(*track);
 
         PredictionDragDebugTelemetry &debug = track->drag_debug;
         debug.last_result_solve_quality = result.solve_quality;
@@ -243,7 +245,8 @@ namespace Game
         // Do NOT clear request_pending here — a newer solver request may already be in-flight.
         // Only the solver completion path and request submission paths manage that flag.
         // Preserve an already-queued refine request when a late preview-derived result arrives after drag end.
-        const bool keep_dirty_for_followup = track->dirty || track->invalidated_while_pending;
+        const bool keep_dirty_for_followup =
+                PredictionRuntimeDetail::prediction_track_should_keep_dirty_for_followup(lifecycle_before_apply);
         track->invalidated_while_pending = false;
 
         OrbitPredictionCache cache_to_publish{};
@@ -293,8 +296,8 @@ namespace Game
                 _maneuver_plan_live_preview_active &&
                 PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
         const bool full_streaming_result =
-                result.solve_quality == OrbitPredictionService::SolveQuality::Full &&
-                result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
+                PredictionRuntimeDetail::prediction_track_is_full_streaming_publish(result.solve_quality,
+                                                                                    result.publish_stage);
 
         if (result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview)
         {
@@ -312,17 +315,10 @@ namespace Game
             merge_chunk_assembly(track->preview_overlay.chunk_assembly, result.chunk_assembly);
             restore_authoritative_planned_data(*track, cache_to_publish);
 
-            if (result.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming)
-            {
-                track->preview_state = PredictionPreviewRuntimeState::PreviewStreaming;
-            }
-            else if (track->preview_state != PredictionPreviewRuntimeState::AwaitFullRefine)
-            {
-                track->preview_state =
-                        drag_preview_active_now
-                                ? PredictionPreviewRuntimeState::PreviewStreaming
-                                : PredictionPreviewRuntimeState::Idle;
-            }
+            track->preview_state = PredictionRuntimeDetail::prediction_track_preview_state_after_preview_publish(
+                    lifecycle_before_apply,
+                    result.publish_stage,
+                    drag_preview_active_now);
 
             track->cache = std::move(cache_to_publish);
             track->pick_cache.clear();
@@ -353,7 +349,8 @@ namespace Game
             track->preview_overlay.clear();
             track->full_stream_overlay.clear();
             track->preview_state = PredictionPreviewRuntimeState::Idle;
-            if (!drag_preview_active_now)
+            if (PredictionRuntimeDetail::prediction_track_should_clear_preview_anchor_after_final_publish(
+                        drag_preview_active_now))
             {
                 track->preview_anchor = {};
             }

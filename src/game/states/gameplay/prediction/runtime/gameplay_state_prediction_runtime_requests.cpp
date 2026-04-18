@@ -86,14 +86,9 @@ namespace Game
 
         bool should_defer_solver_request_until_publish(const PredictionTrackState &track)
         {
-            if (track.request_pending)
-            {
-                return true;
-            }
-
-            const bool awaiting_latest_publish =
-                    !PredictionRuntimeDetail::latest_solver_generation_published(track);
-            return (track.derived_request_pending || awaiting_latest_publish) && !track.dirty;
+            const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot snapshot =
+                    PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
+            return PredictionRuntimeDetail::prediction_track_should_defer_solver_request(snapshot);
         }
 
     } // namespace
@@ -424,8 +419,10 @@ namespace Game
             return;
         }
 
+        const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
+                PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
         const bool live_preview_drag_pending_override =
-                (track.dirty || track.invalidated_while_pending) &&
+                PredictionRuntimeDetail::prediction_track_live_preview_drag_pending_override(lifecycle) &&
                 track.supports_maneuvers &&
                 track.key == _prediction_selection.active_subject &&
                 with_maneuvers &&

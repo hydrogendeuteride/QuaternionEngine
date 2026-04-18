@@ -1,4 +1,5 @@
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
+#include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,16 +14,9 @@ namespace Game
 
         [[nodiscard]] bool preview_pick_clamp_active(const PredictionTrackState &track)
         {
-            if (track.preview_state == PredictionPreviewRuntimeState::PreviewStreaming ||
-                track.preview_state == PredictionPreviewRuntimeState::DragPreviewPending)
-            {
-                return true;
-            }
-
-            const PredictionChunkAssembly &assembly = track.preview_overlay.chunk_assembly;
-            return track.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine &&
-                   assembly.valid &&
-                   !assembly.chunks.empty();
+            const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
+                    PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
+            return PredictionRuntimeDetail::prediction_track_preview_pick_clamp_active(lifecycle);
         }
 
         [[nodiscard]] double resolve_preview_pick_coverage_end_s(const PredictionTrackState &track)
@@ -177,8 +171,10 @@ namespace Game
 
         out.identity_frame_transform = Draw::frame_transform_is_identity(out.frame_to_world);
         out.use_base_adaptive_curve = !out.stable_cache->render_curve_frame.empty();
+        const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
+                PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
         out.use_planned_adaptive_curve =
-                track.preview_state != PredictionPreviewRuntimeState::PreviewStreaming &&
+                lifecycle.preview_state != PredictionPreviewRuntimeState::PreviewStreaming &&
                 !out.planned_cache->render_curve_frame_planned.empty();
 
         out.world_basis_draw_ctx = out.draw_ctx;

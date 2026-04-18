@@ -496,6 +496,22 @@ namespace Game
         AwaitFullRefine,
     };
 
+    // High-level runtime lifecycle derived from the existing preview/pending/cache fields.
+    // This sits above the current bool/overlay combination so transition logic can move toward
+    // a single explicit state machine without changing behavior immediately.
+    enum class PredictionTrackLifecycleState : uint8_t
+    {
+        Idle = 0,
+        NeedsRebuild,
+        DragPreviewPending,
+        PreviewStreaming,
+        AwaitFullRefine,
+        FullSolvePending,
+        FullStreaming,
+        FinalDerivedPending,
+        Stable,
+    };
+
     struct PredictionPreviewAnchor
     {
         bool valid{false};
