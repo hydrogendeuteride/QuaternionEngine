@@ -196,7 +196,9 @@ namespace Game
                 continue;
             }
 
-            if (track.request_pending)
+            const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
+                    PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
+            if (PredictionRuntimeDetail::prediction_track_should_mark_invalidated_while_pending(lifecycle))
             {
                 track.invalidated_while_pending = true;
                 continue;
@@ -249,6 +251,8 @@ namespace Game
                                                           const double now_s,
                                                           const bool with_maneuvers)
     {
+        const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
+                PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
         const bool preview_drag_active =
                 track.supports_maneuvers &&
                 live_preview_drag_active(with_maneuvers, _maneuver_plan_live_preview_active, _maneuver_gizmo_interaction.state);
@@ -270,8 +274,7 @@ namespace Game
             track.preview_anchor.visual_window_s = visual_window_s;
             track.preview_anchor.exact_window_s = exact_window_s;
             track.preview_last_anchor_refresh_at_s = now_s;
-            if (track.preview_state == PredictionPreviewRuntimeState::Idle ||
-                track.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine)
+            if (PredictionRuntimeDetail::prediction_track_can_enter_preview_drag(lifecycle))
             {
                 track.preview_state = PredictionPreviewRuntimeState::EnterDrag;
                 track.preview_entered_at_s = now_s;
@@ -280,15 +283,14 @@ namespace Game
         }
 
         if (track.preview_anchor.valid &&
-            track.preview_state != PredictionPreviewRuntimeState::Idle &&
-            track.preview_state != PredictionPreviewRuntimeState::AwaitFullRefine)
+            PredictionRuntimeDetail::prediction_track_can_transition_to_await_full_refine(lifecycle))
         {
             track.preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
             track.preview_last_anchor_refresh_at_s = now_s;
             return;
         }
 
-        if (track.preview_state == PredictionPreviewRuntimeState::Idle)
+        if (lifecycle.preview_state == PredictionPreviewRuntimeState::Idle)
         {
             track.preview_anchor = {};
         }
@@ -516,8 +518,10 @@ namespace Game
                                                         const bool thrusting,
                                                         const bool with_maneuvers) const
     {
+        const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
+                PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
         // Rebuild when cache state, thrusting, timing, or horizon coverage says we must.
-        bool rebuild = track.dirty || !track.cache.valid;
+        bool rebuild = lifecycle.dirty || !lifecycle.visible_cache_valid;
 
         if (!rebuild && thrusting)
         {
@@ -531,9 +535,9 @@ namespace Game
             rebuild = dt_since_build_s >= _prediction_periodic_refresh_s;
         }
 
-        if (!rebuild && track.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine)
+        if (!rebuild && PredictionRuntimeDetail::prediction_track_should_rebuild_from_await_full_refine(lifecycle))
         {
-            rebuild = !track.request_pending && !track.derived_request_pending;
+            rebuild = true;
         }
 
         if (rebuild || !track.cache.valid || track.cache.trajectory_inertial.empty())

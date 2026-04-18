@@ -1030,6 +1030,9 @@ namespace Game
             track.latest_requested_derived_display_frame_revision = 0;
             track.latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
             track.latest_requested_derived_publish_stage = OrbitPredictionService::PublishStage::Final;
+            // Display-frame artifacts are no longer trustworthy after a global derived reset.
+            track.preview_overlay.clear();
+            track.full_stream_overlay.clear();
             track.pick_cache.clear();
             (void) request_prediction_derived_refresh(track);
         }
