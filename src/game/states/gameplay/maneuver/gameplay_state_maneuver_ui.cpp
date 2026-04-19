@@ -179,7 +179,8 @@ namespace Game
 
     void GameplayState::draw_maneuver_imgui_gizmo(GameStateContext &ctx)
     {
-        // Per-frame gizmo loop: refresh runtime cache, rebuild markers, resolve hover/drag state, then draw overlay UI.
+        // Per-frame gizmo loop: reuse the runtime cache refreshed during on_update(),
+        // rebuild markers, resolve hover/drag state, then draw overlay UI.
         if (!_maneuver_nodes_enabled || _maneuver_state.nodes.empty())
         {
             return;
@@ -191,7 +192,6 @@ namespace Game
         }
 
         update_maneuver_ui_config(ctx);
-        refresh_maneuver_node_runtime_cache(ctx);
 
         ManeuverGizmoViewContext view{};
         if (!build_maneuver_gizmo_view_context(ctx, view))
@@ -339,7 +339,6 @@ namespace Game
         {
             return;
         }
-        refresh_maneuver_node_runtime_cache(ctx);
 
         const float ttl_s = std::clamp(ctx.delta_time(), 0.0f, 0.1f) + 0.002f;
 
