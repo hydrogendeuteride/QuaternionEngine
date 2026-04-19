@@ -53,11 +53,16 @@ namespace Game
             const bool dragging_maneuver_axis =
                     with_maneuvers &&
                     PredictionRuntimeDetail::maneuver_drag_active(gizmo_state);
+            const bool has_future_maneuver_node =
+                    with_maneuvers &&
+                    std::any_of(nodes.begin(),
+                                nodes.end(),
+                                [now_s](const ManeuverNode &node) {
+                                    return std::isfinite(node.time_s) && node.time_s >= now_s;
+                                });
             const bool active_subject = track.key == selection.active_subject;
-            (void) nodes;
-            (void) now_s;
             return active_subject &&
-                   (thrusting || dragging_maneuver_axis);
+                   (thrusting || has_future_maneuver_node || dragging_maneuver_axis);
         }
 
         bool prediction_request_is_throttled(const PredictionTrackState &track, const bool interactive_request)
@@ -269,19 +274,10 @@ namespace Game
         // Copy currently authored maneuver nodes so the worker can include planned burns.
         if (with_maneuvers)
         {
-            const double request_end_s =
-                    request.sim_time_s + std::max(0.0, request.future_window_s);
-            constexpr double kManeuverRequestTimeEpsilonS = 1.0e-6;
             request.maneuver_impulses.reserve(_maneuver_state.nodes.size());
             for (const ManeuverNode &node : _maneuver_state.nodes)
             {
                 if (!std::isfinite(node.time_s))
-                {
-                    continue;
-                }
-
-                if (node.time_s < (request.sim_time_s - kManeuverRequestTimeEpsilonS) ||
-                    node.time_s > (request_end_s + kManeuverRequestTimeEpsilonS))
                 {
                     continue;
                 }
@@ -300,7 +296,6 @@ namespace Game
         }
 
         request.full_stream_publish.active =
-                interactive_request &&
                 solve_quality == OrbitPredictionService::SolveQuality::Full &&
                 track.key == _prediction_selection.active_subject &&
                 prediction_subject_is_player(track.key) &&
