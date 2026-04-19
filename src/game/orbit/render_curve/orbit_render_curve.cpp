@@ -56,6 +56,30 @@ namespace Game
             return t_s > (interval_t0_s + epsilon_s) && t_s < (interval_t1_s - epsilon_s);
         }
 
+        /// Anchor times are provided sorted by the draw/pick callers.
+        /// Use a single lower_bound instead of scanning every authored node for every tree node.
+        bool interval_contains_any_anchor_time(const double interval_t0_s,
+                                               const double interval_t1_s,
+                                               const std::span<const double> anchor_times_s)
+        {
+            if (!(interval_t1_s > interval_t0_s) || anchor_times_s.empty())
+            {
+                return false;
+            }
+
+            const double epsilon_s =
+                    std::max(1.0e-9, std::abs(interval_t1_s - interval_t0_s) * 1.0e-9);
+            const double interval_lo_s = interval_t0_s + epsilon_s;
+            const double interval_hi_s = interval_t1_s - epsilon_s;
+            if (!(interval_hi_s > interval_lo_s))
+            {
+                return false;
+            }
+
+            const auto it = std::lower_bound(anchor_times_s.begin(), anchor_times_s.end(), interval_lo_s);
+            return it != anchor_times_s.end() && *it < interval_hi_s;
+        }
+
         /// Force descent into children when t_start/t_end or any anchor time falls
         /// inside this node's span. This ensures segment boundaries align with those times.
         bool node_requires_anchor_descend(const OrbitRenderCurve::Node &node,
@@ -81,15 +105,9 @@ namespace Game
                 return true;
             }
 
-            for (const double anchor_time_s : anchor_times_s)
-            {
-                if (interval_contains_interior_time(node_t0_s, node_t1_s, anchor_time_s))
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            const double query_t0_s = std::max(node_t0_s, t_start_s);
+            const double query_t1_s = std::min(node_t1_s, t_end_s);
+            return interval_contains_any_anchor_time(query_t0_s, query_t1_s, anchor_times_s);
         }
 
         /// Binary search for the source segment containing time t_s within [first_index, last_index).
