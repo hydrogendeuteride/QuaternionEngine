@@ -270,22 +270,16 @@ namespace Game::PredictionDrawDetail
                 return planned_window;
             }
 
-            double anchored_plan_end = std::min(t_plan_start + window_span_s, t1p);
-            if (std::isfinite(window_end_time_s))
-            {
-                anchored_plan_end = std::clamp(window_end_time_s, t0p, t1p);
-            }
-            if (!(anchored_plan_end > t_plan_start))
-            {
-                return planned_window;
-            }
-
             if (std::isfinite(window_start_time_s))
             {
-                t_plan_start = std::clamp(window_start_time_s, t0p, anchored_plan_end);
+                t_plan_start = std::clamp(window_start_time_s, t0p, t1p);
             }
 
-            const double t_plan_end = anchored_plan_end;
+            double t_plan_end = std::min(t_plan_start + window_span_s, t1p);
+            if (std::isfinite(window_end_time_s))
+            {
+                t_plan_end = std::clamp(window_end_time_s, t0p, t1p);
+            }
             if (!(t_plan_end > t_plan_start))
             {
                 return planned_window;
