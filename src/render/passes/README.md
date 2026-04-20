@@ -26,6 +26,7 @@ passes/
 ├── mesh_vfx.h / .cpp        — mesh-based VFX pass (unlit emissive + alpha/fresnel)
 ├── auto_exposure.h / .cpp   — compute average luminance + CPU readback for exposure
 ├── tonemap.h / .cpp         — HDR→LDR tonemap (ACES/Reinhard) with bloom
+├── hover_outline.h / .cpp   — hover mask → blur → outline/glow composite on LDR
 ├── fxaa.h / .cpp            — FXAA anti-aliasing on LDR output
 ├── orbit_plot.h / .cpp      — dedicated orbit trajectory polylines (gameplay)
 ├── transparent.h / .cpp     — forward-rendered transparent objects (alpha blend)
@@ -52,11 +53,12 @@ Passes are registered on the `RenderGraph` each frame in this order
 11. Transparent    — forward alpha-blended objects (HDR)
 12. AutoExposure   — compute luminance measurement
 13. Tonemap        — HDR → LDR with bloom
-14. OrbitPlot      — dedicated orbit plot overlays (LDR/HDR target)
-15. DebugDraw      — wireframe overlays
-16. FXAA           — anti-aliasing (LDR)
-17. ImGui          — debug UI on swapchain
-18. PresentChain   — letterbox blit + layout transition to PRESENT_SRC
+14. HoverOutline   — hovered object outline/glow composite (LDR)
+15. OrbitPlot      — dedicated orbit plot overlays (LDR/HDR target)
+16. DebugDraw      — wireframe overlays
+17. FXAA           — anti-aliasing (LDR)
+18. ImGui          — debug UI on swapchain
+19. PresentChain   — letterbox blit + layout transition to PRESENT_SRC
 ```
 
 ## Key Types
@@ -77,6 +79,7 @@ Passes are registered on the `RenderGraph` each frame in this order
 | `MeshVfxPass` | Mesh-based unlit VFX pass with alpha blend and fresnel controls |
 | `AutoExposurePass` | Compute average log-luminance, CPU readback, smooth exposure adaptation |
 | `TonemapPass` | HDR→LDR tonemap (ACES default), bloom threshold/intensity controls |
+| `HoverOutlinePass` | Hover-driven opaque mask render, blur, and LDR outline composite |
 | `FxaaPass` | FXAA post-process anti-aliasing with configurable edge thresholds |
 | `OrbitPlotPass` | Dedicated orbit trajectory line overlay from `OrbitPlotSystem` |
 | `TransparentPass` | Forward-rendered transparent objects with alpha blending |

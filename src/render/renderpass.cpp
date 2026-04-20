@@ -17,6 +17,7 @@
 #include "passes/transparent.h"
 #include "passes/mesh_vfx.h"
 #include "passes/tonemap.h"
+#include "passes/hover_outline.h"
 #include "passes/auto_exposure.h"
 #include "passes/orbit_plot.h"
 #include "passes/shadow.h"
@@ -113,6 +114,10 @@ void RenderPassManager::init(EngineContext *context)
     auto tonemapPass = std::make_unique<TonemapPass>();
     tonemapPass->init(context);
     addPass(std::move(tonemapPass));
+
+    auto hoverOutlinePass = std::make_unique<HoverOutlinePass>();
+    hoverOutlinePass->init(context);
+    addPass(std::move(hoverOutlinePass));
 }
 
 void RenderPassManager::cleanup()

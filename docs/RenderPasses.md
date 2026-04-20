@@ -5,7 +5,7 @@ Pass classes (`IRenderPass`) define initialization and recording logic, but exec
 ### Overview
 
 - Interface: Each pass implements `IRenderPass { init(context); execute(cmd); cleanup(); getName(); }`. Today, `execute()` is unused for built-in passes; work is recorded via the Render Graph record callback.
-- Manager: `RenderPassManager::init()` creates and stores built-in passes: `BackgroundPass` (compute), `GeometryPass` (G-Buffer), `LightingPass` (deferred), `TransparentPass`, plus optional `ImGuiPass`.
+- Manager: `RenderPassManager::init()` creates and stores built-in passes including `BackgroundPass` (compute), `GeometryPass` (G-Buffer), `LightingPass` (deferred), `HoverOutlinePass` (LDR hover glow), `TransparentPass`, plus optional `ImGuiPass`.
 - Render graph: Passes call `register_graph(graph, ...)` to declare image/buffer access and attachments. The graph inserts barriers and begins/ends dynamic rendering.
 - Shared targets: Passes coordinate through `SwapchainManager` images: `drawImage`, `gBufferPosition/Normal/Albedo`, `depthImage` (imported into the graph each frame).
 - Hot reload: Fetch graphics pipeline/layout by key each frame through `PipelineManager` in the record callback.
@@ -77,6 +77,7 @@ addPass(std::move(myPass));
 - SSR (Screen Space Reflections): Reads HDR lighting result + G-Buffer and outputs reflections blended with the scene.
   Two variants: `ssr.nort` (screen-space only) and `ssr.rt` (SSR + RT fallback using TLAS ray queries).
 - Tonemap + Bloom: Converts HDR to LDR with exposure control and optional bloom. Supports Reinhard and ACES tonemapping.
+- Hover Outline: Uses the current CPU hover pick to gather matching opaque draws, render a binary mask, apply separable blur, and composite an outline/glow on the LDR image before overlays and FXAA.
 - FXAA: Post-process anti-aliasing on the LDR tonemapped image. Simple 5-tap edge-detection blur.
 - Transparent (forward): Writes to `drawImage` with depth test against `depthImage` after lighting.
 - ImGui: Inserted just before present to draw on the swapchain image.
@@ -100,7 +101,7 @@ See also: `docs/RenderGraph.md` for the builder API and synchronization details.
 
 ## Post-Processing Pipeline
 
-After deferred lighting, the engine runs a post-processing chain: SSR → Tonemap (with Bloom) → FXAA → Present.
+After deferred lighting, the engine runs a post-processing chain: SSR → Tonemap (with Bloom) → Hover Outline → Orbit/Debug overlays → FXAA → Present.
 
 ### SSR (Screen Space Reflections)
 
@@ -176,3 +177,20 @@ layout(push_constant) uniform Push {
 } pc;
 ```
 
+---
+
+### Hover Outline
+
+Located in `src/render/passes/hover_outline.cpp` with shaders `hover_outline_mask.frag`, `hover_outline_blur.frag`, and `hover_outline_composite.frag`.
+
+Behavior:
+- Reads `PickingSystem::hover_pick()` from CPU hover picking.
+- Expands the hover result to either the exact primitive or the whole logical owner (`GLTFInstance` / `MeshInstance`).
+- Renders only matching `OpaqueSurfaces` into a mask using the same alpha-cutout rules as the main material path.
+- Applies horizontal and vertical fullscreen blur passes on the mask.
+- Composites the resulting outline/glow on top of the tonemapped LDR image before orbit/debug overlays and FXAA.
+
+Current v1 limits:
+- Coverage is limited to opaque and alpha-masked surfaces already emitted into `DrawContext::OpaqueSurfaces`.
+- Transparent and Mesh VFX surfaces are not rendered into the outline mask.
+- Occlusion follows the main opaque depth buffer, so only visible opaque fragments contribute to the glow.

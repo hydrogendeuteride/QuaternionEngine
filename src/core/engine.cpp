@@ -59,6 +59,7 @@
 #include "render/passes/transparent.h"
 #include "render/passes/fxaa.h"
 #include "render/passes/tonemap.h"
+#include "render/passes/hover_outline.h"
 #include "render/passes/auto_exposure.h"
 #include "render/passes/orbit_plot.h"
 #include "render/passes/debug_draw.h"
@@ -421,6 +422,7 @@ void VulkanEngine::init()
 
     _picking = std::make_unique<PickingSystem>();
     _picking->init(_context.get());
+    _context->picking = _picking.get();
 
     // Render graph skeleton
     _renderGraph = std::make_unique<RenderGraph>();
@@ -471,6 +473,8 @@ void VulkanEngine::init()
 
     // Build material pipelines early so materials can be created
     metalRoughMaterial.build_pipelines(this);
+    _context->pbrMaterialLayout = metalRoughMaterial.materialLayout;
+    _context->pbrUnusedSetLayout = metalRoughMaterial.emptySetLayout;
 
     initDefaultData();
 
@@ -958,6 +962,10 @@ void VulkanEngine::cleanup()
         if (_picking)
         {
             _picking->cleanup();
+            if (_context)
+            {
+                _context->picking = nullptr;
+            }
             _picking.reset();
         }
         if (_debugDraw)
@@ -1540,6 +1548,11 @@ void VulkanEngine::draw()
             if (auto *tonemap = _renderPassManager->getPass<TonemapPass>())
             {
                 finalColor = tonemap->register_graph(_renderGraph.get(), hdrTarget);
+
+                if (auto *hoverOutline = _renderPassManager->getPass<HoverOutlinePass>())
+                {
+                    finalColor = hoverOutline->register_graph(_renderGraph.get(), finalColor, hDepth);
+                }
 
                 if (auto *orbitPlot = _renderPassManager->getPass<OrbitPlotPass>())
                 {

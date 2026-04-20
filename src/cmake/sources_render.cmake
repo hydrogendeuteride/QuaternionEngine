@@ -52,6 +52,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   render/passes/auto_exposure.cpp
   render/passes/tonemap.h
   render/passes/tonemap.cpp
+  render/passes/hover_outline.h
+  render/passes/hover_outline.cpp
   render/passes/orbit_plot.h
   render/passes/orbit_plot.cpp
   render/passes/debug_draw.h

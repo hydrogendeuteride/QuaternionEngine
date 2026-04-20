@@ -37,6 +37,7 @@ class RayTracingManager;
 class TextureCache;
 class IBLManager;
 class InputSystem;
+class PickingSystem;
 class DebugDrawSystem;
 class OrbitPlotSystem;
 namespace Physics {
@@ -383,6 +384,9 @@ public:
     // Streaming subsystems (engine-owned)
     TextureCache* textures = nullptr;            // texture streaming + cache
     IBLManager*  ibl = nullptr;                  // optional IBL owner (if created by engine)
+    PickingSystem* picking = nullptr;           // scene picking + hover state
+    VkDescriptorSetLayout pbrMaterialLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout pbrUnusedSetLayout = VK_NULL_HANDLE;
 
     // Per-frame cached GPUSceneData buffer + descriptor (lazily created, reusable by any pass).
     // Call getOrCreateSceneDataDescriptor() to obtain a valid set=0 descriptor for the current frame.
