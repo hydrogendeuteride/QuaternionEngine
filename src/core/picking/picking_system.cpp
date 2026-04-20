@@ -151,6 +151,31 @@ namespace
         return false;
     }
 
+    void apply_hover_selection_level(PickingSystem::PickInfo &pick)
+    {
+        if (!pick.valid)
+        {
+            pick.selectionLevel = PickingSystem::SelectionLevel::None;
+            return;
+        }
+
+        if (pick.kind == PickingSystem::PickInfo::Kind::SceneObject)
+        {
+            pick.selectionLevel = PickingSystem::SelectionLevel::Primitive;
+        }
+        else
+        {
+            pick.selectionLevel = PickingSystem::SelectionLevel::Object;
+        }
+    }
+
+    void apply_click_selection_level(PickingSystem::PickInfo &pick)
+    {
+        pick.selectionLevel = pick.valid
+                                  ? PickingSystem::SelectionLevel::Object
+                                  : PickingSystem::SelectionLevel::None;
+    }
+
     struct RaySegmentClosest
     {
         double ray_s = 0.0;   // distance along ray direction (>= 0)
@@ -304,6 +329,8 @@ void PickingSystem::init(EngineContext *context)
     _line_pick_groups.clear();
     _owned_line_pick_segments.clear();
     _line_pick_batches.clear();
+    _gltf_owner_bindings.clear();
+    _mesh_owner_bindings.clear();
     _mouse_pos_window = glm::vec2{-1.0f, -1.0f};
     _drag_state = {};
     _pending_pick = {};
@@ -335,6 +362,8 @@ void PickingSystem::cleanup()
     _line_pick_groups.clear();
     _owned_line_pick_segments.clear();
     _line_pick_batches.clear();
+    _gltf_owner_bindings.clear();
+    _mesh_owner_bindings.clear();
     _pending_pick = {};
     _pick_result_pending = false;
     _last_pick_object_id = 0;
@@ -451,6 +480,7 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
                     if (line_hit)
                     {
                         _last_pick = std::move(line_pick);
+                        apply_click_selection_level(_last_pick);
                         _last_pick_object_id = 0;
                     }
                     else
@@ -515,17 +545,20 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
                     if (line_hit && std::isfinite(line_depth_m) && line_depth_m < mesh_depth_m)
                     {
                         _last_pick = std::move(line_pick);
+                        apply_click_selection_level(_last_pick);
                         _last_pick_object_id = 0;
                     }
                     else
                     {
                         set_pick_from_hit(hit_object, hit_pos, _last_pick);
+                        apply_click_selection_level(_last_pick);
                         _last_pick_object_id = hit_object.objectID;
                     }
                 }
                     else if (line_hit)
                     {
                         _last_pick = std::move(line_pick);
+                        apply_click_selection_level(_last_pick);
                         _last_pick_object_id = 0;
                     }
                     else if (_settings.clear_last_pick_on_miss)
@@ -550,6 +583,7 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
                         PickInfo info{};
                         glm::vec3 center_local = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.0f));
                         set_pick_from_hit(obj, local_to_world(center_local, scene->get_world_origin()), info);
+                        apply_click_selection_level(info);
                         _drag_selection.push_back(std::move(info));
                     }
                 }
@@ -604,6 +638,7 @@ void PickingSystem::update_hover(bool ui_want_capture_mouse)
     if (mesh_hit)
     {
         set_pick_from_hit(hover_obj, hover_pos, _hover_pick);
+        apply_hover_selection_level(_hover_pick);
     }
 
     PickInfo line_pick{};
@@ -618,6 +653,7 @@ void PickingSystem::update_hover(bool ui_want_capture_mouse)
         if (!mesh_hit)
         {
             _hover_pick = std::move(line_pick);
+            apply_hover_selection_level(_hover_pick);
         }
         else
         {
@@ -663,6 +699,7 @@ void PickingSystem::update_hover(bool ui_want_capture_mouse)
             if (std::isfinite(line_depth_m) && line_depth_m < mesh_depth_m)
             {
                 _hover_pick = std::move(line_pick);
+                apply_hover_selection_level(_hover_pick);
             }
         }
     }
@@ -710,6 +747,7 @@ void PickingSystem::begin_frame()
             glm::vec3 fallback_local = glm::vec3(picked.transform[3]);
             WorldVec3 fallback_pos = local_to_world(fallback_local, _context->scene->get_world_origin());
             set_pick_from_hit(picked, fallback_pos, _last_pick);
+            apply_click_selection_level(_last_pick);
         }
         else if (_settings.clear_last_pick_on_miss)
         {
@@ -817,6 +855,113 @@ void PickingSystem::clear_owner_picks(RenderObject::OwnerType owner_type, const 
     }
 }
 
+void PickingSystem::set_owner_binding(RenderObject::OwnerType owner_type,
+                                      const std::string &owner_name,
+                                      const std::string &object_name,
+                                      const std::string &member_name)
+{
+    if (owner_name.empty())
+    {
+        return;
+    }
+
+    std::unordered_map<std::string, OwnerBinding> *bindings = nullptr;
+    switch (owner_type)
+    {
+        case RenderObject::OwnerType::GLTFInstance:
+            bindings = &_gltf_owner_bindings;
+            break;
+        case RenderObject::OwnerType::MeshInstance:
+            bindings = &_mesh_owner_bindings;
+            break;
+        default:
+            return;
+    }
+
+    if (!bindings)
+    {
+        return;
+    }
+
+    const std::string resolved_object = object_name.empty() ? owner_name : object_name;
+    const std::string resolved_member = member_name.empty() ? owner_name : member_name;
+    (*bindings)[owner_name] = OwnerBinding{resolved_object, resolved_member};
+}
+
+void PickingSystem::clear_owner_binding(RenderObject::OwnerType owner_type, const std::string &owner_name)
+{
+    if (owner_name.empty())
+    {
+        return;
+    }
+
+    switch (owner_type)
+    {
+        case RenderObject::OwnerType::GLTFInstance:
+            _gltf_owner_bindings.erase(owner_name);
+            break;
+        case RenderObject::OwnerType::MeshInstance:
+            _mesh_owner_bindings.erase(owner_name);
+            break;
+        default:
+            break;
+    }
+}
+
+bool PickingSystem::get_owner_binding(RenderObject::OwnerType owner_type,
+                                      const std::string &owner_name,
+                                      std::string &out_object_name,
+                                      std::string &out_member_name) const
+{
+    const OwnerBindingView binding = resolve_owner_binding(owner_type, owner_name);
+    if (binding.object_name.empty())
+    {
+        out_object_name.clear();
+        out_member_name.clear();
+        return false;
+    }
+
+    out_object_name.assign(binding.object_name.begin(), binding.object_name.end());
+    out_member_name.assign(binding.member_name.begin(), binding.member_name.end());
+    return true;
+}
+
+PickingSystem::OwnerBindingView PickingSystem::resolve_owner_binding(RenderObject::OwnerType owner_type,
+                                                                     const std::string &owner_name) const
+{
+    if (owner_name.empty())
+    {
+        return {};
+    }
+
+    const std::unordered_map<std::string, OwnerBinding> *bindings = nullptr;
+    switch (owner_type)
+    {
+        case RenderObject::OwnerType::GLTFInstance:
+            bindings = &_gltf_owner_bindings;
+            break;
+        case RenderObject::OwnerType::MeshInstance:
+            bindings = &_mesh_owner_bindings;
+            break;
+        default:
+            break;
+    }
+
+    if (bindings)
+    {
+        auto it = bindings->find(owner_name);
+        if (it != bindings->end())
+        {
+            return {
+                it->second.object_name.empty() ? std::string_view(owner_name) : std::string_view(it->second.object_name),
+                it->second.member_name.empty() ? std::string_view(owner_name) : std::string_view(it->second.member_name),
+            };
+        }
+    }
+
+    return {owner_name, owner_name};
+}
+
 bool PickingSystem::move_last_pick_to_parent()
 {
     if (!_last_pick.valid ||
@@ -831,7 +976,13 @@ bool PickingSystem::move_last_pick_to_parent()
     {
         return false;
     }
-    return set_pick_to_gltf_node(_last_pick, parent.get());
+    if (!set_pick_to_gltf_node(_last_pick, parent.get()))
+    {
+        return false;
+    }
+
+    _last_pick.selectionLevel = SelectionLevel::Node;
+    return true;
 }
 
 bool PickingSystem::move_last_pick_to_child(size_t child_index)
@@ -848,7 +999,13 @@ bool PickingSystem::move_last_pick_to_child(size_t child_index)
     {
         return false;
     }
-    return set_pick_to_gltf_node(_last_pick, child);
+    if (!set_pick_to_gltf_node(_last_pick, child))
+    {
+        return false;
+    }
+
+    _last_pick.selectionLevel = SelectionLevel::Node;
+    return true;
 }
 
 bool PickingSystem::move_last_pick_to_child(const std::string &child_name)
@@ -873,7 +1030,66 @@ bool PickingSystem::move_last_pick_to_child(const std::string &child_name)
     {
         return false;
     }
-    return set_pick_to_gltf_node(_last_pick, child);
+    if (!set_pick_to_gltf_node(_last_pick, child))
+    {
+        return false;
+    }
+
+    _last_pick.selectionLevel = SelectionLevel::Node;
+    return true;
+}
+
+bool PickingSystem::set_last_pick_selection_level(SelectionLevel level)
+{
+    if (!_last_pick.valid || level == SelectionLevel::None)
+    {
+        return false;
+    }
+
+    switch (level)
+    {
+        case SelectionLevel::Object:
+            if (_last_pick.objectName.empty())
+            {
+                return false;
+            }
+            break;
+        case SelectionLevel::Member:
+            if (_last_pick.memberName.empty())
+            {
+                return false;
+            }
+            break;
+        case SelectionLevel::Node:
+            if (_last_pick.ownerType != RenderObject::OwnerType::GLTFInstance ||
+                _last_pick.node == nullptr ||
+                _last_pick.nodeName.empty())
+            {
+                return false;
+            }
+            break;
+        case SelectionLevel::Primitive:
+            if (_last_pick.kind != PickInfo::Kind::SceneObject)
+            {
+                return false;
+            }
+            break;
+        case SelectionLevel::None:
+            return false;
+    }
+
+    _last_pick.selectionLevel = level;
+    return true;
+}
+
+bool PickingSystem::select_last_pick_object()
+{
+    return set_last_pick_selection_level(SelectionLevel::Object);
+}
+
+bool PickingSystem::select_last_pick_member()
+{
+    return set_last_pick_selection_level(SelectionLevel::Member);
 }
 
 glm::vec2 PickingSystem::window_to_swapchain_pixels(const glm::vec2 &window_pos) const
@@ -1129,6 +1345,8 @@ bool PickingSystem::pick_line_at_window_pos(const glm::vec2 &window_pos, PickInf
     out_pick.node = nullptr;
     out_pick.ownerType = RenderObject::OwnerType::None;
     out_pick.ownerName = group.owner_name;
+    out_pick.objectName = group.owner_name;
+    out_pick.memberName = group.owner_name;
     out_pick.nodeName.clear();
     out_pick.nodeParentName.clear();
     out_pick.nodeChildren.clear();
@@ -1140,6 +1358,7 @@ bool PickingSystem::pick_line_at_window_pos(const glm::vec2 &window_pos, PickInf
     out_pick.surfaceIndex = 0;
     out_pick.time_s = hit_time_s;
     out_pick.kind = PickInfo::Kind::Line;
+    out_pick.selectionLevel = SelectionLevel::Object;
     out_pick.valid = true;
 
     out_depth_m = best_depth;
@@ -1153,6 +1372,11 @@ void PickingSystem::set_pick_from_hit(const RenderObject &hit_object, const Worl
     out_pick.node = hit_object.sourceNode;
     out_pick.ownerType = hit_object.ownerType;
     out_pick.ownerName = hit_object.ownerName;
+    {
+        const OwnerBindingView binding = resolve_owner_binding(hit_object.ownerType, hit_object.ownerName);
+        out_pick.objectName.assign(binding.object_name.begin(), binding.object_name.end());
+        out_pick.memberName.assign(binding.member_name.begin(), binding.member_name.end());
+    }
     if (out_pick.ownerType == RenderObject::OwnerType::GLTFInstance)
     {
         populate_pick_node_hierarchy(out_pick.scene, out_pick.node, out_pick);
@@ -1171,6 +1395,7 @@ void PickingSystem::set_pick_from_hit(const RenderObject &hit_object, const Worl
     out_pick.surfaceIndex = hit_object.surfaceIndex;
     out_pick.time_s = std::numeric_limits<double>::quiet_NaN();
     out_pick.kind = PickInfo::Kind::SceneObject;
+    out_pick.selectionLevel = SelectionLevel::Primitive;
     out_pick.valid = true;
 }
 
@@ -1213,6 +1438,7 @@ bool PickingSystem::set_pick_to_gltf_node(PickInfo &pick, Node *target_node)
         updated.worldPos = WorldVec3(glm::dvec3(updated.worldTransform[3]));
     }
     updated.valid = true;
+    updated.selectionLevel = SelectionLevel::Node;
 
     pick = std::move(updated);
     _last_pick_object_id = 0;
@@ -1226,6 +1452,8 @@ void PickingSystem::clear_pick(PickInfo &pick) const
     pick.node = nullptr;
     pick.ownerType = RenderObject::OwnerType::None;
     pick.ownerName.clear();
+    pick.objectName.clear();
+    pick.memberName.clear();
     pick.nodeName.clear();
     pick.nodeParentName.clear();
     pick.nodeChildren.clear();
@@ -1237,6 +1465,7 @@ void PickingSystem::clear_pick(PickInfo &pick) const
     pick.surfaceIndex = 0;
     pick.time_s = std::numeric_limits<double>::quiet_NaN();
     pick.kind = PickInfo::Kind::None;
+    pick.selectionLevel = SelectionLevel::None;
     pick.valid = false;
 }
 

@@ -2,6 +2,7 @@
 
 #include "game/game_world.h"
 #include "game/state/game_state.h"
+#include "core/game_api.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_types.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_derived_service.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
@@ -341,6 +342,10 @@ namespace Game
         std::string _settings_rel_path{"settings/gameplay.json"};
         std::string _settings_io_status{};
         bool _settings_io_status_ok{true};
+
+        // Outline settings stash: GameplayState applies its own scope on enter, restores on exit.
+        GameAPI::Engine::OutlineSettings _saved_outline_settings{};
+        bool _outline_settings_saved{false};
 
         // Input keybindings (TOML). Loaded on_enter; starts from struct defaults.
         Keybinds _keybinds{};

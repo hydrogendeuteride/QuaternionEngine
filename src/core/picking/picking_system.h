@@ -13,6 +13,8 @@
 #include <limits>
 #include <span>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 class EngineContext;
@@ -22,6 +24,15 @@ struct RGImageHandle;
 class PickingSystem
 {
 public:
+    enum class SelectionLevel : uint8_t
+    {
+        None = 0,
+        Object,
+        Member,
+        Node,
+        Primitive,
+    };
+
     struct Settings
     {
         // Master toggle for all picking behavior (click, drag, hover).
@@ -72,6 +83,8 @@ public:
         Node *node = nullptr;
         RenderObject::OwnerType ownerType = RenderObject::OwnerType::None;
         std::string ownerName;
+        std::string objectName;
+        std::string memberName;
         // Populated for glTF picks when node identity can be resolved from scene->nodes.
         std::string nodeName;
         std::string nodeParentName;
@@ -85,7 +98,14 @@ public:
         // For Kind::Line picks (e.g. orbit polyline), this is the interpolated time at the hit point if provided.
         double time_s = std::numeric_limits<double>::quiet_NaN();
         Kind kind = Kind::None;
+        SelectionLevel selectionLevel = SelectionLevel::None;
         bool valid = false;
+    };
+
+    struct OwnerBindingView
+    {
+        std::string_view object_name{};
+        std::string_view member_name{};
     };
 
     void init(EngineContext *context);
@@ -123,6 +143,18 @@ public:
 
     void clear_owner_picks(RenderObject::OwnerType owner_type, const std::string &owner_name);
 
+    void set_owner_binding(RenderObject::OwnerType owner_type,
+                           const std::string &owner_name,
+                           const std::string &object_name,
+                           const std::string &member_name = {});
+    void clear_owner_binding(RenderObject::OwnerType owner_type, const std::string &owner_name);
+    bool get_owner_binding(RenderObject::OwnerType owner_type,
+                           const std::string &owner_name,
+                           std::string &out_object_name,
+                           std::string &out_member_name) const;
+    OwnerBindingView resolve_owner_binding(RenderObject::OwnerType owner_type,
+                                           const std::string &owner_name) const;
+
     struct LinePickSegmentData
     {
         WorldVec3 a_world{0.0, 0.0, 0.0};
@@ -152,6 +184,9 @@ public:
     bool move_last_pick_to_parent();
     bool move_last_pick_to_child(size_t child_index = 0);
     bool move_last_pick_to_child(const std::string &child_name);
+    bool set_last_pick_selection_level(SelectionLevel level);
+    bool select_last_pick_object();
+    bool select_last_pick_member();
 
 private:
     struct PickRequest
@@ -197,6 +232,12 @@ private:
         std::string owner_name;
     };
 
+    struct OwnerBinding
+    {
+        std::string object_name;
+        std::string member_name;
+    };
+
     struct LinePickSegment
     {
         uint32_t group_id = 0;
@@ -217,6 +258,8 @@ private:
     std::vector<LinePickGroup> _line_pick_groups{};
     std::vector<LinePickSegment> _owned_line_pick_segments{};
     std::vector<LinePickBatch> _line_pick_batches{};
+    std::unordered_map<std::string, OwnerBinding> _gltf_owner_bindings{};
+    std::unordered_map<std::string, OwnerBinding> _mesh_owner_bindings{};
 
     glm::vec2 _mouse_pos_window{-1.0f, -1.0f};
     DragState _drag_state{};

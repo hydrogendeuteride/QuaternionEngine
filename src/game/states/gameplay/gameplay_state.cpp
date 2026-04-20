@@ -99,12 +99,35 @@ namespace Game
             }
         }
 
+        if (ctx.api && !_outline_settings_saved)
+        {
+            _saved_outline_settings = ctx.api->get_outline_settings();
+            _outline_settings_saved = true;
+
+            GameAPI::Engine::OutlineSettings gameplay_outline = _saved_outline_settings;
+            gameplay_outline.enabled = true;
+            gameplay_outline.suppressHoverWhenSelected = true;
+            gameplay_outline.hover.enabled = true;
+            gameplay_outline.hover.scope = GameAPI::Engine::SelectionLevel::Object;
+            gameplay_outline.hover.useSelectionLevel = false;
+            gameplay_outline.selection.enabled = true;
+            gameplay_outline.selection.scope = GameAPI::Engine::SelectionLevel::Node;
+            gameplay_outline.selection.useSelectionLevel = false;
+            ctx.api->set_outline_settings(gameplay_outline);
+        }
+
         setup_scene(ctx);
         clear_preloaded_gltf_scenes();
     }
 
     void GameplayState::on_exit(GameStateContext &ctx)
     {
+        if (ctx.api && _outline_settings_saved)
+        {
+            ctx.api->set_outline_settings(_saved_outline_settings);
+            _outline_settings_saved = false;
+        }
+
         clear_maneuver_gizmo_instances(ctx);
 
         _world.clear_rebase_anchor();

@@ -1327,34 +1327,117 @@ public:
     // Picking / Selection
     // ------------------------------------------------------------------------
 
+    enum class PickOwnerType : uint8_t
+    {
+        None = 0,
+        GLTFInstance = 1,
+        MeshInstance = 2,
+    };
+
+    enum class SelectionLevel : uint8_t
+    {
+        None = 0,
+        Object,
+        Member,
+        Node,
+        Primitive,
+    };
+
     struct PickResult
     {
         bool valid{false};
-        std::string ownerName;
+        PickOwnerType ownerType{PickOwnerType::None};
+        std::string ownerName;   // Concrete render instance name
+        std::string objectName;  // Logical object/group name
+        std::string memberName;  // Logical member name inside objectName
         std::string nodeName;
         std::string nodeParentName;
         std::vector<std::string> nodeChildren;
         std::vector<std::string> nodePath;
+        uint32_t surfaceIndex{0};
+        SelectionLevel selectionLevel{SelectionLevel::None};
         glm::vec3 worldPosition{0.0f};
     };
 
     struct PickResultD
     {
         bool valid{false};
+        PickOwnerType ownerType{PickOwnerType::None};
         std::string ownerName;
+        std::string objectName;
+        std::string memberName;
         std::string nodeName;
         std::string nodeParentName;
         std::vector<std::string> nodeChildren;
         std::vector<std::string> nodePath;
+        uint32_t surfaceIndex{0};
+        SelectionLevel selectionLevel{SelectionLevel::None};
         glm::dvec3 worldPosition{0.0};
+    };
+
+    struct OutlineChannelSettings
+    {
+        bool enabled{true};
+        glm::vec3 color{1.0f, 0.72f, 0.15f};
+        float intensity{0.8f};
+        float outlineWidthPx{2.0f};
+        float blurRadiusPx{3.0f};
+        SelectionLevel scope{SelectionLevel::Primitive};
+        bool useSelectionLevel{false};
+    };
+
+    struct OutlineSettings
+    {
+        bool enabled{false};
+        bool halfResolutionBlur{true};
+        bool suppressHoverWhenSelected{false};
+        OutlineChannelSettings hover{};
+        OutlineChannelSettings selection{
+            true,
+            glm::vec3(0.25f, 0.8f, 1.0f),
+            1.0f,
+            3.0f,
+            4.0f,
+            SelectionLevel::Object,
+            true,
+        };
     };
 
     // Get last click selection result
     PickResult get_last_pick() const;
     PickResultD get_last_pick_d() const;
+    PickResult get_hover_pick() const;
+    PickResultD get_hover_pick_d() const;
+    bool set_last_pick_selection_level(SelectionLevel level);
+    SelectionLevel get_last_pick_selection_level() const;
+    bool select_object_of_last_pick();
+    bool select_member_of_last_pick();
     bool select_parent_of_last_pick();
     bool select_child_of_last_pick(size_t childIndex = 0);
     bool select_child_of_last_pick(const std::string& childName);
+
+    // Map concrete mesh/glTF instances onto a logical object/member hierarchy.
+    // Unbound instances default to objectName == memberName == ownerName.
+    bool bind_instance_to_selection_object(const std::string& instanceName,
+                                           const std::string& objectName,
+                                           const std::string& memberName = {});
+    void clear_instance_selection_object_binding(const std::string& instanceName);
+    bool get_instance_selection_object_binding(const std::string& instanceName,
+                                               std::string& outObjectName,
+                                               std::string& outMemberName) const;
+
+    // Hover/selection outline controls.
+    void set_outline_settings(const OutlineSettings& settings);
+    OutlineSettings get_outline_settings() const;
+    void set_outline_enabled(bool enabled);
+    bool get_outline_enabled() const;
+
+    // Per-channel convenience setters (applied on top of current settings).
+    void set_hover_outline_enabled(bool enabled);
+    void set_selection_outline_enabled(bool enabled);
+    // intensity < 0 leaves the existing intensity untouched.
+    void set_hover_outline_color(const glm::vec3& color, float intensity = -1.0f);
+    void set_selection_outline_color(const glm::vec3& color, float intensity = -1.0f);
 
     // Picking settings (see PickingSystem::Settings)
     void set_picking_enabled(bool enabled);

@@ -46,16 +46,72 @@ namespace
                owner_type == RenderObject::OwnerType::MeshInstance;
     }
 
-    bool matches_composite_target(const RenderObject &draw, const PickingSystem::PickInfo &pick)
+    HoverOutlinePass::TargetMode target_mode_from_selection_level(PickingSystem::SelectionLevel level,
+                                                                  HoverOutlinePass::TargetMode fallback)
+    {
+        switch (level)
+        {
+            case PickingSystem::SelectionLevel::Object:
+                return HoverOutlinePass::TargetMode::Object;
+            case PickingSystem::SelectionLevel::Member:
+                return HoverOutlinePass::TargetMode::Member;
+            case PickingSystem::SelectionLevel::Node:
+                return HoverOutlinePass::TargetMode::Node;
+            case PickingSystem::SelectionLevel::Primitive:
+                return HoverOutlinePass::TargetMode::Primitive;
+            case PickingSystem::SelectionLevel::None:
+            default:
+                return fallback;
+        }
+    }
+
+    bool matches_instance_target(const RenderObject &draw, const PickingSystem::PickInfo &pick)
     {
         return draw.ownerType == pick.ownerType &&
                !draw.ownerName.empty() &&
                draw.ownerName == pick.ownerName;
     }
 
+    bool matches_object_target(const RenderObject &draw,
+                               const PickingSystem &picking,
+                               const PickingSystem::PickInfo &pick)
+    {
+        if (pick.objectName.empty() || draw.ownerName.empty())
+        {
+            return false;
+        }
+
+        const PickingSystem::OwnerBindingView binding = picking.resolve_owner_binding(draw.ownerType, draw.ownerName);
+        return !binding.object_name.empty() && binding.object_name == pick.objectName;
+    }
+
+    bool matches_member_target(const RenderObject &draw,
+                               const PickingSystem &picking,
+                               const PickingSystem::PickInfo &pick)
+    {
+        if (pick.objectName.empty() || pick.memberName.empty() || draw.ownerName.empty())
+        {
+            return false;
+        }
+
+        const PickingSystem::OwnerBindingView binding = picking.resolve_owner_binding(draw.ownerType, draw.ownerName);
+        return !binding.object_name.empty() &&
+               !binding.member_name.empty() &&
+               binding.object_name == pick.objectName &&
+               binding.member_name == pick.memberName;
+    }
+
+    bool matches_node_target(const RenderObject &draw, const PickingSystem::PickInfo &pick)
+    {
+        return matches_instance_target(draw, pick) &&
+               pick.ownerType == RenderObject::OwnerType::GLTFInstance &&
+               pick.node != nullptr &&
+               draw.sourceNode == pick.node;
+    }
+
     bool matches_primitive_target(const RenderObject &draw, const PickingSystem::PickInfo &pick)
     {
-        if (!matches_composite_target(draw, pick))
+        if (!matches_instance_target(draw, pick))
         {
             return false;
         }
@@ -84,10 +140,19 @@ namespace
         return false;
     }
 
-    std::vector<const RenderObject *> collect_hover_outline_draws(const EngineContext *context,
-                                                                 const DrawContext &draw_context,
-                                                                 const PickingSystem::PickInfo &pick,
-                                                                 HoverOutlinePass::TargetMode mode)
+    HoverOutlinePass::TargetMode resolve_channel_target_mode(const PickingSystem::PickInfo &pick,
+                                                             const HoverOutlinePass::ChannelSettings &channel)
+    {
+        return channel.use_pick_selection_level
+                   ? target_mode_from_selection_level(pick.selectionLevel, channel.target_mode)
+                   : channel.target_mode;
+    }
+
+    std::vector<const RenderObject *> collect_outline_draws(const EngineContext *context,
+                                                            const DrawContext &draw_context,
+                                                            const PickingSystem &picking,
+                                                            const PickingSystem::PickInfo &pick,
+                                                            const HoverOutlinePass::ChannelSettings &channel)
     {
         std::vector<const RenderObject *> draws{};
         if (!pick.valid ||
@@ -99,6 +164,7 @@ namespace
             return draws;
         }
 
+        const HoverOutlinePass::TargetMode mode = resolve_channel_target_mode(pick, channel);
         draws.reserve(draw_context.OpaqueSurfaces.size());
         for (const RenderObject &draw : draw_context.OpaqueSurfaces)
         {
@@ -107,10 +173,22 @@ namespace
                 continue;
             }
 
-            const bool matches =
-                (mode == HoverOutlinePass::TargetMode::Composite)
-                    ? matches_composite_target(draw, pick)
-                    : matches_primitive_target(draw, pick);
+            bool matches = false;
+            switch (mode)
+            {
+                case HoverOutlinePass::TargetMode::Primitive:
+                    matches = matches_primitive_target(draw, pick);
+                    break;
+                case HoverOutlinePass::TargetMode::Node:
+                    matches = matches_node_target(draw, pick);
+                    break;
+                case HoverOutlinePass::TargetMode::Member:
+                    matches = matches_member_target(draw, picking, pick);
+                    break;
+                case HoverOutlinePass::TargetMode::Object:
+                    matches = matches_object_target(draw, picking, pick);
+                    break;
+            }
             if (matches)
             {
                 draws.push_back(&draw);
@@ -191,7 +269,13 @@ void HoverOutlinePass::init(EngineContext *context)
     GraphicsPipelineCreateInfo composite_info{};
     composite_info.vertexShaderPath = _context->getAssets()->shaderPath("fullscreen.vert.spv");
     composite_info.fragmentShaderPath = _context->getAssets()->shaderPath("hover_outline_composite.frag.spv");
-    composite_info.setLayouts = {_singleImageLayout, _singleImageLayout, _singleImageLayout};
+    composite_info.setLayouts = {
+        _singleImageLayout,
+        _singleImageLayout,
+        _singleImageLayout,
+        _singleImageLayout,
+        _singleImageLayout,
+    };
     composite_info.pushConstants = {composite_pcr};
     composite_info.configure = [this](PipelineBuilder &b)
     {
@@ -232,10 +316,22 @@ RGImageHandle HoverOutlinePass::register_graph(RenderGraph *graph, RGImageHandle
         return ldrInput;
     }
 
-    const PickingSystem::PickInfo &hover = _context->picking->hover_pick();
-    const std::vector<const RenderObject *> draws =
-        collect_hover_outline_draws(_context, _context->getMainDrawContext(), hover, _settings.target_mode);
-    if (draws.empty())
+    PickingSystem &picking = *_context->picking;
+    const DrawContext &draw_context = _context->getMainDrawContext();
+    const PickingSystem::PickInfo &hover_pick = picking.hover_pick();
+    const PickingSystem::PickInfo &selection_pick = picking.last_pick();
+
+    const bool hover_suppressed = _settings.suppress_hover_when_selected && selection_pick.valid;
+    const std::vector<const RenderObject *> hover_draws =
+        (_settings.hover.enabled && !hover_suppressed)
+            ? collect_outline_draws(_context, draw_context, picking, hover_pick, _settings.hover)
+            : std::vector<const RenderObject *>{};
+    const std::vector<const RenderObject *> selection_draws =
+        _settings.selection.enabled
+            ? collect_outline_draws(_context, draw_context, picking, selection_pick, _settings.selection)
+            : std::vector<const RenderObject *>{};
+
+    if (hover_draws.empty() && selection_draws.empty())
     {
         return ldrInput;
     }
@@ -260,27 +356,36 @@ RGImageHandle HoverOutlinePass::register_graph(RenderGraph *graph, RGImageHandle
                      VK_IMAGE_USAGE_SAMPLED_BIT |
                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
-    RGImageHandle raw_mask = graph->create_image(mask_desc);
-    blur_desc.name = "hover_outline.blur_x";
-    RGImageHandle blur_x = graph->create_image(blur_desc);
-    blur_desc.name = "hover_outline.blur_y";
-    RGImageHandle blur_y = graph->create_image(blur_desc);
+    mask_desc.name = "hover_outline.hover.mask";
+    RGImageHandle hover_raw_mask = graph->create_image(mask_desc);
+    blur_desc.name = "hover_outline.hover.blur_x";
+    RGImageHandle hover_blur_x = graph->create_image(blur_desc);
+    blur_desc.name = "hover_outline.hover.blur_y";
+    RGImageHandle hover_blur_y = graph->create_image(blur_desc);
+
+    mask_desc.name = "hover_outline.selection.mask";
+    RGImageHandle selection_raw_mask = graph->create_image(mask_desc);
+    blur_desc.name = "hover_outline.selection.blur_x";
+    RGImageHandle selection_blur_x = graph->create_image(blur_desc);
+    blur_desc.name = "hover_outline.selection.blur_y";
+    RGImageHandle selection_blur_y = graph->create_image(blur_desc);
+
     RGImageHandle composite_output = graph->create_image(ldr_desc);
 
     graph->add_pass(
-        "HoverOutline.Mask",
+        "HoverOutline.HoverMask",
         RGPassType::Graphics,
-        [raw_mask, depthHandle, draws](RGPassBuilder &builder, EngineContext *)
+        [hover_raw_mask, depthHandle, hover_draws](RGPassBuilder &builder, EngineContext *)
         {
-            builder.write_color(raw_mask, true);
+            builder.write_color(hover_raw_mask, true);
             builder.write_depth(depthHandle, false);
 
             std::unordered_set<VkBuffer> index_set{};
             std::unordered_set<VkBuffer> vertex_set{};
-            index_set.reserve(draws.size());
-            vertex_set.reserve(draws.size());
+            index_set.reserve(hover_draws.size());
+            vertex_set.reserve(hover_draws.size());
 
-            for (const RenderObject *draw : draws)
+            for (const RenderObject *draw : hover_draws)
             {
                 if (!draw)
                 {
@@ -299,50 +404,129 @@ RGImageHandle HoverOutlinePass::register_graph(RenderGraph *graph, RGImageHandle
                 builder.read_buffer(buffer, RGBufferUsage::StorageRead, 0, "hover_outline.vertex");
             }
         },
-        [this, draws](VkCommandBuffer cmd, const RGPassResources &, EngineContext *ctx)
+        [this, hover_draws](VkCommandBuffer cmd, const RGPassResources &, EngineContext *ctx)
         {
-            draw_mask(cmd, ctx, draws);
+            draw_mask(cmd, ctx, hover_draws);
         });
 
     graph->add_pass(
-        "HoverOutline.BlurX",
+        "HoverOutline.HoverBlurX",
         RGPassType::Graphics,
-        [raw_mask, blur_x](RGPassBuilder &builder, EngineContext *)
+        [hover_raw_mask, hover_blur_x](RGPassBuilder &builder, EngineContext *)
         {
-            builder.read(raw_mask, RGImageUsage::SampledFragment);
-            builder.write_color(blur_x, true);
+            builder.read(hover_raw_mask, RGImageUsage::SampledFragment);
+            builder.write_color(hover_blur_x, true);
         },
-        [this, raw_mask, blur_extent](VkCommandBuffer cmd, const RGPassResources &resources, EngineContext *ctx)
+        [this, hover_raw_mask, blur_extent](VkCommandBuffer cmd, const RGPassResources &resources, EngineContext *ctx)
         {
-            draw_blur(cmd, ctx, resources, raw_mask, glm::vec2(1.0f, 0.0f), blur_extent);
+            draw_blur(cmd, ctx, resources, hover_raw_mask, glm::vec2(1.0f, 0.0f), blur_extent, _settings.hover.blur_radius_px);
         });
 
     graph->add_pass(
-        "HoverOutline.BlurY",
+        "HoverOutline.HoverBlurY",
         RGPassType::Graphics,
-        [blur_x, blur_y](RGPassBuilder &builder, EngineContext *)
+        [hover_blur_x, hover_blur_y](RGPassBuilder &builder, EngineContext *)
         {
-            builder.read(blur_x, RGImageUsage::SampledFragment);
-            builder.write_color(blur_y, true);
+            builder.read(hover_blur_x, RGImageUsage::SampledFragment);
+            builder.write_color(hover_blur_y, true);
         },
-        [this, blur_x, blur_extent](VkCommandBuffer cmd, const RGPassResources &resources, EngineContext *ctx)
+        [this, hover_blur_x, blur_extent](VkCommandBuffer cmd, const RGPassResources &resources, EngineContext *ctx)
         {
-            draw_blur(cmd, ctx, resources, blur_x, glm::vec2(0.0f, 1.0f), blur_extent);
+            draw_blur(cmd, ctx, resources, hover_blur_x, glm::vec2(0.0f, 1.0f), blur_extent, _settings.hover.blur_radius_px);
+        });
+
+    graph->add_pass(
+        "HoverOutline.SelectionMask",
+        RGPassType::Graphics,
+        [selection_raw_mask, depthHandle, selection_draws](RGPassBuilder &builder, EngineContext *)
+        {
+            builder.write_color(selection_raw_mask, true);
+            builder.write_depth(depthHandle, false);
+
+            std::unordered_set<VkBuffer> index_set{};
+            std::unordered_set<VkBuffer> vertex_set{};
+            index_set.reserve(selection_draws.size());
+            vertex_set.reserve(selection_draws.size());
+
+            for (const RenderObject *draw : selection_draws)
+            {
+                if (!draw)
+                {
+                    continue;
+                }
+                if (draw->indexBuffer) index_set.insert(draw->indexBuffer);
+                if (draw->vertexBuffer) vertex_set.insert(draw->vertexBuffer);
+            }
+
+            for (VkBuffer buffer : index_set)
+            {
+                builder.read_buffer(buffer, RGBufferUsage::IndexRead, 0, "hover_outline.index");
+            }
+            for (VkBuffer buffer : vertex_set)
+            {
+                builder.read_buffer(buffer, RGBufferUsage::StorageRead, 0, "hover_outline.vertex");
+            }
+        },
+        [this, selection_draws](VkCommandBuffer cmd, const RGPassResources &, EngineContext *ctx)
+        {
+            draw_mask(cmd, ctx, selection_draws);
+        });
+
+    graph->add_pass(
+        "HoverOutline.SelectionBlurX",
+        RGPassType::Graphics,
+        [selection_raw_mask, selection_blur_x](RGPassBuilder &builder, EngineContext *)
+        {
+            builder.read(selection_raw_mask, RGImageUsage::SampledFragment);
+            builder.write_color(selection_blur_x, true);
+        },
+        [this, selection_raw_mask, blur_extent](VkCommandBuffer cmd, const RGPassResources &resources, EngineContext *ctx)
+        {
+            draw_blur(cmd,
+                      ctx,
+                      resources,
+                      selection_raw_mask,
+                      glm::vec2(1.0f, 0.0f),
+                      blur_extent,
+                      _settings.selection.blur_radius_px);
+        });
+
+    graph->add_pass(
+        "HoverOutline.SelectionBlurY",
+        RGPassType::Graphics,
+        [selection_blur_x, selection_blur_y](RGPassBuilder &builder, EngineContext *)
+        {
+            builder.read(selection_blur_x, RGImageUsage::SampledFragment);
+            builder.write_color(selection_blur_y, true);
+        },
+        [this, selection_blur_x, blur_extent](VkCommandBuffer cmd, const RGPassResources &resources, EngineContext *ctx)
+        {
+            draw_blur(cmd,
+                      ctx,
+                      resources,
+                      selection_blur_x,
+                      glm::vec2(0.0f, 1.0f),
+                      blur_extent,
+                      _settings.selection.blur_radius_px);
         });
 
     graph->add_pass(
         "HoverOutline.Composite",
         RGPassType::Graphics,
-        [ldrInput, raw_mask, blur_y, composite_output](RGPassBuilder &builder, EngineContext *)
+        [ldrInput, hover_raw_mask, hover_blur_y, selection_raw_mask, selection_blur_y, composite_output](RGPassBuilder &builder, EngineContext *)
         {
             builder.read(ldrInput, RGImageUsage::SampledFragment);
-            builder.read(raw_mask, RGImageUsage::SampledFragment);
-            builder.read(blur_y, RGImageUsage::SampledFragment);
+            builder.read(hover_raw_mask, RGImageUsage::SampledFragment);
+            builder.read(hover_blur_y, RGImageUsage::SampledFragment);
+            builder.read(selection_raw_mask, RGImageUsage::SampledFragment);
+            builder.read(selection_blur_y, RGImageUsage::SampledFragment);
             builder.write_color(composite_output, true);
         },
-        [this, ldrInput, raw_mask, blur_y](VkCommandBuffer cmd, const RGPassResources &resources, EngineContext *ctx)
+        [this, ldrInput, hover_raw_mask, hover_blur_y, selection_raw_mask, selection_blur_y](VkCommandBuffer cmd,
+                                                                                               const RGPassResources &resources,
+                                                                                               EngineContext *ctx)
         {
-            draw_composite(cmd, ctx, resources, ldrInput, raw_mask, blur_y);
+            draw_composite(cmd, ctx, resources, ldrInput, hover_raw_mask, hover_blur_y, selection_raw_mask, selection_blur_y);
         });
 
     return composite_output;
@@ -423,7 +607,8 @@ void HoverOutlinePass::draw_blur(VkCommandBuffer cmd,
                                  const RGPassResources &resources,
                                  RGImageHandle inputHandle,
                                  const glm::vec2 &direction,
-                                 VkExtent2D render_extent) const
+                                 VkExtent2D render_extent,
+                                 float radius_px) const
 {
     EngineContext *ctxLocal = context ? context : _context;
     if (!ctxLocal || !ctxLocal->currentFrame || !ctxLocal->getDevice() || !ctxLocal->getSamplers() || !_singleImageLayout)
@@ -456,7 +641,7 @@ void HoverOutlinePass::draw_blur(VkCommandBuffer cmd,
     push.inverse_extent.x = draw_extent.width > 0 ? 1.0f / static_cast<float>(draw_extent.width) : 0.0f;
     push.inverse_extent.y = draw_extent.height > 0 ? 1.0f / static_cast<float>(draw_extent.height) : 0.0f;
     push.direction = direction;
-    push.radius_px = std::max(_settings.blur_radius_px, 0.5f);
+    push.radius_px = std::max(radius_px, 0.5f);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &set, 0, nullptr);
@@ -474,8 +659,10 @@ void HoverOutlinePass::draw_composite(VkCommandBuffer cmd,
                                       EngineContext *context,
                                       const RGPassResources &resources,
                                       RGImageHandle ldrInput,
-                                      RGImageHandle rawMask,
-                                      RGImageHandle blurredMask) const
+                                      RGImageHandle hoverRawMask,
+                                      RGImageHandle hoverBlurredMask,
+                                      RGImageHandle selectionRawMask,
+                                      RGImageHandle selectionBlurredMask) const
 {
     EngineContext *ctxLocal = context ? context : _context;
     if (!ctxLocal || !ctxLocal->currentFrame || !ctxLocal->getDevice() || !ctxLocal->getSamplers() || !_singleImageLayout)
@@ -484,9 +671,15 @@ void HoverOutlinePass::draw_composite(VkCommandBuffer cmd,
     }
 
     const VkImageView ldr_view = resources.image_view(ldrInput);
-    const VkImageView raw_view = resources.image_view(rawMask);
-    const VkImageView blurred_view = resources.image_view(blurredMask);
-    if (ldr_view == VK_NULL_HANDLE || raw_view == VK_NULL_HANDLE || blurred_view == VK_NULL_HANDLE)
+    const VkImageView hover_raw_view = resources.image_view(hoverRawMask);
+    const VkImageView hover_blurred_view = resources.image_view(hoverBlurredMask);
+    const VkImageView selection_raw_view = resources.image_view(selectionRawMask);
+    const VkImageView selection_blurred_view = resources.image_view(selectionBlurredMask);
+    if (ldr_view == VK_NULL_HANDLE ||
+        hover_raw_view == VK_NULL_HANDLE ||
+        hover_blurred_view == VK_NULL_HANDLE ||
+        selection_raw_view == VK_NULL_HANDLE ||
+        selection_blurred_view == VK_NULL_HANDLE)
     {
         return;
     }
@@ -500,8 +693,10 @@ void HoverOutlinePass::draw_composite(VkCommandBuffer cmd,
 
     const VkDevice device = ctxLocal->getDevice()->device();
     VkDescriptorSet base_set = ctxLocal->currentFrame->_frameDescriptors.allocate(device, _singleImageLayout);
-    VkDescriptorSet raw_set = ctxLocal->currentFrame->_frameDescriptors.allocate(device, _singleImageLayout);
-    VkDescriptorSet blurred_set = ctxLocal->currentFrame->_frameDescriptors.allocate(device, _singleImageLayout);
+    VkDescriptorSet hover_raw_set = ctxLocal->currentFrame->_frameDescriptors.allocate(device, _singleImageLayout);
+    VkDescriptorSet hover_blurred_set = ctxLocal->currentFrame->_frameDescriptors.allocate(device, _singleImageLayout);
+    VkDescriptorSet selection_raw_set = ctxLocal->currentFrame->_frameDescriptors.allocate(device, _singleImageLayout);
+    VkDescriptorSet selection_blurred_set = ctxLocal->currentFrame->_frameDescriptors.allocate(device, _singleImageLayout);
 
     DescriptorWriter writer;
     writer.write_image(0, ldr_view, ctxLocal->getSamplers()->linearClampEdge(),
@@ -509,24 +704,39 @@ void HoverOutlinePass::draw_composite(VkCommandBuffer cmd,
     writer.update_set(device, base_set);
 
     writer.clear();
-    writer.write_image(0, raw_view, ctxLocal->getSamplers()->linearClampEdge(),
+    writer.write_image(0, hover_raw_view, ctxLocal->getSamplers()->linearClampEdge(),
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    writer.update_set(device, raw_set);
+    writer.update_set(device, hover_raw_set);
 
     writer.clear();
-    writer.write_image(0, blurred_view, ctxLocal->getSamplers()->linearClampEdge(),
+    writer.write_image(0, hover_blurred_view, ctxLocal->getSamplers()->linearClampEdge(),
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    writer.update_set(device, blurred_set);
+    writer.update_set(device, hover_blurred_set);
+
+    writer.clear();
+    writer.write_image(0, selection_raw_view, ctxLocal->getSamplers()->linearClampEdge(),
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    writer.update_set(device, selection_raw_set);
+
+    writer.clear();
+    writer.write_image(0, selection_blurred_view, ctxLocal->getSamplers()->linearClampEdge(),
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    writer.update_set(device, selection_blurred_set);
 
     CompositePush push{};
-    push.color_intensity = glm::vec4(_settings.color, std::max(_settings.intensity, 0.0f));
-    push.params.x = std::max(_settings.outline_width_px, 0.25f);
-    push.params.y = std::max(_settings.blur_radius_px, 0.5f);
+    push.hover_color_intensity = glm::vec4(_settings.hover.color, std::max(_settings.hover.intensity, 0.0f));
+    push.selection_color_intensity = glm::vec4(_settings.selection.color, std::max(_settings.selection.intensity, 0.0f));
+    push.params.x = std::max(_settings.hover.outline_width_px, 0.25f);
+    push.params.y = std::max(_settings.hover.blur_radius_px, 0.5f);
+    push.params.z = std::max(_settings.selection.outline_width_px, 0.25f);
+    push.params.w = std::max(_settings.selection.blur_radius_px, 0.5f);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &base_set, 0, nullptr);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1, &raw_set, 0, nullptr);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 2, 1, &blurred_set, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1, &hover_raw_set, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 2, 1, &hover_blurred_set, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 3, 1, &selection_raw_set, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 4, 1, &selection_blurred_set, 0, nullptr);
     vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(CompositePush), &push);
 
     const VkExtent2D extent = ctxLocal->getDrawExtent();
