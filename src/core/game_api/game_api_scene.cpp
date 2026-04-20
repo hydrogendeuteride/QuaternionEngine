@@ -2,6 +2,7 @@
 #include "core/engine.h"
 #include "core/context.h"
 #include "core/assets/manager.h"
+#include "core/picking/picking_system.h"
 #include "scene/vk_scene.h"
 
 // Ensure GameAPI::DecalShape and ::DecalShape stay in sync.
@@ -77,12 +78,32 @@ uint32_t Engine::add_gltf_instance_async(const std::string& name,
 
 bool Engine::remove_gltf_instance(const std::string& name)
 {
-    return _engine->_sceneManager ? _engine->_sceneManager->removeGLTFInstance(name) : false;
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    const bool removed = _engine->_sceneManager->removeGLTFInstance(name);
+    if (removed)
+    {
+        clear_instance_selection_object_binding(name);
+    }
+    return removed;
 }
 
 bool Engine::remove_render_instance(const std::string& name)
 {
-    return _engine->_sceneManager ? _engine->_sceneManager->removeDynamicInstance(name) : false;
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    const bool removed = _engine->_sceneManager->removeDynamicInstance(name);
+    if (removed)
+    {
+        clear_instance_selection_object_binding(name);
+    }
+    return removed;
 }
 
 bool Engine::get_gltf_instance_transform(const std::string& name, Transform& out) const
@@ -242,7 +263,17 @@ bool Engine::add_textured_primitive(const std::string& name,
 
 bool Engine::remove_mesh_instance(const std::string& name)
 {
-    return _engine->_sceneManager ? _engine->_sceneManager->removeMeshInstance(name) : false;
+    if (!_engine || !_engine->_sceneManager)
+    {
+        return false;
+    }
+
+    const bool removed = _engine->_sceneManager->removeMeshInstance(name);
+    if (removed)
+    {
+        clear_instance_selection_object_binding(name);
+    }
+    return removed;
 }
 
 bool Engine::set_decal(const std::string& name, const Decal& decal)
@@ -386,6 +417,11 @@ void Engine::clear_all_instances()
     {
         _engine->_sceneManager->clearGLTFInstances();
         _engine->_sceneManager->clearMeshInstances();
+    }
+
+    if (PickingSystem *picking = _engine ? _engine->picking() : nullptr)
+    {
+        picking->clear_all_owner_bindings();
     }
 }
 

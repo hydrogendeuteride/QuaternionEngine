@@ -161,7 +161,7 @@ namespace
 
         if (pick.kind == PickingSystem::PickInfo::Kind::SceneObject)
         {
-            pick.selectionLevel = PickingSystem::SelectionLevel::Primitive;
+            pick.selectionLevel = PickingSystem::SelectionLevel::Member;
         }
         else
         {
@@ -171,9 +171,15 @@ namespace
 
     void apply_click_selection_level(PickingSystem::PickInfo &pick)
     {
-        pick.selectionLevel = pick.valid
-                                  ? PickingSystem::SelectionLevel::Object
-                                  : PickingSystem::SelectionLevel::None;
+        if (!pick.valid)
+        {
+            pick.selectionLevel = PickingSystem::SelectionLevel::None;
+            return;
+        }
+
+        pick.selectionLevel = (pick.kind == PickingSystem::PickInfo::Kind::SceneObject)
+                                  ? PickingSystem::SelectionLevel::Member
+                                  : PickingSystem::SelectionLevel::Object;
     }
 
     struct RaySegmentClosest
@@ -853,6 +859,12 @@ void PickingSystem::clear_owner_picks(RenderObject::OwnerType owner_type, const 
                                              }),
                               _drag_selection.end());
     }
+}
+
+void PickingSystem::clear_all_owner_bindings()
+{
+    _gltf_owner_bindings.clear();
+    _mesh_owner_bindings.clear();
 }
 
 void PickingSystem::set_owner_binding(RenderObject::OwnerType owner_type,

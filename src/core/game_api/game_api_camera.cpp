@@ -491,7 +491,7 @@ bool Engine::set_camera_target_from_last_pick()
     }
     else if (pick.ownerType == RenderObject::OwnerType::GLTFInstance)
     {
-        if (!pick.nodeName.empty())
+        if (pick.selectionLevel == PickingSystem::SelectionLevel::Node && !pick.nodeName.empty())
         {
             glm::mat4 node_world{1.0f};
             if (_engine->_sceneManager->getGLTFInstanceNodeWorldTransform(pick.ownerName, pick.nodeName, node_world))
@@ -504,6 +504,12 @@ bool Engine::set_camera_target_from_last_pick()
                 t.type = ::CameraTargetType::GLTFInstance;
                 t.name = pick.ownerName;
             }
+        }
+        else if (pick.selectionLevel == PickingSystem::SelectionLevel::Member ||
+                 pick.selectionLevel == PickingSystem::SelectionLevel::Primitive)
+        {
+            t.type = ::CameraTargetType::WorldPoint;
+            t.world_point = pick.worldPos;
         }
         else
         {

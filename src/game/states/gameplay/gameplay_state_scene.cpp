@@ -12,6 +12,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <optional>
 #include <string>
@@ -25,6 +26,8 @@ namespace Game
 
     namespace
     {
+        constexpr const char *kSelectionDemoCompositeName = "selection_demo_composite";
+
         glm::vec4 celestial_mesh_base_color(const std::string &name)
         {
             if (name == "moon")
@@ -406,6 +409,78 @@ namespace Game
         const glm::dvec3 v_origin_world =
                 _physics_context ? _physics_context->velocity_origin_world() : glm::dvec3(0.0);
 
+        auto attach_selection_demo_composite = [&](Entity &entity) -> bool {
+            if (!ctx.api || entity.render_name().empty())
+            {
+                return false;
+            }
+
+            struct MemberSpec
+            {
+                const char *name;
+                GameAPI::PrimitiveType primitive{GameAPI::PrimitiveType::Cube};
+                glm::vec3 local_position{0.0f};
+                glm::vec3 local_scale{1.0f};
+                glm::vec4 color{1.0f};
+            };
+
+            const std::array<MemberSpec, 2> member_specs{{
+                    {"port_pod",
+                     GameAPI::PrimitiveType::Cube,
+                     glm::vec3(-1.05f, 0.0f, -0.25f),
+                     glm::vec3(0.38f, 0.22f, 0.82f),
+                     glm::vec4(0.92f, 0.48f, 0.18f, 1.0f)},
+                    {"starboard_pod",
+                     GameAPI::PrimitiveType::Cube,
+                     glm::vec3(1.05f, 0.0f, -0.25f),
+                     glm::vec3(0.38f, 0.22f, 0.82f),
+                     glm::vec4(0.18f, 0.78f, 0.98f, 1.0f)},
+            }};
+
+            for (const MemberSpec &spec : member_specs)
+            {
+                Attachment attachment{};
+                attachment.name = spec.name;
+                attachment.render_name = entity.render_name() + "_" + spec.name;
+                attachment.local_position = spec.local_position;
+                attachment.local_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+                attachment.local_scale = spec.local_scale;
+
+                Transform local_transform{};
+                local_transform.position_world = WorldVec3(attachment.local_position);
+                local_transform.rotation = attachment.local_rotation;
+                local_transform.scale = attachment.local_scale;
+
+                const Transform world_transform = entity.transform() * local_transform;
+
+                GameAPI::TransformD api_transform{};
+                api_transform.position = glm::dvec3(world_transform.position_world);
+                api_transform.rotation = world_transform.rotation;
+                api_transform.scale = world_transform.scale;
+
+                GameAPI::PrimitiveMaterial material{};
+                material.colorFactor = spec.color;
+                material.metallic = 0.0f;
+                material.roughness = 0.35f;
+
+                if (!ctx.api->add_textured_primitive(attachment.render_name,
+                                                     spec.primitive,
+                                                     material,
+                                                     api_transform))
+                {
+                    return false;
+                }
+
+                entity.add_attachment(attachment);
+                if (!_world.bind_render_selection(attachment.render_name, entity.name(), attachment.name))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        };
+
         // Spawn orbiter entities from config
         auto spawn_orbiter = [&](const ScenarioConfig::OrbiterDef &orbiter_def,
                                  const WorldVec3 &pos_world,
@@ -421,6 +496,11 @@ namespace Game
             const bool render_is_gltf = !orbiter_def.gltf_path.empty();
 
             auto builder = _world.builder(orbiter_def.name).transform(tr);
+            builder.selection_binding(orbiter_def.name, "body");
+            if (orbiter_def.name == kSelectionDemoCompositeName)
+            {
+                builder.render_sync_mode(Entity::RenderSyncMode::Authoritative);
+            }
             if (render_is_gltf)
             {
                 builder.render_gltf(orbiter_def.gltf_path);
@@ -447,6 +527,14 @@ namespace Game
 
             if (!ent)
             {
+                out_id = EntityId{};
+                return;
+            }
+
+            if (orbiter_def.name == kSelectionDemoCompositeName &&
+                !attach_selection_demo_composite(*ent))
+            {
+                (void) _world.destroy_entity(ent->id());
                 out_id = EntityId{};
                 return;
             }
@@ -484,9 +572,54 @@ namespace Game
 
         // Spawn all orbiters from config
         const auto &cfg = _scenario_config;
+        std::vector<ScenarioConfig::OrbiterDef> orbiter_defs = cfg.orbiters;
+
+        {
+            ScenarioConfig::OrbiterDef demo_composite{};
+            demo_composite.name = kSelectionDemoCompositeName;
+            demo_composite.prediction_group = "flight";
+            demo_composite.primitive = GameAPI::PrimitiveType::Capsule;
+            demo_composite.render_scale = glm::vec3(1.35f);
+            demo_composite.body_settings
+                    .set_shape(Physics::CollisionShape::Capsule(0.7f, 1.1f))
+                    .set_dynamic()
+                    .set_layer(Physics::Layer::Dynamic)
+                    .set_gravity_scale(0.0f)
+                    .set_friction(0.2f)
+                    .set_restitution(0.1f)
+                    .set_linear_damping(0.0f)
+                    .set_angular_damping(0.0f)
+                    .set_mass(850.0f);
+
+            const glm::dvec3 player_rel_pos = glm::dvec3(player_pos_world - cfg.system_center);
+            const glm::dvec3 player_orbit_normal = glm::cross(player_rel_pos, player_vel_world);
+            const double player_orbit_radius_m = glm::length(player_rel_pos);
+            const double player_orbit_normal_len = glm::length(player_orbit_normal);
+
+            if (player_orbit_radius_m > 1.0 && player_orbit_normal_len > 1e-6)
+            {
+                constexpr double kDemoShipAlongTrackSpacingM = 120.0;
+                const double phase_offset_rad = kDemoShipAlongTrackSpacingM / player_orbit_radius_m;
+                const glm::dquat phase_rotation = glm::angleAxis(
+                        phase_offset_rad,
+                        player_orbit_normal / player_orbit_normal_len);
+                const glm::dvec3 demo_rel_pos = phase_rotation * player_rel_pos;
+                const glm::dvec3 demo_vel_world = phase_rotation * player_vel_world;
+
+                demo_composite.offset_from_player = demo_rel_pos - player_rel_pos;
+                demo_composite.relative_velocity = demo_vel_world - player_vel_world;
+            }
+            else
+            {
+                demo_composite.offset_from_player = glm::dvec3(0.0, 0.0, -120.0);
+                demo_composite.relative_velocity = glm::dvec3(0.0);
+            }
+
+            orbiter_defs.push_back(std::move(demo_composite));
+        }
 
         bool primary_player_spawned = false;
-        for (const auto &orbiter_def : cfg.orbiters)
+        for (const auto &orbiter_def : orbiter_defs)
         {
             const bool is_primary_player = orbiter_def.is_player && !primary_player_spawned;
             WorldVec3 pos_world = player_pos_world + WorldVec3(orbiter_def.offset_from_player);

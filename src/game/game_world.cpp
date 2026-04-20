@@ -27,6 +27,7 @@ namespace Game
             {
                 return;
             }
+            api.clear_instance_selection_object_binding(name);
             (void) api.remove_render_instance(name);
         }
     } // namespace
@@ -155,6 +156,14 @@ namespace Game
         return *this;
     }
 
+    GameWorld::EntityBuilder &GameWorld::EntityBuilder::selection_binding(const std::string &object_name,
+                                                                          const std::string &member_name)
+    {
+        _selection_object_name = object_name;
+        _selection_member_name = member_name;
+        return *this;
+    }
+
     GameWorld::EntityBuilder &GameWorld::EntityBuilder::physics(const Physics::BodySettings &settings,
                                                                 bool use_interpolation,
                                                                 bool override_user_data)
@@ -233,6 +242,11 @@ namespace Game
             }
         }
 
+        if (entity.has_render() && !_selection_object_name.empty())
+        {
+            (void) world.bind_render_selection(entity.render_name(), _selection_object_name, _selection_member_name);
+        }
+
         if (_wants_physics)
         {
             Physics::BodySettings settings = _physics_settings;
@@ -299,6 +313,18 @@ namespace Game
         entity->set_render_name(render_name);
         entity->set_render_sync_mode(sync_mode);
         return true;
+    }
+
+    bool GameWorld::bind_render_selection(const std::string &render_name,
+                                          const std::string &object_name,
+                                          const std::string &member_name)
+    {
+        if (!_api || render_name.empty() || object_name.empty())
+        {
+            return false;
+        }
+
+        return _api->bind_instance_to_selection_object(render_name, object_name, member_name);
     }
 
     bool GameWorld::bind_physics(EntityId id,

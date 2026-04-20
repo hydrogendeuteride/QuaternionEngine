@@ -87,6 +87,10 @@ namespace Game
                          const std::string &render_name,
                          Entity::RenderSyncMode sync_mode = Entity::RenderSyncMode::Interpolated);
 
+        bool bind_render_selection(const std::string &render_name,
+                                   const std::string &object_name,
+                                   const std::string &member_name = {});
+
         bool bind_physics(EntityId id,
                           uint32_t body_value,
                           bool use_interpolation = true,
@@ -120,6 +124,9 @@ namespace Game
 
         EntityBuilder &render_sync_mode(Entity::RenderSyncMode mode);
 
+        EntityBuilder &selection_binding(const std::string &object_name,
+                                        const std::string &member_name = {});
+
         EntityBuilder &physics(const Physics::BodySettings &settings,
                                bool use_interpolation = true,
                                bool override_user_data = true);
@@ -148,6 +155,8 @@ namespace Game
         std::string _gltf_path{};
         bool _gltf_preload{true};
         Entity::RenderSyncMode _render_sync_mode{Entity::RenderSyncMode::Interpolated};
+        std::string _selection_object_name{};
+        std::string _selection_member_name{};
 
         bool _wants_physics{false};
         Physics::BodySettings _physics_settings{};

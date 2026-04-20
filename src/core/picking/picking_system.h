@@ -142,6 +142,7 @@ public:
     void set_debug_draw_bvh(bool enabled) { _debug_draw_bvh = enabled; }
 
     void clear_owner_picks(RenderObject::OwnerType owner_type, const std::string &owner_name);
+    void clear_all_owner_bindings();
 
     void set_owner_binding(RenderObject::OwnerType owner_type,
                            const std::string &owner_name,
@@ -180,7 +181,8 @@ public:
     PickInfo *mutable_last_pick() { return &_last_pick; }
     PickInfo *mutable_hover_pick() { return &_hover_pick; }
 
-    // Hierarchical selection helpers for glTF picks.
+    // Selection-level helpers. The glTF node traversal helpers remain available
+    // for legacy tooling, but object/member/primitive selection is preferred.
     bool move_last_pick_to_parent();
     bool move_last_pick_to_child(size_t child_index = 0);
     bool move_last_pick_to_child(const std::string &child_name);

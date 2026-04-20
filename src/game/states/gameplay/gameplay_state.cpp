@@ -111,8 +111,8 @@ namespace Game
             gameplay_outline.hover.scope = GameAPI::Engine::SelectionLevel::Object;
             gameplay_outline.hover.useSelectionLevel = false;
             gameplay_outline.selection.enabled = true;
-            gameplay_outline.selection.scope = GameAPI::Engine::SelectionLevel::Node;
-            gameplay_outline.selection.useSelectionLevel = false;
+            gameplay_outline.selection.scope = GameAPI::Engine::SelectionLevel::Member;
+            gameplay_outline.selection.useSelectionLevel = true;
             ctx.api->set_outline_settings(gameplay_outline);
         }
 

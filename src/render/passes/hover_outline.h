@@ -43,7 +43,7 @@ public:
             1.0f,
             3.0f,
             4.0f,
-            TargetMode::Object,
+            TargetMode::Member,
             true,
         };
     };
