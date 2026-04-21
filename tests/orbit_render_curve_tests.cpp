@@ -48,7 +48,35 @@ namespace
                                         glm::dvec3(1.0, 4.0, 0.0)));
         return segments;
     }
+
+    void expect_vec3_near(const glm::dvec3 &actual, const glm::dvec3 &expected, const double tol)
+    {
+        EXPECT_NEAR(actual.x, expected.x, tol);
+        EXPECT_NEAR(actual.y, expected.y, tol);
+        EXPECT_NEAR(actual.z, expected.z, tol);
+    }
 } // namespace
+
+TEST(TrajectorySegmentEvaluationTests, EvaluatesHermiteStateAndClampsToSegmentBounds)
+{
+    const orbitsim::TrajectorySegment segment = make_segment(10.0,
+                                                             2.0,
+                                                             glm::dvec3(0.0, 0.0, 0.0),
+                                                             glm::dvec3(5.0, 0.0, 0.0),
+                                                             glm::dvec3(10.0, 0.0, 0.0),
+                                                             glm::dvec3(5.0, 0.0, 0.0));
+
+    const orbitsim::State mid = orbitsim::trajectory_segment_state_at(segment, 11.0);
+    expect_vec3_near(mid.position_m, glm::dvec3(5.0, 0.0, 0.0), 1.0e-12);
+    expect_vec3_near(mid.velocity_mps, glm::dvec3(5.0, 0.0, 0.0), 1.0e-12);
+
+    expect_vec3_near(orbitsim::trajectory_segment_position_at(segment, 9.0),
+                     segment.start.position_m,
+                     1.0e-12);
+    expect_vec3_near(orbitsim::trajectory_segment_position_at(segment, 13.0),
+                     segment.end.position_m,
+                     1.0e-12);
+}
 
 TEST(OrbitRenderCurveTests, BuildCreatesHierarchyForCurvedSegments)
 {

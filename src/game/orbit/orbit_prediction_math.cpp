@@ -1,6 +1,8 @@
 #include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 
+#include "orbitsim/math.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -147,20 +149,9 @@ namespace Game::OrbitPredictionMath
         }
         u = std::clamp(u, 0.0, 1.0);
 
-        const double u2 = u * u;
-        const double u3 = u2 * u;
-
-        const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-        const double h10 = u3 - (2.0 * u2) + u;
-        const double h01 = (-2.0 * u3) + (3.0 * u2);
-        const double h11 = u3 - u2;
-
-        const glm::dvec3 p0 = glm::dvec3(a.position_m);
-        const glm::dvec3 p1 = glm::dvec3(b.position_m);
-        const glm::dvec3 m0 = glm::dvec3(a.velocity_mps) * h;
-        const glm::dvec3 m1 = glm::dvec3(b.velocity_mps) * h;
-
-        const glm::dvec3 p = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
+        const glm::dvec3 p = orbitsim::hermite_position(a.position_m, a.velocity_mps,
+                                                        b.position_m, b.velocity_mps,
+                                                        h, u);
         return ref_body_world + WorldVec3(p);
     }
 } // namespace Game::OrbitPredictionMath

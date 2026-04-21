@@ -1,6 +1,8 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 
+#include "game/orbit/orbit_prediction_math.h"
+
 #include "orbitsim/trajectory_transforms.hpp"
 
 #include <algorithm>
@@ -13,43 +15,6 @@ namespace Game
     namespace
     {
         using namespace ManeuverUtil;
-
-        WorldVec3 hermite_position_world(const WorldVec3 &ref_body_world,
-                                         const orbitsim::TrajectorySample &a,
-                                         const orbitsim::TrajectorySample &b,
-                                         const double t_s)
-        {
-            const double ta = a.t_s;
-            const double tb = b.t_s;
-            const double h = tb - ta;
-            if (!std::isfinite(h) || !(h > 0.0))
-            {
-                return ref_body_world + WorldVec3(a.position_m);
-            }
-
-            double u = (t_s - ta) / h;
-            if (!std::isfinite(u))
-            {
-                u = 0.0;
-            }
-            u = std::clamp(u, 0.0, 1.0);
-
-            const double u2 = u * u;
-            const double u3 = u2 * u;
-
-            const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-            const double h10 = u3 - (2.0 * u2) + u;
-            const double h01 = (-2.0 * u3) + (3.0 * u2);
-            const double h11 = u3 - u2;
-
-            const glm::dvec3 p0 = glm::dvec3(a.position_m);
-            const glm::dvec3 p1 = glm::dvec3(b.position_m);
-            const glm::dvec3 m0 = glm::dvec3(a.velocity_mps) * h;
-            const glm::dvec3 m1 = glm::dvec3(b.velocity_mps) * h;
-
-            const glm::dvec3 p = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-            return ref_body_world + WorldVec3(p);
-        }
 
         struct TrajectorySampledState
         {
@@ -103,7 +68,7 @@ namespace Game
             }
             u = clamp_sane(u, 0.0, 1.0, 0.0);
 
-            out.position_world = hermite_position_world(ref_body_world, a, b, t_clamped);
+            out.position_world = OrbitPredictionMath::hermite_position_world(ref_body_world, a, b, t_clamped);
             out.r_rel_m = glm::mix(glm::dvec3(a.position_m), glm::dvec3(b.position_m), u);
             out.v_rel_mps = glm::mix(glm::dvec3(a.velocity_mps), glm::dvec3(b.velocity_mps), u);
             out.valid = finite3(out.r_rel_m) && finite3(out.v_rel_mps);

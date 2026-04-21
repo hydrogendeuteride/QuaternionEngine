@@ -5,6 +5,7 @@
 #include "game/orbit/prediction/orbit_prediction_service_internal.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
 
+#include "orbitsim/math.hpp"
 #include "orbitsim/trajectory_transforms.hpp"
 
 #include <algorithm>
@@ -62,23 +63,12 @@ namespace Game::PredictionCacheInternal
         }
         u = std::clamp(u, 0.0, 1.0);
 
-        const double u2 = u * u;
-        const double u3 = u2 * u;
-        const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-        const double h10 = u3 - (2.0 * u2) + u;
-        const double h01 = (-2.0 * u3) + (3.0 * u2);
-        const double h11 = u3 - u2;
-        const double dh00 = (6.0 * u2) - (6.0 * u);
-        const double dh10 = (3.0 * u2) - (4.0 * u) + 1.0;
-        const double dh01 = (-6.0 * u2) + (6.0 * u);
-        const double dh11 = (3.0 * u2) - (2.0 * u);
-
-        const glm::dvec3 p0 = glm::dvec3(a.position_m);
-        const glm::dvec3 p1 = glm::dvec3(b.position_m);
-        const glm::dvec3 m0 = glm::dvec3(a.velocity_mps) * h;
-        const glm::dvec3 m1 = glm::dvec3(b.velocity_mps) * h;
-        const glm::dvec3 pos = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-        const glm::dvec3 vel = ((dh00 * p0) + (dh10 * m0) + (dh01 * p1) + (dh11 * m1)) / h;
+        const glm::dvec3 pos = orbitsim::hermite_position(a.position_m, a.velocity_mps,
+                                                          b.position_m, b.velocity_mps,
+                                                          h, u);
+        const glm::dvec3 vel = orbitsim::hermite_velocity_mps(a.position_m, a.velocity_mps,
+                                                              b.position_m, b.velocity_mps,
+                                                              h, u);
         if (!finite_vec3(pos) || !finite_vec3(vel))
         {
             return false;

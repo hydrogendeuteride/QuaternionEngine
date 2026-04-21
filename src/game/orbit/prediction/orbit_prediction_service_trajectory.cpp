@@ -70,43 +70,8 @@ namespace Game
                             const double t_s,
                             orbitsim::State &out_state)
     {
-        out_state = segment.start;
-        if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s) || !std::isfinite(t_s))
-        {
-            return finite_vec3(out_state.position_m) && finite_vec3(out_state.velocity_mps);
-        }
-
-        double u = (t_s - segment.t0_s) / segment.dt_s;
-        if (!std::isfinite(u))
-        {
-            u = 0.0;
-        }
-        u = std::clamp(u, 0.0, 1.0);
-
-        const double u2 = u * u;
-        const double u3 = u2 * u;
-        const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-        const double h10 = u3 - (2.0 * u2) + u;
-        const double h01 = (-2.0 * u3) + (3.0 * u2);
-        const double h11 = u3 - u2;
-        const double dh00 = (6.0 * u2) - (6.0 * u);
-        const double dh10 = (3.0 * u2) - (4.0 * u) + 1.0;
-        const double dh01 = (-6.0 * u2) + (6.0 * u);
-        const double dh11 = (3.0 * u2) - (2.0 * u);
-
-        const glm::dvec3 p0 = glm::dvec3(segment.start.position_m);
-        const glm::dvec3 p1 = glm::dvec3(segment.end.position_m);
-        const glm::dvec3 m0 = glm::dvec3(segment.start.velocity_mps) * segment.dt_s;
-        const glm::dvec3 m1 = glm::dvec3(segment.end.velocity_mps) * segment.dt_s;
-        const glm::dvec3 pos = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-        const glm::dvec3 vel = ((dh00 * p0) + (dh10 * m0) + (dh01 * p1) + (dh11 * m1)) / segment.dt_s;
-        if (!finite_vec3(pos) || !finite_vec3(vel))
-        {
-            return false;
-        }
-
-        out_state = orbitsim::make_state(pos, vel);
-        return true;
+        out_state = orbitsim::trajectory_segment_state_at(segment, t_s);
+        return finite_state(out_state);
     }
 
     bool sample_trajectory_segment_state(const std::vector<orbitsim::TrajectorySegment> &segments,
