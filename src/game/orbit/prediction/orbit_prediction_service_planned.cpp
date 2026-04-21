@@ -17,6 +17,15 @@ namespace Game
     namespace
     {
         constexpr std::size_t kMaxCachedPlannedChunks = 512u;
+        // Cache keys only select candidates; find_cached_chunk validates state continuity before reuse.
+        constexpr double kBaselineCacheStartTimeQuantumS = 0.001;
+        constexpr double kBaselineCachePositionQuantumM = 1.0;
+        constexpr double kBaselineCacheVelocityQuantumMps = 1.0e-3;
+        constexpr double kBaselineCacheSpinAxisQuantum = 1.0e-6;
+        constexpr double kBaselineCacheSpinAngleQuantumRad = 1.0e-6;
+        constexpr double kBaselineCacheSpinRateQuantumRadPerS = 1.0e-6;
+        constexpr double kManeuverCacheTimeQuantumS = 0.001;
+        constexpr double kManeuverCacheDvQuantumMps = 1.0e-6;
 
         template<typename T>
         void hash_combine(uint64_t &seed, const T &value)
@@ -30,6 +39,65 @@ namespace Game
             hash_combine(seed, v.x);
             hash_combine(seed, v.y);
             hash_combine(seed, v.z);
+            return seed;
+        }
+
+        int64_t quantized_cache_tick(const double value, const double quantum)
+        {
+            if (!std::isfinite(value) || !(quantum > 0.0))
+            {
+                return 0;
+            }
+
+            const long double scaled = static_cast<long double>(value) / static_cast<long double>(quantum);
+            const long double rounded = std::round(scaled);
+            constexpr long double min_tick =
+                    static_cast<long double>(std::numeric_limits<int64_t>::min());
+            constexpr long double max_tick =
+                    static_cast<long double>(std::numeric_limits<int64_t>::max());
+            if (rounded <= min_tick)
+            {
+                return std::numeric_limits<int64_t>::min();
+            }
+            if (rounded >= max_tick)
+            {
+                return std::numeric_limits<int64_t>::max();
+            }
+            return static_cast<int64_t>(rounded);
+        }
+
+        double planned_chunk_cache_time_quantum_s(const OrbitPredictionService::PredictionProfileId profile_id)
+        {
+            switch (profile_id)
+            {
+            case OrbitPredictionService::PredictionProfileId::Exact:
+                return 0.001;
+            case OrbitPredictionService::PredictionProfileId::Near:
+                return 0.1;
+            case OrbitPredictionService::PredictionProfileId::Tail:
+                return 1.0;
+            }
+            return 0.1;
+        }
+
+        uint64_t hash_quantized_vec3(const orbitsim::Vec3 &v, const double quantum)
+        {
+            uint64_t seed = 0xcbf29ce484222325ULL;
+            hash_combine(seed, quantized_cache_tick(v.x, quantum));
+            hash_combine(seed, quantized_cache_tick(v.y, quantum));
+            hash_combine(seed, quantized_cache_tick(v.z, quantum));
+            return seed;
+        }
+
+        uint64_t hash_quantized_state(const orbitsim::State &state)
+        {
+            uint64_t seed = hash_quantized_vec3(state.position_m, kBaselineCachePositionQuantumM);
+            hash_combine(seed, hash_quantized_vec3(state.velocity_mps, kBaselineCacheVelocityQuantumMps));
+            hash_combine(seed, quantized_cache_tick(state.spin.axis.x, kBaselineCacheSpinAxisQuantum));
+            hash_combine(seed, quantized_cache_tick(state.spin.axis.y, kBaselineCacheSpinAxisQuantum));
+            hash_combine(seed, quantized_cache_tick(state.spin.axis.z, kBaselineCacheSpinAxisQuantum));
+            hash_combine(seed, quantized_cache_tick(state.spin.angle_rad, kBaselineCacheSpinAngleQuantumRad));
+            hash_combine(seed, quantized_cache_tick(state.spin.rate_rad_per_s, kBaselineCacheSpinRateQuantumRadPerS));
             return seed;
         }
 
@@ -84,20 +152,20 @@ namespace Game
         {
             uint64_t seed = 0xcbf29ce484222325ULL;
             hash_combine(seed, request.track_id);
-            hash_combine(seed, start_time_s);
-            hash_combine(seed, hash_state(start_state));
+            hash_combine(seed, quantized_cache_tick(start_time_s, kBaselineCacheStartTimeQuantumS));
+            hash_combine(seed, hash_quantized_state(start_state));
             return seed;
         }
 
-        uint64_t hash_maneuver_impulse(const OrbitPredictionService::ManeuverImpulse &impulse)
+        uint64_t hash_maneuver_impulse_for_cache(const OrbitPredictionService::ManeuverImpulse &impulse)
         {
             uint64_t seed = 0xcbf29ce484222325ULL;
             hash_combine(seed, impulse.node_id);
-            hash_combine(seed, impulse.t_s);
+            hash_combine(seed, quantized_cache_tick(impulse.t_s, kManeuverCacheTimeQuantumS));
             hash_combine(seed, impulse.primary_body_id);
-            hash_combine(seed, impulse.dv_rtn_mps.x);
-            hash_combine(seed, impulse.dv_rtn_mps.y);
-            hash_combine(seed, impulse.dv_rtn_mps.z);
+            hash_combine(seed, quantized_cache_tick(impulse.dv_rtn_mps.x, kManeuverCacheDvQuantumMps));
+            hash_combine(seed, quantized_cache_tick(impulse.dv_rtn_mps.y, kManeuverCacheDvQuantumMps));
+            hash_combine(seed, quantized_cache_tick(impulse.dv_rtn_mps.z, kManeuverCacheDvQuantumMps));
             return seed;
         }
 
@@ -165,8 +233,8 @@ namespace Game
                    a.baseline_generation_id == b.baseline_generation_id &&
                    a.upstream_maneuver_hash == b.upstream_maneuver_hash &&
                    a.frame_independent_generation == b.frame_independent_generation &&
-                   a.chunk_t0_s == b.chunk_t0_s &&
-                   a.chunk_t1_s == b.chunk_t1_s &&
+                   a.chunk_t0_tick == b.chunk_t0_tick &&
+                   a.chunk_t1_tick == b.chunk_t1_tick &&
                    a.profile_id == b.profile_id;
         }
 
@@ -462,10 +530,12 @@ namespace Game
                             std::abs(upstream_impulse.t_s - chunk.t1_s) <= kChunkBoundaryEpsilonS;
                     if (before_chunk_end || (include_chunk_end_impulse && at_chunk_end))
                     {
-                        hash_combine(upstream_maneuver_hash, hash_maneuver_impulse(upstream_impulse));
+                        hash_combine(upstream_maneuver_hash, hash_maneuver_impulse_for_cache(upstream_impulse));
                     }
                 }
 
+                const double chunk_cache_time_quantum_s =
+                        planned_chunk_cache_time_quantum_s(effective_chunk.profile_id);
                 const OrbitPredictionService::PlannedChunkCacheKey cache_key{
                         .track_id = ctx.request.track_id,
                         .baseline_generation_id = baseline_generation_id,
@@ -473,6 +543,8 @@ namespace Game
                         .frame_independent_generation = frame_independent_generation,
                         .chunk_t0_s = chunk.t0_s,
                         .chunk_t1_s = chunk.t1_s,
+                        .chunk_t0_tick = quantized_cache_tick(chunk.t0_s, chunk_cache_time_quantum_s),
+                        .chunk_t1_tick = quantized_cache_tick(chunk.t1_s, chunk_cache_time_quantum_s),
                         .profile_id = effective_chunk.profile_id,
                 };
                 if (effective_chunk.allow_reuse)

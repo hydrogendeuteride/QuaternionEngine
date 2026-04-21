@@ -397,6 +397,8 @@ namespace Game
             uint64_t frame_independent_generation{0};
             double chunk_t0_s{std::numeric_limits<double>::quiet_NaN()};
             double chunk_t1_s{std::numeric_limits<double>::quiet_NaN()};
+            int64_t chunk_t0_tick{0};
+            int64_t chunk_t1_tick{0};
             PredictionProfileId profile_id{PredictionProfileId::Near};
         };
 
