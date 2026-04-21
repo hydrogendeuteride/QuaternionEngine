@@ -54,6 +54,15 @@ public:
         bool use_fast_hover_mesh_bvh = true;
         uint32_t fast_hover_mesh_bvh_max_depth = 8;
 
+        // Avoid repeating the same expensive CPU hover miss every frame while
+        // the cursor and camera are stationary. 0 disables this cache.
+        uint32_t stationary_hover_miss_skip_frames = 5;
+
+        // When the cursor itself is stationary, refresh hover at a lower
+        // cadence even if the camera/scene is still moving. Mouse motion always
+        // forces an immediate hover update. 0 disables throttling.
+        uint32_t stationary_hover_update_interval_frames = 15;
+
         // When true, ignore mouse interactions while UI wants mouse capture.
         bool respect_ui_capture_mouse = true;
 
@@ -258,6 +267,20 @@ private:
         size_t count = 0;
     };
 
+    struct HoverMissCache
+    {
+        bool valid = false;
+        uint32_t skipped_frames = 0;
+        glm::vec2 mouse_pos_window{0.0f, 0.0f};
+        WorldVec3 camera_world{0.0, 0.0, 0.0};
+        glm::quat camera_orientation{1.0f, 0.0f, 0.0f, 0.0f};
+        float camera_fov = 0.0f;
+        WorldVec3 origin_world{0.0, 0.0, 0.0};
+        VkExtent2D logical_extent{0, 0};
+        VkExtent2D swapchain_extent{0, 0};
+        bool line_hover_enabled = false;
+    };
+
     PickInfo _last_pick{};
     PickInfo _hover_pick{};
     std::vector<PickInfo> _drag_selection{};
@@ -280,4 +303,9 @@ private:
     bool _pick_result_pending = false;
 
     AllocatedBuffer _pick_readback_buffer{};
+    HoverMissCache _hover_miss_cache{};
+    uint64_t _mouse_motion_generation = 0;
+    uint64_t _last_hover_mouse_motion_generation = std::numeric_limits<uint64_t>::max();
+    uint64_t _hover_frame_counter = 0;
+    uint64_t _last_hover_update_frame = 0;
 };

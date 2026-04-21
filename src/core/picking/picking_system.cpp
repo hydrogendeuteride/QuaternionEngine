@@ -386,6 +386,59 @@ namespace
         out_t = t;
         return true;
     }
+
+    bool same_extent(const VkExtent2D &a, const VkExtent2D &b)
+    {
+        return a.width == b.width && a.height == b.height;
+    }
+
+    bool same_vec2(const glm::vec2 &a, const glm::vec2 &b, const float epsilon)
+    {
+        return std::abs(a.x - b.x) <= epsilon &&
+               std::abs(a.y - b.y) <= epsilon;
+    }
+
+    bool same_world_vec3(const WorldVec3 &a, const WorldVec3 &b, const double epsilon)
+    {
+        return std::abs(a.x - b.x) <= epsilon &&
+               std::abs(a.y - b.y) <= epsilon &&
+               std::abs(a.z - b.z) <= epsilon;
+    }
+
+    bool same_quat(const glm::quat &a, const glm::quat &b, const float epsilon)
+    {
+        return std::abs(a.w - b.w) <= epsilon &&
+               std::abs(a.x - b.x) <= epsilon &&
+               std::abs(a.y - b.y) <= epsilon &&
+               std::abs(a.z - b.z) <= epsilon;
+    }
+
+    template <typename HoverCache>
+    bool hover_miss_cache_matches(const HoverCache &cache,
+                                  const glm::vec2 &mouse_pos_window,
+                                  const WorldVec3 &camera_world,
+                                  const glm::quat &camera_orientation,
+                                  const float camera_fov,
+                                  const WorldVec3 &origin_world,
+                                  const VkExtent2D &logical_extent,
+                                  const VkExtent2D &swapchain_extent,
+                                  const bool line_hover_enabled)
+    {
+        constexpr float kMouseEpsilonPx = 0.01f;
+        constexpr double kWorldEpsilonM = 1.0e-6;
+        constexpr float kQuatEpsilon = 1.0e-6f;
+        constexpr float kFovEpsilonDeg = 1.0e-5f;
+
+        return cache.valid &&
+               cache.line_hover_enabled == line_hover_enabled &&
+               same_vec2(cache.mouse_pos_window, mouse_pos_window, kMouseEpsilonPx) &&
+               same_world_vec3(cache.camera_world, camera_world, kWorldEpsilonM) &&
+               same_quat(cache.camera_orientation, camera_orientation, kQuatEpsilon) &&
+               std::abs(cache.camera_fov - camera_fov) <= kFovEpsilonDeg &&
+               same_world_vec3(cache.origin_world, origin_world, kWorldEpsilonM) &&
+               same_extent(cache.logical_extent, logical_extent) &&
+               same_extent(cache.swapchain_extent, swapchain_extent);
+    }
 } // namespace
 
 void PickingSystem::init(EngineContext *context)
@@ -404,6 +457,11 @@ void PickingSystem::init(EngineContext *context)
     _pending_pick = {};
     _pick_result_pending = false;
     _last_pick_object_id = 0;
+    _hover_miss_cache = {};
+    _mouse_motion_generation = 0;
+    _last_hover_mouse_motion_generation = std::numeric_limits<uint64_t>::max();
+    _hover_frame_counter = 0;
+    _last_hover_update_frame = 0;
 
     _pick_readback_buffer = {};
     if (_context && _context->getResources())
@@ -435,6 +493,11 @@ void PickingSystem::cleanup()
     _pending_pick = {};
     _pick_result_pending = false;
     _last_pick_object_id = 0;
+    _hover_miss_cache = {};
+    _mouse_motion_generation = 0;
+    _last_hover_mouse_motion_generation = std::numeric_limits<uint64_t>::max();
+    _hover_frame_counter = 0;
+    _last_hover_update_frame = 0;
 }
 
 void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture_mouse)
@@ -461,6 +524,7 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
         if (event.type == InputEvent::Type::MouseMove)
         {
             _mouse_pos_window = event.mouse_pos;
+            ++_mouse_motion_generation;
             if (_drag_state.button_down)
             {
                 _drag_state.current = _mouse_pos_window;
@@ -476,6 +540,10 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
 
         if (event.type == InputEvent::Type::MouseButtonDown && is_select_button(event.mouse_button))
         {
+            if (!same_vec2(_mouse_pos_window, event.mouse_pos, 0.01f))
+            {
+                ++_mouse_motion_generation;
+            }
             _mouse_pos_window = event.mouse_pos;
 
             if (!_settings.enabled)
@@ -508,6 +576,10 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
 
         if (event.type == InputEvent::Type::MouseButtonUp && _drag_state.button_down && event.mouse_button == _drag_state.button)
         {
+            if (!same_vec2(_mouse_pos_window, event.mouse_pos, 0.01f))
+            {
+                ++_mouse_motion_generation;
+            }
             _mouse_pos_window = event.mouse_pos;
 
             const bool was_down = _drag_state.button_down;
@@ -671,32 +743,89 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
 
 void PickingSystem::update_hover(bool ui_want_capture_mouse)
 {
+    ++_hover_frame_counter;
+
     if (_context == nullptr || _context->scene == nullptr)
     {
+        _hover_miss_cache = {};
+        _last_hover_update_frame = 0;
+        _last_hover_mouse_motion_generation = std::numeric_limits<uint64_t>::max();
         return;
     }
 
     if (!_settings.enabled || !_settings.enable_hover)
     {
         clear_pick(_hover_pick);
+        _hover_miss_cache = {};
+        _last_hover_update_frame = 0;
+        _last_hover_mouse_motion_generation = std::numeric_limits<uint64_t>::max();
         return;
     }
 
     if (_settings.respect_ui_capture_mouse && ui_want_capture_mouse)
     {
         clear_pick(_hover_pick);
+        _hover_miss_cache = {};
+        _last_hover_update_frame = 0;
+        _last_hover_mouse_motion_generation = std::numeric_limits<uint64_t>::max();
         return;
     }
 
     if (_settings.require_cursor_normal && _context->input && _context->input->cursor_mode() != CursorMode::Normal)
     {
         clear_pick(_hover_pick);
+        _hover_miss_cache = {};
+        _last_hover_update_frame = 0;
+        _last_hover_mouse_motion_generation = std::numeric_limits<uint64_t>::max();
         return;
     }
 
     if (_mouse_pos_window.x < 0.0f || _mouse_pos_window.y < 0.0f)
     {
         clear_pick(_hover_pick);
+        _hover_miss_cache = {};
+        _last_hover_update_frame = 0;
+        _last_hover_mouse_motion_generation = std::numeric_limits<uint64_t>::max();
+        return;
+    }
+
+    const uint32_t stationary_hover_interval = _settings.stationary_hover_update_interval_frames;
+    const bool cursor_stationary_since_last_hover =
+        _last_hover_mouse_motion_generation == _mouse_motion_generation;
+    if (stationary_hover_interval > 0 &&
+        cursor_stationary_since_last_hover &&
+        _last_hover_update_frame != 0 &&
+        (_hover_frame_counter - _last_hover_update_frame) < stationary_hover_interval)
+    {
+        return;
+    }
+
+    const Camera &camera = _context->scene->getMainCamera();
+    const WorldVec3 origin_world = _context->scene->get_world_origin();
+    VkExtent2D logical_extent = _context->getLogicalRenderExtent();
+    VkExtent2D swapchain_extent{0, 0};
+    if (SwapchainManager *swapchain = _context->getSwapchain())
+    {
+        swapchain_extent = swapchain->swapchainExtent();
+    }
+
+    const bool line_hover_enabled = _settings.enable_line_picking && _settings.enable_line_hover;
+    const uint32_t max_stationary_miss_skips = _settings.stationary_hover_miss_skip_frames;
+    if (max_stationary_miss_skips > 0 &&
+        _hover_miss_cache.skipped_frames < max_stationary_miss_skips &&
+        hover_miss_cache_matches(_hover_miss_cache,
+                                 _mouse_pos_window,
+                                 camera.position_world,
+                                 camera.orientation,
+                                 camera.fovDegrees,
+                                 origin_world,
+                                 logical_extent,
+                                 swapchain_extent,
+                                 line_hover_enabled))
+    {
+        ++_hover_miss_cache.skipped_frames;
+        _last_hover_update_frame = _hover_frame_counter;
+        _last_hover_mouse_motion_generation = _mouse_motion_generation;
         return;
     }
 
@@ -784,6 +913,27 @@ void PickingSystem::update_hover(bool ui_want_capture_mouse)
     else if (!mesh_hit)
     {
         clear_pick(_hover_pick);
+    }
+
+    _last_hover_update_frame = _hover_frame_counter;
+    _last_hover_mouse_motion_generation = _mouse_motion_generation;
+
+    if (_hover_pick.valid)
+    {
+        _hover_miss_cache = {};
+    }
+    else
+    {
+        _hover_miss_cache.valid = true;
+        _hover_miss_cache.skipped_frames = 0;
+        _hover_miss_cache.mouse_pos_window = _mouse_pos_window;
+        _hover_miss_cache.camera_world = camera.position_world;
+        _hover_miss_cache.camera_orientation = camera.orientation;
+        _hover_miss_cache.camera_fov = camera.fovDegrees;
+        _hover_miss_cache.origin_world = origin_world;
+        _hover_miss_cache.logical_extent = logical_extent;
+        _hover_miss_cache.swapchain_extent = swapchain_extent;
+        _hover_miss_cache.line_hover_enabled = line_hover_enabled;
     }
 }
 
