@@ -99,7 +99,8 @@ bool intersect_ray_mesh_bvh(const MeshBVH &bvh,
                             const glm::mat4 &worldTransform,
                             const glm::vec3 &rayOriginWorld,
                             const glm::vec3 &rayDirWorld,
-                            MeshBVHPickHit &outHit)
+                            MeshBVHPickHit &outHit,
+                            const MeshBVHPickOptions &options)
 {
     outHit = {};
 
@@ -126,6 +127,30 @@ bool intersect_ray_mesh_bvh(const MeshBVH &bvh,
     bvh2::Ray ray(bvh2::Vec3<float>(originLocal.x, originLocal.y, originLocal.z),
                   bvh2::Vec3<float>(dirLocal.x, dirLocal.y, dirLocal.z));
 
+    if (!options.preciseTriangleHit)
+    {
+        uint32_t nodeIdx = 0;
+        float tLocal = 0.0f;
+        if (!bvh2::traverseBVHClosestNodeHit<float>(bvh.nodes, ray, options.maxTraversalDepth, nodeIdx, tLocal))
+        {
+            return false;
+        }
+        if (nodeIdx >= bvh.nodes.size())
+        {
+            return false;
+        }
+
+        glm::vec3 localHit = originLocal + dirLocal * tLocal;
+        glm::vec3 worldHit = glm::vec3(worldTransform * glm::vec4(localHit, 1.0f));
+
+        outHit.hit = true;
+        outHit.triangleHit = false;
+        outHit.localPos = localHit;
+        outHit.worldPos = worldHit;
+        outHit.t = glm::length(worldHit - rayOriginWorld);
+        return true;
+    }
+
     uint32_t primIdx = 0;
     float tLocal = 0.0f;
     if (!bvh2::traverseBVHClosestHit<float>(bvh.nodes, bvh.primitives, ray, primIdx, tLocal))
@@ -143,6 +168,7 @@ bool intersect_ray_mesh_bvh(const MeshBVH &bvh,
     glm::vec3 worldHit = glm::vec3(worldTransform * glm::vec4(localHit, 1.0f));
 
     outHit.hit = true;
+    outHit.triangleHit = true;
     outHit.localPos = localHit;
     outHit.worldPos = worldHit;
     outHit.surfaceIndex = ref.surfaceIndex;

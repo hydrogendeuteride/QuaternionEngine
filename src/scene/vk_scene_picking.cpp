@@ -284,15 +284,17 @@ namespace
     }
 
     // Ray / oriented-bounds intersection in world space using object-local shape.
-    // For non-mesh shapes we use a quick world-space bounding-sphere pretest;
-    // for mesh bounds we go directly to the mesh BVH (which already has a root AABB).
+    // For non-mesh shapes we use a quick world-space bounding-sphere pretest.
+    // Mesh bounds use the same sphere pretest before touching the CPU BVH; this
+    // keeps common hover-miss rays out of per-mesh matrix inversion and BVH traversal.
     // Returns true when hit; outWorldHit is the closest hit point in world space.
     bool intersect_ray_bounds(const glm::vec3 &rayOrigin,
                               const glm::vec3 &rayDir,
                               const RenderObject &obj,
                               glm::vec3 &outWorldHit,
                               BoundsHitDebug *debug,
-                              MeshBVHPickHit *outMeshHit)
+                              MeshBVHPickHit *outMeshHit,
+                              const SceneManager::PickOptions &pickOptions)
     {
         const Bounds &bounds = obj.bounds;
         const glm::mat4 &worldTransform = obj.transform;
@@ -342,6 +344,12 @@ namespace
             }
             case BoundsType::Mesh:
             {
+                float sphereT = 0.0f;
+                if (!intersect_ray_sphere(rayOrigin, rayDir, bounds, worldTransform, sphereT))
+                {
+                    return false;
+                }
+
                 // For mesh bounds we rely solely on the CPU mesh BVH.
                 // If there is no BVH or the BVH misses, the object is
                 // treated as not hit by this ray (no coarse box fallback).
@@ -361,7 +369,10 @@ namespace
                 }
 
                 MeshBVHPickHit meshHit{};
-                if (!intersect_ray_mesh_bvh(*pick_bvh, worldTransform, rayOrigin, rayDir, meshHit))
+                MeshBVHPickOptions meshOptions{};
+                meshOptions.preciseTriangleHit = pickOptions.preciseMeshBVH;
+                meshOptions.maxTraversalDepth = pickOptions.meshBVHMaxDepth;
+                if (!intersect_ray_mesh_bvh(*pick_bvh, worldTransform, rayOrigin, rayDir, meshHit, meshOptions))
                 {
                     if (debug)
                     {
@@ -438,6 +449,14 @@ namespace
 } // namespace
 
 bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject, WorldVec3 &outWorldPos)
+{
+    return pick(mousePosPixels, outObject, outWorldPos, PickOptions{});
+}
+
+bool SceneManager::pick(const glm::vec2 &mousePosPixels,
+                        RenderObject &outObject,
+                        WorldVec3 &outWorldPos,
+                        const PickOptions &options)
 {
     if (_context == nullptr)
     {
@@ -572,7 +591,7 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
             MeshBVHPickHit localMeshHit{};
             const bool hit =
                 intersect_terrain_planet_sphere(obj, hitPos) ||
-                intersect_ray_bounds(rayOrigin, rayDir, obj, hitPos, &localDebug, &localMeshHit);
+                intersect_ray_bounds(rayOrigin, rayDir, obj, hitPos, &localDebug, &localMeshHit, options);
             if (!hit)
             {
                 continue;
@@ -592,7 +611,7 @@ bool SceneManager::pick(const glm::vec2 &mousePosPixels, RenderObject &outObject
 
                 // If we have a precise mesh BVH hit, refine the picked
                 // primitive to the exact triangle instead of the whole surface.
-                if (localMeshHit.hit && hit_bvh)
+                if (localMeshHit.hit && localMeshHit.triangleHit && hit_bvh)
                 {
                     outObject.firstIndex = localMeshHit.firstIndex;
                     outObject.indexCount = 3;

@@ -702,7 +702,16 @@ void PickingSystem::update_hover(bool ui_want_capture_mouse)
 
     RenderObject hover_obj{};
     WorldVec3 hover_pos{};
-    const bool mesh_hit = _context->scene->pick(window_to_swapchain_pixels(_mouse_pos_window), hover_obj, hover_pos);
+    SceneManager::PickOptions hover_options{};
+    if (_settings.use_fast_hover_mesh_bvh)
+    {
+        hover_options.preciseMeshBVH = false;
+        hover_options.meshBVHMaxDepth = _settings.fast_hover_mesh_bvh_max_depth;
+    }
+    const bool mesh_hit = _context->scene->pick(window_to_swapchain_pixels(_mouse_pos_window),
+                                               hover_obj,
+                                               hover_pos,
+                                               hover_options);
 
     if (mesh_hit)
     {

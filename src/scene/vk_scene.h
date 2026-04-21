@@ -121,7 +121,17 @@ public:
     // Ray-pick against current DrawContext using per-surface Bounds.
     // mousePosPixels is in window coordinates (SDL), origin at top-left.
     // Returns true if any object was hit, filling outObject and outWorldPos.
+    struct PickOptions
+    {
+        bool preciseMeshBVH = true;
+        uint32_t meshBVHMaxDepth = 0xFFFFFFFFu;
+    };
+
     bool pick(const glm::vec2 &mousePosPixels, RenderObject &outObject, WorldVec3 &outWorldPos);
+    bool pick(const glm::vec2 &mousePosPixels,
+              RenderObject &outObject,
+              WorldVec3 &outWorldPos,
+              const PickOptions &options);
 
     // Resolve an object ID (from ID buffer) back to the RenderObject for
     // the most recently built DrawContext. Returns false if not found or id==0.

@@ -39,6 +39,7 @@ std::unique_ptr<MeshBVH> build_mesh_bvh(const MeshAsset &mesh,
 struct MeshBVHPickHit
 {
     bool hit = false;
+    bool triangleHit = false;       // false when the hit is an approximate BVH node
 
     float t = 0.0f;                 // world-space distance along ray
     glm::vec3 localPos{0.0f};       // hit position in mesh-local space
@@ -48,11 +49,17 @@ struct MeshBVHPickHit
     uint32_t firstIndex = 0;        // index into mesh index buffer (triangle start)
 };
 
+struct MeshBVHPickOptions
+{
+    bool preciseTriangleHit = true;
+    uint32_t maxTraversalDepth = 0xFFFFFFFFu;
+};
+
 // Ray–mesh BVH intersection in world space.
 // Returns true on hit and fills outHit.
 bool intersect_ray_mesh_bvh(const MeshBVH &bvh,
                             const glm::mat4 &worldTransform,
                             const glm::vec3 &rayOriginWorld,
                             const glm::vec3 &rayDirWorld,
-                            MeshBVHPickHit &outHit);
-
+                            MeshBVHPickHit &outHit,
+                            const MeshBVHPickOptions &options = {});

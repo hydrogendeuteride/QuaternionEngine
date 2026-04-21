@@ -49,6 +49,11 @@ public:
         bool enable_click_select = true;
         bool enable_drag_select = true;
 
+        // Hover outlines usually only need object identity, not exact triangle identity.
+        // Keep click selection precise, but let hover stop BVH traversal at a bounded depth.
+        bool use_fast_hover_mesh_bvh = true;
+        uint32_t fast_hover_mesh_bvh_max_depth = 8;
+
         // When true, ignore mouse interactions while UI wants mouse capture.
         bool respect_ui_capture_mouse = true;
 
