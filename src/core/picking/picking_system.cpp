@@ -169,7 +169,69 @@ namespace
         }
     }
 
-    void apply_click_selection_level(PickingSystem::PickInfo &pick)
+    bool picks_share_logical_object(const PickingSystem::PickInfo &a, const PickingSystem::PickInfo &b)
+    {
+        return a.valid &&
+               b.valid &&
+               a.kind == PickingSystem::PickInfo::Kind::SceneObject &&
+               b.kind == PickingSystem::PickInfo::Kind::SceneObject &&
+               !a.objectName.empty() &&
+               a.objectName == b.objectName;
+    }
+
+    bool has_distinct_logical_member(const PickingSystem::PickInfo &pick)
+    {
+        return pick.kind == PickingSystem::PickInfo::Kind::SceneObject &&
+               !pick.objectName.empty() &&
+               !pick.memberName.empty() &&
+               pick.memberName != pick.objectName;
+    }
+
+    void apply_click_selection_level(PickingSystem::PickInfo &pick,
+                                     const PickingSystem::PickInfo *previous_pick = nullptr)
+    {
+        if (!pick.valid)
+        {
+            pick.selectionLevel = PickingSystem::SelectionLevel::None;
+            return;
+        }
+
+        if (pick.kind != PickingSystem::PickInfo::Kind::SceneObject)
+        {
+            pick.selectionLevel = PickingSystem::SelectionLevel::Object;
+            return;
+        }
+
+        if (!previous_pick || !picks_share_logical_object(*previous_pick, pick))
+        {
+            pick.selectionLevel = PickingSystem::SelectionLevel::Object;
+            return;
+        }
+
+        if (!has_distinct_logical_member(pick))
+        {
+            pick.selectionLevel = PickingSystem::SelectionLevel::Object;
+            return;
+        }
+
+        if (previous_pick->selectionLevel == PickingSystem::SelectionLevel::Object)
+        {
+            pick.selectionLevel = PickingSystem::SelectionLevel::Member;
+            return;
+        }
+
+        if (previous_pick->selectionLevel == PickingSystem::SelectionLevel::Member)
+        {
+            pick.selectionLevel = previous_pick->memberName == pick.memberName
+                                      ? PickingSystem::SelectionLevel::Object
+                                      : PickingSystem::SelectionLevel::Member;
+            return;
+        }
+
+        pick.selectionLevel = PickingSystem::SelectionLevel::Member;
+    }
+
+    void apply_drag_selection_level(PickingSystem::PickInfo &pick)
     {
         if (!pick.valid)
         {
@@ -475,6 +537,7 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
 
             if (do_click_select)
             {
+                const PickInfo previous_pick = _last_pick;
                 PickInfo line_pick{};
                 double line_depth_m = 0.0;
                 const bool line_hit =
@@ -486,7 +549,7 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
                     if (line_hit)
                     {
                         _last_pick = std::move(line_pick);
-                        apply_click_selection_level(_last_pick);
+                        apply_click_selection_level(_last_pick, &previous_pick);
                         _last_pick_object_id = 0;
                     }
                     else
@@ -551,20 +614,20 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
                     if (line_hit && std::isfinite(line_depth_m) && line_depth_m < mesh_depth_m)
                     {
                         _last_pick = std::move(line_pick);
-                        apply_click_selection_level(_last_pick);
+                        apply_click_selection_level(_last_pick, &previous_pick);
                         _last_pick_object_id = 0;
                     }
                     else
                     {
                         set_pick_from_hit(hit_object, hit_pos, _last_pick);
-                        apply_click_selection_level(_last_pick);
+                        apply_click_selection_level(_last_pick, &previous_pick);
                         _last_pick_object_id = hit_object.objectID;
                     }
                 }
                     else if (line_hit)
                     {
                         _last_pick = std::move(line_pick);
-                        apply_click_selection_level(_last_pick);
+                        apply_click_selection_level(_last_pick, &previous_pick);
                         _last_pick_object_id = 0;
                     }
                     else if (_settings.clear_last_pick_on_miss)
@@ -589,7 +652,7 @@ void PickingSystem::process_input(const InputSystem &input, bool ui_want_capture
                         PickInfo info{};
                         glm::vec3 center_local = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.0f));
                         set_pick_from_hit(obj, local_to_world(center_local, scene->get_world_origin()), info);
-                        apply_click_selection_level(info);
+                        apply_drag_selection_level(info);
                         _drag_selection.push_back(std::move(info));
                     }
                 }
@@ -749,11 +812,12 @@ void PickingSystem::begin_frame()
         RenderObject picked{};
         if (_context->scene->resolveObjectID(picked_id, picked))
         {
+            const PickInfo previous_pick = _last_pick;
             _last_pick_object_id = picked_id;
             glm::vec3 fallback_local = glm::vec3(picked.transform[3]);
             WorldVec3 fallback_pos = local_to_world(fallback_local, _context->scene->get_world_origin());
             set_pick_from_hit(picked, fallback_pos, _last_pick);
-            apply_click_selection_level(_last_pick);
+            apply_click_selection_level(_last_pick, &previous_pick);
         }
         else if (_settings.clear_last_pick_on_miss)
         {
