@@ -1,4 +1,7 @@
 #include "gameplay_prediction_maneuver_test_common.h"
+#include "game/orbit/prediction/orbit_prediction_service_internal.h"
+
+#include <functional>
 
 TEST(GameplayPredictionManeuverTests, BuildEphemerisSamplingSpecAllowsFutureWindowBeyondLegacyCap)
 {
@@ -505,6 +508,58 @@ TEST(GameplayPredictionManeuverTests, PredictionServiceBuildsChunkScopedEphemeri
 
     EXPECT_TRUE(saw_full_window_ephemeris);
     EXPECT_TRUE(saw_chunk_scoped_ephemeris);
+}
+
+TEST(GameplayPredictionManeuverTests, PredictionServiceReusesCoveredEphemerisForLaterWindow)
+{
+    Game::OrbitPredictionService service{};
+    const Game::OrbitPredictionService::Request first_request =
+            make_celestial_prediction_request(0.0, 600.0);
+    const Game::OrbitPredictionService::EphemerisSamplingSpec first_sampling_spec =
+            Game::OrbitPredictionService::build_ephemeris_sampling_spec(first_request);
+    ASSERT_TRUE(first_sampling_spec.valid);
+
+    const Game::OrbitPredictionService::EphemerisBuildRequest first_build_request =
+            Game::build_ephemeris_build_request(first_request, first_sampling_spec);
+
+    bool first_reused = true;
+    const Game::OrbitPredictionService::SharedCelestialEphemeris first_ephemeris =
+            service.get_or_build_ephemeris(first_build_request,
+                                           std::function<bool()>{},
+                                           nullptr,
+                                           &first_reused);
+    ASSERT_TRUE(first_ephemeris);
+    ASSERT_FALSE(first_ephemeris->empty());
+    EXPECT_FALSE(first_reused);
+
+    Game::OrbitPredictionService::Request later_request =
+            make_celestial_prediction_request(30.0, 120.0);
+    for (orbitsim::MassiveBody &body : later_request.massive_bodies)
+    {
+        body.state = first_ephemeris->body_state_at_by_id(body.id, later_request.sim_time_s);
+    }
+
+    const Game::OrbitPredictionService::EphemerisSamplingSpec later_sampling_spec =
+            Game::OrbitPredictionService::build_ephemeris_sampling_spec(later_request);
+    ASSERT_TRUE(later_sampling_spec.valid);
+    const Game::OrbitPredictionService::EphemerisBuildRequest later_build_request =
+            Game::build_ephemeris_build_request(later_request, later_sampling_spec);
+
+    Game::OrbitPredictionService::AdaptiveStageDiagnostics later_diagnostics{};
+    bool later_reused = false;
+    const Game::OrbitPredictionService::SharedCelestialEphemeris later_ephemeris =
+            service.get_or_build_ephemeris(later_build_request,
+                                           std::function<bool()>{},
+                                           &later_diagnostics,
+                                           &later_reused);
+
+    EXPECT_TRUE(later_reused);
+    EXPECT_TRUE(later_diagnostics.cache_reused);
+    EXPECT_DOUBLE_EQ(later_diagnostics.requested_duration_s, later_build_request.duration_s);
+    EXPECT_EQ(later_ephemeris, first_ephemeris);
+
+    std::lock_guard<std::mutex> lock(service._ephemeris_mutex);
+    EXPECT_EQ(service._ephemeris_cache.size(), 1u);
 }
 
 TEST(GameplayPredictionManeuverTests, PredictionServiceRejectsResultsFromPreviousResetEpoch)

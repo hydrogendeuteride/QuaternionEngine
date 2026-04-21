@@ -8,6 +8,12 @@ namespace Game
 {
     namespace
     {
+        constexpr double kEphemerisStatePositionToleranceFloorM = 1.0e-3;
+        constexpr double kEphemerisStateVelocityToleranceFloorMps = 1.0e-6;
+        constexpr double kEphemerisSpinAxisTolerance = 1.0e-9;
+        constexpr double kEphemerisSpinAngleToleranceRad = 1.0e-9;
+        constexpr double kEphemerisSpinRateToleranceRadPerS = 1.0e-12;
+
         bool tolerance_covers_request(const orbitsim::AdaptiveToleranceRamp &entry,
                                       const orbitsim::AdaptiveToleranceRamp &request)
         {
@@ -37,38 +43,98 @@ namespace Game
                    a.softening_length_m == b.softening_length_m;
         }
 
-        bool same_spin_state(const orbitsim::SpinState &a, const orbitsim::SpinState &b)
+        double ephemeris_state_position_tolerance_m(const orbitsim::AdaptiveEphemerisOptions &request_options)
         {
-            return a.axis == b.axis &&
-                   a.angle_rad == b.angle_rad &&
-                   a.rate_rad_per_s == b.rate_rad_per_s;
+            return std::max({kEphemerisStatePositionToleranceFloorM,
+                             request_options.tolerance.pos_near_m,
+                             request_options.tolerance.pos_far_m});
         }
 
-        bool same_state_for_ephemeris(const orbitsim::State &a, const orbitsim::State &b)
+        double ephemeris_state_velocity_tolerance_mps(const orbitsim::AdaptiveEphemerisOptions &request_options)
         {
-            return a.position_m == b.position_m &&
-                   a.velocity_mps == b.velocity_mps &&
-                   same_spin_state(a.spin, b.spin);
+            return std::max({kEphemerisStateVelocityToleranceFloorMps,
+                             request_options.tolerance.vel_near_mps,
+                             request_options.tolerance.vel_far_mps});
         }
 
-        bool same_massive_body_for_ephemeris(const orbitsim::MassiveBody &a, const orbitsim::MassiveBody &b)
+        bool vec3_within_tolerance(const orbitsim::Vec3 &a,
+                                   const orbitsim::Vec3 &b,
+                                   const double tolerance)
         {
-            return a.id == b.id &&
-                   a.mass_kg == b.mass_kg &&
-                   same_state_for_ephemeris(a.state, b.state);
+            return finite_vec3(a) &&
+                   finite_vec3(b) &&
+                   glm::length(glm::dvec3(a - b)) <= tolerance;
         }
 
-        bool same_massive_body_set_for_ephemeris(const std::vector<orbitsim::MassiveBody> &a,
-                                                 const std::vector<orbitsim::MassiveBody> &b)
+        bool spin_state_matches_ephemeris_sample(const orbitsim::SpinState &sample,
+                                                 const orbitsim::SpinState &request)
         {
-            if (a.size() != b.size())
+            return vec3_within_tolerance(sample.axis, request.axis, kEphemerisSpinAxisTolerance) &&
+                   std::abs(sample.angle_rad - request.angle_rad) <= kEphemerisSpinAngleToleranceRad &&
+                   std::abs(sample.rate_rad_per_s - request.rate_rad_per_s) <= kEphemerisSpinRateToleranceRadPerS;
+        }
+
+        bool state_matches_ephemeris_sample(const orbitsim::State &sample,
+                                            const orbitsim::State &request,
+                                            const orbitsim::AdaptiveEphemerisOptions &request_options)
+        {
+            return vec3_within_tolerance(sample.position_m,
+                                         request.position_m,
+                                         ephemeris_state_position_tolerance_m(request_options)) &&
+                   vec3_within_tolerance(sample.velocity_mps,
+                                         request.velocity_mps,
+                                         ephemeris_state_velocity_tolerance_mps(request_options)) &&
+                   spin_state_matches_ephemeris_sample(sample.spin, request.spin);
+        }
+
+        bool cached_ephemeris_covers_request(const OrbitPredictionService::CachedEphemerisEntry &entry,
+                                             const OrbitPredictionService::EphemerisBuildRequest &request)
+        {
+            if (!entry.ephemeris || entry.ephemeris->empty())
             {
                 return false;
             }
 
-            for (std::size_t i = 0; i < a.size(); ++i)
+            const double request_end_s = request.sim_time_s + request.duration_s;
+            if (!std::isfinite(request.sim_time_s) ||
+                !std::isfinite(request_end_s) ||
+                !(request.duration_s > 0.0))
             {
-                if (!same_massive_body_for_ephemeris(a[i], b[i]))
+                return false;
+            }
+
+            const double entry_start_s = entry.ephemeris->t0_s();
+            const double entry_end_s = entry.ephemeris->t_end_s();
+            return std::isfinite(entry_start_s) &&
+                   std::isfinite(entry_end_s) &&
+                   entry_start_s <= (request.sim_time_s + kEphemerisDurationEpsilonS) &&
+                   (entry_end_s + kEphemerisDurationEpsilonS) >= request_end_s;
+        }
+
+        bool cached_massive_body_set_matches_request(
+                const OrbitPredictionService::CachedEphemerisEntry &entry,
+                const OrbitPredictionService::EphemerisBuildRequest &request)
+        {
+            if (!entry.ephemeris ||
+                entry.massive_bodies.size() != request.massive_bodies.size() ||
+                entry.ephemeris->body_ids.size() != request.massive_bodies.size())
+            {
+                return false;
+            }
+
+            for (std::size_t i = 0; i < request.massive_bodies.size(); ++i)
+            {
+                const orbitsim::MassiveBody &entry_body = entry.massive_bodies[i];
+                const orbitsim::MassiveBody &request_body = request.massive_bodies[i];
+                if (entry_body.id != request_body.id ||
+                    entry.ephemeris->body_ids[i] != request_body.id ||
+                    entry_body.mass_kg != request_body.mass_kg)
+                {
+                    return false;
+                }
+
+                const orbitsim::State cached_state = entry.ephemeris->body_state_at(i, request.sim_time_s);
+                if (!state_matches_ephemeris_sample(cached_state, request_body.state, request.adaptive_options))
                 {
                     return false;
                 }
@@ -84,6 +150,7 @@ namespace Game
     {
         return ephemeris &&
                !ephemeris->empty() &&
+               ephemeris->t0_s() <= (sim_time_s + kEphemerisDurationEpsilonS) &&
                (ephemeris->t_end_s() + kEphemerisDurationEpsilonS) >= (sim_time_s + horizon_s);
     }
 
@@ -95,7 +162,7 @@ namespace Game
             return false;
         }
 
-        if (entry.sim_time_s != request.sim_time_s)
+        if (!cached_ephemeris_covers_request(entry, request))
         {
             return false;
         }
@@ -105,12 +172,7 @@ namespace Game
             return false;
         }
 
-        if (!same_massive_body_set_for_ephemeris(entry.massive_bodies, request.massive_bodies))
-        {
-            return false;
-        }
-
-        if ((entry.duration_s + kEphemerisDurationEpsilonS) < request.duration_s)
+        if (!cached_massive_body_set_matches_request(entry, request))
         {
             return false;
         }

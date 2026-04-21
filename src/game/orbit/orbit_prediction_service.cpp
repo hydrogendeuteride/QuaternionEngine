@@ -7,6 +7,34 @@
 
 namespace Game
 {
+    namespace
+    {
+        OrbitPredictionService::AdaptiveStageDiagnostics make_reused_ephemeris_diagnostics(
+                const OrbitPredictionService::CachedEphemerisEntry &entry,
+                const OrbitPredictionService::EphemerisBuildRequest &request)
+        {
+            OrbitPredictionService::AdaptiveStageDiagnostics out = entry.diagnostics;
+            out.requested_duration_s = std::max(0.0, request.duration_s);
+            out.cache_reused = true;
+
+            if (entry.ephemeris && !entry.ephemeris->empty())
+            {
+                const double request_start_s = request.sim_time_s;
+                const double request_end_s = request.sim_time_s + request.duration_s;
+                const double covered_start_s = std::max(entry.ephemeris->t0_s(), request_start_s);
+                const double covered_end_s = std::min(entry.ephemeris->t_end_s(), request_end_s);
+                if (std::isfinite(covered_start_s) &&
+                    std::isfinite(covered_end_s) &&
+                    covered_end_s > covered_start_s)
+                {
+                    out.covered_duration_s = covered_end_s - covered_start_s;
+                }
+            }
+
+            return out;
+        }
+    } // namespace
+
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
     OrbitPredictionService::OrbitPredictionService()
@@ -210,8 +238,7 @@ namespace Game
                 entry.last_use_serial = _next_ephemeris_use_serial++;
                 if (out_diagnostics)
                 {
-                    *out_diagnostics = entry.diagnostics;
-                    out_diagnostics->cache_reused = true;
+                    *out_diagnostics = make_reused_ephemeris_diagnostics(entry, request);
                 }
                 if (out_cache_reused)
                 {
@@ -240,8 +267,7 @@ namespace Game
             entry.last_use_serial = _next_ephemeris_use_serial++;
             if (out_diagnostics)
             {
-                *out_diagnostics = entry.diagnostics;
-                out_diagnostics->cache_reused = true;
+                *out_diagnostics = make_reused_ephemeris_diagnostics(entry, request);
             }
             if (out_cache_reused)
             {
