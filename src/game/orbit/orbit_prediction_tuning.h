@@ -83,6 +83,8 @@ namespace Game::OrbitPredictionTuning
     inline constexpr double kPrimaryBodyHysteresisKeepRatio = 0.90;
     inline constexpr double kPostNodeCoverageMinS = 120.0;
     inline constexpr double kManeuverRefreshS = 0.1;
+    inline constexpr double kPredictionCoverageRefreshLeadS = 5.0;
+    inline constexpr double kPredictionCoverageRefreshLeadFixedDtScale = 2.0;
     // Chunk planner bands stay finer-grained than the Exact/Near/Tail profile classes.
     inline constexpr double kPredictionChunkBandNearEndS = 3.0 * kSecondsPerDay;
     inline constexpr double kPredictionChunkBandTransferEndS = 30.0 * kSecondsPerDay;

@@ -194,6 +194,21 @@ namespace Game
                    (covered_duration_s + coverage_epsilon_s) < (requested_duration_s - coverage_epsilon_s);
         }
 
+        [[nodiscard]] double prediction_coverage_refresh_lead_s(const double required_ahead_s, const float fixed_dt)
+        {
+            const double fixed_dt_lead_s =
+                    std::max(0.0, static_cast<double>(fixed_dt)) *
+                    OrbitPredictionTuning::kPredictionCoverageRefreshLeadFixedDtScale;
+            const double lead_s =
+                    std::max(OrbitPredictionTuning::kPredictionCoverageRefreshLeadS, fixed_dt_lead_s);
+            if (!(required_ahead_s > 0.0) || !std::isfinite(required_ahead_s))
+            {
+                return lead_s;
+            }
+
+            return std::min(required_ahead_s, lead_s);
+        }
+
         [[nodiscard]] double prediction_cache_end_time_s(const OrbitPredictionCache &cache)
         {
             double cache_end_s = std::numeric_limits<double>::quiet_NaN();
@@ -644,6 +659,12 @@ namespace Game
         const double coverage_epsilon_s =
                 std::max(1.0e-3, std::min(0.25, std::max(0.0, static_cast<double>(fixed_dt)) * 0.5));
         if ((cache_end_s - now_s + coverage_epsilon_s) >= required_ahead_s)
+        {
+            return false;
+        }
+
+        const double coverage_refresh_lead_s = prediction_coverage_refresh_lead_s(required_ahead_s, fixed_dt);
+        if ((cache_end_s - now_s + coverage_epsilon_s) > coverage_refresh_lead_s)
         {
             return false;
         }

@@ -9,6 +9,76 @@ namespace Game
 {
     namespace
     {
+        constexpr std::size_t kMaxPendingCompletedResults = 64;
+
+        bool prediction_result_is_streaming(const OrbitPredictionService::Result &result)
+        {
+            return result.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming ||
+                   result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
+        }
+
+        bool should_drop_completed_result_for_incoming(
+                const OrbitPredictionService::Result &queued,
+                const OrbitPredictionService::Result &incoming)
+        {
+            if (queued.track_id != incoming.track_id || !prediction_result_is_streaming(queued))
+            {
+                return false;
+            }
+
+            if (!prediction_result_is_streaming(incoming))
+            {
+                return true;
+            }
+
+            if (incoming.generation_id > queued.generation_id)
+            {
+                return true;
+            }
+
+            // Preview publishes are visual snapshots. Keep only the newest queued
+            // preview for a track, while preserving full-stream chunk batches.
+            return incoming.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming &&
+                   queued.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming;
+        }
+
+        void coalesce_completed_results(
+                std::deque<OrbitPredictionService::Result> &completed,
+                const OrbitPredictionService::Result &incoming)
+        {
+            completed.erase(std::remove_if(completed.begin(),
+                                           completed.end(),
+                                           [&incoming](const OrbitPredictionService::Result &queued) {
+                                               return should_drop_completed_result_for_incoming(queued, incoming);
+                                           }),
+                            completed.end());
+        }
+
+        void trim_completed_results(std::deque<OrbitPredictionService::Result> &completed)
+        {
+            while (completed.size() > kMaxPendingCompletedResults)
+            {
+                auto streaming_it = std::find_if(completed.begin(),
+                                                 completed.end(),
+                                                 [](const OrbitPredictionService::Result &queued) {
+                                                     return prediction_result_is_streaming(queued);
+                                                 });
+                if (streaming_it == completed.end())
+                {
+                    return;
+                }
+                completed.erase(streaming_it);
+            }
+        }
+
+        void enqueue_completed_result(std::deque<OrbitPredictionService::Result> &completed,
+                                      OrbitPredictionService::Result result)
+        {
+            coalesce_completed_results(completed, result);
+            completed.push_back(std::move(result));
+            trim_completed_results(completed);
+        }
+
         OrbitPredictionService::AdaptiveStageDiagnostics make_reused_ephemeris_diagnostics(
                 const OrbitPredictionService::CachedEphemerisEntry &entry,
                 const OrbitPredictionService::EphemerisBuildRequest &request)
@@ -411,7 +481,7 @@ namespace Game
             return false;
         }
 
-        _completed.push_back(std::move(result));
+        enqueue_completed_result(_completed, std::move(result));
         return true;
     }
 
