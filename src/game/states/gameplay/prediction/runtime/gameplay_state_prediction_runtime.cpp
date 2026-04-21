@@ -74,7 +74,11 @@ namespace Game
             }
 
             out.t0_s = time_ctx.first_future_node_time_s;
-            out.t1_s = out.t0_s + plan_horizon_s;
+            const double final_node_time_s =
+                    std::isfinite(time_ctx.last_future_node_time_s)
+                            ? time_ctx.last_future_node_time_s
+                            : out.t0_s;
+            out.t1_s = final_node_time_s + plan_horizon_s;
             out.valid = std::isfinite(out.t1_s) &&
                         out.t1_s > (out.t0_s + kPredictionTimeEpsilonS);
             return out;

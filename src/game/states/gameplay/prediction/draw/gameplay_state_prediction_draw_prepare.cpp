@@ -218,9 +218,13 @@ namespace Game
                             std::isfinite(authored_plan_ctx.first_future_node_time_s)
                                     ? authored_plan_ctx.first_future_node_time_s
                                     : authored_plan_ctx.first_relevant_node_time_s;
+                    const double authored_plan_tail_anchor_s =
+                            std::isfinite(authored_plan_ctx.last_future_node_time_s)
+                                    ? authored_plan_ctx.last_future_node_time_s
+                                    : authored_plan_start_s;
                     const double authored_plan_end_s =
-                            std::isfinite(authored_plan_start_s)
-                                    ? (authored_plan_start_s + maneuver_plan_horizon_s())
+                            std::isfinite(authored_plan_tail_anchor_s)
+                                    ? (authored_plan_tail_anchor_s + maneuver_plan_horizon_s())
                                     : std::numeric_limits<double>::quiet_NaN();
                     if (std::isfinite(authored_plan_start_s) &&
                         authored_plan_end_s > (authored_plan_start_s + kPredictionTimeEpsilonS))

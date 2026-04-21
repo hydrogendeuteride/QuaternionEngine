@@ -173,6 +173,16 @@ namespace Game
                    !cache.maneuver_previews.empty();
         }
 
+        bool full_stream_result_is_obsolete_after_final_publish(
+                const PredictionTrackState &track,
+                const OrbitPredictionDerivedService::Result &result)
+        {
+            return result.solve_quality == OrbitPredictionService::SolveQuality::Full &&
+                   result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming &&
+                   track.authoritative_cache.valid &&
+                   track.authoritative_cache.generation_id >= result.generation_id;
+        }
+
         void restore_authoritative_planned_data(const PredictionTrackState &track, OrbitPredictionCache &cache)
         {
             if (track.authoritative_cache.valid && cache_has_planned_data(track.authoritative_cache))
@@ -213,6 +223,10 @@ namespace Game
              result.display_frame_key != track->latest_requested_derived_display_frame_key ||
              result.display_frame_revision != track->latest_requested_derived_display_frame_revision ||
              result.analysis_body_id != track->latest_requested_derived_analysis_body_id))
+        {
+            return;
+        }
+        if (full_stream_result_is_obsolete_after_final_publish(*track, result))
         {
             return;
         }

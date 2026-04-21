@@ -245,6 +245,7 @@ namespace Game
             const bool solver_pending = player_track->request_pending;
             const bool derived_pending = player_track->derived_request_pending;
             const bool update_pending = solver_pending || derived_pending;
+            const bool queued_update = player_track->dirty && !update_pending;
             const bool has_ready_plan =
                     player_track->cache.valid &&
                     player_track->cache.has_planned_frame_draw_data();
@@ -253,19 +254,19 @@ namespace Game
             const char *status_detail = "Add a maneuver node to start a planned solve.";
             ImVec4 status_color = ImVec4(0.70f, 0.72f, 0.76f, 1.0f);
 
-            if (has_plan && !has_ready_plan && player_track->dirty && !update_pending)
+            if (has_plan && queued_update)
             {
                 status_label = "Queued";
                 status_detail = "Plan preview is marked dirty and will rebuild on the next prediction tick.";
                 status_color = ImVec4(0.95f, 0.78f, 0.24f, 1.0f);
             }
-            else if (!has_ready_plan && solver_pending)
+            else if (solver_pending)
             {
                 status_label = "Solving";
                 status_detail = "The solver is still building the planned trajectory.";
                 status_color = ImVec4(0.95f, 0.78f, 0.24f, 1.0f);
             }
-            else if (!has_ready_plan && derived_pending)
+            else if (derived_pending)
             {
                 status_label = "Preparing";
                 status_detail = "Solver output is being converted into frame-space render data.";
@@ -289,18 +290,15 @@ namespace Game
 
             if (has_plan)
             {
-                const double requested_window_s = std::max(
-                        prediction_required_window_s(*player_track, now_s, true),
-                        maneuver_plan_horizon_s());
                 float progress = 1.0f;
-                if (!has_ready_plan && update_pending)
+                if (queued_update || update_pending)
                 {
                     const double pulse = 0.5 + 0.5 * std::sin(ImGui::GetTime() * 3.0);
                     progress = static_cast<float>(0.20 + 0.60 * pulse);
                 }
 
                 char progress_label[128];
-                if (!has_ready_plan && update_pending)
+                if (queued_update || update_pending)
                 {
                     std::snprintf(progress_label,
                                   sizeof(progress_label),

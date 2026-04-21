@@ -187,7 +187,7 @@ TEST(GameplayPredictionManeuverTests, PredictionServicePublishesChunkMetadataFor
     EXPECT_GE(chunk.t1_s, request.sim_time_s + request.future_window_s);
 }
 
-TEST(GameplayPredictionManeuverTests, PredictionServicePublishesPreviewPatchAndTailAsSeparateChunkStages)
+TEST(GameplayPredictionManeuverTests, PredictionServicePublishesPreviewPatchThenFullFinalStage)
 {
     Game::OrbitPredictionService service{};
     Game::OrbitPredictionService::Request request = make_prediction_request(0.0, 60.0);
@@ -270,19 +270,32 @@ TEST(GameplayPredictionManeuverTests, PredictionServicePublishesPreviewPatchAndT
     EXPECT_TRUE(saw_stream_impulse_preview);
 
     ASSERT_FALSE(first_finalizing_result.published_chunks.empty());
-    EXPECT_GE(first_finalizing_result.published_chunks.front().chunk_id,
-              last_streaming_result.published_chunks.back().chunk_id + 1u);
-    EXPECT_GE(first_finalizing_result.published_chunks.front().t0_s, 40.0 - 1.0e-6);
+    EXPECT_EQ(first_finalizing_result.published_chunks.front().chunk_id, 0u);
+    EXPECT_LE(first_finalizing_result.published_chunks.front().t0_s, 1.0e-6);
+    EXPECT_GE(first_finalizing_result.published_chunks.back().t1_s, 60.0);
+    EXPECT_GT(first_finalizing_result.published_chunks.size(),
+              last_streaming_result.published_chunks.size());
+    bool saw_final_prefix_chunk = false;
+    bool saw_final_preview_chunk = false;
+    bool saw_final_tail_chunk = false;
     for (const Game::OrbitPredictionService::Result *result : finalizing_results)
     {
         for (const Game::OrbitPredictionService::PublishedChunk &chunk : result->published_chunks)
         {
             EXPECT_EQ(chunk.quality_state, Game::OrbitPredictionService::ChunkQualityState::Final);
+            saw_final_prefix_chunk |= chunk.t0_s < (20.0 - 1.0e-6);
+            saw_final_preview_chunk |=
+                    chunk.t0_s >= (20.0 - 1.0e-6) &&
+                    chunk.t1_s <= (40.0 + 1.0e-6);
+            saw_final_tail_chunk |= chunk.t0_s >= (40.0 - 1.0e-6);
         }
     }
+    EXPECT_TRUE(saw_final_prefix_chunk);
+    EXPECT_TRUE(saw_final_preview_chunk);
+    EXPECT_TRUE(saw_final_tail_chunk);
     ASSERT_FALSE(first_finalizing_result.trajectory_segments_inertial_planned.empty());
     ASSERT_FALSE(last_finalizing_result.trajectory_segments_inertial_planned.empty());
-    EXPECT_LE(first_finalizing_result.trajectory_segments_inertial_planned.front().t0_s, 20.0 + 1.0e-6);
+    EXPECT_LE(first_finalizing_result.trajectory_segments_inertial_planned.front().t0_s, 1.0e-6);
     EXPECT_GE(last_finalizing_result.trajectory_segments_inertial_planned.back().t0_s +
                       last_finalizing_result.trajectory_segments_inertial_planned.back().dt_s,
               60.0);
@@ -510,4 +523,3 @@ TEST(GameplayPredictionManeuverTests, PredictionServiceRejectsResultsFromPreviou
     const std::unordered_map<uint64_t, uint64_t> superseded_generation{{stale_job.track_id, stale_job.generation_id + 1}};
     EXPECT_FALSE(Game::OrbitPredictionService::should_publish_result(stale_job, 4, superseded_generation));
 }
-

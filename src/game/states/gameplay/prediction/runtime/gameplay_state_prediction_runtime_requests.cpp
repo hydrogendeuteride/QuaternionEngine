@@ -269,8 +269,13 @@ namespace Game
         // Copy currently authored maneuver nodes so the worker can include planned burns.
         if (with_maneuvers)
         {
+            const double maneuver_window_s =
+                    preview_request_active
+                            ? track.preview_anchor.request_window_s
+                            : request.future_window_s;
             const double request_end_s =
-                    request.sim_time_s + std::max(0.0, request.future_window_s);
+                    request.sim_time_s +
+                    std::max(0.0, std::isfinite(maneuver_window_s) ? maneuver_window_s : 0.0);
             constexpr double kManeuverRequestTimeEpsilonS = 1.0e-6;
             request.maneuver_impulses.reserve(_maneuver_state.nodes.size());
             for (const ManeuverNode &node : _maneuver_state.nodes)
@@ -299,8 +304,13 @@ namespace Game
             }
         }
 
+        const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
+                PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
+        const bool post_preview_full_refine =
+                lifecycle.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine &&
+                track.preview_anchor.valid;
         request.full_stream_publish.active =
-                interactive_request &&
+                (interactive_request || post_preview_full_refine) &&
                 solve_quality == OrbitPredictionService::SolveQuality::Full &&
                 track.key == _prediction_selection.active_subject &&
                 prediction_subject_is_player(track.key) &&

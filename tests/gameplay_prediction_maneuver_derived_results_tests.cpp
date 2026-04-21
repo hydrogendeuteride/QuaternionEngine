@@ -576,6 +576,55 @@ TEST(GameplayPredictionManeuverTests, FullStreamingSequenceConvergesAfterFinalDe
     EXPECT_FALSE(state.should_rebuild_prediction_track(final_track, 10.0, 0.016f, false, false));
 }
 
+TEST(GameplayPredictionManeuverTests, LateFullStreamingDerivedResultAfterFinalPublishIsIgnored)
+{
+    Game::GameplayState state{};
+    state._prediction_sampling_policy.orbiter_min_window_s = 5.0;
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.supports_maneuvers = true;
+    track.cache = make_prediction_cache(9u, 0.0, 20.0, 7'050'000.0, 7'300'000.0);
+    track.authoritative_cache = track.cache;
+    track.dirty = false;
+    track.latest_requested_generation_id = 9u;
+    track.latest_requested_authoritative_generation_id = 9u;
+    track.derived_request_pending = false;
+    track.latest_requested_derived_generation_id = 9u;
+    track.latest_requested_derived_display_frame_key = 1u;
+    track.latest_requested_derived_display_frame_revision = 1u;
+    track.latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
+    track.latest_requested_derived_publish_stage = Game::OrbitPredictionService::PublishStage::Final;
+    state._prediction_tracks.push_back(track);
+
+    Game::OrbitPredictionDerivedService::Result late_streamed_result{};
+    late_streamed_result.track_id = state._prediction_tracks.front().key.track_id();
+    late_streamed_result.generation_id = 9u;
+    late_streamed_result.display_frame_key = 1u;
+    late_streamed_result.display_frame_revision = 1u;
+    late_streamed_result.analysis_body_id = orbitsim::kInvalidBodyId;
+    late_streamed_result.valid = true;
+    late_streamed_result.solve_quality = Game::OrbitPredictionService::SolveQuality::Full;
+    late_streamed_result.publish_stage = Game::OrbitPredictionService::PublishStage::FullStreaming;
+    late_streamed_result.cache = make_prediction_cache(9u, 0.0, 20.0, 8'050'000.0, 8'300'000.0);
+    late_streamed_result.chunk_assembly.valid = true;
+    late_streamed_result.chunk_assembly.generation_id = 9u;
+    late_streamed_result.chunk_assembly.chunks = {
+            make_chunk(1u, 9u, 10.0, 20.0, 8'150'000.0, 8'300'000.0),
+    };
+
+    state.apply_completed_prediction_derived_result(std::move(late_streamed_result));
+
+    const Game::PredictionTrackState &updated_track = state._prediction_tracks.front();
+    const auto lifecycle = Game::PredictionRuntimeDetail::describe_prediction_track_lifecycle(updated_track);
+    EXPECT_EQ(lifecycle.state, Game::PredictionTrackLifecycleState::Stable);
+    EXPECT_FALSE(updated_track.derived_request_pending);
+    EXPECT_FALSE(updated_track.full_stream_overlay.chunk_assembly.valid);
+    EXPECT_TRUE(updated_track.full_stream_overlay.chunk_assembly.chunks.empty());
+    EXPECT_DOUBLE_EQ(updated_track.cache.trajectory_frame.front().position_m.x, 7'050'000.0);
+    EXPECT_DOUBLE_EQ(updated_track.cache.trajectory_frame.back().position_m.x, 7'300'000.0);
+}
+
 int main(int argc, char **argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
