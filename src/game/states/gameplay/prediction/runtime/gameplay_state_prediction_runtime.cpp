@@ -27,6 +27,23 @@ namespace Game
             double t1_s{std::numeric_limits<double>::quiet_NaN()};
         };
 
+        double resolve_authored_plan_end_s(const PredictionTimeContext &time_ctx,
+                                           const double final_node_time_s,
+                                           const double plan_horizon_s,
+                                           const double post_node_coverage_s)
+        {
+            if (!std::isfinite(time_ctx.sim_now_s) ||
+                !std::isfinite(final_node_time_s) ||
+                !(plan_horizon_s > 0.0))
+            {
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+
+            const double horizon_end_s = time_ctx.sim_now_s + plan_horizon_s;
+            const double post_node_end_s = final_node_time_s + std::max(0.0, post_node_coverage_s);
+            return std::max(horizon_end_s, post_node_end_s);
+        }
+
         bool node_time_in_context_range(const PredictionTimeContext &time_ctx, const double node_time_s)
         {
             if (!std::isfinite(node_time_s))
@@ -62,7 +79,8 @@ namespace Game
         }
 
         AuthoredPlanWindow resolve_authored_plan_window(const PredictionTimeContext &time_ctx,
-                                                        const double plan_horizon_s)
+                                                        const double plan_horizon_s,
+                                                        const double post_node_coverage_s)
         {
             AuthoredPlanWindow out{};
             if (!(plan_horizon_s > 0.0) ||
@@ -78,7 +96,10 @@ namespace Game
                     std::isfinite(time_ctx.last_future_node_time_s)
                             ? time_ctx.last_future_node_time_s
                             : out.t0_s;
-            out.t1_s = final_node_time_s + plan_horizon_s;
+            out.t1_s = resolve_authored_plan_end_s(time_ctx,
+                                                   final_node_time_s,
+                                                   plan_horizon_s,
+                                                   post_node_coverage_s);
             out.valid = std::isfinite(out.t1_s) &&
                         out.t1_s > (out.t0_s + kPredictionTimeEpsilonS);
             return out;
@@ -489,11 +510,12 @@ namespace Game
         out.request_window_s =
                 std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(key) : 0.0);
         const double solve_margin_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
+        const double post_node_coverage_s = OrbitPredictionTuning::kPostNodeCoverageMinS;
         const bool supports_maneuver_windows = with_maneuvers && time_ctx.has_plan;
         const double plan_horizon_s = maneuver_plan_horizon_s();
         const AuthoredPlanWindow authored_plan_window =
                 supports_maneuver_windows
-                        ? resolve_authored_plan_window(time_ctx, plan_horizon_s)
+                        ? resolve_authored_plan_window(time_ctx, plan_horizon_s, post_node_coverage_s)
                         : AuthoredPlanWindow{};
 
         if (std::isfinite(time_ctx.last_future_node_time_s) &&
@@ -503,7 +525,7 @@ namespace Game
             const double required_plan_end_s =
                     authored_plan_window.valid
                             ? authored_plan_window.t1_s
-                            : (time_ctx.last_future_node_time_s + solve_margin_s);
+                            : (time_ctx.last_future_node_time_s + post_node_coverage_s);
             out.request_window_s = std::max(
                     out.request_window_s,
                     std::max(0.0, required_plan_end_s - time_ctx.sim_now_s));
@@ -536,6 +558,15 @@ namespace Game
             std::isfinite(time_ctx.sim_now_s))
         {
             const double anchor_offset_s = std::max(0.0, time_ctx.selected_node_time_s - time_ctx.sim_now_s);
+            const double preview_exact_window_s =
+                    std::min(solve_margin_s,
+                             std::max(OrbitPredictionTuning::kPreviewExactWindowMinS,
+                                      std::max(0.0, _maneuver_plan_windows.preview_window_s)));
+            if (preview_exact_window_s > 0.0)
+            {
+                out.request_window_s = std::max(out.request_window_s,
+                                                anchor_offset_s + (2.0 * preview_exact_window_s));
+            }
             const double anchored_visual_window_s = resolve_live_preview_visual_window_s(out.request_window_s,
                                                                                          anchor_offset_s,
                                                                                          _maneuver_plan_windows.preview_window_s);
@@ -572,7 +603,11 @@ namespace Game
         {
             if (!authored_plan_window.valid && std::isfinite(time_ctx.last_future_node_time_s))
             {
-                const double authored_plan_end_s = time_ctx.last_future_node_time_s + plan_horizon_s;
+                const double authored_plan_end_s =
+                        resolve_authored_plan_end_s(time_ctx,
+                                                    time_ctx.last_future_node_time_s,
+                                                    plan_horizon_s,
+                                                    post_node_coverage_s);
                 const double authored_plan_span_s = std::max(0.0, authored_plan_end_s - visual_anchor.time_s);
                 out.visual_window_s = std::max(out.visual_window_s, authored_plan_span_s);
             }
@@ -598,7 +633,11 @@ namespace Game
             !authored_plan_window.valid &&
             std::isfinite(time_ctx.last_future_node_time_s))
         {
-            const double authored_plan_end_s = time_ctx.last_future_node_time_s + plan_horizon_s;
+            const double authored_plan_end_s =
+                    resolve_authored_plan_end_s(time_ctx,
+                                                time_ctx.last_future_node_time_s,
+                                                plan_horizon_s,
+                                                post_node_coverage_s);
             const double authored_plan_span_s = std::max(0.0, authored_plan_end_s - pick_anchor.time_s);
             out.pick_window_s = std::max(out.pick_window_s, authored_plan_span_s);
         }

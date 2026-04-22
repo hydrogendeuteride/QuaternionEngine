@@ -213,6 +213,10 @@ namespace Game
             return out;
         }
 
+        std::vector<double> scratch_anchor_times_s{};
+        const std::span<const double> normalized_anchor_times_s =
+                normalized_anchor_times(anchor_times_s, scratch_anchor_times_s);
+
         const std::size_t max_segments = settings.max_segments;
         if (max_segments == 0)
         {
@@ -247,7 +251,7 @@ namespace Game
             mark_keep(n - 1);
         }
 
-        for (const double anchor_time_s : anchor_times_s)
+        for (const double anchor_time_s : normalized_anchor_times_s)
         {
             if (keep_count >= max_segments)
             {

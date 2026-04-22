@@ -56,7 +56,7 @@ TEST(GameplayPredictionManeuverTests, PredictionFutureWindowClampsNegativeValues
     EXPECT_DOUBLE_EQ(state.prediction_future_window_s(celestial_key), 0.0);
 }
 
-TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowExtendsPastLastManeuverNode)
+TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowKeepsPlanHorizonAnchoredToNowForNearbyNodes)
 {
     Game::GameplayState state{};
     state._prediction_draw_future_segment = true;
@@ -75,7 +75,63 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowExtendsPastLastMan
 
     const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
     const double required_window_s = state.prediction_required_window_s(orbiter_key, 100.0, true);
-    EXPECT_DOUBLE_EQ(required_window_s, 740.0);
+    EXPECT_DOUBLE_EQ(required_window_s, 600.0);
+}
+
+TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowDoesNotAddLargeSolveMarginToNearbyNodes)
+{
+    Game::GameplayState state{};
+    state._prediction_draw_future_segment = true;
+    state._prediction_sampling_policy.orbiter_min_window_s = 120.0;
+    state._maneuver_plan_horizon.horizon_s = 600.0;
+    state._maneuver_plan_windows.solve_margin_s = 600.0;
+
+    Game::GameplayState::ManeuverNode node{};
+    node.id = 1;
+    node.time_s = 150.0;
+    state._maneuver_state.nodes.push_back(node);
+
+    const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
+    const double required_window_s = state.prediction_required_window_s(orbiter_key, 100.0, true);
+    EXPECT_DOUBLE_EQ(required_window_s, 600.0);
+}
+
+TEST(GameplayPredictionManeuverTests, FullRequestKeepsPlanHorizonAnchoredToNowWhenAddingNearbyNode)
+{
+    Game::GameplayState state{};
+    state._orbitsim = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbitsim);
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+    state._prediction_draw_future_segment = true;
+    state._prediction_sampling_policy.orbiter_min_window_s = 120.0;
+    state._maneuver_plan_horizon.horizon_s = 600.0;
+    state._maneuver_plan_windows.solve_margin_s = 600.0;
+
+    Game::GameplayState::ManeuverNode node{};
+    node.id = 1;
+    node.time_s = 150.0;
+    state._maneuver_state.selected_node_id = node.id;
+    state._maneuver_state.nodes.push_back(node);
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+
+    Game::OrbitPredictionService::Request request{};
+    const bool built = state.build_orbiter_prediction_request(track,
+                                                              WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                              glm::dvec3(0.0, 7'500.0, 0.0),
+                                                              100.0,
+                                                              false,
+                                                              true,
+                                                              request);
+
+    ASSERT_TRUE(built);
+    EXPECT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::Full);
+    EXPECT_DOUBLE_EQ(request.future_window_s, 600.0);
+    ASSERT_EQ(request.maneuver_impulses.size(), 1u);
+    EXPECT_EQ(request.maneuver_impulses.front().node_id, node.id);
+    EXPECT_DOUBLE_EQ(request.maneuver_impulses.front().t_s, node.time_s);
 }
 
 TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowSupportsFarFutureManeuverNodes)
@@ -92,7 +148,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowSupportsFarFutureM
 
     const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
     const double required_window_s = state.prediction_required_window_s(orbiter_key, 100.0, true);
-    EXPECT_DOUBLE_EQ(required_window_s, 50'500.0);
+    EXPECT_DOUBLE_EQ(required_window_s, 50'020.0);
 }
 
 TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowUsesPlanHorizonBeyondBaseSamplingWindow)
@@ -110,7 +166,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowUsesPlanHorizonBey
 
     const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
     const double required_window_s = state.prediction_required_window_s(orbiter_key, 0.0, true);
-    EXPECT_DOUBLE_EQ(required_window_s, 121'000.0);
+    EXPECT_DOUBLE_EQ(required_window_s, 120'000.0);
 }
 
 TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowKeepsDisplayedHorizonDuringLivePreview)
@@ -163,7 +219,7 @@ TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheSeparatesPatchWindowFrom
     EXPECT_DOUBLE_EQ(track.preview_anchor.anchor_time_s, 50'000.0);
     EXPECT_DOUBLE_EQ(state.prediction_display_window_s(track.key, 100.0, true), 180.0);
     EXPECT_DOUBLE_EQ(state.prediction_preview_exact_window_s(track, 100.0, true), 180.0);
-    EXPECT_DOUBLE_EQ(track.preview_anchor.request_window_s, 50'500.0);
+    EXPECT_DOUBLE_EQ(track.preview_anchor.request_window_s, 50'260.0);
     EXPECT_DOUBLE_EQ(track.preview_anchor.visual_window_s, 180.0);
     EXPECT_DOUBLE_EQ(track.preview_anchor.exact_window_s, 300.0);
     EXPECT_DOUBLE_EQ(track.preview_last_anchor_refresh_at_s, 100.0);

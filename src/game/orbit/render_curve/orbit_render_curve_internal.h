@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <vector>
 
 namespace Game
 {
@@ -16,6 +17,57 @@ namespace Game
     inline double segment_end_time(const orbitsim::TrajectorySegment &segment)
     {
         return segment.t0_s + segment.dt_s;
+    }
+
+    inline bool anchor_times_are_sorted_and_finite(const std::span<const double> anchor_times_s)
+    {
+        double previous_time_s = 0.0;
+        bool has_previous = false;
+        for (const double anchor_time_s : anchor_times_s)
+        {
+            if (!std::isfinite(anchor_time_s))
+            {
+                return false;
+            }
+
+            if (has_previous && anchor_time_s < previous_time_s)
+            {
+                return false;
+            }
+
+            previous_time_s = anchor_time_s;
+            has_previous = true;
+        }
+
+        return true;
+    }
+
+    /// Return a finite, nondecreasing anchor-time span suitable for binary searches.
+    /// Already-normalized caller spans are returned without allocation.
+    inline std::span<const double> normalized_anchor_times(
+            const std::span<const double> anchor_times_s,
+            std::vector<double> &scratch_anchor_times_s)
+    {
+        if (anchor_times_s.empty() || anchor_times_are_sorted_and_finite(anchor_times_s))
+        {
+            return anchor_times_s;
+        }
+
+        scratch_anchor_times_s.clear();
+        scratch_anchor_times_s.reserve(anchor_times_s.size());
+        for (const double anchor_time_s : anchor_times_s)
+        {
+            if (std::isfinite(anchor_time_s))
+            {
+                scratch_anchor_times_s.push_back(anchor_time_s);
+            }
+        }
+
+        std::sort(scratch_anchor_times_s.begin(), scratch_anchor_times_s.end());
+        scratch_anchor_times_s.erase(
+                std::unique(scratch_anchor_times_s.begin(), scratch_anchor_times_s.end()),
+                scratch_anchor_times_s.end());
+        return std::span<const double>(scratch_anchor_times_s.data(), scratch_anchor_times_s.size());
     }
 
     /// Evaluate the Hermite-interpolated world position of a trajectory segment at time t_s.

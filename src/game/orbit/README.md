@@ -87,7 +87,7 @@ Internal helpers split out from `orbit_prediction_service.cpp`. Not included by 
   `eval_segment_local_position()` evaluates a Hermite-interpolated position within a `TrajectorySegment`, and `meters_per_px_at_world()` computes the world-space size of a screen pixel at a given point (used for pixel-error LOD decisions).
 
 - `orbit_render_curve.h`
-  Binary-tree LOD structure over trajectory segments. Public interface, types (`LineSegment`, `RenderResult`, `PickResult`, `Node`, `SelectionContext`), and entry points (`build`, `build_render_lod`, `build_pick_lod`).
+  Public interface for orbit curve LOD and final line generation. `build()` owns the persistent binary-tree LOD hierarchy; `select_segments()` / `resolve_curve_segments()` select camera-appropriate Hermite segments from that tree; the span-based `build_render_lod()` and `build_pick_lod()` overloads convert already-selected flat segments into final render or pick line segments.
 
 ### `render_curve/` subfolder
 
@@ -97,25 +97,28 @@ Internal implementation split files for `OrbitRenderCurve`. Not included outside
   Shared inline helpers: `segment_end_time`, `eval_segment_world_position`, and frustum containment tests (`frustum_contains_point_margin`, `frustum_accept_segment_margin`).
 
 - `orbit_render_curve.cpp`
-  Tree construction and LOD selection. `build()` constructs a balanced binary tree where each internal node merges a range of source Hermite segments and records worst-case approximation error. `select_segments()` walks the tree with pixel-error-driven descent. `resolve_curve_segments()` is the shared select+transform entry point for both render and pick paths.
+  Tree construction and stage-1 LOD selection. `build()` constructs a balanced binary tree where each internal node merges a range of source Hermite segments and records worst-case approximation error. `select_segments()` walks the tree with pixel-error-driven descent. `resolve_curve_segments()` is the shared select+transform entry point for both render and pick paths; it does not create final draw-line tessellation.
 
 - `orbit_render_curve_render.cpp`
-  Adaptive subdivision for rendering. `build_render_lod()` bisects each segment until chord-vs-curve midpoint error falls below a screen-pixel threshold, using an explicit stack. Segments outside the frustum are accepted without further subdivision.
+  Stage-2 adaptive subdivision for rendering. The span-based `build_render_lod()` bisects each already-selected segment until chord-vs-curve midpoint error falls below a screen-pixel threshold, using an explicit stack. Segments outside the frustum are accepted without further subdivision. The curve-based overload is a convenience pipeline that runs tree selection first and then delegates here.
 
 - `orbit_render_curve_pick.cpp`
-  Frustum culling and downsampling for picking. `build_pick_lod()` converts segments to world-space lines, frustum-culls, then uniformly downsamples if over budget -- preserving endpoints and anchor-time segments.
+  Final line generation for picking. The span-based `build_pick_lod()` converts already-selected segments to world-space lines, frustum-culls, then uniformly downsamples if over budget -- preserving endpoints and anchor-time segments. The curve-based overload runs tree selection first and then delegates here.
 
 ## Pipeline Overview
 
-The orbit visualization pipeline has three layers:
+The orbit visualization pipeline has four layers:
 
 1. **Prediction** (background thread)
    `OrbitPredictionService` propagates spacecraft and celestial trajectories on a worker thread. Results include inertial trajectory samples, Hermite-based trajectory segments, and maneuver-node previews.
 
-2. **LOD Selection** (main thread, per-frame)
-   `OrbitRenderCurve` selects the coarse trajectory representation for the current camera/window, then produces the final render or pick line data.
+2. **Tree LOD Selection** (main thread, per-frame)
+   `OrbitRenderCurve::select_segments()` walks the binary tree and chooses a camera-appropriate set of Hermite curve segments. This stage decides which source ranges can be represented by coarser merged curves; it does not directly define the final line segments sent to drawing or picking.
 
-3. **Rendering**
+3. **Final Line Generation** (main thread, per-frame)
+   Render paths run an additional screen-space midpoint-error subdivision pass over the selected curves. Pick paths convert selected curves to lines, apply frustum culling, and downsample if needed while preserving endpoints and anchor-time boundaries.
+
+4. **Rendering**
    The final world-space line segments are submitted to the debug-draw / line rendering system for display.
 
 ## How It Is Called
@@ -168,19 +171,19 @@ The entry point is `GameplayState`, which:
 - Per-segment Hermite evaluation or pixel-size computation:
   Start in `orbit_plot_util.h/.cpp`.
 
-- Binary-tree LOD structure, segment merging, or error-driven tree traversal:
+- Binary-tree LOD structure, segment merging, or stage-1 tree traversal:
   Start in `render_curve/orbit_render_curve.cpp`.
 
-- Adaptive subdivision for rendering (pixel-error threshold, max depth):
+- Stage-2 adaptive subdivision for rendering (pixel-error threshold, max depth):
   Start in `render_curve/orbit_render_curve_render.cpp`.
 
-- Frustum culling, picking decimation, or anchor-time preservation:
+- Final pick line generation, frustum culling, picking decimation, or anchor-time preservation:
   Start in `render_curve/orbit_render_curve_pick.cpp`.
 
 ## Notes About Structure
 
 - `orbit_prediction_service` runs on background threads; all other files are main-thread only.
 - Trajectory data flows as `orbitsim::TrajectorySegment` (Hermite spline segments with start/end position+velocity and time span).
-- LOD decisions are pixel-error-driven: the chord-vs-curve midpoint deviation is measured in screen pixels, so near geometry is automatically refined more than distant geometry.
-- `OrbitRenderCurve` owns both the persistent hierarchy and the final line-generation logic used by the gameplay orbit overlay.
+- Both tree selection and render subdivision use pixel-error decisions, but at different levels: tree selection chooses coarser or finer Hermite curve segments from the persistent hierarchy, while render subdivision tessellates those selected curves into final draw lines.
+- `OrbitRenderCurve` owns both the persistent hierarchy and the final line-generation logic used by the gameplay orbit overlay; keep those responsibilities distinct when profiling or changing budgets.
 - Files in `prediction/` and `render_curve/` are internal implementation details -- they are not included outside the orbit module and should not expose any public API.

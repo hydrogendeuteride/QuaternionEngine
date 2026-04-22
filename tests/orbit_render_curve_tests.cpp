@@ -130,6 +130,31 @@ TEST(OrbitRenderCurveTests, SelectSegmentsDescendsWhenErrorBudgetIsTiny)
                      segments.back().t0_s + segments.back().dt_s);
 }
 
+TEST(OrbitRenderCurveTests, SelectSegmentsNormalizesUnsortedAnchorTimes)
+{
+    const std::vector<orbitsim::TrajectorySegment> segments = make_curved_segments();
+    const Game::OrbitRenderCurve curve = Game::OrbitRenderCurve::build(segments);
+
+    const std::vector<double> anchor_times_s{3.0, 1.0};
+
+    Game::OrbitRenderCurve::SelectionContext ctx{};
+    ctx.camera_world = glm::dvec3(0.0, 0.0, 1.0e9);
+    ctx.tan_half_fov = 1.0;
+    ctx.viewport_height_px = 1080.0;
+    ctx.error_px = 1.0e30;
+    ctx.anchor_times_s = anchor_times_s;
+
+    std::vector<orbitsim::TrajectorySegment> selected{};
+    Game::OrbitRenderCurve::select_segments(curve, ctx, 0.0, 4.0, selected);
+
+    ASSERT_EQ(selected.size(), segments.size());
+    for (std::size_t i = 0; i < segments.size(); ++i)
+    {
+        EXPECT_DOUBLE_EQ(selected[i].t0_s, segments[i].t0_s);
+        EXPECT_DOUBLE_EQ(selected[i].dt_s, segments[i].dt_s);
+    }
+}
+
 TEST(OrbitRenderCurveTests, PickLodKeepsLongSegmentCrossingFrustum)
 {
     const std::vector<orbitsim::TrajectorySegment> segments{

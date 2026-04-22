@@ -19,9 +19,17 @@ namespace Game
     /// a range of source Hermite segments into a single coarser segment and records
     /// its worst-case approximation error (in meters).
     ///
-    /// At runtime, build_render_lod() / build_pick_lod() descend the tree, select
-    /// segments at the appropriate fidelity for the current camera, and produce
-    /// world-space line segments for drawing or picking.
+    /// Runtime line generation is intentionally split into two responsibilities:
+    ///   1. Tree LOD selection chooses a camera-appropriate set of Hermite curve
+    ///      segments from the persistent hierarchy. This is handled by
+    ///      select_segments() / resolve_curve_segments().
+    ///   2. The selected segments are converted into final world-space line
+    ///      segments. Rendering performs an additional screen-space midpoint-error
+    ///      subdivision pass; picking applies frustum culling and downsampling.
+    ///
+    /// The curve-based build_render_lod() / build_pick_lod() overloads are
+    /// convenience pipelines that run the tree-selection stage first, then delegate
+    /// to the span-based final line-generation overloads.
     ///
     /// File layout:
     ///   orbit_render_curve.h              -- types and public interface
@@ -42,7 +50,7 @@ namespace Game
             double viewport_height_px{1.0};
         };
 
-        /// Controls render-LOD subdivision budget and quality.
+        /// Controls final render-subdivision budget and quality.
         struct RenderSettings
         {
             double error_px{0.75};            ///< max allowed chord-vs-curve error in screen pixels
@@ -59,7 +67,7 @@ namespace Game
             double t1_s{0.0};
         };
 
-        /// Output of build_render_lod(). cap_hit is set when max_segments was reached.
+        /// Output of final render line generation. cap_hit is set when max_segments was reached.
         struct RenderResult
         {
             std::vector<LineSegment> segments{};
@@ -108,10 +116,14 @@ namespace Game
             }
         };
 
-        /// All parameters needed for tree-based LOD selection.
+        /// All parameters needed for the tree-LOD selection stage.
         /// Bundles camera, reference frame, and anchor times into one struct
         /// so that the curve-based overloads of build_render_lod / build_pick_lod
         /// can share the select+transform logic via resolve_curve_segments().
+        /// Final render subdivision has its own RenderSettings and is not performed
+        /// by select_segments() itself.
+        /// Sorted, finite anchor times avoid scratch allocation; public curve APIs
+        /// normalize this span before internal binary searches.
         struct SelectionContext
         {
             WorldVec3 reference_body_world{0.0, 0.0, 0.0};  ///< world position of the reference body
@@ -121,7 +133,7 @@ namespace Game
             double tan_half_fov{0.0};
             double viewport_height_px{1.0};
             double error_px{0.75};                           ///< pixel-error threshold for tree descent
-            std::span<const double> anchor_times_s{};        ///< times that must lie on segment boundaries
+            std::span<const double> anchor_times_s{};        ///< finite times that should lie on segment boundaries
         };
 
         [[nodiscard]] bool empty() const
@@ -148,7 +160,8 @@ namespace Game
 
         // -- Render LOD (orbit_render_curve_render.cpp) --
 
-        /// Produce render line segments from a flat segment array.
+        /// Produce final render line segments from a flat segment array.
+        /// This is the render-subdivision stage only; it does not walk the LOD tree.
         /// Adaptively subdivides each segment until chord-vs-curve error < error_px,
         /// skipping segments outside the frustum.
         static RenderResult build_render_lod(
@@ -161,8 +174,10 @@ namespace Game
                 double t_end_s,
                 const FrustumContext &frustum);
 
-        /// Convenience overload: selects segments from the LOD tree first,
-        /// then delegates to the span-based overload above.
+        /// Convenience pipeline: run tree-LOD selection first, then run final
+        /// render subdivision via the span-based overload above.
+        /// Tree selection reduces the Hermite curve set; it does not directly
+        /// define the final draw-line tessellation.
         static RenderResult build_render_lod(
                 const OrbitRenderCurve &curve,
                 const SelectionContext &ctx,
@@ -173,7 +188,8 @@ namespace Game
 
         // -- Pick LOD (orbit_render_curve_pick.cpp) --
 
-        /// Produce pick line segments from a flat segment array.
+        /// Produce final pick line segments from a flat segment array.
+        /// This is the pick line-generation stage only; it does not walk the LOD tree.
         /// Frustum-culls first, then downsamples uniformly if over budget,
         /// preserving anchor-time segments and endpoints.
         static PickResult build_pick_lod(
@@ -186,8 +202,8 @@ namespace Game
                 double t_end_s,
                 std::span<const double> anchor_times_s = {});
 
-        /// Convenience overload: selects segments from the LOD tree first,
-        /// then delegates to the span-based overload above.
+        /// Convenience pipeline: run tree-LOD selection first, then run pick
+        /// frustum culling / downsampling via the span-based overload above.
         static PickResult build_pick_lod(
                 const OrbitRenderCurve &curve,
                 const SelectionContext &ctx,
@@ -196,7 +212,8 @@ namespace Game
                 double t_start_s,
                 double t_end_s);
 
-        /// Walk the LOD tree and collect segments at the appropriate fidelity.
+        /// Stage 1: walk the LOD tree and collect Hermite curve segments at the
+        /// appropriate fidelity.
         /// Descends into children when the node's merge error exceeds the screen-pixel
         /// threshold, or when anchor times / time-window boundaries fall inside the node.
         static void select_segments(const OrbitRenderCurve &curve,
@@ -206,7 +223,8 @@ namespace Game
                                     std::vector<orbitsim::TrajectorySegment> &out_segments);
 
     private:
-        /// select_segments() + optional BCI-to-world frame transform.
+        /// Stage 1 helper: select_segments() + optional BCI-to-world frame transform.
+        /// Does not perform final render subdivision or pick downsampling.
         /// Shared entry point for both curve-based build_render_lod and build_pick_lod.
         static std::vector<orbitsim::TrajectorySegment> resolve_curve_segments(
                 const OrbitRenderCurve &curve,
