@@ -130,6 +130,41 @@ TEST(OrbitRenderCurveTests, SelectSegmentsDescendsWhenErrorBudgetIsTiny)
                      segments.back().t0_s + segments.back().dt_s);
 }
 
+TEST(OrbitRenderCurveTests, PickLodKeepsLongSegmentCrossingFrustum)
+{
+    const std::vector<orbitsim::TrajectorySegment> segments{
+            make_segment(0.0,
+                         1.0,
+                         glm::dvec3(-2.0, 0.0, 0.5),
+                         glm::dvec3(12.0, 0.0, 0.0),
+                         glm::dvec3(10.0, 0.0, 0.5),
+                         glm::dvec3(12.0, 0.0, 0.0)),
+    };
+
+    Game::OrbitRenderCurve::FrustumContext frustum{};
+    frustum.valid = true;
+    frustum.viewproj = glm::mat4(1.0f);
+
+    Game::OrbitRenderCurve::PickSettings settings{};
+    settings.max_segments = 8;
+    settings.frustum_margin_ratio = 0.0;
+
+    const Game::OrbitRenderCurve::PickResult result =
+            Game::OrbitRenderCurve::build_pick_lod(segments,
+                                                   WorldVec3(0.0, 0.0, 0.0),
+                                                   WorldVec3(0.0, 0.0, 0.0),
+                                                   frustum,
+                                                   settings,
+                                                   0.0,
+                                                   1.0);
+
+    EXPECT_EQ(result.segments_before_cull, 1u);
+    EXPECT_EQ(result.segments_after_cull, 1u);
+    ASSERT_EQ(result.segments.size(), 1u);
+    EXPECT_DOUBLE_EQ(result.segments.front().t0_s, 0.0);
+    EXPECT_DOUBLE_EQ(result.segments.front().t1_s, 1.0);
+}
+
 int main(int argc, char **argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

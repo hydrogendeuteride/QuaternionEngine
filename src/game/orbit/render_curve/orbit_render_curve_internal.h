@@ -6,6 +6,7 @@
 #include "game/orbit/orbit_render_curve.h"
 #include "game/orbit/orbit_plot_util.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace Game
@@ -26,8 +27,49 @@ namespace Game
         return reference_body_world + OrbitPlotUtil::eval_segment_local_position(segment, t_s) + align_delta_world;
     }
 
+    inline bool clip_point_is_finite(const glm::vec4 &clip)
+    {
+        return std::isfinite(clip.x) &&
+               std::isfinite(clip.y) &&
+               std::isfinite(clip.z) &&
+               std::isfinite(clip.w);
+    }
+
+    inline glm::vec4 project_world_to_clip(const OrbitRenderCurve::FrustumContext &frustum,
+                                           const WorldVec3 &point_world)
+    {
+        const glm::vec3 point_local = world_to_local(point_world, frustum.origin_world);
+        return frustum.viewproj * glm::vec4(point_local, 1.0f);
+    }
+
+    inline double frustum_safe_margin(const double margin_ratio)
+    {
+        return std::isfinite(margin_ratio) ? std::max(0.0, margin_ratio) : 0.0;
+    }
+
+    inline void clip_plane_distances_margin(const glm::vec4 &clip,
+                                            const double margin_ratio,
+                                            double (&distances)[6])
+    {
+        const double x = static_cast<double>(clip.x);
+        const double y = static_cast<double>(clip.y);
+        const double z = static_cast<double>(clip.z);
+        const double w = static_cast<double>(clip.w);
+
+        const double xy_extent = (1.0 + margin_ratio) * w;
+        const double near_extent = margin_ratio * w;
+        const double far_extent = (1.0 + margin_ratio) * w;
+
+        distances[0] = x + xy_extent;      // left:   x >= -(1 + margin) * w
+        distances[1] = -x + xy_extent;     // right:  x <=  (1 + margin) * w
+        distances[2] = y + xy_extent;      // bottom: y >= -(1 + margin) * w
+        distances[3] = -y + xy_extent;     // top:    y <=  (1 + margin) * w
+        distances[4] = z + near_extent;    // near:   z >= -margin * w
+        distances[5] = -z + far_extent;    // far:    z <=  (1 + margin) * w
+    }
+
     /// Test whether a world-space point lies inside the frustum with an NDC margin.
-    /// Projects the point to clip space and checks against expanded bounds.
+    /// Projects the point to clip space and checks against expanded Vulkan clip bounds.
     /// Returns true (accept) when the frustum is invalid (culling disabled).
     inline bool frustum_contains_point_margin(const OrbitRenderCurve::FrustumContext &frustum,
                                                const WorldVec3 &point_world,
@@ -38,37 +80,26 @@ namespace Game
             return true;
         }
 
-        const double safe_margin = std::isfinite(margin_ratio) ? std::max(0.0, margin_ratio) : 0.0;
-
-        const glm::vec3 point_local = world_to_local(point_world, frustum.origin_world);
-        const glm::vec4 clip = frustum.viewproj * glm::vec4(point_local, 1.0f);
-        if (!std::isfinite(clip.x) || !std::isfinite(clip.y) || !std::isfinite(clip.z) || !std::isfinite(clip.w))
+        const glm::vec4 clip = project_world_to_clip(frustum, point_world);
+        if (!clip_point_is_finite(clip) || !(static_cast<double>(clip.w) > 1.0e-6))
         {
             return false;
         }
 
-        const double w = static_cast<double>(clip.w);
-        const double aw = std::abs(w);
-        if (!(aw > 1.0e-6))
+        double distances[6]{};
+        clip_plane_distances_margin(clip, frustum_safe_margin(margin_ratio), distances);
+        for (const double distance : distances)
         {
-            return false;
+            if (distance < 0.0)
+            {
+                return false;
+            }
         }
-
-        const double x = static_cast<double>(clip.x);
-        const double y = static_cast<double>(clip.y);
-        const double z = static_cast<double>(clip.z);
-
-        const double xy_bound = (1.0 + safe_margin) * aw;
-        const double z_min = -safe_margin * aw;
-        const double z_max = (1.0 + safe_margin) * aw;
-
-        return (x >= -xy_bound && x <= xy_bound) &&
-               (y >= -xy_bound && y <= xy_bound) &&
-               (z >= z_min && z <= z_max);
+        return true;
     }
 
-    /// Accept a line segment if either endpoint or its midpoint is inside the frustum.
-    /// Conservative test: may accept segments partially outside, but never rejects fully-visible ones.
+    /// Accept a line segment unless both endpoints are fully outside one homogeneous clip plane.
+    /// This keeps long segments that cross the view even when endpoints and midpoint are off-screen.
     inline bool frustum_accept_segment_margin(const OrbitRenderCurve::FrustumContext &frustum,
                                                const WorldVec3 &a_world,
                                                const WorldVec3 &b_world,
@@ -79,13 +110,28 @@ namespace Game
             return true;
         }
 
-        if (frustum_contains_point_margin(frustum, a_world, margin_ratio) ||
-            frustum_contains_point_margin(frustum, b_world, margin_ratio))
+        const glm::vec4 clip_a = project_world_to_clip(frustum, a_world);
+        const glm::vec4 clip_b = project_world_to_clip(frustum, b_world);
+        if (!clip_point_is_finite(clip_a) || !clip_point_is_finite(clip_b))
         {
-            return true;
+            return false;
         }
 
-        const WorldVec3 mid_world = 0.5 * (a_world + b_world);
-        return frustum_contains_point_margin(frustum, mid_world, margin_ratio);
+        double distances_a[6]{};
+        double distances_b[6]{};
+        const double safe_margin = frustum_safe_margin(margin_ratio);
+        clip_plane_distances_margin(clip_a, safe_margin, distances_a);
+        clip_plane_distances_margin(clip_b, safe_margin, distances_b);
+
+        constexpr double kClipPlaneDistanceEpsilon = 1.0e-7;
+        for (std::size_t i = 0; i < 6; ++i)
+        {
+            if (distances_a[i] < -kClipPlaneDistanceEpsilon &&
+                distances_b[i] < -kClipPlaneDistanceEpsilon)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 } // namespace Game
