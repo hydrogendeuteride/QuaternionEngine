@@ -330,6 +330,11 @@ namespace Game::PredictionCacheInternal
         dst.hard_cap_hit = dst.hard_cap_hit || src.hard_cap_hit;
         dst.cancelled = dst.cancelled || src.cancelled;
         dst.cache_reused = dst.cache_reused || src.cache_reused;
+        dst.maneuver_apply_failed_count += src.maneuver_apply_failed_count;
+        if (dst.maneuver_apply_failed_node_id < 0 && src.maneuver_apply_failed_node_id >= 0)
+        {
+            dst.maneuver_apply_failed_node_id = src.maneuver_apply_failed_node_id;
+        }
     }
 
     inline orbitsim::FrameSegmentTransformOptions build_frame_segment_transform_options(

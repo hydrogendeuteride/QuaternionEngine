@@ -93,6 +93,11 @@ namespace Game
             lhs.hard_cap_hit = lhs.hard_cap_hit || rhs.hard_cap_hit;
             lhs.cancelled = lhs.cancelled || rhs.cancelled;
             lhs.cache_reused = lhs.cache_reused || rhs.cache_reused;
+            lhs.maneuver_apply_failed_count += rhs.maneuver_apply_failed_count;
+            if (lhs.maneuver_apply_failed_node_id < 0 && rhs.maneuver_apply_failed_node_id >= 0)
+            {
+                lhs.maneuver_apply_failed_node_id = rhs.maneuver_apply_failed_node_id;
+            }
             return lhs;
         }
 
@@ -603,6 +608,14 @@ namespace Game
                 return;
             }
 
+            const auto fail_with_planned_diagnostics =
+                    [&](const Status status, const PlannedSolveOutput &planned_output) {
+                        out.diagnostics.trajectory_planned = planned_output.diagnostics;
+                        out.diagnostics.trajectory_sample_count_planned = planned_output.samples.size();
+                        sync_stage_counts();
+                        fail(status);
+                    };
+
             std::shared_ptr<const Result::CoreData> staged_core_data{};
             const auto shared_core_data_for_staged_publish = [&out, &staged_core_data]() {
                 if (staged_core_data)
@@ -791,7 +804,7 @@ namespace Game
                     if (prefix_stage_output.status != Status::Success ||
                         prefix_summary.status != Status::Success)
                     {
-                        fail(prefix_summary.status);
+                        fail_with_planned_diagnostics(prefix_summary.status, prefix_stage_output);
                         return;
                     }
                     preview_start_state = prefix_summary.end_state;
@@ -811,7 +824,7 @@ namespace Game
                                                 preview_stage_chunks);
                 if (preview_stage_output.status != Status::Success || preview_summary.status != Status::Success)
                 {
-                    fail(preview_summary.status);
+                    fail_with_planned_diagnostics(preview_summary.status, preview_stage_output);
                     return;
                 }
 
@@ -828,7 +841,7 @@ namespace Game
                     if (prefix_stage_output.status != Status::Success ||
                         prefix_summary.status != Status::Success)
                     {
-                        fail(prefix_summary.status);
+                        fail_with_planned_diagnostics(prefix_summary.status, prefix_stage_output);
                         return;
                     }
                     prefix_stage_solved = true;
@@ -854,7 +867,7 @@ namespace Game
                     if (final_preview_stage_output.status != Status::Success ||
                         final_preview_summary.status != Status::Success)
                     {
-                        fail(final_preview_summary.status);
+                        fail_with_planned_diagnostics(final_preview_summary.status, final_preview_stage_output);
                         return;
                     }
                     final_preview_output = &final_preview_stage_output;
@@ -877,7 +890,7 @@ namespace Game
                     if (suffix_stage_output.status != Status::Success ||
                         suffix_summary.status != Status::Success)
                     {
-                        fail(suffix_summary.status);
+                        fail_with_planned_diagnostics(suffix_summary.status, suffix_stage_output);
                         return;
                     }
                 }
@@ -978,7 +991,7 @@ namespace Game
                 apply_planned_range_summary(planned, planned_summary);
                 if (planned.status != Status::Success)
                 {
-                    fail(planned.status);
+                    fail_with_planned_diagnostics(planned.status, planned);
                     return;
                 }
                 if (!flush_full_stream_batch(true))

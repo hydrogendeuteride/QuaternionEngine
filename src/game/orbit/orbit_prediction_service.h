@@ -74,6 +74,8 @@ namespace Game
             bool hard_cap_hit{false};
             bool cancelled{false};
             bool cache_reused{false};
+            std::size_t maneuver_apply_failed_count{0};
+            int maneuver_apply_failed_node_id{-1};
         };
 
         struct Diagnostics
