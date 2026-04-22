@@ -5,6 +5,7 @@
 #include "orbitsim/trajectory_types.hpp"
 
 #include <condition_variable>
+#include <cassert>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -277,6 +278,7 @@ namespace Game
                 std::vector<orbitsim::TrajectorySample> trajectory_inertial{};
                 std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial{};
             };
+            using SharedCoreData = std::shared_ptr<const CoreData>;
 
             uint64_t track_id{0};
             uint64_t generation_id{0};
@@ -319,29 +321,56 @@ namespace Game
                 return _shared_core_data ? _shared_core_data->trajectory_segments_inertial : trajectory_segments_inertial;
             }
 
+            [[nodiscard]] const SharedCoreData &shared_core_data() const
+            {
+                return _shared_core_data;
+            }
+
+            [[nodiscard]] bool has_shared_core_data() const
+            {
+                return static_cast<bool>(_shared_core_data);
+            }
+
+            [[nodiscard]] std::vector<orbitsim::MassiveBody> clone_massive_bodies() const
+            {
+                return resolved_massive_bodies();
+            }
+
+            [[nodiscard]] std::vector<orbitsim::TrajectorySample> clone_trajectory_inertial() const
+            {
+                return resolved_trajectory_inertial();
+            }
+
+            [[nodiscard]] std::vector<orbitsim::TrajectorySegment> clone_trajectory_segments_inertial() const
+            {
+                return resolved_trajectory_segments_inertial();
+            }
+
             [[nodiscard]] std::vector<orbitsim::MassiveBody> take_massive_bodies()
             {
-                return _shared_core_data ? _shared_core_data->massive_bodies : std::move(massive_bodies);
+                assert(!_shared_core_data && "shared core data cannot be taken; use resolved_*(), shared_core_data(), or clone_*()");
+                return std::move(massive_bodies);
             }
 
             [[nodiscard]] std::vector<orbitsim::TrajectorySample> take_trajectory_inertial()
             {
-                return _shared_core_data ? _shared_core_data->trajectory_inertial : std::move(trajectory_inertial);
+                assert(!_shared_core_data && "shared core data cannot be taken; use resolved_*(), shared_core_data(), or clone_*()");
+                return std::move(trajectory_inertial);
             }
 
             [[nodiscard]] std::vector<orbitsim::TrajectorySegment> take_trajectory_segments_inertial()
             {
-                return _shared_core_data ? _shared_core_data->trajectory_segments_inertial
-                                         : std::move(trajectory_segments_inertial);
+                assert(!_shared_core_data && "shared core data cannot be taken; use resolved_*(), shared_core_data(), or clone_*()");
+                return std::move(trajectory_segments_inertial);
             }
 
-            void set_shared_core_data(std::shared_ptr<const CoreData> shared_core_data)
+            void set_shared_core_data(SharedCoreData shared_core_data)
             {
                 _shared_core_data = std::move(shared_core_data);
             }
 
         private:
-            std::shared_ptr<const CoreData> _shared_core_data{};
+            SharedCoreData _shared_core_data{};
         };
 
         struct EphemerisSamplingSpec

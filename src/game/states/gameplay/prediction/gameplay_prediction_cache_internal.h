@@ -49,32 +49,13 @@ namespace Game::PredictionCacheInternal
 
         const orbitsim::TrajectorySample &a = trajectory[i_hi - 1];
         const orbitsim::TrajectorySample &b = trajectory[i_hi];
-        const double h = b.t_s - a.t_s;
-        if (!(h > 0.0) || !std::isfinite(h))
-        {
-            out_state = orbitsim::make_state(a.position_m, a.velocity_mps);
-            return true;
-        }
-
-        double u = (query_time_s - a.t_s) / h;
-        if (!std::isfinite(u))
-        {
-            u = 0.0;
-        }
-        u = std::clamp(u, 0.0, 1.0);
-
-        const glm::dvec3 pos = orbitsim::hermite_position(a.position_m, a.velocity_mps,
-                                                          b.position_m, b.velocity_mps,
-                                                          h, u);
-        const glm::dvec3 vel = orbitsim::hermite_velocity_mps(a.position_m, a.velocity_mps,
-                                                              b.position_m, b.velocity_mps,
-                                                              h, u);
-        if (!finite_vec3(pos) || !finite_vec3(vel))
+        const orbitsim::State sampled = OrbitPredictionMath::sample_pair_state(a, b, query_time_s);
+        if (!finite_vec3(sampled.position_m) || !finite_vec3(sampled.velocity_mps))
         {
             return false;
         }
 
-        out_state = orbitsim::make_state(pos, vel);
+        out_state = sampled;
         return true;
     }
 
@@ -418,11 +399,16 @@ namespace Game::PredictionCacheInternal
         cache.analysis_cache_valid = false;
         cache.metrics_valid = false;
 
+        const auto &base_ephemeris = cache.resolved_shared_ephemeris();
+        const auto &base_bodies = cache.resolved_massive_bodies();
+        const auto &base_samples = cache.resolved_trajectory_inertial();
+        const auto &base_segments = cache.resolved_trajectory_segments_inertial();
+
         if (resolved_frame_spec.type == orbitsim::TrajectoryFrameType::Inertial)
         {
-            cache.trajectory_frame = cache.trajectory_inertial;
+            cache.trajectory_frame = base_samples;
             cache.trajectory_frame_planned = cache.trajectory_inertial_planned;
-            cache.trajectory_segments_frame = cache.trajectory_segments_inertial;
+            cache.trajectory_segments_frame = base_segments;
             cache.trajectory_segments_frame_planned = cache.trajectory_segments_inertial_planned;
             if (!validate_trajectory_segment_continuity(cache.trajectory_segments_frame))
             {
@@ -439,7 +425,7 @@ namespace Game::PredictionCacheInternal
             {
                 diagnostics->frame_base = make_stage_diagnostics_from_segments(
                         cache.trajectory_segments_frame,
-                        prediction_segment_span_s(cache.trajectory_segments_inertial));
+                        prediction_segment_span_s(base_segments));
                 diagnostics->frame_planned = make_stage_diagnostics_from_segments(
                         cache.trajectory_segments_frame_planned,
                         prediction_segment_span_s(cache.trajectory_segments_inertial_planned));
@@ -447,14 +433,14 @@ namespace Game::PredictionCacheInternal
         }
         else
         {
-            if (!cache.shared_ephemeris || cache.shared_ephemeris->empty())
+            if (!base_ephemeris || base_ephemeris->empty())
             {
                 update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::MissingEphemeris);
                 return false;
             }
 
             const auto player_lookup = build_player_lookup(player_lookup_segments_inertial);
-            const std::size_t base_sample_budget = std::max<std::size_t>(cache.trajectory_inertial.size(), 2);
+            const std::size_t base_sample_budget = std::max<std::size_t>(base_samples.size(), 2);
             const std::size_t planned_sample_budget =
                     cache.trajectory_inertial_planned.size() >= 2 ? cache.trajectory_inertial_planned.size()
                                                                   : base_sample_budget;
@@ -463,13 +449,13 @@ namespace Game::PredictionCacheInternal
             const orbitsim::FrameSegmentTransformOptions base_opt =
                     build_frame_segment_transform_options(
                             resolved_frame_spec,
-                            cache.trajectory_segments_inertial,
+                            base_segments,
                             cancel_requested);
             orbitsim::FrameSegmentTransformDiagnostics base_frame_diag{};
             cache.trajectory_segments_frame = orbitsim::transform_trajectory_segments_to_frame_spec(
-                    cache.trajectory_segments_inertial,
-                    *cache.shared_ephemeris,
-                    cache.massive_bodies,
+                    base_segments,
+                    *base_ephemeris,
+                    base_bodies,
                     resolved_frame_spec,
                     base_opt,
                     player_lookup,
@@ -493,7 +479,7 @@ namespace Game::PredictionCacheInternal
             {
                 diagnostics->frame_base = make_stage_diagnostics_from_adaptive(
                         base_frame_diag,
-                        prediction_segment_span_s(cache.trajectory_segments_inertial));
+                        prediction_segment_span_s(base_segments));
                 diagnostics->frame_base.accepted_segments = cache.trajectory_segments_frame.size();
                 diagnostics->frame_base.covered_duration_s = prediction_segment_span_s(cache.trajectory_segments_frame);
                 diagnostics->frame_base.frame_resegmentation_count = base_frame_diag.frame_resegmentation_count;
@@ -515,8 +501,8 @@ namespace Game::PredictionCacheInternal
                 orbitsim::FrameSegmentTransformDiagnostics planned_frame_diag{};
                 cache.trajectory_segments_frame_planned = orbitsim::transform_trajectory_segments_to_frame_spec(
                         cache.trajectory_segments_inertial_planned,
-                        *cache.shared_ephemeris,
-                        cache.massive_bodies,
+                        *base_ephemeris,
+                        base_bodies,
                         resolved_frame_spec,
                         planned_opt,
                         player_lookup,
@@ -596,7 +582,10 @@ namespace Game::PredictionCacheInternal
             return true;
         }
 
-        const std::size_t base_sample_budget = std::max<std::size_t>(cache.trajectory_inertial.size(), 2);
+        const auto &base_ephemeris = cache.resolved_shared_ephemeris();
+        const auto &base_bodies = cache.resolved_massive_bodies();
+        const auto &base_samples = cache.resolved_trajectory_inertial();
+        const std::size_t base_sample_budget = std::max<std::size_t>(base_samples.size(), 2);
         const std::size_t planned_sample_budget =
                 cache.trajectory_inertial_planned.size() >= 2 ? cache.trajectory_inertial_planned.size()
                                                               : base_sample_budget;
@@ -626,7 +615,7 @@ namespace Game::PredictionCacheInternal
         }
         else
         {
-            if (!cache.shared_ephemeris || cache.shared_ephemeris->empty())
+            if (!base_ephemeris || base_ephemeris->empty())
             {
                 update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::MissingEphemeris);
                 return false;
@@ -641,8 +630,8 @@ namespace Game::PredictionCacheInternal
             orbitsim::FrameSegmentTransformDiagnostics planned_frame_diag{};
             cache.trajectory_segments_frame_planned = orbitsim::transform_trajectory_segments_to_frame_spec(
                     cache.trajectory_segments_inertial_planned,
-                    *cache.shared_ephemeris,
-                    cache.massive_bodies,
+                    *base_ephemeris,
+                    base_bodies,
                     resolved_frame_spec,
                     planned_opt,
                     player_lookup,
@@ -761,7 +750,9 @@ namespace Game::PredictionCacheInternal
         }
         else
         {
-            if (!cache.shared_ephemeris || cache.shared_ephemeris->empty())
+            const auto &base_ephemeris = cache.resolved_shared_ephemeris();
+            const auto &base_bodies = cache.resolved_massive_bodies();
+            if (!base_ephemeris || base_ephemeris->empty())
             {
                 update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::MissingEphemeris);
                 return false;
@@ -776,8 +767,8 @@ namespace Game::PredictionCacheInternal
             orbitsim::FrameSegmentTransformDiagnostics frame_diag{};
             frame_segments = orbitsim::transform_trajectory_segments_to_frame_spec(
                     streamed_chunk.trajectory_segments_inertial,
-                    *cache.shared_ephemeris,
-                    cache.massive_bodies,
+                    *base_ephemeris,
+                    base_bodies,
                     resolved_frame_spec,
                     frame_opt,
                     player_lookup,
@@ -944,12 +935,16 @@ namespace Game::PredictionCacheInternal
     {
         clear_prediction_metrics(cache, analysis_body_id);
 
-        const auto analysis_it = std::find_if(cache.massive_bodies.begin(),
-                                              cache.massive_bodies.end(),
+        const auto &base_ephemeris = cache.resolved_shared_ephemeris();
+        const auto &base_bodies = cache.resolved_massive_bodies();
+        const auto &base_samples = cache.resolved_trajectory_inertial();
+        const auto &base_segments = cache.resolved_trajectory_segments_inertial();
+        const auto analysis_it = std::find_if(base_bodies.begin(),
+                                              base_bodies.end(),
                                               [analysis_body_id](const orbitsim::MassiveBody &body) {
                                                   return body.id == analysis_body_id;
                                               });
-        if (analysis_it == cache.massive_bodies.end() || !(analysis_it->mass_kg > 0.0))
+        if (analysis_it == base_bodies.end() || !(analysis_it->mass_kg > 0.0))
         {
             return;
         }
@@ -975,21 +970,21 @@ namespace Game::PredictionCacheInternal
         {
             rel_samples = cache.trajectory_analysis_bci;
         }
-        else if (cache.shared_ephemeris && !cache.shared_ephemeris->empty())
+        else if (base_ephemeris && !base_ephemeris->empty())
         {
-            const std::size_t sample_budget = std::max<std::size_t>(cache.trajectory_inertial.size(), 2);
+            const std::size_t sample_budget = std::max<std::size_t>(base_samples.size(), 2);
             const orbitsim::TrajectoryFrameSpec analysis_frame =
                     orbitsim::TrajectoryFrameSpec::body_centered_inertial(analysis_body_id);
             const orbitsim::FrameSegmentTransformOptions frame_opt =
                     build_frame_segment_transform_options(
                             analysis_frame,
-                            cache.trajectory_segments_inertial,
+                            base_segments,
                             cancel_requested);
-            const std::vector<orbitsim::TrajectorySegment> rel_segments =
+            std::vector<orbitsim::TrajectorySegment> rel_segments =
                     orbitsim::transform_trajectory_segments_to_frame_spec(
-                            cache.trajectory_segments_inertial,
-                            *cache.shared_ephemeris,
-                            cache.massive_bodies,
+                            base_segments,
+                            *base_ephemeris,
+                            base_bodies,
                             analysis_frame,
                             frame_opt);
             if (cancel_requested && cancel_requested())

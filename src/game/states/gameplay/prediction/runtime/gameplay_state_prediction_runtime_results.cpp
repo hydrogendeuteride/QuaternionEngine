@@ -64,7 +64,7 @@ namespace Game
                 reused_cache.metrics_body_id = base_cache.metrics_body_id;
                 reused_cache.metrics_valid = base_cache.metrics_valid;
             }
-            reused_cache.valid = reused_cache.trajectory_inertial.size() >= 2 &&
+            reused_cache.valid = reused_cache.resolved_trajectory_inertial().size() >= 2 &&
                                  reused_cache.trajectory_frame.size() >= 2 &&
                                  !reused_cache.trajectory_segments_frame.empty();
             return reused_cache;
@@ -275,7 +275,7 @@ namespace Game
                         track->cache.resolved_frame_spec_valid &&
                         result.cache.resolved_frame_spec_valid &&
                         frame_specs_match(track->cache.resolved_frame_spec, result.cache.resolved_frame_spec) &&
-                        track->cache.shared_ephemeris == result.cache.shared_ephemeris &&
+                        track->cache.resolved_shared_ephemeris() == result.cache.resolved_shared_ephemeris() &&
                         track->cache.trajectory_frame.size() >= 2 &&
                         !track->cache.trajectory_segments_frame.empty();
                 if (reusable_base_still_available)

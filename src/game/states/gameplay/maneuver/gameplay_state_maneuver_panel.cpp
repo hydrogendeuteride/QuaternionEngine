@@ -125,7 +125,7 @@ namespace Game
 
             if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track))
             {
-                if (!player_cache->trajectory_inertial.empty())
+                if (!player_cache->resolved_trajectory_inertial().empty())
                 {
                     return resolve_prediction_analysis_body_id(*player_cache,
                                                                player_track->key,

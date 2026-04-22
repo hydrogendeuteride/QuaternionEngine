@@ -1,6 +1,7 @@
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 
 #include "game/orbit/orbit_plot_util.h"
+#include "game/orbit/orbit_prediction_math.h"
 
 #include "orbitsim/math.hpp"
 
@@ -175,23 +176,7 @@ namespace Game::PredictionDrawDetail
 
         const orbitsim::TrajectorySample &a = traj[i_lo];
         const orbitsim::TrajectorySample &b = traj[i_hi];
-        const double h = b.t_s - a.t_s;
-        if (!(h > 0.0) || !std::isfinite(h))
-        {
-            return transform_local(glm::dvec3(a.position_m));
-        }
-
-        double u = (t_s - a.t_s) / h;
-        if (!std::isfinite(u))
-        {
-            u = 0.0;
-        }
-        u = std::clamp(u, 0.0, 1.0);
-
-        const glm::dvec3 local = orbitsim::hermite_position(a.position_m, a.velocity_mps,
-                                                            b.position_m, b.velocity_mps,
-                                                            h, u);
-        return transform_local(local);
+        return transform_local(OrbitPredictionMath::sample_pair_position_m(a, b, t_s));
     }
 
     bool sample_prediction_path_world(const OrbitDrawWindowContext &ctx,

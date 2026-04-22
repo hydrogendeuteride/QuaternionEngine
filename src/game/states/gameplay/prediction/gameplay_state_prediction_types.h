@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -140,12 +141,14 @@ namespace Game
     struct OrbitPredictionCache
     {
         using ManeuverNodePreview = OrbitPredictionService::ManeuverNodePreview;
+        using SharedSolverCoreData = OrbitPredictionService::Result::SharedCoreData;
 
         bool valid{false};
         uint64_t generation_id{0};
         double build_time_s{0.0};
         WorldVec3 build_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 build_vel_world{0.0, 0.0, 0.0};
+        SharedSolverCoreData shared_solver_core_data{};
         OrbitPredictionService::SharedCelestialEphemeris shared_ephemeris{};
         std::vector<orbitsim::MassiveBody> massive_bodies;
 
@@ -184,6 +187,36 @@ namespace Game
         orbitsim::BodyId metrics_body_id{orbitsim::kInvalidBodyId};
         bool metrics_valid{false};
 
+        void set_shared_solver_core_data(SharedSolverCoreData core_data)
+        {
+            shared_solver_core_data = std::move(core_data);
+            if (shared_solver_core_data)
+            {
+                shared_ephemeris = shared_solver_core_data->shared_ephemeris;
+            }
+        }
+
+        [[nodiscard]] const OrbitPredictionService::SharedCelestialEphemeris &resolved_shared_ephemeris() const
+        {
+            return shared_solver_core_data ? shared_solver_core_data->shared_ephemeris : shared_ephemeris;
+        }
+
+        [[nodiscard]] const std::vector<orbitsim::MassiveBody> &resolved_massive_bodies() const
+        {
+            return shared_solver_core_data ? shared_solver_core_data->massive_bodies : massive_bodies;
+        }
+
+        [[nodiscard]] const std::vector<orbitsim::TrajectorySample> &resolved_trajectory_inertial() const
+        {
+            return shared_solver_core_data ? shared_solver_core_data->trajectory_inertial : trajectory_inertial;
+        }
+
+        [[nodiscard]] const std::vector<orbitsim::TrajectorySegment> &resolved_trajectory_segments_inertial() const
+        {
+            return shared_solver_core_data ? shared_solver_core_data->trajectory_segments_inertial
+                                           : trajectory_segments_inertial;
+        }
+
         [[nodiscard]] bool has_planned_frame_draw_data() const
         {
             return trajectory_frame_planned.size() >= 2 ||
@@ -199,6 +232,7 @@ namespace Game
             build_time_s = 0.0;
             build_pos_world = WorldVec3(0.0, 0.0, 0.0);
             build_vel_world = glm::dvec3(0.0, 0.0, 0.0);
+            shared_solver_core_data.reset();
             shared_ephemeris.reset();
             massive_bodies.clear();
             trajectory_inertial.clear();

@@ -428,11 +428,18 @@ namespace Game
         cache.build_time_s = solver.build_time_s;
         cache.build_pos_world = request.build_pos_world;
         cache.build_vel_world = request.build_vel_world;
-        cache.shared_ephemeris = solver.resolved_shared_ephemeris();
-        cache.massive_bodies = solver.take_massive_bodies();
-        cache.trajectory_inertial = solver.take_trajectory_inertial();
+        if (solver.has_shared_core_data())
+        {
+            cache.set_shared_solver_core_data(solver.shared_core_data());
+        }
+        else
+        {
+            cache.shared_ephemeris = std::move(solver.shared_ephemeris);
+            cache.massive_bodies = solver.take_massive_bodies();
+            cache.trajectory_inertial = solver.take_trajectory_inertial();
+            cache.trajectory_segments_inertial = solver.take_trajectory_segments_inertial();
+        }
         cache.trajectory_inertial_planned = std::move(solver.trajectory_inertial_planned);
-        cache.trajectory_segments_inertial = solver.take_trajectory_segments_inertial();
         cache.trajectory_segments_inertial_planned = std::move(solver.trajectory_segments_inertial_planned);
         cache.maneuver_previews = std::move(solver.maneuver_previews);
         cache.valid = true;

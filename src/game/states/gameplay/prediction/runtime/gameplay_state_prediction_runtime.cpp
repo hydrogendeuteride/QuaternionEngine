@@ -244,8 +244,8 @@ namespace Game
                 }
             };
 
-            accumulate_samples_end(cache.trajectory_inertial);
-            accumulate_segments_end(cache.trajectory_segments_inertial);
+            accumulate_samples_end(cache.resolved_trajectory_inertial());
+            accumulate_segments_end(cache.resolved_trajectory_segments_inertial());
             accumulate_samples_end(cache.trajectory_inertial_planned);
             accumulate_segments_end(cache.trajectory_segments_inertial_planned);
             return cache_end_s;
@@ -642,7 +642,7 @@ namespace Game
             rebuild = true;
         }
 
-        if (rebuild || !track.cache.valid || track.cache.trajectory_inertial.empty())
+        if (rebuild || !track.cache.valid || track.cache.resolved_trajectory_inertial().empty())
         {
             return rebuild;
         }

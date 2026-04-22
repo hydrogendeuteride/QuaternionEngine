@@ -126,10 +126,10 @@ namespace Game
                sample_prediction_inertial_state(anchor_cache.trajectory_inertial_planned,
                                                 track.preview_anchor.anchor_time_s,
                                                 out_state) ||
-               PredictionCacheInternal::sample_prediction_inertial_state(track.cache.trajectory_segments_inertial,
+               PredictionCacheInternal::sample_prediction_inertial_state(track.cache.resolved_trajectory_segments_inertial(),
                                                                          track.preview_anchor.anchor_time_s,
                                                                          out_state) ||
-               sample_prediction_inertial_state(track.cache.trajectory_inertial,
+               sample_prediction_inertial_state(track.cache.resolved_trajectory_inertial(),
                                                 track.preview_anchor.anchor_time_s,
                                                 out_state);
     }
@@ -210,7 +210,7 @@ namespace Game
         request.track_id = track.key.track_id();
         request.sim_time_s = now_s;
         request.sim_config = _orbitsim->sim.config();
-        request.shared_ephemeris = track.cache.shared_ephemeris;
+        request.shared_ephemeris = track.cache.resolved_shared_ephemeris();
         request.massive_bodies = _orbitsim->sim.massive_bodies();
         request.ship_bary_position_m = ship_bary_pos_m;
         request.ship_bary_velocity_mps = ship_bary_vel_mps;
@@ -389,7 +389,7 @@ namespace Game
         request.sim_time_s = now_s;
         request.sim_config = _orbitsim->sim.config();
         request.massive_bodies = _orbitsim->sim.massive_bodies();
-        request.shared_ephemeris = track.cache.shared_ephemeris;
+        request.shared_ephemeris = track.cache.resolved_shared_ephemeris();
         request.subject_body_id = body->id;
         request.priority = PredictionRuntimeDetail::classify_prediction_request_priority(
                 _prediction_selection,

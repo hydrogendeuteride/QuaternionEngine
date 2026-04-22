@@ -31,17 +31,18 @@ namespace Game
             const OrbitPredictionCache &cache = *player_cache;
             const auto &traj =
                     cache.trajectory_inertial_planned.size() >= 2 ? cache.trajectory_inertial_planned
-                                                                  : cache.trajectory_inertial;
+                                                                  : cache.resolved_trajectory_inertial();
+            const auto &bodies = cache.resolved_massive_bodies();
 
             orbitsim::State sc_state{};
             if (!traj.empty() &&
                 sample_prediction_inertial_state(traj, query_time_s, sc_state) &&
-                !cache.massive_bodies.empty())
+                !bodies.empty())
             {
                 const orbitsim::BodyId preferred_body_id =
                         node.primary_body_auto ? orbitsim::kInvalidBodyId : node.primary_body_id;
                 const orbitsim::BodyId primary_body_id = select_prediction_primary_body_id(
-                        cache.massive_bodies,
+                        bodies,
                         &cache,
                         sc_state.position_m,
                         query_time_s,
@@ -52,7 +53,7 @@ namespace Game
                 }
             }
 
-            if (!cache.trajectory_inertial.empty())
+            if (!cache.resolved_trajectory_inertial().empty())
             {
                 const orbitsim::BodyId analysis_body_id =
                         resolve_prediction_analysis_body_id(cache, player_track->key, query_time_s, node.primary_body_id);

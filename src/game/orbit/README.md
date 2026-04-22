@@ -39,7 +39,7 @@ orbit/
 
 - `orbit_prediction_math.h / .cpp`
   Pure math helpers for orbital mechanics.
-  `OrbitalElementsEstimate` struct (SMA, eccentricity, period, periapsis, apoapsis), `estimate_orbital_period_s()`, `compute_orbital_elements()`, `select_prediction_horizon_and_dt()`, and `hermite_position_world()` (cubic Hermite interpolation on trajectory samples).
+  `OrbitalElementsEstimate` struct (SMA, eccentricity, period, periapsis, apoapsis), `estimate_orbital_period_s()`, `compute_orbital_elements()`, `select_prediction_horizon_and_dt()`, and sample-pair trajectory evaluation helpers.
 
 - `orbit_prediction_service.h / .cpp`
   Background-threaded prediction worker.

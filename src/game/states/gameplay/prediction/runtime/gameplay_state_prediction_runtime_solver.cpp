@@ -35,24 +35,28 @@ namespace Game
         bool base_trajectory_signature_matches(const OrbitPredictionCache &cache,
                                               const OrbitPredictionService::Result &result)
         {
+            const std::vector<orbitsim::TrajectorySegment> &cache_segments =
+                    cache.resolved_trajectory_segments_inertial();
+            const std::vector<orbitsim::TrajectorySample> &cache_samples =
+                    cache.resolved_trajectory_inertial();
             const std::vector<orbitsim::TrajectorySegment> &result_segments =
                     result.resolved_trajectory_segments_inertial();
             const std::vector<orbitsim::TrajectorySample> &result_samples =
                     result.resolved_trajectory_inertial();
-            if (cache.trajectory_segments_inertial.empty() || result_segments.empty() ||
-                cache.trajectory_inertial.size() < 2 || result_samples.size() < 2)
+            if (cache_segments.empty() || result_segments.empty() ||
+                cache_samples.size() < 2 || result_samples.size() < 2)
             {
                 return false;
             }
 
-            if (cache.trajectory_segments_inertial.size() != result_segments.size() ||
-                cache.trajectory_inertial.size() != result_samples.size())
+            if (cache_segments.size() != result_segments.size() ||
+                cache_samples.size() != result_samples.size())
             {
                 return false;
             }
 
-            const orbitsim::TrajectorySegment &cache_seg0 = cache.trajectory_segments_inertial.front();
-            const orbitsim::TrajectorySegment &cache_seg1 = cache.trajectory_segments_inertial.back();
+            const orbitsim::TrajectorySegment &cache_seg0 = cache_segments.front();
+            const orbitsim::TrajectorySegment &cache_seg1 = cache_segments.back();
             const orbitsim::TrajectorySegment &result_seg0 = result_segments.front();
             const orbitsim::TrajectorySegment &result_seg1 = result_segments.back();
             if (cache_seg0.t0_s != result_seg0.t0_s ||
@@ -63,8 +67,8 @@ namespace Game
                 return false;
             }
 
-            const orbitsim::TrajectorySample &cache_sample0 = cache.trajectory_inertial.front();
-            const orbitsim::TrajectorySample &cache_sample1 = cache.trajectory_inertial.back();
+            const orbitsim::TrajectorySample &cache_sample0 = cache_samples.front();
+            const orbitsim::TrajectorySample &cache_sample1 = cache_samples.back();
             const orbitsim::TrajectorySample &result_sample0 = result_samples.front();
             const orbitsim::TrajectorySample &result_sample1 = result_samples.back();
             return cache_sample0.t_s == result_sample0.t_s &&
@@ -80,7 +84,7 @@ namespace Game
                    track.cache.resolved_frame_spec_valid &&
                    frame_supports_live_base_frame_reuse(resolved_frame_spec) &&
                    frame_specs_match(track.cache.resolved_frame_spec, resolved_frame_spec) &&
-                   track.cache.shared_ephemeris == result.resolved_shared_ephemeris() &&
+                   track.cache.resolved_shared_ephemeris() == result.resolved_shared_ephemeris() &&
                    track.cache.trajectory_frame.size() >= 2 &&
                    !track.cache.trajectory_segments_frame.empty() &&
                    base_trajectory_signature_matches(track.cache, result);
@@ -185,14 +189,21 @@ namespace Game
 
         OrbitPredictionCache resolve_cache{};
         resolve_cache.build_time_s = result.build_time_s;
-        resolve_cache.shared_ephemeris = result.resolved_shared_ephemeris();
-        resolve_cache.massive_bodies = result.resolved_massive_bodies();
-        resolve_cache.trajectory_segments_inertial = result.resolved_trajectory_segments_inertial();
+        if (result.has_shared_core_data())
+        {
+            resolve_cache.set_shared_solver_core_data(result.shared_core_data());
+        }
+        else
+        {
+            resolve_cache.shared_ephemeris = result.resolved_shared_ephemeris();
+            resolve_cache.massive_bodies = result.resolved_massive_bodies();
+            resolve_cache.trajectory_segments_inertial = result.resolved_trajectory_segments_inertial();
+            resolve_cache.trajectory_inertial = result.resolved_trajectory_inertial();
+        }
         const double reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : result.build_time_s;
         const orbitsim::TrajectoryFrameSpec resolved_frame_spec =
                 resolve_prediction_display_frame_spec(resolve_cache, reference_time_s);
 
-        resolve_cache.trajectory_inertial = result.resolved_trajectory_inertial();
         orbitsim::BodyId analysis_body_id =
                 resolve_prediction_analysis_body_id(resolve_cache,
                                                    track->key,
@@ -223,9 +234,9 @@ namespace Game
                 {
                     player_lookup_segments = player_cache->trajectory_segments_inertial_planned;
                 }
-                else if (!player_cache->trajectory_segments_inertial.empty())
+                else if (!player_cache->resolved_trajectory_segments_inertial().empty())
                 {
-                    player_lookup_segments = player_cache->trajectory_segments_inertial;
+                    player_lookup_segments = player_cache->resolved_trajectory_segments_inertial();
                 }
             }
         }

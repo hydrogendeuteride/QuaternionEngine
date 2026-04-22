@@ -30,8 +30,20 @@ namespace Game::OrbitPredictionMath
                                      const glm::dvec3 &r_m,
                                      const glm::dvec3 &v_mps);
 
-    WorldVec3 hermite_position_world(const WorldVec3 &ref_body_world,
-                                     const orbitsim::TrajectorySample &a,
-                                     const orbitsim::TrajectorySample &b,
-                                     double t_s);
+    glm::dvec3 sample_pair_position_m(const orbitsim::TrajectorySample &a,
+                                      const orbitsim::TrajectorySample &b,
+                                      double t_s);
+
+    glm::dvec3 sample_pair_velocity_mps(const orbitsim::TrajectorySample &a,
+                                        const orbitsim::TrajectorySample &b,
+                                        double t_s);
+
+    orbitsim::State sample_pair_state(const orbitsim::TrajectorySample &a,
+                                      const orbitsim::TrajectorySample &b,
+                                      double t_s);
+
+    WorldVec3 sample_pair_position_world(const WorldVec3 &ref_body_world,
+                                         const orbitsim::TrajectorySample &a,
+                                         const orbitsim::TrajectorySample &b,
+                                         double t_s);
 } // namespace Game::OrbitPredictionMath
