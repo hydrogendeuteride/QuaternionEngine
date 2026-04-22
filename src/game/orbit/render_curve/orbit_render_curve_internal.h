@@ -7,6 +7,7 @@
 #include "game/orbit/orbit_plot_util.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace Game
@@ -40,6 +41,11 @@ namespace Game
     {
         const glm::vec3 point_local = world_to_local(point_world, frustum.origin_world);
         return frustum.viewproj * glm::vec4(point_local, 1.0f);
+    }
+
+    inline bool vec3_is_finite(const glm::dvec3 &v)
+    {
+        return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
     }
 
     inline double frustum_safe_margin(const double margin_ratio)
@@ -133,5 +139,89 @@ namespace Game
             }
         }
         return true;
+    }
+
+    inline bool frustum_accept_clip_control_points_margin(
+            const std::array<glm::vec4, 4> &clip_points,
+            const double margin_ratio)
+    {
+        double distances[4][6]{};
+        for (std::size_t point_index = 0; point_index < clip_points.size(); ++point_index)
+        {
+            const glm::vec4 &clip = clip_points[point_index];
+            if (!clip_point_is_finite(clip))
+            {
+                return false;
+            }
+            clip_plane_distances_margin(clip, margin_ratio, distances[point_index]);
+        }
+
+        constexpr double kClipPlaneDistanceEpsilon = 1.0e-7;
+        for (std::size_t plane_index = 0; plane_index < 6; ++plane_index)
+        {
+            bool all_outside_plane = true;
+            for (std::size_t point_index = 0; point_index < clip_points.size(); ++point_index)
+            {
+                if (distances[point_index][plane_index] >= -kClipPlaneDistanceEpsilon)
+                {
+                    all_outside_plane = false;
+                    break;
+                }
+            }
+
+            if (all_outside_plane)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// Conservatively accept a Hermite curve interval if its cubic Bezier control hull
+    /// is not fully outside any homogeneous clip plane.
+    inline bool frustum_accept_hermite_interval_margin(
+            const OrbitRenderCurve::FrustumContext &frustum,
+            const orbitsim::TrajectorySegment &segment,
+            const double t0_s,
+            const double t1_s,
+            const WorldVec3 &reference_body_world,
+            const WorldVec3 &align_delta_world,
+            const double margin_ratio)
+    {
+        if (!frustum.valid)
+        {
+            return true;
+        }
+
+        const double dt_s = t1_s - t0_s;
+        if (!std::isfinite(dt_s) || !(dt_s > 0.0))
+        {
+            return false;
+        }
+
+        const orbitsim::State state0 = orbitsim::trajectory_segment_state_at(segment, t0_s);
+        const orbitsim::State state1 = orbitsim::trajectory_segment_state_at(segment, t1_s);
+        if (!vec3_is_finite(state0.position_m) ||
+            !vec3_is_finite(state0.velocity_mps) ||
+            !vec3_is_finite(state1.position_m) ||
+            !vec3_is_finite(state1.velocity_mps))
+        {
+            return false;
+        }
+
+        const WorldVec3 p0 = reference_body_world + state0.position_m + align_delta_world;
+        const WorldVec3 p3 = reference_body_world + state1.position_m + align_delta_world;
+        const WorldVec3 p1 = p0 + (state0.velocity_mps * (dt_s / 3.0));
+        const WorldVec3 p2 = p3 - (state1.velocity_mps * (dt_s / 3.0));
+
+        return frustum_accept_clip_control_points_margin(
+                std::array<glm::vec4, 4>{
+                        project_world_to_clip(frustum, p0),
+                        project_world_to_clip(frustum, p1),
+                        project_world_to_clip(frustum, p2),
+                        project_world_to_clip(frustum, p3),
+                },
+                frustum_safe_margin(margin_ratio));
     }
 } // namespace Game
