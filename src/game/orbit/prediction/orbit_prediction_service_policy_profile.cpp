@@ -261,12 +261,6 @@ namespace Game
                 chunk.t1_s,
                 probe.primary_body_id_mid);
 
-        if (chunk.profile_id == PredictionProfileId::Exact ||
-            chunk.profile_id == PredictionProfileId::Near)
-        {
-            return probe;
-        }
-
         for (const OrbitPredictionService::ManeuverImpulse &impulse : request.maneuver_impulses)
         {
             if (!std::isfinite(impulse.t_s))
@@ -274,26 +268,32 @@ namespace Game
                 continue;
             }
 
-            const double distance_s = std::min(std::abs(impulse.t_s - chunk.t0_s), std::abs(impulse.t_s - chunk.t1_s));
+            const double distance_s = std::min(std::abs(impulse.t_s - chunk.t0_s),
+                                               std::abs(impulse.t_s - chunk.t1_s));
             probe.maneuver_proximity_s = std::min(probe.maneuver_proximity_s, distance_s);
         }
 
+        const bool tail_profile = chunk.profile_id == PredictionProfileId::Tail;
         uint32_t promote_steps = 0u;
-        if (probe.heading_change_rad >= OrbitPredictionTuning::kPredictionActivityProbeHeadingPromoteRad)
+        if (tail_profile &&
+            probe.heading_change_rad >= OrbitPredictionTuning::kPredictionActivityProbeHeadingPromoteRad)
         {
             promote_steps = std::max(promote_steps, 1u);
         }
-        if (probe.heading_change_rad >= OrbitPredictionTuning::kPredictionActivityProbeHeadingSplitRad)
+        if (tail_profile &&
+            probe.heading_change_rad >= OrbitPredictionTuning::kPredictionActivityProbeHeadingSplitRad)
         {
             promote_steps = std::max(promote_steps, 2u);
             probe.should_split = true;
         }
 
-        if (normalized_jerk >= OrbitPredictionTuning::kPredictionActivityProbeNormalizedJerkPromote)
+        if (tail_profile &&
+            normalized_jerk >= OrbitPredictionTuning::kPredictionActivityProbeNormalizedJerkPromote)
         {
             promote_steps = std::max(promote_steps, 1u);
         }
-        if (normalized_jerk >= OrbitPredictionTuning::kPredictionActivityProbeNormalizedJerkSplit)
+        if (tail_profile &&
+            normalized_jerk >= OrbitPredictionTuning::kPredictionActivityProbeNormalizedJerkSplit)
         {
             promote_steps = std::max(promote_steps, 2u);
             probe.should_split = true;

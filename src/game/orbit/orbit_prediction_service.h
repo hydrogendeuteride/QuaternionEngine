@@ -10,6 +10,7 @@
 #include <deque>
 #include <functional>
 #include <limits>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -441,10 +442,43 @@ namespace Game
             std::vector<orbitsim::TrajectorySegment> seam_validation_segments{};
             std::vector<orbitsim::TrajectorySample> samples{};
             std::vector<ManeuverNodePreview> previews{};
-            uint64_t last_use_serial{0};
         };
 
     private:
+        struct PlannedChunkCacheKeyHash
+        {
+            [[nodiscard]] std::size_t operator()(const PlannedChunkCacheKey &key) const noexcept
+            {
+                std::size_t seed = std::hash<uint64_t>{}(key.track_id);
+                const auto combine = [&seed](const std::size_t value) {
+                    seed ^= value + 0x9e3779b97f4a7c15ull + (seed << 6u) + (seed >> 2u);
+                };
+
+                combine(std::hash<uint64_t>{}(key.baseline_generation_id));
+                combine(std::hash<uint64_t>{}(key.upstream_maneuver_hash));
+                combine(std::hash<uint64_t>{}(key.frame_independent_generation));
+                combine(std::hash<int64_t>{}(key.chunk_t0_tick));
+                combine(std::hash<int64_t>{}(key.chunk_t1_tick));
+                combine(std::hash<uint8_t>{}(static_cast<uint8_t>(key.profile_id)));
+                return seed;
+            }
+        };
+
+        struct PlannedChunkCacheKeyEqual
+        {
+            [[nodiscard]] bool operator()(const PlannedChunkCacheKey &a,
+                                          const PlannedChunkCacheKey &b) const noexcept
+            {
+                return a.track_id == b.track_id &&
+                       a.baseline_generation_id == b.baseline_generation_id &&
+                       a.upstream_maneuver_hash == b.upstream_maneuver_hash &&
+                       a.frame_independent_generation == b.frame_independent_generation &&
+                       a.chunk_t0_tick == b.chunk_t0_tick &&
+                       a.chunk_t1_tick == b.chunk_t1_tick &&
+                       a.profile_id == b.profile_id;
+            }
+        };
+
         struct ReusableBaselineCacheEntry
         {
             uint64_t generation_id{0};
@@ -500,8 +534,12 @@ namespace Game
         std::unordered_map<uint64_t, ReusableBaselineCacheEntry> _reusable_baseline_by_track{};
 
         mutable std::mutex _planned_chunk_cache_mutex;
-        std::vector<PlannedChunkCacheEntry> _planned_chunk_cache{};
-        uint64_t _next_planned_chunk_cache_use_serial{1};
+        std::list<PlannedChunkCacheEntry> _planned_chunk_cache{};
+        std::unordered_map<PlannedChunkCacheKey,
+                           std::list<PlannedChunkCacheEntry>::iterator,
+                           PlannedChunkCacheKeyHash,
+                           PlannedChunkCacheKeyEqual>
+                _planned_chunk_cache_by_key{};
 
         std::mutex _ephemeris_mutex;
         std::vector<CachedEphemerisEntry> _ephemeris_cache{};

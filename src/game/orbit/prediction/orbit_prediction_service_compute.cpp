@@ -22,18 +22,6 @@ namespace Game
             return (flags & static_cast<uint32_t>(flag)) != 0u;
         }
 
-        bool planned_chunk_cache_key_matches(const OrbitPredictionService::PlannedChunkCacheKey &a,
-                                             const OrbitPredictionService::PlannedChunkCacheKey &b)
-        {
-            return a.track_id == b.track_id &&
-                   a.baseline_generation_id == b.baseline_generation_id &&
-                   a.upstream_maneuver_hash == b.upstream_maneuver_hash &&
-                   a.frame_independent_generation == b.frame_independent_generation &&
-                   a.chunk_t0_tick == b.chunk_t0_tick &&
-                   a.chunk_t1_tick == b.chunk_t1_tick &&
-                   a.profile_id == b.profile_id;
-        }
-
         OrbitPredictionService::PublishedChunk make_published_chunk(
                 const PlannedChunkPacket &packet,
                 const uint32_t chunk_id,
@@ -534,23 +522,35 @@ namespace Game
                            const orbitsim::State &expected_start_state)
                             -> std::optional<PlannedChunkCacheEntry> {
                         std::lock_guard<std::mutex> lock(_planned_chunk_cache_mutex);
-                        for (PlannedChunkCacheEntry &entry : _planned_chunk_cache)
+                        const auto cache_it = _planned_chunk_cache_by_key.find(key);
+                        if (cache_it == _planned_chunk_cache_by_key.end())
                         {
-                            if (!planned_chunk_cache_key_matches(entry.key, key) ||
-                                !states_are_continuous(entry.start_state, expected_start_state) ||
-                                entry.samples.size() < 2u ||
-                                entry.segments.empty() ||
-                                !validate_trajectory_segment_continuity(entry.segments) ||
-                                (!entry.seam_validation_segments.empty() &&
-                                 !validate_trajectory_segment_continuity(entry.seam_validation_segments)))
-                            {
-                                continue;
-                            }
-
-                            entry.last_use_serial = _next_planned_chunk_cache_use_serial++;
-                            return entry;
+                            return std::nullopt;
                         }
-                        return std::nullopt;
+
+                        auto entry_it = cache_it->second;
+                        PlannedChunkCacheEntry &entry = *entry_it;
+                        if (entry.samples.size() < 2u ||
+                            entry.segments.empty() ||
+                            !validate_trajectory_segment_continuity(entry.segments) ||
+                            (!entry.seam_validation_segments.empty() &&
+                             !validate_trajectory_segment_continuity(entry.seam_validation_segments)))
+                        {
+                            _planned_chunk_cache_by_key.erase(cache_it);
+                            _planned_chunk_cache.erase(entry_it);
+                            return std::nullopt;
+                        }
+
+                        if (!states_are_continuous(entry.start_state, expected_start_state))
+                        {
+                            return std::nullopt;
+                        }
+
+                        _planned_chunk_cache.splice(_planned_chunk_cache.begin(),
+                                                    _planned_chunk_cache,
+                                                    entry_it);
+                        cache_it->second = _planned_chunk_cache.begin();
+                        return *_planned_chunk_cache.begin();
                     },
                     // store_cached_chunk closure
                     [this](PlannedChunkCacheEntry entry) {
@@ -567,35 +567,27 @@ namespace Game
                         }
 
                         std::lock_guard<std::mutex> lock(_planned_chunk_cache_mutex);
-                        entry.last_use_serial = _next_planned_chunk_cache_use_serial++;
-                        const auto existing_it = std::find_if(
-                                _planned_chunk_cache.begin(),
-                                _planned_chunk_cache.end(),
-                                [&entry](const PlannedChunkCacheEntry &cached) {
-                                    return planned_chunk_cache_key_matches(cached.key, entry.key);
-                                });
-                        if (existing_it != _planned_chunk_cache.end())
+                        const auto existing_it = _planned_chunk_cache_by_key.find(entry.key);
+                        if (existing_it != _planned_chunk_cache_by_key.end())
                         {
-                            *existing_it = std::move(entry);
+                            auto lru_it = existing_it->second;
+                            *lru_it = std::move(entry);
+                            _planned_chunk_cache.splice(_planned_chunk_cache.begin(),
+                                                        _planned_chunk_cache,
+                                                        lru_it);
+                            existing_it->second = _planned_chunk_cache.begin();
                         }
                         else
                         {
-                            _planned_chunk_cache.push_back(std::move(entry));
+                            _planned_chunk_cache.push_front(std::move(entry));
+                            _planned_chunk_cache_by_key.emplace(_planned_chunk_cache.front().key,
+                                                                _planned_chunk_cache.begin());
                         }
 
                         if (_planned_chunk_cache.size() > kMaxCachedPlannedChunks)
                         {
-                            const auto lru_it = std::min_element(
-                                    _planned_chunk_cache.begin(),
-                                    _planned_chunk_cache.end(),
-                                    [](const PlannedChunkCacheEntry &a,
-                                       const PlannedChunkCacheEntry &b) {
-                                        return a.last_use_serial < b.last_use_serial;
-                                    });
-                            if (lru_it != _planned_chunk_cache.end())
-                            {
-                                _planned_chunk_cache.erase(lru_it);
-                            }
+                            _planned_chunk_cache_by_key.erase(_planned_chunk_cache.back().key);
+                            _planned_chunk_cache.pop_back();
                         }
                     },
                     // get_or_build_ephemeris closure

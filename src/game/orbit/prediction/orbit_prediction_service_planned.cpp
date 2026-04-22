@@ -226,18 +226,6 @@ namespace Game
                        std::make_move_iterator(src.end()));
         }
 
-        bool planned_chunk_cache_key_matches(const OrbitPredictionService::PlannedChunkCacheKey &a,
-                                             const OrbitPredictionService::PlannedChunkCacheKey &b)
-        {
-            return a.track_id == b.track_id &&
-                   a.baseline_generation_id == b.baseline_generation_id &&
-                   a.upstream_maneuver_hash == b.upstream_maneuver_hash &&
-                   a.frame_independent_generation == b.frame_independent_generation &&
-                   a.chunk_t0_tick == b.chunk_t0_tick &&
-                   a.chunk_t1_tick == b.chunk_t1_tick &&
-                   a.profile_id == b.profile_id;
-        }
-
         bool validate_segment_boundary(const orbitsim::TrajectorySegment &previous_segment,
                                        const orbitsim::TrajectorySegment &current_segment)
         {

@@ -211,8 +211,8 @@ namespace Game
 
         {
             std::lock_guard<std::mutex> lock(_planned_chunk_cache_mutex);
+            _planned_chunk_cache_by_key.clear();
             _planned_chunk_cache.clear();
-            _next_planned_chunk_cache_use_serial = 1;
         }
 
         {
