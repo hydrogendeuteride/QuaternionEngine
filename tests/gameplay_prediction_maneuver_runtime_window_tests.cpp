@@ -533,11 +533,87 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestUsesSelectedNodePreviewF
     ASSERT_TRUE(built);
     ASSERT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
     ASSERT_TRUE(request.preview_patch.active);
+    EXPECT_FALSE(request.planned_suffix_refine.active);
     ASSERT_TRUE(request.preview_patch.anchor_state_valid);
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.position_m.x, 7'250'000.0);
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.position_m.y, 123.0);
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.velocity_mps.y, 7'650.0);
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.velocity_mps.z, 5.0);
+}
+
+TEST(GameplayPredictionManeuverTests, FullRequestEnablesPlannedSuffixRefineForPostDragAnchor)
+{
+    Game::GameplayState state{};
+    state._orbitsim = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbitsim);
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+
+    Game::GameplayState::ManeuverNode upstream{};
+    upstream.id = 1;
+    upstream.time_s = 150.0;
+    state._maneuver_state.nodes.push_back(upstream);
+
+    Game::GameplayState::ManeuverNode selected{};
+    selected.id = 2;
+    selected.time_s = 240.0;
+    state._maneuver_state.selected_node_id = selected.id;
+    state._maneuver_state.nodes.push_back(selected);
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+    track.cache = make_prediction_cache(4u, 100.0, 360.0, 7'000'000.0, 7'260'000.0);
+    track.cache.trajectory_segments_inertial_planned = {
+            make_segment(100.0, 150.0, 7'000'000.0, 7'050'000.0),
+            make_segment(150.0, 240.0, 7'050'000.0, 7'140'000.0),
+    };
+    track.cache.trajectory_inertial_planned = {
+            make_sample(100.0, 7'000'000.0),
+            make_sample(150.0, 7'050'000.0),
+            make_sample(240.0, 7'140'000.0),
+    };
+    track.cache.maneuver_previews.push_back(Game::OrbitPredictionService::ManeuverNodePreview{
+            .node_id = upstream.id,
+            .t_s = upstream.time_s,
+            .valid = true,
+            .inertial_position_m = glm::dvec3(7'050'000.0, 0.0, 0.0),
+            .inertial_velocity_mps = glm::dvec3(0.0, 7'500.0, 0.0),
+    });
+    track.cache.maneuver_previews.push_back(Game::OrbitPredictionService::ManeuverNodePreview{
+            .node_id = selected.id,
+            .t_s = selected.time_s,
+            .valid = true,
+            .inertial_position_m = glm::dvec3(7'140'000.0, 0.0, 0.0),
+            .inertial_velocity_mps = glm::dvec3(0.0, 7'500.0, 0.0),
+    });
+    track.authoritative_cache = track.cache;
+    track.preview_state = Game::PredictionPreviewRuntimeState::AwaitFullRefine;
+    track.preview_anchor.valid = true;
+    track.preview_anchor.anchor_node_id = selected.id;
+    track.preview_anchor.anchor_time_s = selected.time_s;
+
+    Game::OrbitPredictionService::Request request{};
+    const bool built = state.build_orbiter_prediction_request(track,
+                                                              WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                              glm::dvec3(0.0, 7'500.0, 0.0),
+                                                              100.0,
+                                                              false,
+                                                              true,
+                                                              request);
+
+    ASSERT_TRUE(built);
+    EXPECT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::Full);
+    ASSERT_TRUE(request.planned_suffix_refine.active);
+    EXPECT_EQ(request.planned_suffix_refine.anchor_node_id, selected.id);
+    EXPECT_DOUBLE_EQ(request.planned_suffix_refine.anchor_time_s, selected.time_s);
+    ASSERT_EQ(request.planned_suffix_refine.prefix_segments_inertial.size(), 2u);
+    EXPECT_DOUBLE_EQ(request.planned_suffix_refine.prefix_segments_inertial.front().t0_s, 100.0);
+    EXPECT_DOUBLE_EQ(request.planned_suffix_refine.prefix_segments_inertial.back().t0_s +
+                             request.planned_suffix_refine.prefix_segments_inertial.back().dt_s,
+                     selected.time_s);
+    ASSERT_EQ(request.planned_suffix_refine.prefix_previews.size(), 1u);
+    EXPECT_EQ(request.planned_suffix_refine.prefix_previews.front().node_id, upstream.id);
+    EXPECT_FALSE(request.preview_patch.active);
 }
 
 TEST(GameplayPredictionManeuverTests, FastPreviewRequestFallsBackToInertialCacheForAnchorState)
@@ -659,6 +735,7 @@ TEST(GameplayPredictionManeuverTests, FullRequestEnablesFullStreamPublishForPost
     ASSERT_TRUE(built);
     EXPECT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::Full);
     EXPECT_EQ(request.maneuver_impulses.size(), 1u);
+    EXPECT_FALSE(request.planned_suffix_refine.active);
     EXPECT_TRUE(request.full_stream_publish.active);
 }
 

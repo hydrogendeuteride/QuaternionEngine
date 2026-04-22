@@ -240,6 +240,16 @@ namespace Game
                 orbitsim::State anchor_state_inertial{};
             };
 
+            struct PlannedSuffixRefineSpec
+            {
+                bool active{false};
+                int anchor_node_id{-1};
+                double anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
+                orbitsim::State anchor_state_inertial{};
+                std::vector<orbitsim::TrajectorySegment> prefix_segments_inertial{};
+                std::vector<ManeuverNodePreview> prefix_previews{};
+            };
+
             struct FullStreamPublishSpec
             {
                 bool active{false};
@@ -269,6 +279,7 @@ namespace Game
             orbitsim::BodyId preferred_primary_body_id{orbitsim::kInvalidBodyId};
             std::vector<ManeuverImpulse> maneuver_impulses;
             PreviewPatchSpec preview_patch{};
+            PlannedSuffixRefineSpec planned_suffix_refine{};
             FullStreamPublishSpec full_stream_publish{};
         };
 

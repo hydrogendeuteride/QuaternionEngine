@@ -320,7 +320,7 @@ namespace Game
                     .profile_id = profile_id,
                     .boundary_flags = boundary_flags,
                     .priority = resolve_chunk_priority(profile_id, boundary_flags),
-                    .allow_reuse = profile_id != PredictionProfileId::Exact,
+                    .allow_reuse = true,
                     .requires_seam_validation = !plan.chunks.empty(),
             });
         }

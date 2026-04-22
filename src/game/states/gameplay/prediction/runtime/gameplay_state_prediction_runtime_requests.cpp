@@ -86,6 +86,119 @@ namespace Game
             return PredictionRuntimeDetail::prediction_track_should_defer_solver_request(snapshot);
         }
 
+        constexpr double kSuffixRefineAnchorTimeMatchEpsilonS = 1.0e-6;
+
+        bool maneuver_node_matches_preview_anchor(const GameplayState::ManeuverNode &node,
+                                                  const PredictionPreviewAnchor &anchor)
+        {
+            return anchor.valid &&
+                   node.id == anchor.anchor_node_id &&
+                   std::isfinite(node.time_s) &&
+                   std::isfinite(anchor.anchor_time_s) &&
+                   std::abs(node.time_s - anchor.anchor_time_s) <= kSuffixRefineAnchorTimeMatchEpsilonS;
+        }
+
+        std::vector<OrbitPredictionService::ManeuverNodePreview> collect_prefix_maneuver_previews(
+                const OrbitPredictionCache &cache,
+                const double anchor_time_s)
+        {
+            std::vector<OrbitPredictionService::ManeuverNodePreview> out;
+            out.reserve(cache.maneuver_previews.size());
+            for (const OrbitPredictionService::ManeuverNodePreview &preview : cache.maneuver_previews)
+            {
+                if (preview.valid &&
+                    std::isfinite(preview.t_s) &&
+                    preview.t_s < (anchor_time_s - kSuffixRefineAnchorTimeMatchEpsilonS))
+                {
+                    out.push_back(preview);
+                }
+            }
+            return out;
+        }
+
+        bool try_build_suffix_refine_prefix_from_cache(
+                const OrbitPredictionCache &cache,
+                const double now_s,
+                const double anchor_time_s,
+                std::vector<orbitsim::TrajectorySegment> &out_prefix_segments,
+                std::vector<OrbitPredictionService::ManeuverNodePreview> &out_prefix_previews)
+        {
+            out_prefix_segments.clear();
+            out_prefix_previews.clear();
+
+            if (!cache.valid ||
+                !std::isfinite(now_s) ||
+                !std::isfinite(anchor_time_s) ||
+                anchor_time_s <= (now_s + kSuffixRefineAnchorTimeMatchEpsilonS) ||
+                cache.trajectory_segments_inertial_planned.empty() ||
+                !validate_trajectory_segment_continuity(cache.trajectory_segments_inertial_planned))
+            {
+                return false;
+            }
+
+            const double required_duration_s = anchor_time_s - now_s;
+            if (!trajectory_segments_cover_window(cache.trajectory_segments_inertial_planned,
+                                                  now_s,
+                                                  required_duration_s))
+            {
+                return false;
+            }
+
+            std::size_t cursor = 0u;
+            if (!PredictionCacheInternal::slice_trajectory_segments_from_cursor(cache.trajectory_segments_inertial_planned,
+                                                                                now_s,
+                                                                                anchor_time_s,
+                                                                                cursor,
+                                                                                out_prefix_segments))
+            {
+                out_prefix_segments.clear();
+                return false;
+            }
+            if (out_prefix_segments.empty() ||
+                !validate_trajectory_segment_continuity(out_prefix_segments))
+            {
+                out_prefix_segments.clear();
+                return false;
+            }
+
+            const double start_epsilon_s = continuity_time_epsilon_s(now_s);
+            const double end_epsilon_s = continuity_time_epsilon_s(anchor_time_s);
+            const double prefix_end_s = prediction_segment_end_time(out_prefix_segments.back());
+            if (std::abs(out_prefix_segments.front().t0_s - now_s) > start_epsilon_s ||
+                std::abs(prefix_end_s - anchor_time_s) > end_epsilon_s)
+            {
+                out_prefix_segments.clear();
+                return false;
+            }
+
+            out_prefix_previews = collect_prefix_maneuver_previews(cache, anchor_time_s);
+            return true;
+        }
+
+        bool try_build_suffix_refine_prefix(
+                const PredictionTrackState &track,
+                const double now_s,
+                const double anchor_time_s,
+                std::vector<orbitsim::TrajectorySegment> &out_prefix_segments,
+                std::vector<OrbitPredictionService::ManeuverNodePreview> &out_prefix_previews)
+        {
+            if (track.authoritative_cache.valid &&
+                try_build_suffix_refine_prefix_from_cache(track.authoritative_cache,
+                                                          now_s,
+                                                          anchor_time_s,
+                                                          out_prefix_segments,
+                                                          out_prefix_previews))
+            {
+                return true;
+            }
+
+            return try_build_suffix_refine_prefix_from_cache(track.cache,
+                                                            now_s,
+                                                            anchor_time_s,
+                                                            out_prefix_segments,
+                                                            out_prefix_previews);
+        }
+
     } // namespace
 
     bool GameplayState::resolve_prediction_preview_anchor_state(const PredictionTrackState &track,
@@ -309,6 +422,35 @@ namespace Game
         const bool post_preview_full_refine =
                 lifecycle.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine &&
                 track.preview_anchor.valid;
+        const ManeuverNode *selected_node = _maneuver_state.find_node(_maneuver_state.selected_node_id);
+        if (solve_quality == OrbitPredictionService::SolveQuality::Full &&
+            post_preview_full_refine &&
+            track.supports_maneuvers &&
+            with_maneuvers &&
+            selected_node &&
+            maneuver_node_matches_preview_anchor(*selected_node, track.preview_anchor) &&
+            !request.maneuver_impulses.empty())
+        {
+            orbitsim::State anchor_state{};
+            std::vector<orbitsim::TrajectorySegment> prefix_segments;
+            std::vector<OrbitPredictionService::ManeuverNodePreview> prefix_previews;
+            if (resolve_prediction_preview_anchor_state(track, anchor_state) &&
+                finite_state(anchor_state) &&
+                try_build_suffix_refine_prefix(track,
+                                               now_s,
+                                               track.preview_anchor.anchor_time_s,
+                                               prefix_segments,
+                                               prefix_previews) &&
+                states_are_continuous(prefix_segments.back().end, anchor_state))
+            {
+                request.planned_suffix_refine.active = true;
+                request.planned_suffix_refine.anchor_node_id = track.preview_anchor.anchor_node_id;
+                request.planned_suffix_refine.anchor_time_s = track.preview_anchor.anchor_time_s;
+                request.planned_suffix_refine.anchor_state_inertial = anchor_state;
+                request.planned_suffix_refine.prefix_segments_inertial = std::move(prefix_segments);
+                request.planned_suffix_refine.prefix_previews = std::move(prefix_previews);
+            }
+        }
         request.full_stream_publish.active =
                 (interactive_request || post_preview_full_refine) &&
                 solve_quality == OrbitPredictionService::SolveQuality::Full &&

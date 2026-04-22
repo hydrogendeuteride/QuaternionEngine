@@ -28,7 +28,7 @@ namespace Game
 
             if (!prediction_result_is_streaming(incoming))
             {
-                return true;
+                return incoming.generation_id > queued.generation_id;
             }
 
             if (incoming.generation_id > queued.generation_id)

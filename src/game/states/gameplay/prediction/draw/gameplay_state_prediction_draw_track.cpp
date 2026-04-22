@@ -383,6 +383,30 @@ namespace Game
                         }
                     }
                 };
+        const auto draw_cache_fallback_ranges =
+                [&](const std::vector<std::pair<double, double>> &covered_ranges,
+                    const double fresh_cutoff_s) {
+                    const std::vector<std::pair<double, double>> uncovered_ranges =
+                            Draw::compute_uncovered_ranges(planned_window_t0_s,
+                                                           planned_window_t1_s,
+                                                           covered_ranges);
+                    _orbit_plot_perf.planned_fallback_range_count =
+                            static_cast<uint32_t>(uncovered_ranges.size());
+                    for (const auto &[range_t0_s, range_t1_s] : uncovered_ranges)
+                    {
+                        const bool prefix_range =
+                                !std::isfinite(fresh_cutoff_s) ||
+                                range_t1_s <= (fresh_cutoff_s + 1.0e-6);
+                        if (track_ctx.maneuver_drag_active && !prefix_range)
+                        {
+                            continue;
+                        }
+                        draw_planned_window_from_cache(planned_cache,
+                                                       range_t0_s,
+                                                       range_t1_s,
+                                                       prefix_range ? track_ctx.track_color_plan : stale_plan_color);
+                    }
+                };
         const auto preview_tail_matches_planned_cache = [&]() {
             if (!preview_assembly.valid || preview_assembly.chunks.empty())
             {
@@ -511,7 +535,13 @@ namespace Game
                         track_ctx.track_color_plan,
                         nullptr,
                         full_stream_covered_ranges);
-                _orbit_plot_perf.planned_fallback_range_count = 0;
+                double first_full_stream_t0_s = std::numeric_limits<double>::infinity();
+                for (const auto &[range_t0_s, range_t1_s] : full_stream_covered_ranges)
+                {
+                    (void) range_t1_s;
+                    first_full_stream_t0_s = std::min(first_full_stream_t0_s, range_t0_s);
+                }
+                draw_cache_fallback_ranges(full_stream_covered_ranges, first_full_stream_t0_s);
                 return;
             }
             if (track_ctx.maneuver_drag_active && std::isfinite(track_ctx.planned_draw_window.anchor_time_s))
@@ -566,7 +596,12 @@ namespace Game
                     track_ctx.track_color_plan,
                     &covered_ranges,
                     full_stream_covered_ranges);
-            _orbit_plot_perf.planned_fallback_range_count = 0;
+            covered_ranges.insert(covered_ranges.end(),
+                                  full_stream_covered_ranges.begin(),
+                                  full_stream_covered_ranges.end());
+            const double fresh_cutoff_s =
+                    std::isfinite(first_preview_t0_s) ? first_preview_t0_s : std::numeric_limits<double>::infinity();
+            draw_cache_fallback_ranges(covered_ranges, fresh_cutoff_s);
             return;
         }
 

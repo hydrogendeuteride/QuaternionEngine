@@ -1026,9 +1026,7 @@ namespace Game
 
             OrbitPredictionService::PredictionChunkPlan effective_chunk = chunk;
             effective_chunk.profile_id = activity_probe.recommended_profile_id;
-            effective_chunk.allow_reuse = chunk.allow_reuse &&
-                                          effective_chunk.profile_id !=
-                                                  OrbitPredictionService::PredictionProfileId::Exact;
+            effective_chunk.allow_reuse = chunk.allow_reuse;
 
             bool split_chunk = activity_probe.should_split &&
                                (chunk.t1_s - chunk.t0_s) >=
@@ -1081,9 +1079,7 @@ namespace Game
                 }
 
                 effective_chunk.profile_id = promoted_profile;
-                effective_chunk.allow_reuse = chunk.allow_reuse &&
-                                              effective_chunk.profile_id !=
-                                                      OrbitPredictionService::PredictionProfileId::Exact;
+                effective_chunk.allow_reuse = chunk.allow_reuse;
             }
 
             if (!chunk_solved)
@@ -1134,7 +1130,8 @@ namespace Game
             chunk_packet.start_state = chunk_start_state;
             chunk_packet.end_state = chunk_attempt.end_state;
             chunk_packet.diagnostics = chunk_attempt.diagnostics;
-            chunk_packet.reused_from_cache = chunk_attempt.reused_from_cache;
+            chunk_packet.reused_from_cache =
+                    chunk_attempt.reused_from_cache || chunk_attempt.diagnostics.cache_reused;
             chunk_packet.previews = std::move(chunk_attempt.previews);
             chunk_packet.segments = std::move(chunk_attempt.segments);
             chunk_packet.samples = std::move(chunk_attempt.samples);
