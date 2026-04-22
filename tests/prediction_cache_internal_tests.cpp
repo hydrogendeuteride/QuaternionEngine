@@ -134,6 +134,55 @@ TEST(PredictionCacheInternalTests, RebuildPredictionMetricsUsesSegmentDerivedSam
     EXPECT_NEAR(fixture.cache.speed_kmps.front(), 0.0005f, 1.0e-5f);
 }
 
+TEST(PredictionCacheInternalTests, RebuildPredictionMetricsFindsPeriapsisFromSegments)
+{
+    constexpr orbitsim::BodyId body_id = 1;
+
+    Game::OrbitPredictionCache cache{};
+    cache.valid = true;
+    cache.massive_bodies = {
+            orbitsim::MassiveBody{
+                    .mass_kg = 1.0,
+                    .radius_m = 1.0,
+                    .id = body_id,
+            },
+    };
+    cache.resolved_frame_spec = orbitsim::TrajectoryFrameSpec::body_centered_inertial(body_id);
+    cache.resolved_frame_spec_valid = true;
+    cache.trajectory_segments_frame = {
+            orbitsim::TrajectorySegment{
+                    .t0_s = 0.0,
+                    .dt_s = 10.0,
+                    .start = orbitsim::make_state(orbitsim::Vec3{10.0, 0.0, 0.0},
+                                                  orbitsim::Vec3{-2.0, 0.0, 0.0}),
+                    .end = orbitsim::make_state(orbitsim::Vec3{10.0, 0.0, 0.0},
+                                                orbitsim::Vec3{2.0, 0.0, 0.0}),
+            },
+    };
+    cache.trajectory_frame = {
+            orbitsim::TrajectorySample{
+                    .t_s = 0.0,
+                    .position_m = cache.trajectory_segments_frame.front().start.position_m,
+                    .velocity_mps = cache.trajectory_segments_frame.front().start.velocity_mps,
+            },
+            orbitsim::TrajectorySample{
+                    .t_s = 10.0,
+                    .position_m = cache.trajectory_segments_frame.front().end.position_m,
+                    .velocity_mps = cache.trajectory_segments_frame.front().end.velocity_mps,
+            },
+    };
+
+    orbitsim::GameSimulation::Config cfg{};
+    cfg.gravitational_constant = 1.0;
+
+    Game::PredictionCacheInternal::rebuild_prediction_metrics(cache, cfg, body_id);
+
+    ASSERT_TRUE(cache.metrics_valid);
+    ASSERT_EQ(cache.altitude_km.size(), 2u);
+    EXPECT_NEAR(cache.altitude_km.front(), 0.009f, 1.0e-6f);
+    EXPECT_NEAR(cache.periapsis_alt_km, 0.004, 1.0e-6);
+}
+
 TEST(PredictionCacheInternalTests, RebuildFrameCacheCanSkipPreviewPlannedRenderCurve)
 {
     LinearPredictionFixture fixture = make_linear_cache();
