@@ -18,9 +18,8 @@ scenario/
 - `scenario_config.h`
   The `ScenarioConfig` struct and its nested definitions:
   - `CelestialDef` -- massive body definition (name, mass, radius, atmosphere, SOI, terrain assets, orbit distance, prediction overlay color)
-  - `OrbiterDef` -- orbiting entity definition (name, orbit altitude, spawn offset, velocity, formation hold, prediction group, primitive type, render scale, physics body settings, player/rebase flags)
+  - `OrbiterDef` -- orbiting entity definition (name, orbit altitude, spawn offset/velocity, formation hold, prediction group, primitive type, render scale, physics body settings, player/rebase flags)
   - Global parameters: `speed_scale`, `mu_base` (gravitational parameter), `system_center` (world-space origin)
-  - `default_earth_moon_config()` -- built-in fallback scenario
 
 - `scenario_loader.h`
   Public API for scenario I/O:
@@ -66,6 +65,7 @@ Scenario loading is initiated during gameplay setup:
 - `GameplayState` calls `load_scenario_config()` with a JSON path to populate the scenario data.
 - The returned `ScenarioConfig` drives celestial body spawning, orbiter placement, and orbital parameter initialization.
 - `save_scenario_config()` enables scenario export for debugging or editing.
+- Scenario JSON is required at runtime; there is no compiled fallback scenario anymore.
 
 ## If You Want To Change...
 
@@ -84,8 +84,8 @@ Scenario loading is initiated during gameplay setup:
 - Schema version migration:
   Add a version check branch in `load_scenario_config()` within `scenario_loader.cpp`.
 
-- The built-in fallback scenario:
-  Modify `default_earth_moon_config()` (declared in `scenario_config.h`).
+- Orbiter spawn semantics:
+  Update the comments on `ScenarioConfig::OrbiterDef` in `scenario_config.h` and the load/save logic in `scenario_loader.cpp`.
 
 ## Notes About Structure
 

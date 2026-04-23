@@ -29,6 +29,11 @@ namespace Game
             return base + "." + child;
         }
 
+        std::string indexed_path(const std::string &base, const size_t index)
+        {
+            return base + "[" + std::to_string(index) + "]";
+        }
+
         template<typename T>
         T json_required(const json &j, const char *key, const std::string &path)
         {
@@ -583,6 +588,66 @@ namespace Game
             return j;
         }
 
+        ScenarioConfig::AttachmentDef parse_attachment_def(const json &j, const std::string &path)
+        {
+            if (!j.is_object())
+            {
+                fail(path + " must be an object");
+            }
+
+            ScenarioConfig::AttachmentDef a{};
+            a.name = json_required<std::string>(j, "name", path);
+            a.primitive = parse_primitive_type(
+                    json_required<std::string>(j, "primitive", path),
+                    child_path(path, "primitive"));
+            a.local_position = parse_vec3(
+                    *json_required_object(j, "local_position", path),
+                    child_path(path, "local_position"));
+            if (const auto it = j.find("local_rotation"); it != j.end() && !it->is_null())
+            {
+                a.local_rotation = parse_quat(
+                        *json_required_object(j, "local_rotation", path),
+                        child_path(path, "local_rotation"));
+            }
+            a.local_scale = parse_vec3(
+                    *json_required_object(j, "local_scale", path),
+                    child_path(path, "local_scale"));
+            if (const auto it = j.find("material"); it != j.end() && !it->is_null())
+            {
+                a.material = parse_material_def(*it, child_path(path, "material"));
+            }
+
+            if (a.name.empty())
+            {
+                fail(child_path(path, "name") + " must not be empty");
+            }
+            if (a.local_scale.x <= 0.0f || a.local_scale.y <= 0.0f || a.local_scale.z <= 0.0f)
+            {
+                fail(child_path(path, "local_scale") + " components must be > 0");
+            }
+
+            return a;
+        }
+
+        json serialize_attachment_def(const ScenarioConfig::AttachmentDef &a)
+        {
+            json j;
+            j["name"] = a.name;
+            j["primitive"] = primitive_type_string(a.primitive);
+            j["local_position"] = {{"x", a.local_position.x}, {"y", a.local_position.y}, {"z", a.local_position.z}};
+            j["local_rotation"] = {
+                    {"w", a.local_rotation.w},
+                    {"x", a.local_rotation.x},
+                    {"y", a.local_rotation.y},
+                    {"z", a.local_rotation.z}};
+            j["local_scale"] = {{"x", a.local_scale.x}, {"y", a.local_scale.y}, {"z", a.local_scale.z}};
+            if (a.material.has_overrides())
+            {
+                j["material"] = serialize_material_def(a.material);
+            }
+            return j;
+        }
+
         // ---- OrbiterDef ----
 
         ScenarioConfig::OrbiterDef parse_orbiter_def(const json &j, const std::string &path)
@@ -601,6 +666,15 @@ namespace Game
             o.relative_velocity = parse_dvec3(
                     *json_required_object(j, "relative_velocity", path),
                     child_path(path, "relative_velocity"));
+            if (const auto it = j.find("derive_spawn_from_player_orbit"); it != j.end() && !it->is_null())
+            {
+                o.derive_spawn_from_player_orbit = json_required<bool>(j, "derive_spawn_from_player_orbit", path);
+            }
+            if (const auto it = j.find("player_orbit_along_track_offset_m"); it != j.end() && !it->is_null())
+            {
+                o.player_orbit_along_track_offset_m =
+                        json_required_finite<double>(j, "player_orbit_along_track_offset_m", path);
+            }
             if (const auto it = j.find("formation_hold_enabled"); it != j.end() && !it->is_null())
             {
                 o.formation_hold_enabled = json_required<bool>(j, "formation_hold_enabled", path);
@@ -646,6 +720,17 @@ namespace Game
             o.render_scale = parse_vec3(
                     *json_required_object(j, "render_scale", path),
                     child_path(path, "render_scale"));
+            if (const auto it = j.find("attachments"); it != j.end() && !it->is_null())
+            {
+                const json *attachments_json = json_required_array(j, "attachments", path);
+                o.attachments.reserve(attachments_json->size());
+                for (size_t i = 0; i < attachments_json->size(); ++i)
+                {
+                    o.attachments.push_back(parse_attachment_def(
+                            (*attachments_json)[i],
+                            indexed_path(child_path(path, "attachments"), i)));
+                }
+            }
             o.body_settings = parse_body_settings(
                     *json_required_object(j, "body_settings", path),
                     child_path(path, "body_settings"));
@@ -686,6 +771,11 @@ namespace Game
             j["orbit_altitude_m"] = o.orbit_altitude_m;
             j["offset_from_player"] = {{"x", o.offset_from_player.x}, {"y", o.offset_from_player.y}, {"z", o.offset_from_player.z}};
             j["relative_velocity"] = {{"x", o.relative_velocity.x}, {"y", o.relative_velocity.y}, {"z", o.relative_velocity.z}};
+            j["derive_spawn_from_player_orbit"] = o.derive_spawn_from_player_orbit;
+            if (o.derive_spawn_from_player_orbit || o.player_orbit_along_track_offset_m != 0.0)
+            {
+                j["player_orbit_along_track_offset_m"] = o.player_orbit_along_track_offset_m;
+            }
             j["formation_hold_enabled"] = o.formation_hold_enabled;
             if (!o.formation_leader.empty())
             {
@@ -721,11 +811,19 @@ namespace Game
             {
                 j["primitive"] = primitive_type_string(o.primitive);
             }
-            if (o.material.has_any_texture())
+            if (o.material.has_overrides())
             {
                 j["material"] = serialize_material_def(o.material);
             }
             j["render_scale"] = {{"x", o.render_scale.x}, {"y", o.render_scale.y}, {"z", o.render_scale.z}};
+            if (!o.attachments.empty())
+            {
+                j["attachments"] = json::array();
+                for (const auto &attachment : o.attachments)
+                {
+                    j["attachments"].push_back(serialize_attachment_def(attachment));
+                }
+            }
             j["body_settings"] = serialize_body_settings(o.body_settings);
             j["is_player"] = o.is_player;
             j["is_rebase_anchor"] = o.is_rebase_anchor;

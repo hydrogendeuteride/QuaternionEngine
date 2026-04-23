@@ -33,7 +33,7 @@ namespace Game
         : _scenario_asset_path(scenario_asset_path.empty()
                                    ? std::string(kDefaultScenarioAsset)
                                    : std::move(scenario_asset_path))
-        , _scenario_config(default_earth_moon_config())
+        , _scenario_config()
     {
     }
 
@@ -87,8 +87,10 @@ namespace Game
         }
         else
         {
-            Logger::warn("[GameplayLoadingState] Falling back to compiled default scenario config.");
-            _scenario_config = default_earth_moon_config();
+            _failed = true;
+            _error_text = "Failed to load scenario: " + scenario_path;
+            Logger::error("[GameplayLoadingState] {}", _error_text);
+            return;
         }
 
         start_preload_jobs(ctx);
