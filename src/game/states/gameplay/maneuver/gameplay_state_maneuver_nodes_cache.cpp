@@ -1,6 +1,8 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 
+#include "game/orbit/orbit_prediction_math.h"
+
 #include "orbitsim/trajectory_transforms.hpp"
 
 #include <algorithm>
@@ -13,43 +15,6 @@ namespace Game
     namespace
     {
         using namespace ManeuverUtil;
-
-        WorldVec3 hermite_position_world(const WorldVec3 &ref_body_world,
-                                         const orbitsim::TrajectorySample &a,
-                                         const orbitsim::TrajectorySample &b,
-                                         const double t_s)
-        {
-            const double ta = a.t_s;
-            const double tb = b.t_s;
-            const double h = tb - ta;
-            if (!std::isfinite(h) || !(h > 0.0))
-            {
-                return ref_body_world + WorldVec3(a.position_m);
-            }
-
-            double u = (t_s - ta) / h;
-            if (!std::isfinite(u))
-            {
-                u = 0.0;
-            }
-            u = std::clamp(u, 0.0, 1.0);
-
-            const double u2 = u * u;
-            const double u3 = u2 * u;
-
-            const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-            const double h10 = u3 - (2.0 * u2) + u;
-            const double h01 = (-2.0 * u3) + (3.0 * u2);
-            const double h11 = u3 - u2;
-
-            const glm::dvec3 p0 = glm::dvec3(a.position_m);
-            const glm::dvec3 p1 = glm::dvec3(b.position_m);
-            const glm::dvec3 m0 = glm::dvec3(a.velocity_mps) * h;
-            const glm::dvec3 m1 = glm::dvec3(b.velocity_mps) * h;
-
-            const glm::dvec3 p = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-            return ref_body_world + WorldVec3(p);
-        }
 
         struct TrajectorySampledState
         {
@@ -91,21 +56,11 @@ namespace Game
             size_t i_lo = (i_hi == 0) ? 0 : (i_hi - 1);
             const orbitsim::TrajectorySample &a = traj_bci[i_lo];
             const orbitsim::TrajectorySample &b = traj_bci[i_hi];
+            const orbitsim::State sampled = OrbitPredictionMath::sample_pair_state(a, b, t_clamped);
 
-            const double ta = a.t_s;
-            const double tb = b.t_s;
-            const double h = tb - ta;
-
-            double u = 0.0;
-            if (std::isfinite(h) && h > 1e-9)
-            {
-                u = (t_clamped - ta) / h;
-            }
-            u = clamp_sane(u, 0.0, 1.0, 0.0);
-
-            out.position_world = hermite_position_world(ref_body_world, a, b, t_clamped);
-            out.r_rel_m = glm::mix(glm::dvec3(a.position_m), glm::dvec3(b.position_m), u);
-            out.v_rel_mps = glm::mix(glm::dvec3(a.velocity_mps), glm::dvec3(b.velocity_mps), u);
+            out.position_world = OrbitPredictionMath::sample_pair_position_world(ref_body_world, a, b, t_clamped);
+            out.r_rel_m = sampled.position_m;
+            out.v_rel_mps = sampled.velocity_mps;
             out.valid = finite3(out.r_rel_m) && finite3(out.v_rel_mps);
             return out;
         }
@@ -268,10 +223,11 @@ namespace Game
         const WorldVec3 align_delta = compute_maneuver_align_delta(ctx, *display_cache, traj_base);
 
         const auto &traj_node_world = traj_planned.size() >= 2 ? traj_planned : traj_base;
+        const auto &pred_base_traj_inertial = pred_cache->resolved_trajectory_inertial();
         const auto &traj_node_inertial =
                 pred_cache->trajectory_inertial_planned.size() >= 2
                     ? pred_cache->trajectory_inertial_planned
-                    : pred_cache->trajectory_inertial;
+                    : pred_base_traj_inertial;
         const PreviewMap preview_by_node_id = build_preview_map(*pred_cache);
         PreviewMap stable_preview_by_node_id;
         if (stable_cache && stable_cache != pred_cache)
@@ -328,8 +284,9 @@ namespace Game
                             sample_cache.resolved_frame_spec_valid
                                 ? sample_cache.resolved_frame_spec
                                 : resolve_prediction_display_frame_spec(sample_cache, now_s);
+                    const auto &ephemeris = sample_cache.resolved_shared_ephemeris();
                     if (frame_spec.type != orbitsim::TrajectoryFrameType::Inertial &&
-                        (!sample_cache.shared_ephemeris || sample_cache.shared_ephemeris->empty()))
+                        (!ephemeris || ephemeris->empty()))
                     {
                         return false;
                     }
@@ -352,9 +309,8 @@ namespace Game
                                                                    preview_vel_mps.y,
                                                                    preview_vel_mps.z},
                             }},
-                            sample_cache.shared_ephemeris ? *sample_cache.shared_ephemeris
-                                                          : orbitsim::CelestialEphemeris{},
-                            sample_cache.massive_bodies,
+                            ephemeris ? *ephemeris : orbitsim::CelestialEphemeris{},
+                            sample_cache.resolved_massive_bodies(),
                             frame_spec,
                             player_lookup ? *player_lookup : orbitsim::SpacecraftStateLookup{});
                     if (frame_samples.size() != 1)
@@ -415,27 +371,29 @@ namespace Game
                     {
                         return preferred;
                     }
-                    if (sample_cache.massive_bodies.empty() || !std::isfinite(sample_time_s) || !finite3(inertial_pos_m))
+                    const auto &bodies = sample_cache.resolved_massive_bodies();
+                    const auto &ephemeris = sample_cache.resolved_shared_ephemeris();
+                    if (bodies.empty() || !std::isfinite(sample_time_s) || !finite3(inertial_pos_m))
                     {
                         return orbitsim::kInvalidBodyId;
                     }
 
                     const auto body_pos_at = [&](const std::size_t i) -> orbitsim::Vec3 {
-                        const orbitsim::MassiveBody &body = sample_cache.massive_bodies[i];
-                        if (sample_cache.shared_ephemeris && !sample_cache.shared_ephemeris->empty())
+                        const orbitsim::MassiveBody &body = bodies[i];
+                        if (ephemeris && !ephemeris->empty())
                         {
-                            return sample_cache.shared_ephemeris->body_state_at_by_id(body.id, sample_time_s).position_m;
+                            return ephemeris->body_state_at_by_id(body.id, sample_time_s).position_m;
                         }
                         return body.state.position_m;
                     };
 
                     const std::size_t idx = orbitsim::auto_select_primary_index(
-                            sample_cache.massive_bodies,
+                            bodies,
                             orbitsim::Vec3{inertial_pos_m.x, inertial_pos_m.y, inertial_pos_m.z},
                             body_pos_at,
                             _orbitsim ? _orbitsim->sim.config().softening_length_m : 0.0);
-                    return idx < sample_cache.massive_bodies.size()
-                               ? sample_cache.massive_bodies[idx].id
+                    return idx < bodies.size()
+                               ? bodies[idx].id
                                : orbitsim::kInvalidBodyId;
                 };
 
@@ -488,7 +446,7 @@ namespace Game
                                        ? &pred_cache->trajectory_inertial_planned
                                        : (stable_traj_node_inertial
                                                   ? stable_traj_node_inertial
-                                                  : (allow_base_fallback ? &pred_cache->trajectory_inertial : nullptr)));
+                                                  : (allow_base_fallback ? &pred_base_traj_inertial : nullptr)));
             auto preview_it = node_preview_map->find(node.id);
             const OrbitPredictionCache::ManeuverNodePreview *preview =
                     (preview_it != node_preview_map->end()) ? preview_it->second : nullptr;
@@ -569,12 +527,14 @@ namespace Game
                 const glm::dvec3 preview_pos_m = glm::dvec3(preview->inertial_position_m);
                 const orbitsim::BodyId primary_id =
                         resolve_node_primary(*node_pred_cache, node, node.time_s, preview_pos_m);
-                const orbitsim::MassiveBody *primary = find_massive_body(node_pred_cache->massive_bodies, primary_id);
+                const auto &bodies = node_pred_cache->resolved_massive_bodies();
+                const auto &ephemeris = node_pred_cache->resolved_shared_ephemeris();
+                const orbitsim::MassiveBody *primary = find_massive_body(bodies, primary_id);
                 if (primary)
                 {
                     const orbitsim::State ps =
-                            (node_pred_cache->shared_ephemeris && !node_pred_cache->shared_ephemeris->empty())
-                                ? node_pred_cache->shared_ephemeris->body_state_at_by_id(primary_id, node.time_s)
+                            (ephemeris && !ephemeris->empty())
+                                ? ephemeris->body_state_at_by_id(primary_id, node.time_s)
                                 : primary->state;
                     r_rel_m = preview_pos_m - glm::dvec3(ps.position_m);
                     v_rel_mps = glm::dvec3(preview->inertial_velocity_mps) - glm::dvec3(ps.velocity_mps);
@@ -595,14 +555,16 @@ namespace Game
                 }
                 const orbitsim::BodyId primary_id =
                         resolve_node_primary(*node_pred_cache, node, basis_time_s, ist.r_rel_m);
-                const orbitsim::MassiveBody *primary = find_massive_body(node_pred_cache->massive_bodies, primary_id);
+                const auto &bodies = node_pred_cache->resolved_massive_bodies();
+                const auto &ephemeris = node_pred_cache->resolved_shared_ephemeris();
+                const orbitsim::MassiveBody *primary = find_massive_body(bodies, primary_id);
                 if (!primary)
                 {
                     continue;
                 }
                 const orbitsim::State ps =
-                        (node_pred_cache->shared_ephemeris && !node_pred_cache->shared_ephemeris->empty())
-                            ? node_pred_cache->shared_ephemeris->body_state_at_by_id(primary_id, basis_time_s)
+                        (ephemeris && !ephemeris->empty())
+                            ? ephemeris->body_state_at_by_id(primary_id, basis_time_s)
                             : primary->state;
                 r_rel_m = ist.r_rel_m - glm::dvec3(ps.position_m);
                 v_rel_mps = ist.v_rel_mps - glm::dvec3(ps.velocity_mps);

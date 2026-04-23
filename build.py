@@ -4,7 +4,8 @@
 #   python3 ./build.py debug
 #   python3 ./build.py release linux
 #   python3 ./build.py release linux ./out/release
-#   py .\build.py debug windows .\cmake-build-debug-win-clangcl
+#   py .\build.py debug windows
+#   py .\build.py debug windows .\build-windows
 
 from pathlib import Path
 import os, shutil, subprocess, sys
@@ -14,6 +15,9 @@ CONFIGS = {"debug": "Debug", "release": "Release", "reldeb": "RelWithDebInfo", "
 TOOLS = {
     "linux": ("Unix Makefiles", ("clang", "clang++", "make"), ("-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++"), "linux-clang"),
     "windows": ("Ninja", ("clang-cl", "lld-link", "llvm-rc", "ninja"), ("-DCMAKE_C_COMPILER=clang-cl", "-DCMAKE_CXX_COMPILER=clang-cl", "-DCMAKE_LINKER=lld-link", "-DCMAKE_RC_COMPILER=llvm-rc"), "win-clangcl"),
+}
+DEFAULT_BUILD_DIRS = {
+    "windows": "build-windows",
 }
 
 
@@ -43,7 +47,7 @@ def main() -> int:
         build_dir = Path(sys.argv[3]).expanduser()
         build_dir = build_dir if build_dir.is_absolute() else ROOT / build_dir
     else:
-        build_dir = ROOT / f"cmake-build-{config.lower()}-{suffix}"
+        build_dir = ROOT / DEFAULT_BUILD_DIRS.get(target, f"cmake-build-{config.lower()}-{suffix}")
     try:
         run(["cmake", "-S", str(ROOT), "-B", str(build_dir), "-G", generator, f"-DCMAKE_BUILD_TYPE={config}", *defines])
         run(["cmake", "--build", str(build_dir), "--target", "vulkan_engine", "--parallel", str(max(1, os.cpu_count() or 1))])

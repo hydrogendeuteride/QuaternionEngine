@@ -1,6 +1,8 @@
 #include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 
+#include "orbitsim/math.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -9,6 +11,31 @@ namespace Game::OrbitPredictionMath
     namespace
     {
         constexpr double kPi = 3.14159265358979323846;
+
+        bool sample_pair_basis(const orbitsim::TrajectorySample &a,
+                               const orbitsim::TrajectorySample &b,
+                               const double t_s,
+                               double &out_h_s,
+                               double &out_u)
+        {
+            const double h = b.t_s - a.t_s;
+            if (!std::isfinite(h) || !(h > 0.0))
+            {
+                out_h_s = 0.0;
+                out_u = 0.0;
+                return false;
+            }
+
+            double u = (t_s - a.t_s) / h;
+            if (!std::isfinite(u))
+            {
+                u = 0.0;
+            }
+
+            out_h_s = h;
+            out_u = std::clamp(u, 0.0, 1.0);
+            return true;
+        }
     } // namespace
 
     double safe_length(const glm::dvec3 &v)
@@ -127,40 +154,63 @@ namespace Game::OrbitPredictionMath
                 period_s * OrbitPredictionTuning::kBaseHorizonFromPeriodScale);
     }
 
-    WorldVec3 hermite_position_world(const WorldVec3 &ref_body_world,
-                                     const orbitsim::TrajectorySample &a,
-                                     const orbitsim::TrajectorySample &b,
-                                     const double t_s)
+    glm::dvec3 sample_pair_position_m(const orbitsim::TrajectorySample &a,
+                                      const orbitsim::TrajectorySample &b,
+                                      const double t_s)
     {
-        const double ta = a.t_s;
-        const double tb = b.t_s;
-        const double h = tb - ta;
-        if (!std::isfinite(h) || !(h > 0.0))
+        double h = 0.0;
+        double u = 0.0;
+        if (!sample_pair_basis(a, b, t_s, h, u))
         {
-            return ref_body_world + WorldVec3(a.position_m);
+            return a.position_m;
         }
 
-        double u = (t_s - ta) / h;
-        if (!std::isfinite(u))
+        return orbitsim::hermite_position(a.position_m, a.velocity_mps,
+                                          b.position_m, b.velocity_mps,
+                                          h, u);
+    }
+
+    glm::dvec3 sample_pair_velocity_mps(const orbitsim::TrajectorySample &a,
+                                        const orbitsim::TrajectorySample &b,
+                                        const double t_s)
+    {
+        double h = 0.0;
+        double u = 0.0;
+        if (!sample_pair_basis(a, b, t_s, h, u))
         {
-            u = 0.0;
+            return a.velocity_mps;
         }
-        u = std::clamp(u, 0.0, 1.0);
 
-        const double u2 = u * u;
-        const double u3 = u2 * u;
+        return orbitsim::hermite_velocity_mps(a.position_m, a.velocity_mps,
+                                              b.position_m, b.velocity_mps,
+                                              h, u);
+    }
 
-        const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-        const double h10 = u3 - (2.0 * u2) + u;
-        const double h01 = (-2.0 * u3) + (3.0 * u2);
-        const double h11 = u3 - u2;
+    orbitsim::State sample_pair_state(const orbitsim::TrajectorySample &a,
+                                      const orbitsim::TrajectorySample &b,
+                                      const double t_s)
+    {
+        double h = 0.0;
+        double u = 0.0;
+        if (!sample_pair_basis(a, b, t_s, h, u))
+        {
+            return orbitsim::make_state(a.position_m, a.velocity_mps);
+        }
 
-        const glm::dvec3 p0 = glm::dvec3(a.position_m);
-        const glm::dvec3 p1 = glm::dvec3(b.position_m);
-        const glm::dvec3 m0 = glm::dvec3(a.velocity_mps) * h;
-        const glm::dvec3 m1 = glm::dvec3(b.velocity_mps) * h;
+        const glm::dvec3 pos = orbitsim::hermite_position(a.position_m, a.velocity_mps,
+                                                          b.position_m, b.velocity_mps,
+                                                          h, u);
+        const glm::dvec3 vel = orbitsim::hermite_velocity_mps(a.position_m, a.velocity_mps,
+                                                              b.position_m, b.velocity_mps,
+                                                              h, u);
+        return orbitsim::make_state(pos, vel);
+    }
 
-        const glm::dvec3 p = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-        return ref_body_world + WorldVec3(p);
+    WorldVec3 sample_pair_position_world(const WorldVec3 &ref_body_world,
+                                         const orbitsim::TrajectorySample &a,
+                                         const orbitsim::TrajectorySample &b,
+                                         const double t_s)
+    {
+        return ref_body_world + WorldVec3(sample_pair_position_m(a, b, t_s));
     }
 } // namespace Game::OrbitPredictionMath

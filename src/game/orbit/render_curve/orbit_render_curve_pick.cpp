@@ -19,6 +19,45 @@ namespace Game
     {
         using LineSegment = OrbitRenderCurve::LineSegment;
 
+        constexpr int kMaxPickFrustumSubdivisionDepth = 10;
+        constexpr double kMinPickSubdivisionDtS = 1.0e-6;
+
+        struct WorkItem
+        {
+            const orbitsim::TrajectorySegment *segment{nullptr};
+            double t0_s{0.0};
+            double t1_s{0.0};
+            int depth{0};
+            WorldVec3 a_world{0.0, 0.0, 0.0};
+            WorldVec3 b_world{0.0, 0.0, 0.0};
+        };
+
+        bool interval_midpoint(const double t0_s,
+                               const double t1_s,
+                               const int depth,
+                               double &out_mid_t_s)
+        {
+            if (depth >= kMaxPickFrustumSubdivisionDepth)
+            {
+                return false;
+            }
+
+            const double dt_s = t1_s - t0_s;
+            if (!std::isfinite(dt_s) || dt_s <= kMinPickSubdivisionDtS)
+            {
+                return false;
+            }
+
+            const double tm_s = 0.5 * (t0_s + t1_s);
+            if (!(tm_s > t0_s) || !(tm_s < t1_s))
+            {
+                return false;
+            }
+
+            out_mid_t_s = tm_s;
+            return true;
+        }
+
         /// Binary search for the segment whose time range contains anchor_time_s.
         /// Returns the index into the sorted segments vector, or size_t::max on failure.
         std::size_t find_anchor_segment_index(const std::vector<LineSegment> &segments, const double anchor_time_s)
@@ -65,6 +104,8 @@ namespace Game
 
         std::vector<LineSegment> visible_segments{};
         visible_segments.reserve(segments_bci.size());
+        std::vector<WorkItem> stack{};
+        stack.reserve(32);
 
         for (const orbitsim::TrajectorySegment &segment : segments_bci)
         {
@@ -88,17 +129,82 @@ namespace Game
                     eval_segment_world_position(segment, clip_t1_s, reference_body_world, align_delta_world);
 
             ++out.segments_before_cull;
-            if (!frustum_accept_segment_margin(frustum, a_world, b_world, frustum_margin_ratio))
-            {
-                continue;
-            }
-
-            visible_segments.push_back(LineSegment{
-                    .a_world = a_world,
-                    .b_world = b_world,
+            stack.clear();
+            stack.push_back(WorkItem{
+                    .segment = &segment,
                     .t0_s = clip_t0_s,
                     .t1_s = clip_t1_s,
+                    .depth = 0,
+                    .a_world = a_world,
+                    .b_world = b_world,
             });
+
+            while (!stack.empty())
+            {
+                const WorkItem item = stack.back();
+                stack.pop_back();
+                if (!item.segment || !(item.t1_s > item.t0_s))
+                {
+                    continue;
+                }
+
+                const bool chord_in_frustum =
+                        frustum_accept_segment_margin(frustum, item.a_world, item.b_world, frustum_margin_ratio);
+                if (chord_in_frustum)
+                {
+                    visible_segments.push_back(LineSegment{
+                            .a_world = item.a_world,
+                            .b_world = item.b_world,
+                            .t0_s = item.t0_s,
+                            .t1_s = item.t1_s,
+                    });
+                    continue;
+                }
+
+                const bool curve_may_enter_frustum =
+                        frustum_accept_hermite_interval_margin(frustum,
+                                                               *item.segment,
+                                                               item.t0_s,
+                                                               item.t1_s,
+                                                               reference_body_world,
+                                                               align_delta_world,
+                                                               frustum_margin_ratio);
+                if (!curve_may_enter_frustum)
+                {
+                    continue;
+                }
+
+                double mid_t_s = 0.0;
+                if (interval_midpoint(item.t0_s, item.t1_s, item.depth, mid_t_s))
+                {
+                    const WorldVec3 mid_world =
+                            eval_segment_world_position(*item.segment, mid_t_s, reference_body_world, align_delta_world);
+                    stack.push_back(WorkItem{
+                            .segment = item.segment,
+                            .t0_s = mid_t_s,
+                            .t1_s = item.t1_s,
+                            .depth = item.depth + 1,
+                            .a_world = mid_world,
+                            .b_world = item.b_world,
+                    });
+                    stack.push_back(WorkItem{
+                            .segment = item.segment,
+                            .t0_s = item.t0_s,
+                            .t1_s = mid_t_s,
+                            .depth = item.depth + 1,
+                            .a_world = item.a_world,
+                            .b_world = mid_world,
+                    });
+                    continue;
+                }
+
+                visible_segments.push_back(LineSegment{
+                        .a_world = item.a_world,
+                        .b_world = item.b_world,
+                        .t0_s = item.t0_s,
+                        .t1_s = item.t1_s,
+                });
+            }
         }
 
         out.segments_after_cull = visible_segments.size();
@@ -106,6 +212,10 @@ namespace Game
         {
             return out;
         }
+
+        std::vector<double> scratch_anchor_times_s{};
+        const std::span<const double> normalized_anchor_times_s =
+                normalized_anchor_times(anchor_times_s, scratch_anchor_times_s);
 
         const std::size_t max_segments = settings.max_segments;
         if (max_segments == 0)
@@ -141,7 +251,7 @@ namespace Game
             mark_keep(n - 1);
         }
 
-        for (const double anchor_time_s : anchor_times_s)
+        for (const double anchor_time_s : normalized_anchor_times_s)
         {
             if (keep_count >= max_segments)
             {

@@ -9,6 +9,8 @@ namespace Game
 {
     namespace
     {
+        constexpr std::size_t kMaxPendingDerivedCompletedResults = 64;
+
         bool request_is_full_streaming_stage(const OrbitPredictionDerivedService::Request &request)
         {
             return request.solver_result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
@@ -34,6 +36,72 @@ namespace Game
                     return 0u;
             }
             return 0u;
+        }
+
+        bool derived_result_is_streaming(const OrbitPredictionDerivedService::Result &result)
+        {
+            return result.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming ||
+                   result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
+        }
+
+        bool should_drop_derived_completed_result_for_incoming(
+                const OrbitPredictionDerivedService::Result &queued,
+                const OrbitPredictionDerivedService::Result &incoming)
+        {
+            if (queued.track_id != incoming.track_id || !derived_result_is_streaming(queued))
+            {
+                return false;
+            }
+
+            if (!derived_result_is_streaming(incoming))
+            {
+                return true;
+            }
+
+            if (incoming.generation_id > queued.generation_id)
+            {
+                return true;
+            }
+
+            return incoming.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming &&
+                   queued.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming;
+        }
+
+        void coalesce_derived_completed_results(
+                std::deque<OrbitPredictionDerivedService::Result> &completed,
+                const OrbitPredictionDerivedService::Result &incoming)
+        {
+            completed.erase(std::remove_if(completed.begin(),
+                                           completed.end(),
+                                           [&incoming](const OrbitPredictionDerivedService::Result &queued) {
+                                               return should_drop_derived_completed_result_for_incoming(queued, incoming);
+                                           }),
+                            completed.end());
+        }
+
+        void trim_derived_completed_results(std::deque<OrbitPredictionDerivedService::Result> &completed)
+        {
+            while (completed.size() > kMaxPendingDerivedCompletedResults)
+            {
+                auto streaming_it = std::find_if(completed.begin(),
+                                                 completed.end(),
+                                                 [](const OrbitPredictionDerivedService::Result &queued) {
+                                                     return derived_result_is_streaming(queued);
+                                                 });
+                if (streaming_it == completed.end())
+                {
+                    return;
+                }
+                completed.erase(streaming_it);
+            }
+        }
+
+        void enqueue_derived_completed_result(std::deque<OrbitPredictionDerivedService::Result> &completed,
+                                              OrbitPredictionDerivedService::Result result)
+        {
+            coalesce_derived_completed_results(completed, result);
+            completed.push_back(std::move(result));
+            trim_derived_completed_results(completed);
         }
 
         uint8_t derived_request_stage_priority_rank(const OrbitPredictionDerivedService::Request &request)
@@ -360,11 +428,18 @@ namespace Game
         cache.build_time_s = solver.build_time_s;
         cache.build_pos_world = request.build_pos_world;
         cache.build_vel_world = request.build_vel_world;
-        cache.shared_ephemeris = solver.resolved_shared_ephemeris();
-        cache.massive_bodies = solver.take_massive_bodies();
-        cache.trajectory_inertial = solver.take_trajectory_inertial();
+        if (solver.has_shared_core_data())
+        {
+            cache.set_shared_solver_core_data(solver.shared_core_data());
+        }
+        else
+        {
+            cache.shared_ephemeris = std::move(solver.shared_ephemeris);
+            cache.massive_bodies = solver.take_massive_bodies();
+            cache.trajectory_inertial = solver.take_trajectory_inertial();
+            cache.trajectory_segments_inertial = solver.take_trajectory_segments_inertial();
+        }
         cache.trajectory_inertial_planned = std::move(solver.trajectory_inertial_planned);
-        cache.trajectory_segments_inertial = solver.take_trajectory_segments_inertial();
         cache.trajectory_segments_inertial_planned = std::move(solver.trajectory_segments_inertial_planned);
         cache.maneuver_previews = std::move(solver.maneuver_previews);
         cache.valid = true;
@@ -587,7 +662,7 @@ namespace Game
                                                              _latest_requested_generation_by_track);
                 if (should_enqueue_result)
                 {
-                    _completed.push_back(std::move(result));
+                    enqueue_derived_completed_result(_completed, std::move(result));
                 }
             }
             _cv.notify_all();

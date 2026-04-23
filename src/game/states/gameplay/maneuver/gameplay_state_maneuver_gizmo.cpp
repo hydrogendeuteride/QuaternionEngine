@@ -415,6 +415,8 @@ namespace Game
             return false;
         }
 
+        cancel_maneuver_node_dv_edit_preview();
+
         const ImVec2 mouse_pos = ImGui::GetIO().MousePos;
         const glm::vec2 mouse_pos_window(mouse_pos.x, mouse_pos.y);
         CameraRay ray{};

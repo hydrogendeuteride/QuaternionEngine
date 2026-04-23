@@ -325,10 +325,6 @@ namespace Game
                                                        track_ctx.track_color_plan.g,
                                                        track_ctx.track_color_plan.b,
                                                        std::clamp(std::max(track_ctx.track_color_plan.a, 0.98f), 0.0f, 1.0f));
-        const glm::vec4 stale_plan_color = glm::vec4(track_ctx.track_color_plan.r,
-                                                     track_ctx.track_color_plan.g,
-                                                     track_ctx.track_color_plan.b,
-                                                     track_ctx.track_color_plan.a * 0.35f);
         const PredictionChunkAssembly &preview_assembly = track_ctx.track->preview_overlay.chunk_assembly;
         const PredictionChunkAssembly *full_stream_assembly =
                 track_ctx.track->full_stream_overlay.ready_for_draw(planned_cache.generation_id,
@@ -381,6 +377,30 @@ namespace Game
                         {
                             ++_orbit_plot_perf.planned_chunks_drawn;
                         }
+                    }
+                };
+        const auto draw_cache_fallback_ranges =
+                [&](const std::vector<std::pair<double, double>> &covered_ranges,
+                    const double fresh_cutoff_s) {
+                    const std::vector<std::pair<double, double>> uncovered_ranges =
+                            Draw::compute_uncovered_ranges(planned_window_t0_s,
+                                                           planned_window_t1_s,
+                                                           covered_ranges);
+                    _orbit_plot_perf.planned_fallback_range_count =
+                            static_cast<uint32_t>(uncovered_ranges.size());
+                    for (const auto &[range_t0_s, range_t1_s] : uncovered_ranges)
+                    {
+                        const bool prefix_range =
+                                std::isfinite(fresh_cutoff_s) &&
+                                range_t1_s <= (fresh_cutoff_s + 1.0e-6);
+                        if (!prefix_range)
+                        {
+                            continue;
+                        }
+                        draw_planned_window_from_cache(planned_cache,
+                                                       range_t0_s,
+                                                       range_t1_s,
+                                                       track_ctx.track_color_plan);
                     }
                 };
         const auto preview_tail_matches_planned_cache = [&]() {
@@ -459,8 +479,7 @@ namespace Game
             return sample_count > 0u &&
                    (total_error_px / static_cast<double>(sample_count)) <= kMaxAverageErrorPx;
         };
-        const glm::vec4 tail_plan_color =
-                preview_tail_matches_planned_cache() ? preview_plan_color : stale_plan_color;
+        const bool draw_matching_cached_tail = preview_tail_matches_planned_cache();
         if (!preview_assembly.valid || preview_assembly.chunks.empty())
         {
             const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
@@ -493,13 +512,6 @@ namespace Game
                                                    preview_plan_color,
                                                    track_ctx.maneuver_drag_active);
                 }
-                if (!track_ctx.maneuver_drag_active && preview_t1_s < planned_window_t1_s)
-                {
-                    draw_planned_window_from_cache(planned_cache,
-                                                   preview_t1_s,
-                                                   planned_window_t1_s,
-                                                   stale_plan_color);
-                }
                 return;
             }
             if (full_stream_assembly)
@@ -511,7 +523,13 @@ namespace Game
                         track_ctx.track_color_plan,
                         nullptr,
                         full_stream_covered_ranges);
-                _orbit_plot_perf.planned_fallback_range_count = 0;
+                double first_full_stream_t0_s = std::numeric_limits<double>::infinity();
+                for (const auto &[range_t0_s, range_t1_s] : full_stream_covered_ranges)
+                {
+                    (void) range_t1_s;
+                    first_full_stream_t0_s = std::min(first_full_stream_t0_s, range_t0_s);
+                }
+                draw_cache_fallback_ranges(full_stream_covered_ranges, first_full_stream_t0_s);
                 return;
             }
             if (track_ctx.maneuver_drag_active && std::isfinite(track_ctx.planned_draw_window.anchor_time_s))
@@ -566,7 +584,12 @@ namespace Game
                     track_ctx.track_color_plan,
                     &covered_ranges,
                     full_stream_covered_ranges);
-            _orbit_plot_perf.planned_fallback_range_count = 0;
+            covered_ranges.insert(covered_ranges.end(),
+                                  full_stream_covered_ranges.begin(),
+                                  full_stream_covered_ranges.end());
+            const double fresh_cutoff_s =
+                    std::isfinite(first_preview_t0_s) ? first_preview_t0_s : std::numeric_limits<double>::infinity();
+            draw_cache_fallback_ranges(covered_ranges, fresh_cutoff_s);
             return;
         }
 
@@ -580,16 +603,16 @@ namespace Game
         for (const auto &[range_t0_s, range_t1_s] : uncovered_ranges)
         {
             const bool prefix_range =
-                    !std::isfinite(drag_prefix_cutoff_s) ||
+                    std::isfinite(drag_prefix_cutoff_s) &&
                     range_t1_s <= (drag_prefix_cutoff_s + 1.0e-6);
-            if (track_ctx.maneuver_drag_active && !prefix_range)
+            if (!prefix_range && (track_ctx.maneuver_drag_active || !draw_matching_cached_tail))
             {
                 continue;
             }
             draw_planned_window_from_cache(planned_cache,
                                            range_t0_s,
                                            range_t1_s,
-                                           prefix_range ? track_ctx.track_color_plan : tail_plan_color);
+                                           prefix_range ? track_ctx.track_color_plan : preview_plan_color);
         }
     }
 } // namespace Game

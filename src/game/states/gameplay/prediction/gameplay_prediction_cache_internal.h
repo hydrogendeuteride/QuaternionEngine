@@ -5,10 +5,12 @@
 #include "game/orbit/prediction/orbit_prediction_service_internal.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
 
+#include "orbitsim/math.hpp"
 #include "orbitsim/trajectory_transforms.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <vector>
@@ -48,51 +50,23 @@ namespace Game::PredictionCacheInternal
 
         const orbitsim::TrajectorySample &a = trajectory[i_hi - 1];
         const orbitsim::TrajectorySample &b = trajectory[i_hi];
-        const double h = b.t_s - a.t_s;
-        if (!(h > 0.0) || !std::isfinite(h))
-        {
-            out_state = orbitsim::make_state(a.position_m, a.velocity_mps);
-            return true;
-        }
-
-        double u = (query_time_s - a.t_s) / h;
-        if (!std::isfinite(u))
-        {
-            u = 0.0;
-        }
-        u = std::clamp(u, 0.0, 1.0);
-
-        const double u2 = u * u;
-        const double u3 = u2 * u;
-        const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-        const double h10 = u3 - (2.0 * u2) + u;
-        const double h01 = (-2.0 * u3) + (3.0 * u2);
-        const double h11 = u3 - u2;
-        const double dh00 = (6.0 * u2) - (6.0 * u);
-        const double dh10 = (3.0 * u2) - (4.0 * u) + 1.0;
-        const double dh01 = (-6.0 * u2) + (6.0 * u);
-        const double dh11 = (3.0 * u2) - (2.0 * u);
-
-        const glm::dvec3 p0 = glm::dvec3(a.position_m);
-        const glm::dvec3 p1 = glm::dvec3(b.position_m);
-        const glm::dvec3 m0 = glm::dvec3(a.velocity_mps) * h;
-        const glm::dvec3 m1 = glm::dvec3(b.velocity_mps) * h;
-        const glm::dvec3 pos = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-        const glm::dvec3 vel = ((dh00 * p0) + (dh10 * m0) + (dh01 * p1) + (dh11 * m1)) / h;
-        if (!finite_vec3(pos) || !finite_vec3(vel))
+        const orbitsim::State sampled = OrbitPredictionMath::sample_pair_state(a, b, query_time_s);
+        if (!finite_vec3(sampled.position_m) || !finite_vec3(sampled.velocity_mps))
         {
             return false;
         }
 
-        out_state = orbitsim::make_state(pos, vel);
+        out_state = sampled;
         return true;
     }
 
     inline bool sample_prediction_inertial_state(const std::vector<orbitsim::TrajectorySegment> &segments,
-                                                 const double query_time_s,
-                                                 orbitsim::State &out_state)
+                                                  const double query_time_s,
+                                                  orbitsim::State &out_state,
+                                                  const TrajectoryBoundarySide boundary_side =
+                                                          TrajectoryBoundarySide::Before)
     {
-        return sample_trajectory_segment_state(segments, query_time_s, out_state);
+        return sample_trajectory_segment_state(segments, query_time_s, out_state, boundary_side);
     }
 
     inline orbitsim::SpacecraftStateLookup build_player_lookup(
@@ -135,7 +109,7 @@ namespace Game::PredictionCacheInternal
             }
 
             orbitsim::State sampled{};
-            if (!sample_prediction_inertial_state(segments, t_s, sampled))
+            if (!sample_prediction_inertial_state(segments, t_s, sampled, TrajectoryBoundarySide::After))
             {
                 return std::nullopt;
             }
@@ -358,6 +332,11 @@ namespace Game::PredictionCacheInternal
         dst.hard_cap_hit = dst.hard_cap_hit || src.hard_cap_hit;
         dst.cancelled = dst.cancelled || src.cancelled;
         dst.cache_reused = dst.cache_reused || src.cache_reused;
+        dst.maneuver_apply_failed_count += src.maneuver_apply_failed_count;
+        if (dst.maneuver_apply_failed_node_id < 0 && src.maneuver_apply_failed_node_id >= 0)
+        {
+            dst.maneuver_apply_failed_node_id = src.maneuver_apply_failed_node_id;
+        }
     }
 
     inline orbitsim::FrameSegmentTransformOptions build_frame_segment_transform_options(
@@ -428,11 +407,16 @@ namespace Game::PredictionCacheInternal
         cache.analysis_cache_valid = false;
         cache.metrics_valid = false;
 
+        const auto &base_ephemeris = cache.resolved_shared_ephemeris();
+        const auto &base_bodies = cache.resolved_massive_bodies();
+        const auto &base_samples = cache.resolved_trajectory_inertial();
+        const auto &base_segments = cache.resolved_trajectory_segments_inertial();
+
         if (resolved_frame_spec.type == orbitsim::TrajectoryFrameType::Inertial)
         {
-            cache.trajectory_frame = cache.trajectory_inertial;
+            cache.trajectory_frame = base_samples;
             cache.trajectory_frame_planned = cache.trajectory_inertial_planned;
-            cache.trajectory_segments_frame = cache.trajectory_segments_inertial;
+            cache.trajectory_segments_frame = base_segments;
             cache.trajectory_segments_frame_planned = cache.trajectory_segments_inertial_planned;
             if (!validate_trajectory_segment_continuity(cache.trajectory_segments_frame))
             {
@@ -449,7 +433,7 @@ namespace Game::PredictionCacheInternal
             {
                 diagnostics->frame_base = make_stage_diagnostics_from_segments(
                         cache.trajectory_segments_frame,
-                        prediction_segment_span_s(cache.trajectory_segments_inertial));
+                        prediction_segment_span_s(base_segments));
                 diagnostics->frame_planned = make_stage_diagnostics_from_segments(
                         cache.trajectory_segments_frame_planned,
                         prediction_segment_span_s(cache.trajectory_segments_inertial_planned));
@@ -457,14 +441,14 @@ namespace Game::PredictionCacheInternal
         }
         else
         {
-            if (!cache.shared_ephemeris || cache.shared_ephemeris->empty())
+            if (!base_ephemeris || base_ephemeris->empty())
             {
                 update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::MissingEphemeris);
                 return false;
             }
 
             const auto player_lookup = build_player_lookup(player_lookup_segments_inertial);
-            const std::size_t base_sample_budget = std::max<std::size_t>(cache.trajectory_inertial.size(), 2);
+            const std::size_t base_sample_budget = std::max<std::size_t>(base_samples.size(), 2);
             const std::size_t planned_sample_budget =
                     cache.trajectory_inertial_planned.size() >= 2 ? cache.trajectory_inertial_planned.size()
                                                                   : base_sample_budget;
@@ -473,13 +457,13 @@ namespace Game::PredictionCacheInternal
             const orbitsim::FrameSegmentTransformOptions base_opt =
                     build_frame_segment_transform_options(
                             resolved_frame_spec,
-                            cache.trajectory_segments_inertial,
+                            base_segments,
                             cancel_requested);
             orbitsim::FrameSegmentTransformDiagnostics base_frame_diag{};
             cache.trajectory_segments_frame = orbitsim::transform_trajectory_segments_to_frame_spec(
-                    cache.trajectory_segments_inertial,
-                    *cache.shared_ephemeris,
-                    cache.massive_bodies,
+                    base_segments,
+                    *base_ephemeris,
+                    base_bodies,
                     resolved_frame_spec,
                     base_opt,
                     player_lookup,
@@ -503,7 +487,7 @@ namespace Game::PredictionCacheInternal
             {
                 diagnostics->frame_base = make_stage_diagnostics_from_adaptive(
                         base_frame_diag,
-                        prediction_segment_span_s(cache.trajectory_segments_inertial));
+                        prediction_segment_span_s(base_segments));
                 diagnostics->frame_base.accepted_segments = cache.trajectory_segments_frame.size();
                 diagnostics->frame_base.covered_duration_s = prediction_segment_span_s(cache.trajectory_segments_frame);
                 diagnostics->frame_base.frame_resegmentation_count = base_frame_diag.frame_resegmentation_count;
@@ -525,8 +509,8 @@ namespace Game::PredictionCacheInternal
                 orbitsim::FrameSegmentTransformDiagnostics planned_frame_diag{};
                 cache.trajectory_segments_frame_planned = orbitsim::transform_trajectory_segments_to_frame_spec(
                         cache.trajectory_segments_inertial_planned,
-                        *cache.shared_ephemeris,
-                        cache.massive_bodies,
+                        *base_ephemeris,
+                        base_bodies,
                         resolved_frame_spec,
                         planned_opt,
                         player_lookup,
@@ -606,7 +590,10 @@ namespace Game::PredictionCacheInternal
             return true;
         }
 
-        const std::size_t base_sample_budget = std::max<std::size_t>(cache.trajectory_inertial.size(), 2);
+        const auto &base_ephemeris = cache.resolved_shared_ephemeris();
+        const auto &base_bodies = cache.resolved_massive_bodies();
+        const auto &base_samples = cache.resolved_trajectory_inertial();
+        const std::size_t base_sample_budget = std::max<std::size_t>(base_samples.size(), 2);
         const std::size_t planned_sample_budget =
                 cache.trajectory_inertial_planned.size() >= 2 ? cache.trajectory_inertial_planned.size()
                                                               : base_sample_budget;
@@ -636,7 +623,7 @@ namespace Game::PredictionCacheInternal
         }
         else
         {
-            if (!cache.shared_ephemeris || cache.shared_ephemeris->empty())
+            if (!base_ephemeris || base_ephemeris->empty())
             {
                 update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::MissingEphemeris);
                 return false;
@@ -651,8 +638,8 @@ namespace Game::PredictionCacheInternal
             orbitsim::FrameSegmentTransformDiagnostics planned_frame_diag{};
             cache.trajectory_segments_frame_planned = orbitsim::transform_trajectory_segments_to_frame_spec(
                     cache.trajectory_segments_inertial_planned,
-                    *cache.shared_ephemeris,
-                    cache.massive_bodies,
+                    *base_ephemeris,
+                    base_bodies,
                     resolved_frame_spec,
                     planned_opt,
                     player_lookup,
@@ -771,7 +758,9 @@ namespace Game::PredictionCacheInternal
         }
         else
         {
-            if (!cache.shared_ephemeris || cache.shared_ephemeris->empty())
+            const auto &base_ephemeris = cache.resolved_shared_ephemeris();
+            const auto &base_bodies = cache.resolved_massive_bodies();
+            if (!base_ephemeris || base_ephemeris->empty())
             {
                 update_derived_diagnostics(diagnostics, cache, PredictionDerivedStatus::MissingEphemeris);
                 return false;
@@ -786,8 +775,8 @@ namespace Game::PredictionCacheInternal
             orbitsim::FrameSegmentTransformDiagnostics frame_diag{};
             frame_segments = orbitsim::transform_trajectory_segments_to_frame_spec(
                     streamed_chunk.trajectory_segments_inertial,
-                    *cache.shared_ephemeris,
-                    cache.massive_bodies,
+                    *base_ephemeris,
+                    base_bodies,
                     resolved_frame_spec,
                     frame_opt,
                     player_lookup,
@@ -946,6 +935,305 @@ namespace Game::PredictionCacheInternal
         cache.metrics_valid = true;
     }
 
+    struct PredictionRadialExtrema
+    {
+        bool periapsis_valid{false};
+        bool apoapsis_valid{false};
+        double periapsis_radius_m{std::numeric_limits<double>::infinity()};
+        double apoapsis_radius_m{0.0};
+    };
+
+    enum class PredictionRadialExtremumKind : uint8_t
+    {
+        None = 0,
+        Periapsis,
+        Apoapsis,
+    };
+
+    inline bool evaluate_radial_motion(const orbitsim::TrajectorySegment &segment,
+                                       const double t_s,
+                                       double &out_r_dot_v,
+                                       double *out_radius_m = nullptr)
+    {
+        orbitsim::State state{};
+        if (!eval_segment_state(segment, t_s, state))
+        {
+            return false;
+        }
+
+        const double radius_m = glm::length(state.position_m);
+        const double r_dot_v = glm::dot(state.position_m, state.velocity_mps);
+        if (!std::isfinite(radius_m) || !std::isfinite(r_dot_v))
+        {
+            return false;
+        }
+
+        out_r_dot_v = r_dot_v;
+        if (out_radius_m)
+        {
+            *out_radius_m = radius_m;
+        }
+        return true;
+    }
+
+    inline bool sample_prediction_radius_m(const std::vector<orbitsim::TrajectorySegment> &segments,
+                                           const double t_s,
+                                           double &out_radius_m)
+    {
+        orbitsim::State state{};
+        if (!sample_trajectory_segment_state(segments,
+                                             t_s,
+                                             state,
+                                             TrajectoryBoundarySide::ContinuousPositionOnly))
+        {
+            return false;
+        }
+
+        const double radius_m = glm::length(state.position_m);
+        if (!(radius_m > 0.0) || !std::isfinite(radius_m))
+        {
+            return false;
+        }
+
+        out_radius_m = radius_m;
+        return true;
+    }
+
+    inline PredictionRadialExtremumKind classify_radial_extremum_by_radius(
+            const std::vector<orbitsim::TrajectorySegment> &segments,
+            const orbitsim::TrajectorySegment &reference_segment,
+            const double t_s,
+            const double radius_m)
+    {
+        if (segments.empty() || !(radius_m > 0.0) || !std::isfinite(radius_m))
+        {
+            return PredictionRadialExtremumKind::None;
+        }
+
+        const double trajectory_t0_s = segments.front().t0_s;
+        const double trajectory_t1_s = prediction_segment_end_time(segments.back());
+        if (!std::isfinite(trajectory_t0_s) || !std::isfinite(trajectory_t1_s) || !(trajectory_t1_s > trajectory_t0_s))
+        {
+            return PredictionRadialExtremumKind::None;
+        }
+
+        const double probe_dt_s = std::clamp(reference_segment.dt_s * 1.0e-3, 1.0e-6, 1.0);
+        const double tolerance_m = std::max(1.0e-6, radius_m * 1.0e-9);
+
+        double before_radius_m = 0.0;
+        double after_radius_m = 0.0;
+        const bool have_before =
+                (t_s - probe_dt_s) >= trajectory_t0_s &&
+                sample_prediction_radius_m(segments, t_s - probe_dt_s, before_radius_m);
+        const bool have_after =
+                (t_s + probe_dt_s) <= trajectory_t1_s &&
+                sample_prediction_radius_m(segments, t_s + probe_dt_s, after_radius_m);
+
+        if (!have_before && !have_after)
+        {
+            return PredictionRadialExtremumKind::None;
+        }
+
+        const bool lower_than_before = !have_before || radius_m <= (before_radius_m + tolerance_m);
+        const bool lower_than_after = !have_after || radius_m <= (after_radius_m + tolerance_m);
+        const bool strictly_lower =
+                (have_before && radius_m < (before_radius_m - tolerance_m)) ||
+                (have_after && radius_m < (after_radius_m - tolerance_m));
+        if (lower_than_before && lower_than_after && strictly_lower)
+        {
+            return PredictionRadialExtremumKind::Periapsis;
+        }
+
+        const bool higher_than_before = !have_before || radius_m >= (before_radius_m - tolerance_m);
+        const bool higher_than_after = !have_after || radius_m >= (after_radius_m - tolerance_m);
+        const bool strictly_higher =
+                (have_before && radius_m > (before_radius_m + tolerance_m)) ||
+                (have_after && radius_m > (after_radius_m + tolerance_m));
+        if (higher_than_before && higher_than_after && strictly_higher)
+        {
+            return PredictionRadialExtremumKind::Apoapsis;
+        }
+
+        return PredictionRadialExtremumKind::None;
+    }
+
+    inline int radial_motion_sign(const double r_dot_v)
+    {
+        if (!std::isfinite(r_dot_v))
+        {
+            return 0;
+        }
+
+        constexpr double kRelativeZero = 1.0e-12;
+        const double tolerance = std::max(1.0e-12, std::abs(r_dot_v) * kRelativeZero);
+        if (r_dot_v > tolerance)
+        {
+            return 1;
+        }
+        if (r_dot_v < -tolerance)
+        {
+            return -1;
+        }
+        return 0;
+    }
+
+    inline double refine_radial_extremum_time(const orbitsim::TrajectorySegment &segment,
+                                              const double t0_s,
+                                              const double t1_s,
+                                              const double f0)
+    {
+        if (!(t1_s > t0_s) || !std::isfinite(t0_s) || !std::isfinite(t1_s))
+        {
+            return t0_s;
+        }
+
+        double a = t0_s;
+        double b = t1_s;
+        double fa = f0;
+        const double time_tolerance_s = std::max(1.0e-9, (t1_s - t0_s) * 1.0e-12);
+
+        for (int i = 0; i < 64 && (b - a) > time_tolerance_s; ++i)
+        {
+            const double m = 0.5 * (a + b);
+            double fm = 0.0;
+            if (!evaluate_radial_motion(segment, m, fm))
+            {
+                break;
+            }
+
+            const int sign_a = radial_motion_sign(fa);
+            const int sign_m = radial_motion_sign(fm);
+            if (sign_m == 0)
+            {
+                return m;
+            }
+            if (sign_a == 0 || sign_a != sign_m)
+            {
+                b = m;
+            }
+            else
+            {
+                a = m;
+                fa = fm;
+            }
+        }
+
+        return 0.5 * (a + b);
+    }
+
+    inline void record_radial_extremum(PredictionRadialExtrema &out,
+                                       const std::vector<orbitsim::TrajectorySegment> &segments,
+                                       const orbitsim::TrajectorySegment &segment,
+                                       const double t_s,
+                                       const int sign_before,
+                                       const int sign_after,
+                                       double &last_recorded_t_s)
+    {
+        if (!std::isfinite(t_s) || sign_before == sign_after)
+        {
+            return;
+        }
+
+        constexpr double kDuplicateRootToleranceS = 1.0e-6;
+        if (std::isfinite(last_recorded_t_s) && std::abs(t_s - last_recorded_t_s) <= kDuplicateRootToleranceS)
+        {
+            return;
+        }
+
+        double r_dot_v = 0.0;
+        double radius_m = 0.0;
+        if (!evaluate_radial_motion(segment, t_s, r_dot_v, &radius_m) || !(radius_m > 0.0))
+        {
+            return;
+        }
+
+        const PredictionRadialExtremumKind kind =
+                classify_radial_extremum_by_radius(segments, segment, t_s, radius_m);
+
+        if (kind == PredictionRadialExtremumKind::Periapsis)
+        {
+            out.periapsis_radius_m = std::min(out.periapsis_radius_m, radius_m);
+            out.periapsis_valid = true;
+        }
+        else if (kind == PredictionRadialExtremumKind::Apoapsis)
+        {
+            out.apoapsis_radius_m = std::max(out.apoapsis_radius_m, radius_m);
+            out.apoapsis_valid = true;
+        }
+        else
+        {
+            return;
+        }
+
+        last_recorded_t_s = t_s;
+    }
+
+    inline PredictionRadialExtrema find_prediction_radial_extrema(
+            const std::vector<orbitsim::TrajectorySegment> &segments)
+    {
+        PredictionRadialExtrema out{};
+        if (segments.empty())
+        {
+            return out;
+        }
+
+        constexpr int kRootScanSubstepsPerSegment = 8;
+        double last_recorded_t_s = std::numeric_limits<double>::quiet_NaN();
+
+        for (const orbitsim::TrajectorySegment &segment : segments)
+        {
+            const double seg_t0_s = segment.t0_s;
+            const double seg_t1_s = prediction_segment_end_time(segment);
+            if (!(segment.dt_s > 0.0) || !std::isfinite(seg_t0_s) || !std::isfinite(seg_t1_s) ||
+                !(seg_t1_s > seg_t0_s))
+            {
+                continue;
+            }
+
+            double prev_t_s = seg_t0_s;
+            double prev_f = 0.0;
+            if (!evaluate_radial_motion(segment, prev_t_s, prev_f))
+            {
+                continue;
+            }
+
+            for (int i = 1; i <= kRootScanSubstepsPerSegment; ++i)
+            {
+                const double curr_t_s =
+                        (i == kRootScanSubstepsPerSegment)
+                                ? seg_t1_s
+                                : (seg_t0_s + (segment.dt_s * static_cast<double>(i)) /
+                                                    static_cast<double>(kRootScanSubstepsPerSegment));
+                double curr_f = 0.0;
+                if (!evaluate_radial_motion(segment, curr_t_s, curr_f))
+                {
+                    continue;
+                }
+
+                int prev_sign = radial_motion_sign(prev_f);
+                int curr_sign = radial_motion_sign(curr_f);
+                if (prev_sign == 0 && curr_sign != 0)
+                {
+                    record_radial_extremum(out, segments, segment, prev_t_s, -curr_sign, curr_sign, last_recorded_t_s);
+                }
+                else if (prev_sign != 0 && curr_sign == 0)
+                {
+                    record_radial_extremum(out, segments, segment, curr_t_s, prev_sign, -prev_sign, last_recorded_t_s);
+                }
+                else if (prev_sign != 0 && curr_sign != 0 && prev_sign != curr_sign)
+                {
+                    const double root_t_s = refine_radial_extremum_time(segment, prev_t_s, curr_t_s, prev_f);
+                    record_radial_extremum(out, segments, segment, root_t_s, prev_sign, curr_sign, last_recorded_t_s);
+                }
+
+                prev_t_s = curr_t_s;
+                prev_f = curr_f;
+            }
+        }
+
+        return out;
+    }
+
     inline void rebuild_prediction_metrics(
             OrbitPredictionCache &cache,
             const orbitsim::GameSimulation::Config &sim_config,
@@ -954,12 +1242,16 @@ namespace Game::PredictionCacheInternal
     {
         clear_prediction_metrics(cache, analysis_body_id);
 
-        const auto analysis_it = std::find_if(cache.massive_bodies.begin(),
-                                              cache.massive_bodies.end(),
+        const auto &base_ephemeris = cache.resolved_shared_ephemeris();
+        const auto &base_bodies = cache.resolved_massive_bodies();
+        const auto &base_samples = cache.resolved_trajectory_inertial();
+        const auto &base_segments = cache.resolved_trajectory_segments_inertial();
+        const auto analysis_it = std::find_if(base_bodies.begin(),
+                                              base_bodies.end(),
                                               [analysis_body_id](const orbitsim::MassiveBody &body) {
                                                   return body.id == analysis_body_id;
                                               });
-        if (analysis_it == cache.massive_bodies.end() || !(analysis_it->mass_kg > 0.0))
+        if (analysis_it == base_bodies.end() || !(analysis_it->mass_kg > 0.0))
         {
             return;
         }
@@ -985,21 +1277,21 @@ namespace Game::PredictionCacheInternal
         {
             rel_samples = cache.trajectory_analysis_bci;
         }
-        else if (cache.shared_ephemeris && !cache.shared_ephemeris->empty())
+        else if (base_ephemeris && !base_ephemeris->empty())
         {
-            const std::size_t sample_budget = std::max<std::size_t>(cache.trajectory_inertial.size(), 2);
+            const std::size_t sample_budget = std::max<std::size_t>(base_samples.size(), 2);
             const orbitsim::TrajectoryFrameSpec analysis_frame =
                     orbitsim::TrajectoryFrameSpec::body_centered_inertial(analysis_body_id);
             const orbitsim::FrameSegmentTransformOptions frame_opt =
                     build_frame_segment_transform_options(
                             analysis_frame,
-                            cache.trajectory_segments_inertial,
+                            base_segments,
                             cancel_requested);
-            const std::vector<orbitsim::TrajectorySegment> rel_segments =
+            std::vector<orbitsim::TrajectorySegment> rel_segments =
                     orbitsim::transform_trajectory_segments_to_frame_spec(
-                            cache.trajectory_segments_inertial,
-                            *cache.shared_ephemeris,
-                            cache.massive_bodies,
+                            base_segments,
+                            *base_ephemeris,
+                            base_bodies,
                             analysis_frame,
                             frame_opt);
             if (cancel_requested && cancel_requested())
@@ -1045,6 +1337,17 @@ namespace Game::PredictionCacheInternal
         cache.apoapsis_alt_km = std::isfinite(elements.apoapsis_m)
                                         ? (elements.apoapsis_m - analysis_it->radius_m) * 1.0e-3
                                         : std::numeric_limits<double>::infinity();
+
+        const PredictionRadialExtrema radial_extrema =
+                find_prediction_radial_extrema(cache.trajectory_segments_analysis_bci);
+        if (radial_extrema.periapsis_valid)
+        {
+            cache.periapsis_alt_km = (radial_extrema.periapsis_radius_m - analysis_it->radius_m) * 1.0e-3;
+        }
+        if (radial_extrema.apoapsis_valid)
+        {
+            cache.apoapsis_alt_km = (radial_extrema.apoapsis_radius_m - analysis_it->radius_m) * 1.0e-3;
+        }
     }
 
     inline bool rebuild_prediction_patch_chunks(

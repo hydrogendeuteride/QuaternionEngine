@@ -33,23 +33,12 @@ namespace Game
             WorldVec3 b_world{0.0, 0.0, 0.0};
         };
 
-        /// Decide whether to split a time interval based on pixel-error.
-        /// Evaluates the curve midpoint, compares against the chord midpoint,
-        /// and converts the distance to screen pixels using the camera's perspective.
-        /// On split, out_mid_world is set to the true curve midpoint for reuse.
-        bool should_split_interval(const orbitsim::TrajectorySegment &segment,
-                                   const double t0_s,
-                                   const double t1_s,
-                                   const int depth,
-                                   const OrbitRenderCurve::CameraContext &camera,
-                                   const double error_px_threshold,
-                                   const WorldVec3 &reference_body_world,
-                                   const WorldVec3 &align_delta_world,
-                                   const WorldVec3 &a_world,
-                                   const WorldVec3 &b_world,
-                                   WorldVec3 &out_mid_world)
+        bool interval_midpoint(const double t0_s,
+                               const double t1_s,
+                               const int depth,
+                               double &out_mid_t_s)
         {
-            if (depth >= kMaxSubdivisionDepth || !(error_px_threshold > 0.0))
+            if (depth >= kMaxSubdivisionDepth)
             {
                 return false;
             }
@@ -66,8 +55,24 @@ namespace Game
                 return false;
             }
 
-            const WorldVec3 curve_mid_world =
-                    eval_segment_world_position(segment, tm_s, reference_body_world, align_delta_world);
+            out_mid_t_s = tm_s;
+            return true;
+        }
+
+        /// Decide whether to split a time interval based on pixel-error.
+        /// Evaluates the curve midpoint, compares against the chord midpoint,
+        /// and converts the distance to screen pixels using the camera's perspective.
+        bool should_split_interval(const OrbitRenderCurve::CameraContext &camera,
+                                   const double error_px_threshold,
+                                   const WorldVec3 &a_world,
+                                   const WorldVec3 &b_world,
+                                   const WorldVec3 &curve_mid_world)
+        {
+            if (!(error_px_threshold > 0.0))
+            {
+                return false;
+            }
+
             const WorldVec3 chord_mid_world = 0.5 * (a_world + b_world);
 
             const double error_m = glm::length(glm::dvec3(curve_mid_world - chord_mid_world));
@@ -86,7 +91,6 @@ namespace Game
             const double error_px = error_m / meters_per_px;
             if (std::isfinite(error_px) && error_px > error_px_threshold)
             {
-                out_mid_world = curve_mid_world;
                 return true;
             }
             return false;
@@ -164,41 +168,53 @@ namespace Game
                 }
 
                 constexpr double kRenderFrustumMargin = 0.1;
-                const bool in_frustum = frustum_accept_segment_margin(
+                const bool chord_in_frustum = frustum_accept_segment_margin(
                         frustum, item.a_world, item.b_world, kRenderFrustumMargin);
+                const bool curve_may_enter_frustum =
+                        chord_in_frustum ||
+                        frustum_accept_hermite_interval_margin(frustum,
+                                                               *item.segment,
+                                                               item.t0_s,
+                                                               item.t1_s,
+                                                               reference_body_world,
+                                                               align_delta_world,
+                                                               kRenderFrustumMargin);
 
                 WorldVec3 mid_world{};
-                if (in_frustum &&
-                    should_split_interval(*item.segment,
-                                          item.t0_s,
-                                          item.t1_s,
-                                          item.depth,
-                                          camera,
-                                          error_px_threshold,
-                                          reference_body_world,
-                                          align_delta_world,
-                                          item.a_world,
-                                          item.b_world,
-                                          mid_world))
+                double mid_t_s = 0.0;
+                const bool can_split = interval_midpoint(item.t0_s, item.t1_s, item.depth, mid_t_s);
+                if (curve_may_enter_frustum && can_split)
                 {
-                    const double mid_t_s = 0.5 * (item.t0_s + item.t1_s);
-                    stack.push_back(WorkItem{
-                            .segment = item.segment,
-                            .t0_s = mid_t_s,
-                            .t1_s = item.t1_s,
-                            .depth = item.depth + 1,
-                            .a_world = mid_world,
-                            .b_world = item.b_world,
-                    });
-                    stack.push_back(WorkItem{
-                            .segment = item.segment,
-                            .t0_s = item.t0_s,
-                            .t1_s = mid_t_s,
-                            .depth = item.depth + 1,
-                            .a_world = item.a_world,
-                            .b_world = mid_world,
-                    });
-                    continue;
+                    mid_world = eval_segment_world_position(
+                            *item.segment, mid_t_s, reference_body_world, align_delta_world);
+                    const bool split_for_frustum_curve = !chord_in_frustum;
+                    const bool split_for_screen_error =
+                            should_split_interval(camera,
+                                                  error_px_threshold,
+                                                  item.a_world,
+                                                  item.b_world,
+                                                  mid_world);
+
+                    if (split_for_frustum_curve || split_for_screen_error)
+                    {
+                        stack.push_back(WorkItem{
+                                .segment = item.segment,
+                                .t0_s = mid_t_s,
+                                .t1_s = item.t1_s,
+                                .depth = item.depth + 1,
+                                .a_world = mid_world,
+                                .b_world = item.b_world,
+                        });
+                        stack.push_back(WorkItem{
+                                .segment = item.segment,
+                                .t0_s = item.t0_s,
+                                .t1_s = mid_t_s,
+                                .depth = item.depth + 1,
+                                .a_world = item.a_world,
+                                .b_world = mid_world,
+                        });
+                        continue;
+                    }
                 }
 
                 out.segments.push_back(LineSegment{

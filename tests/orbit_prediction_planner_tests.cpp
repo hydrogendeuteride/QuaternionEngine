@@ -362,6 +362,65 @@ TEST(OrbitPredictionPlannerTests, ActivityClassifierPromotesAndSplitsHighCurvatu
     EXPECT_LT(probe.dominant_gravity_ratio, 0.8);
 }
 
+TEST(OrbitPredictionPlannerTests, ActivityClassifierSplitsNearAndExactAtDominantGravityTransition)
+{
+    using Profile = Game::OrbitPredictionService::PredictionProfileId;
+
+    Game::OrbitPredictionService::Request request =
+            make_request(0.0, 20.0 * Game::OrbitPredictionTuning::kSecondsPerDay);
+    request.preferred_primary_body_id = 1;
+
+    orbitsim::MassiveBody primary_a{};
+    primary_a.id = 1;
+    primary_a.mass_kg = 5.0e24;
+    primary_a.state = orbitsim::make_state(orbitsim::Vec3(-100'000'000.0, 0.0, 0.0), orbitsim::Vec3(0.0));
+    request.massive_bodies.push_back(primary_a);
+
+    orbitsim::MassiveBody primary_b{};
+    primary_b.id = 2;
+    primary_b.mass_kg = 5.0e24;
+    primary_b.state = orbitsim::make_state(orbitsim::Vec3(100'000'000.0, 0.0, 0.0), orbitsim::Vec3(0.0));
+    request.massive_bodies.push_back(primary_b);
+
+    const std::vector<orbitsim::TrajectorySegment> baseline{
+            make_activity_segment(0.0,
+                                  5.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
+                                  orbitsim::Vec3(-90'000'000.0, 0.0, 0.0),
+                                  orbitsim::Vec3(200.0, 0.0, 0.0),
+                                  orbitsim::Vec3(0.0, 0.0, 0.0),
+                                  orbitsim::Vec3(200.0, 0.0, 0.0)),
+            make_activity_segment(5.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
+                                  10.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
+                                  orbitsim::Vec3(0.0, 0.0, 0.0),
+                                  orbitsim::Vec3(200.0, 0.0, 0.0),
+                                  orbitsim::Vec3(90'000'000.0, 0.0, 0.0),
+                                  orbitsim::Vec3(200.0, 0.0, 0.0)),
+    };
+
+    const Profile profile_ids[] = {Profile::Exact, Profile::Near};
+    for (const Profile profile_id : profile_ids)
+    {
+        SCOPED_TRACE(static_cast<int>(profile_id));
+
+        const Game::OrbitPredictionService::PredictionChunkPlan chunk{
+                .chunk_id = 0u,
+                .t0_s = 0.0,
+                .t1_s = 10.0 * Game::OrbitPredictionTuning::kSecondsPerDay,
+                .profile_id = profile_id,
+        };
+
+        const auto probe = Game::classify_chunk_activity(request, chunk, &baseline);
+        ASSERT_TRUE(probe.valid);
+        EXPECT_TRUE(probe.should_split);
+        EXPECT_EQ(probe.primary_body_id_start, 1);
+        EXPECT_EQ(probe.primary_body_id_mid, 1);
+        EXPECT_EQ(probe.primary_body_id_end, 2);
+        EXPECT_LT(probe.dominant_gravity_ratio,
+                  Game::OrbitPredictionTuning::kPredictionActivityProbeDominantGravitySplitRatio);
+        EXPECT_EQ(probe.recommended_profile_id, Profile::Exact);
+    }
+}
+
 int main(int argc, char **argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

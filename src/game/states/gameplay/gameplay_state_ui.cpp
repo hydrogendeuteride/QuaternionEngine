@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <string>
 
 namespace Game
 {
@@ -116,10 +117,25 @@ namespace Game
                                         const std::size_t sample_count)
         {
             std::string extra{};
+            const auto append_extra = [&extra](std::string value) {
+                if (!extra.empty())
+                {
+                    extra += ", ";
+                }
+                extra += value;
+            };
             if (diag.frame_resegmentation_count > 0)
             {
-                extra = ", reseg " + std::to_string(diag.frame_resegmentation_count);
+                append_extra("reseg " + std::to_string(diag.frame_resegmentation_count));
             }
+            if (diag.maneuver_apply_failed_count > 0)
+            {
+                append_extra("maneuver failed " +
+                             std::to_string(diag.maneuver_apply_failed_count) +
+                             " node " +
+                             std::to_string(diag.maneuver_apply_failed_node_id));
+            }
+            const std::string extra_suffix = extra.empty() ? std::string{} : ", " + extra;
             ImGui::Text("%s: req %.2f s, cov %.2f s, seg %zu, samples %zu%s%s",
                         label,
                         diag.requested_duration_s,
@@ -135,7 +151,7 @@ namespace Game
                         diag.max_dt_s,
                         diag.rejected_splits,
                         diag.forced_boundary_splits,
-                        extra.c_str());
+                        extra_suffix.c_str());
         }
 
         std::string resolve_asset_rel_path(const GameStateContext &ctx, const std::string &rel_path)
@@ -847,7 +863,8 @@ namespace Game
                                 solver_diag.trajectory_base,
                                 solver_diag.trajectory_sample_count);
                         if (solver_diag.trajectory_planned.accepted_segments > 0 ||
-                            solver_diag.trajectory_sample_count_planned > 0)
+                            solver_diag.trajectory_sample_count_planned > 0 ||
+                            solver_diag.trajectory_planned.maneuver_apply_failed_count > 0)
                         {
                             draw_prediction_stage_diag(
                                     "Solver planned",

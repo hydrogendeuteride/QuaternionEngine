@@ -6,6 +6,23 @@
 
 namespace
 {
+    orbitsim::TrajectorySegment make_test_segment(const double t0_s,
+                                                  const double dt_s,
+                                                  const orbitsim::Vec3 &p0,
+                                                  const orbitsim::Vec3 &v0,
+                                                  const orbitsim::Vec3 &p1,
+                                                  const orbitsim::Vec3 &v1,
+                                                  const std::uint32_t flags = 0u)
+    {
+        return orbitsim::TrajectorySegment{
+                .t0_s = t0_s,
+                .dt_s = dt_s,
+                .start = orbitsim::make_state(p0, v0),
+                .end = orbitsim::make_state(p1, v1),
+                .flags = flags,
+        };
+    }
+
     struct LinearPredictionFixture
     {
         orbitsim::GameSimulation sim{};
@@ -82,6 +99,76 @@ namespace
     }
 } // namespace
 
+TEST(PredictionTrajectorySamplingTests, BoundarySideSelectsBeforeOrAfterImpulseVelocity)
+{
+    std::vector<orbitsim::TrajectorySegment> segments{
+            make_test_segment(0.0,
+                              10.0,
+                              orbitsim::Vec3{0.0, 0.0, 0.0},
+                              orbitsim::Vec3{1.0, 0.0, 0.0},
+                              orbitsim::Vec3{10.0, 0.0, 0.0},
+                              orbitsim::Vec3{1.0, 0.0, 0.0}),
+            make_test_segment(10.0,
+                              10.0,
+                              orbitsim::Vec3{10.0, 0.0, 0.0},
+                              orbitsim::Vec3{3.0, 0.0, 0.0},
+                              orbitsim::Vec3{40.0, 0.0, 0.0},
+                              orbitsim::Vec3{3.0, 0.0, 0.0},
+                              orbitsim::kTrajectorySegmentFlagImpulseBoundary),
+    };
+    ASSERT_TRUE(Game::validate_trajectory_segment_continuity(segments));
+
+    orbitsim::State default_state{};
+    ASSERT_TRUE(Game::sample_trajectory_segment_state(segments, 10.0, default_state));
+    EXPECT_DOUBLE_EQ(default_state.position_m.x, 10.0);
+    EXPECT_DOUBLE_EQ(default_state.velocity_mps.x, 1.0);
+
+    orbitsim::State before_state{};
+    ASSERT_TRUE(Game::sample_trajectory_segment_state(segments,
+                                                      10.0,
+                                                      before_state,
+                                                      Game::TrajectoryBoundarySide::Before));
+    EXPECT_DOUBLE_EQ(before_state.position_m.x, 10.0);
+    EXPECT_DOUBLE_EQ(before_state.velocity_mps.x, 1.0);
+
+    orbitsim::State after_state{};
+    ASSERT_TRUE(Game::sample_trajectory_segment_state(segments,
+                                                      10.0,
+                                                      after_state,
+                                                      Game::TrajectoryBoundarySide::After));
+    EXPECT_DOUBLE_EQ(after_state.position_m.x, 10.0);
+    EXPECT_DOUBLE_EQ(after_state.velocity_mps.x, 3.0);
+
+    orbitsim::State position_only_state{};
+    ASSERT_TRUE(Game::sample_trajectory_segment_state(segments,
+                                                      10.0,
+                                                      position_only_state,
+                                                      Game::TrajectoryBoundarySide::ContinuousPositionOnly));
+    EXPECT_DOUBLE_EQ(position_only_state.position_m.x, 10.0);
+}
+
+TEST(PredictionTrajectorySamplingTests, ContinuityRequiresImpulseFlagForVelocityDiscontinuity)
+{
+    std::vector<orbitsim::TrajectorySegment> segments{
+            make_test_segment(0.0,
+                              10.0,
+                              orbitsim::Vec3{0.0, 0.0, 0.0},
+                              orbitsim::Vec3{1.0, 0.0, 0.0},
+                              orbitsim::Vec3{10.0, 0.0, 0.0},
+                              orbitsim::Vec3{1.0, 0.0, 0.0}),
+            make_test_segment(10.0,
+                              10.0,
+                              orbitsim::Vec3{10.0, 0.0, 0.0},
+                              orbitsim::Vec3{3.0, 0.0, 0.0},
+                              orbitsim::Vec3{40.0, 0.0, 0.0},
+                              orbitsim::Vec3{3.0, 0.0, 0.0}),
+    };
+    EXPECT_FALSE(Game::validate_trajectory_segment_continuity(segments));
+
+    segments[1].flags = orbitsim::kTrajectorySegmentFlagImpulseBoundary;
+    EXPECT_TRUE(Game::validate_trajectory_segment_continuity(segments));
+}
+
 TEST(PredictionCacheInternalTests, RebuildFrameCacheProducesBodyCenteredSegments)
 {
     LinearPredictionFixture fixture = make_linear_cache();
@@ -132,6 +219,55 @@ TEST(PredictionCacheInternalTests, RebuildPredictionMetricsUsesSegmentDerivedSam
     ASSERT_EQ(fixture.cache.speed_kmps.size(), fixture.cache.trajectory_frame.size());
     EXPECT_NEAR(fixture.cache.altitude_km.front(), 0.009f, 1.0e-4f);
     EXPECT_NEAR(fixture.cache.speed_kmps.front(), 0.0005f, 1.0e-5f);
+}
+
+TEST(PredictionCacheInternalTests, RebuildPredictionMetricsFindsPeriapsisFromSegments)
+{
+    constexpr orbitsim::BodyId body_id = 1;
+
+    Game::OrbitPredictionCache cache{};
+    cache.valid = true;
+    cache.massive_bodies = {
+            orbitsim::MassiveBody{
+                    .mass_kg = 1.0,
+                    .radius_m = 1.0,
+                    .id = body_id,
+            },
+    };
+    cache.resolved_frame_spec = orbitsim::TrajectoryFrameSpec::body_centered_inertial(body_id);
+    cache.resolved_frame_spec_valid = true;
+    cache.trajectory_segments_frame = {
+            orbitsim::TrajectorySegment{
+                    .t0_s = 0.0,
+                    .dt_s = 10.0,
+                    .start = orbitsim::make_state(orbitsim::Vec3{10.0, 0.0, 0.0},
+                                                  orbitsim::Vec3{-2.0, 0.0, 0.0}),
+                    .end = orbitsim::make_state(orbitsim::Vec3{10.0, 0.0, 0.0},
+                                                orbitsim::Vec3{2.0, 0.0, 0.0}),
+            },
+    };
+    cache.trajectory_frame = {
+            orbitsim::TrajectorySample{
+                    .t_s = 0.0,
+                    .position_m = cache.trajectory_segments_frame.front().start.position_m,
+                    .velocity_mps = cache.trajectory_segments_frame.front().start.velocity_mps,
+            },
+            orbitsim::TrajectorySample{
+                    .t_s = 10.0,
+                    .position_m = cache.trajectory_segments_frame.front().end.position_m,
+                    .velocity_mps = cache.trajectory_segments_frame.front().end.velocity_mps,
+            },
+    };
+
+    orbitsim::GameSimulation::Config cfg{};
+    cfg.gravitational_constant = 1.0;
+
+    Game::PredictionCacheInternal::rebuild_prediction_metrics(cache, cfg, body_id);
+
+    ASSERT_TRUE(cache.metrics_valid);
+    ASSERT_EQ(cache.altitude_km.size(), 2u);
+    EXPECT_NEAR(cache.altitude_km.front(), 0.009f, 1.0e-6f);
+    EXPECT_NEAR(cache.periapsis_alt_km, 0.004, 1.0e-6);
 }
 
 TEST(PredictionCacheInternalTests, RebuildFrameCacheCanSkipPreviewPlannedRenderCurve)

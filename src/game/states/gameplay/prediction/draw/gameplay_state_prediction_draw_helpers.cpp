@@ -1,6 +1,9 @@
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 
 #include "game/orbit/orbit_plot_util.h"
+#include "game/orbit/orbit_prediction_math.h"
+
+#include "orbitsim/math.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -173,32 +176,7 @@ namespace Game::PredictionDrawDetail
 
         const orbitsim::TrajectorySample &a = traj[i_lo];
         const orbitsim::TrajectorySample &b = traj[i_hi];
-        const double h = b.t_s - a.t_s;
-        if (!(h > 0.0) || !std::isfinite(h))
-        {
-            return transform_local(glm::dvec3(a.position_m));
-        }
-
-        double u = (t_s - a.t_s) / h;
-        if (!std::isfinite(u))
-        {
-            u = 0.0;
-        }
-        u = std::clamp(u, 0.0, 1.0);
-
-        const double u2 = u * u;
-        const double u3 = u2 * u;
-        const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-        const double h10 = u3 - (2.0 * u2) + u;
-        const double h01 = (-2.0 * u3) + (3.0 * u2);
-        const double h11 = u3 - u2;
-
-        const glm::dvec3 p0 = glm::dvec3(a.position_m);
-        const glm::dvec3 p1 = glm::dvec3(b.position_m);
-        const glm::dvec3 m0 = glm::dvec3(a.velocity_mps) * h;
-        const glm::dvec3 m1 = glm::dvec3(b.velocity_mps) * h;
-        const glm::dvec3 local = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-        return transform_local(local);
+        return transform_local(OrbitPredictionMath::sample_pair_position_m(a, b, t_s));
     }
 
     bool sample_prediction_path_world(const OrbitDrawWindowContext &ctx,

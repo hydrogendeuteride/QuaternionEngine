@@ -164,6 +164,19 @@ namespace Game
         bool applied_delta{false};
     };
 
+    struct ManeuverNodeEditPreview
+    {
+        enum class State
+        {
+            Idle = 0,
+            EditingDv
+        };
+
+        State state{State::Idle};
+        int node_id{-1};
+        bool changed{false};
+    };
+
     struct ManeuverGizmoViewContext
     {
         // Cached projection state shared by screen-space marker generation, hit-testing, and picking.

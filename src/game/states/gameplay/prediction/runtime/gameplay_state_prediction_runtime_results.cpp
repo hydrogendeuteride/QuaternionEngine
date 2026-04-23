@@ -64,7 +64,7 @@ namespace Game
                 reused_cache.metrics_body_id = base_cache.metrics_body_id;
                 reused_cache.metrics_valid = base_cache.metrics_valid;
             }
-            reused_cache.valid = reused_cache.trajectory_inertial.size() >= 2 &&
+            reused_cache.valid = reused_cache.resolved_trajectory_inertial().size() >= 2 &&
                                  reused_cache.trajectory_frame.size() >= 2 &&
                                  !reused_cache.trajectory_segments_frame.empty();
             return reused_cache;
@@ -173,6 +173,16 @@ namespace Game
                    !cache.maneuver_previews.empty();
         }
 
+        bool full_stream_result_is_obsolete_after_final_publish(
+                const PredictionTrackState &track,
+                const OrbitPredictionDerivedService::Result &result)
+        {
+            return result.solve_quality == OrbitPredictionService::SolveQuality::Full &&
+                   result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming &&
+                   track.authoritative_cache.valid &&
+                   track.authoritative_cache.generation_id >= result.generation_id;
+        }
+
         void restore_authoritative_planned_data(const PredictionTrackState &track, OrbitPredictionCache &cache)
         {
             if (track.authoritative_cache.valid && cache_has_planned_data(track.authoritative_cache))
@@ -213,6 +223,10 @@ namespace Game
              result.display_frame_key != track->latest_requested_derived_display_frame_key ||
              result.display_frame_revision != track->latest_requested_derived_display_frame_revision ||
              result.analysis_body_id != track->latest_requested_derived_analysis_body_id))
+        {
+            return;
+        }
+        if (full_stream_result_is_obsolete_after_final_publish(*track, result))
         {
             return;
         }
@@ -261,7 +275,7 @@ namespace Game
                         track->cache.resolved_frame_spec_valid &&
                         result.cache.resolved_frame_spec_valid &&
                         frame_specs_match(track->cache.resolved_frame_spec, result.cache.resolved_frame_spec) &&
-                        track->cache.shared_ephemeris == result.cache.shared_ephemeris &&
+                        track->cache.resolved_shared_ephemeris() == result.cache.resolved_shared_ephemeris() &&
                         track->cache.trajectory_frame.size() >= 2 &&
                         !track->cache.trajectory_segments_frame.empty();
                 if (reusable_base_still_available)
@@ -291,10 +305,9 @@ namespace Game
             return;
         }
 
-        const bool drag_preview_active_now =
+        const bool live_preview_active_now =
                 track->supports_maneuvers &&
-                _maneuver_plan_live_preview_active &&
-                PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
+                maneuver_live_preview_active(true);
         const bool full_streaming_result =
                 PredictionRuntimeDetail::prediction_track_is_full_streaming_publish(result.solve_quality,
                                                                                     result.publish_stage);
@@ -318,7 +331,7 @@ namespace Game
             track->preview_state = PredictionRuntimeDetail::prediction_track_preview_state_after_preview_publish(
                     lifecycle_before_apply,
                     result.publish_stage,
-                    drag_preview_active_now);
+                    live_preview_active_now);
 
             track->cache = std::move(cache_to_publish);
             track->pick_cache.clear();
@@ -350,7 +363,7 @@ namespace Game
             track->full_stream_overlay.clear();
             track->preview_state = PredictionPreviewRuntimeState::Idle;
             if (PredictionRuntimeDetail::prediction_track_should_clear_preview_anchor_after_final_publish(
-                        drag_preview_active_now))
+                        live_preview_active_now))
             {
                 track->preview_anchor = {};
             }

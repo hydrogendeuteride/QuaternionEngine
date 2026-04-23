@@ -17,6 +17,15 @@ namespace Game
     namespace
     {
         constexpr std::size_t kMaxCachedPlannedChunks = 512u;
+        // Cache keys only select candidates; find_cached_chunk validates state continuity before reuse.
+        constexpr double kBaselineCacheStartTimeQuantumS = 0.001;
+        constexpr double kBaselineCachePositionQuantumM = 1.0;
+        constexpr double kBaselineCacheVelocityQuantumMps = 1.0e-3;
+        constexpr double kBaselineCacheSpinAxisQuantum = 1.0e-6;
+        constexpr double kBaselineCacheSpinAngleQuantumRad = 1.0e-6;
+        constexpr double kBaselineCacheSpinRateQuantumRadPerS = 1.0e-6;
+        constexpr double kManeuverCacheTimeQuantumS = 0.001;
+        constexpr double kManeuverCacheDvQuantumMps = 1.0e-6;
 
         template<typename T>
         void hash_combine(uint64_t &seed, const T &value)
@@ -30,6 +39,65 @@ namespace Game
             hash_combine(seed, v.x);
             hash_combine(seed, v.y);
             hash_combine(seed, v.z);
+            return seed;
+        }
+
+        int64_t quantized_cache_tick(const double value, const double quantum)
+        {
+            if (!std::isfinite(value) || !(quantum > 0.0))
+            {
+                return 0;
+            }
+
+            const long double scaled = static_cast<long double>(value) / static_cast<long double>(quantum);
+            const long double rounded = std::round(scaled);
+            constexpr long double min_tick =
+                    static_cast<long double>(std::numeric_limits<int64_t>::min());
+            constexpr long double max_tick =
+                    static_cast<long double>(std::numeric_limits<int64_t>::max());
+            if (rounded <= min_tick)
+            {
+                return std::numeric_limits<int64_t>::min();
+            }
+            if (rounded >= max_tick)
+            {
+                return std::numeric_limits<int64_t>::max();
+            }
+            return static_cast<int64_t>(rounded);
+        }
+
+        double planned_chunk_cache_time_quantum_s(const OrbitPredictionService::PredictionProfileId profile_id)
+        {
+            switch (profile_id)
+            {
+            case OrbitPredictionService::PredictionProfileId::Exact:
+                return 0.001;
+            case OrbitPredictionService::PredictionProfileId::Near:
+                return 0.1;
+            case OrbitPredictionService::PredictionProfileId::Tail:
+                return 1.0;
+            }
+            return 0.1;
+        }
+
+        uint64_t hash_quantized_vec3(const orbitsim::Vec3 &v, const double quantum)
+        {
+            uint64_t seed = 0xcbf29ce484222325ULL;
+            hash_combine(seed, quantized_cache_tick(v.x, quantum));
+            hash_combine(seed, quantized_cache_tick(v.y, quantum));
+            hash_combine(seed, quantized_cache_tick(v.z, quantum));
+            return seed;
+        }
+
+        uint64_t hash_quantized_state(const orbitsim::State &state)
+        {
+            uint64_t seed = hash_quantized_vec3(state.position_m, kBaselineCachePositionQuantumM);
+            hash_combine(seed, hash_quantized_vec3(state.velocity_mps, kBaselineCacheVelocityQuantumMps));
+            hash_combine(seed, quantized_cache_tick(state.spin.axis.x, kBaselineCacheSpinAxisQuantum));
+            hash_combine(seed, quantized_cache_tick(state.spin.axis.y, kBaselineCacheSpinAxisQuantum));
+            hash_combine(seed, quantized_cache_tick(state.spin.axis.z, kBaselineCacheSpinAxisQuantum));
+            hash_combine(seed, quantized_cache_tick(state.spin.angle_rad, kBaselineCacheSpinAngleQuantumRad));
+            hash_combine(seed, quantized_cache_tick(state.spin.rate_rad_per_s, kBaselineCacheSpinRateQuantumRadPerS));
             return seed;
         }
 
@@ -84,20 +152,20 @@ namespace Game
         {
             uint64_t seed = 0xcbf29ce484222325ULL;
             hash_combine(seed, request.track_id);
-            hash_combine(seed, start_time_s);
-            hash_combine(seed, hash_state(start_state));
+            hash_combine(seed, quantized_cache_tick(start_time_s, kBaselineCacheStartTimeQuantumS));
+            hash_combine(seed, hash_quantized_state(start_state));
             return seed;
         }
 
-        uint64_t hash_maneuver_impulse(const OrbitPredictionService::ManeuverImpulse &impulse)
+        uint64_t hash_maneuver_impulse_for_cache(const OrbitPredictionService::ManeuverImpulse &impulse)
         {
             uint64_t seed = 0xcbf29ce484222325ULL;
             hash_combine(seed, impulse.node_id);
-            hash_combine(seed, impulse.t_s);
+            hash_combine(seed, quantized_cache_tick(impulse.t_s, kManeuverCacheTimeQuantumS));
             hash_combine(seed, impulse.primary_body_id);
-            hash_combine(seed, impulse.dv_rtn_mps.x);
-            hash_combine(seed, impulse.dv_rtn_mps.y);
-            hash_combine(seed, impulse.dv_rtn_mps.z);
+            hash_combine(seed, quantized_cache_tick(impulse.dv_rtn_mps.x, kManeuverCacheDvQuantumMps));
+            hash_combine(seed, quantized_cache_tick(impulse.dv_rtn_mps.y, kManeuverCacheDvQuantumMps));
+            hash_combine(seed, quantized_cache_tick(impulse.dv_rtn_mps.z, kManeuverCacheDvQuantumMps));
             return seed;
         }
 
@@ -115,6 +183,11 @@ namespace Game
             dst.hard_cap_hit = dst.hard_cap_hit || src.hard_cap_hit;
             dst.cancelled = dst.cancelled || src.cancelled;
             dst.cache_reused = dst.cache_reused || src.cache_reused;
+            dst.maneuver_apply_failed_count += src.maneuver_apply_failed_count;
+            if (dst.maneuver_apply_failed_node_id < 0 && src.maneuver_apply_failed_node_id >= 0)
+            {
+                dst.maneuver_apply_failed_node_id = src.maneuver_apply_failed_node_id;
+            }
 
             if (src.accepted_segments == 0u)
             {
@@ -156,18 +229,6 @@ namespace Game
             dst.insert(dst.end(),
                        std::make_move_iterator(src.begin()),
                        std::make_move_iterator(src.end()));
-        }
-
-        bool planned_chunk_cache_key_matches(const OrbitPredictionService::PlannedChunkCacheKey &a,
-                                             const OrbitPredictionService::PlannedChunkCacheKey &b)
-        {
-            return a.track_id == b.track_id &&
-                   a.baseline_generation_id == b.baseline_generation_id &&
-                   a.upstream_maneuver_hash == b.upstream_maneuver_hash &&
-                   a.frame_independent_generation == b.frame_independent_generation &&
-                   a.chunk_t0_s == b.chunk_t0_s &&
-                   a.chunk_t1_s == b.chunk_t1_s &&
-                   a.profile_id == b.profile_id;
         }
 
         bool validate_segment_boundary(const orbitsim::TrajectorySegment &previous_segment,
@@ -296,17 +357,116 @@ namespace Game
             return out_diag.success;
         }
 
+        bool maneuver_impulse_input_is_valid(const OrbitPredictionService::ManeuverImpulse &src)
+        {
+            return std::isfinite(src.t_s) && finite_vec3(src.dv_rtn_mps);
+        }
+
+        void record_maneuver_apply_failure(OrbitPredictionService::AdaptiveStageDiagnostics &diagnostics,
+                                           const int node_id)
+        {
+            ++diagnostics.maneuver_apply_failed_count;
+            if (diagnostics.maneuver_apply_failed_node_id < 0)
+            {
+                diagnostics.maneuver_apply_failed_node_id = node_id;
+            }
+        }
+
+        bool maneuver_impulse_has_nonzero_delta_v(const OrbitPredictionService::ManeuverImpulse &src)
+        {
+            const double dv2 = glm::dot(src.dv_rtn_mps, src.dv_rtn_mps);
+            return dv2 > 0.0 && std::isfinite(dv2);
+        }
+
+        std::optional<std::size_t> resolve_maneuver_primary_index(
+                const OrbitPredictionService::ManeuverImpulse &src,
+                const std::vector<orbitsim::MassiveBody> &massive_bodies,
+                const orbitsim::CelestialEphemeris &ephemeris,
+                const double softening_length_m,
+                const orbitsim::Vec3 &query_position_m)
+        {
+            if (src.primary_body_id != orbitsim::kInvalidBodyId)
+            {
+                return orbitsim::body_index_for_id(massive_bodies, src.primary_body_id);
+            }
+
+            if (massive_bodies.empty() || !finite_vec3(query_position_m))
+            {
+                return std::nullopt;
+            }
+
+            const double eps2 = softening_length_m * softening_length_m;
+            double best_metric = -1.0;
+            std::optional<std::size_t> best_index{};
+            for (std::size_t i = 0; i < massive_bodies.size(); ++i)
+            {
+                const double mass_kg = std::isfinite(massive_bodies[i].mass_kg) ? massive_bodies[i].mass_kg : 0.0;
+                if (!(mass_kg >= 0.0))
+                {
+                    continue;
+                }
+
+                const orbitsim::Vec3 body_position_m = ephemeris.body_position_at(i, src.t_s);
+                if (!finite_vec3(body_position_m))
+                {
+                    continue;
+                }
+
+                const orbitsim::Vec3 dr = body_position_m - query_position_m;
+                const double r2 = glm::dot(dr, dr) + eps2;
+                if (!(r2 > 0.0) || !std::isfinite(r2))
+                {
+                    continue;
+                }
+
+                const double metric = mass_kg / r2;
+                if (std::isfinite(metric) && metric > best_metric)
+                {
+                    best_metric = metric;
+                    best_index = i;
+                }
+            }
+            return best_index;
+        }
+
+        bool maneuver_rtn_basis_is_valid(const std::vector<orbitsim::MassiveBody> &massive_bodies,
+                                         const orbitsim::CelestialEphemeris &ephemeris,
+                                         const std::size_t primary_index,
+                                         const double t_s,
+                                         const orbitsim::State &spacecraft_state)
+        {
+            if (primary_index >= massive_bodies.size() || !finite_state(spacecraft_state))
+            {
+                return false;
+            }
+
+            const orbitsim::State primary_state = ephemeris.body_state_at(primary_index, t_s);
+            if (!finite_state(primary_state))
+            {
+                return false;
+            }
+
+            const orbitsim::Vec3 relative_position_m =
+                    spacecraft_state.position_m - primary_state.position_m;
+            const double relative_position_len2 = glm::dot(relative_position_m, relative_position_m);
+            return finite_vec3(relative_position_m) &&
+                   relative_position_len2 > 0.0 &&
+                   std::isfinite(relative_position_len2);
+        }
+
         bool apply_maneuver_impulse_to_spacecraft(orbitsim::Spacecraft &spacecraft,
                                                   const OrbitPredictionService::ManeuverImpulse &src,
                                                   const std::vector<orbitsim::MassiveBody> &massive_bodies,
                                                   const orbitsim::CelestialEphemeris &ephemeris,
                                                   const double softening_length_m,
                                                   std::vector<OrbitPredictionService::ManeuverNodePreview> *out_previews,
-                                                  std::vector<PlannedSegmentBoundaryState> *out_boundaries)
+                                                  std::vector<PlannedSegmentBoundaryState> *out_boundaries,
+                                                  OrbitPredictionService::AdaptiveStageDiagnostics &diagnostics)
         {
-            if (!std::isfinite(src.t_s) || !finite_vec3(src.dv_rtn_mps))
+            if (!maneuver_impulse_input_is_valid(src))
             {
-                return true;
+                record_maneuver_apply_failure(diagnostics, src.node_id);
+                return false;
             }
 
             OrbitPredictionService::ManeuverNodePreview preview{};
@@ -320,35 +480,46 @@ namespace Game
                 out_previews->push_back(preview);
             }
 
-            if (have_preview)
+            if (!have_preview)
             {
-                std::optional<std::size_t> primary_index = orbitsim::body_index_for_id(massive_bodies, src.primary_body_id);
-                if (!primary_index.has_value())
+                record_maneuver_apply_failure(diagnostics, src.node_id);
+                return false;
+            }
+
+            if (maneuver_impulse_has_nonzero_delta_v(src))
+            {
+                const std::optional<std::size_t> primary_index =
+                        resolve_maneuver_primary_index(src,
+                                                       massive_bodies,
+                                                       ephemeris,
+                                                       softening_length_m,
+                                                       preview.inertial_position_m);
+                if (!primary_index.has_value() ||
+                    !maneuver_rtn_basis_is_valid(massive_bodies,
+                                                 ephemeris,
+                                                 *primary_index,
+                                                 src.t_s,
+                                                 spacecraft.state))
                 {
-                    primary_index = orbitsim::auto_select_primary_index(
-                            massive_bodies,
-                            preview.inertial_position_m,
-                            [&ephemeris, time_s = src.t_s](const std::size_t i) -> orbitsim::Vec3 {
-                                return ephemeris.body_position_at(i, time_s);
-                            },
-                            softening_length_m);
+                    record_maneuver_apply_failure(diagnostics, src.node_id);
+                    return false;
                 }
 
-                if (primary_index.has_value() && *primary_index < massive_bodies.size())
+                const orbitsim::Vec3 dv_inertial_mps = orbitsim::rtn_vector_to_inertial(
+                        ephemeris,
+                        massive_bodies,
+                        *primary_index,
+                        src.t_s,
+                        preview.inertial_position_m,
+                        preview.inertial_velocity_mps,
+                        src.dv_rtn_mps);
+                if (!finite_vec3(dv_inertial_mps))
                 {
-                    const orbitsim::Vec3 dv_inertial_mps = orbitsim::rtn_vector_to_inertial(
-                            ephemeris,
-                            massive_bodies,
-                            *primary_index,
-                            src.t_s,
-                            preview.inertial_position_m,
-                            preview.inertial_velocity_mps,
-                            src.dv_rtn_mps);
-                    if (finite_vec3(dv_inertial_mps))
-                    {
-                        spacecraft.state.velocity_mps += dv_inertial_mps;
-                    }
+                    record_maneuver_apply_failure(diagnostics, src.node_id);
+                    return false;
                 }
+
+                spacecraft.state.velocity_mps += dv_inertial_mps;
             }
 
             if (out_boundaries)
@@ -448,9 +619,11 @@ namespace Game
                 uint64_t upstream_maneuver_hash = 0xcbf29ce484222325ULL;
                 for (const OrbitPredictionService::ManeuverImpulse &upstream_impulse : ctx.request.maneuver_impulses)
                 {
-                    if (!std::isfinite(upstream_impulse.t_s) || !finite_vec3(upstream_impulse.dv_rtn_mps))
+                    if (!maneuver_impulse_input_is_valid(upstream_impulse))
                     {
-                        continue;
+                        record_maneuver_apply_failure(attempt.diagnostics, upstream_impulse.node_id);
+                        attempt.status = Status::InvalidInput;
+                        return attempt;
                     }
                     if (upstream_impulse.t_s > (chunk.t1_s + kChunkBoundaryEpsilonS))
                     {
@@ -462,10 +635,12 @@ namespace Game
                             std::abs(upstream_impulse.t_s - chunk.t1_s) <= kChunkBoundaryEpsilonS;
                     if (before_chunk_end || (include_chunk_end_impulse && at_chunk_end))
                     {
-                        hash_combine(upstream_maneuver_hash, hash_maneuver_impulse(upstream_impulse));
+                        hash_combine(upstream_maneuver_hash, hash_maneuver_impulse_for_cache(upstream_impulse));
                     }
                 }
 
+                const double chunk_cache_time_quantum_s =
+                        planned_chunk_cache_time_quantum_s(effective_chunk.profile_id);
                 const OrbitPredictionService::PlannedChunkCacheKey cache_key{
                         .track_id = ctx.request.track_id,
                         .baseline_generation_id = baseline_generation_id,
@@ -473,6 +648,8 @@ namespace Game
                         .frame_independent_generation = frame_independent_generation,
                         .chunk_t0_s = chunk.t0_s,
                         .chunk_t1_s = chunk.t1_s,
+                        .chunk_t0_tick = quantized_cache_tick(chunk.t0_s, chunk_cache_time_quantum_s),
+                        .chunk_t1_tick = quantized_cache_tick(chunk.t1_s, chunk_cache_time_quantum_s),
                         .profile_id = effective_chunk.profile_id,
                 };
                 if (effective_chunk.allow_reuse)
@@ -544,9 +721,11 @@ namespace Game
                     chunk_impulses.reserve(ctx.request.maneuver_impulses.size());
                     for (const OrbitPredictionService::ManeuverImpulse &impulse : ctx.request.maneuver_impulses)
                     {
-                        if (!std::isfinite(impulse.t_s) || !finite_vec3(impulse.dv_rtn_mps))
+                        if (!maneuver_impulse_input_is_valid(impulse))
                         {
-                            continue;
+                            record_maneuver_apply_failure(attempt.diagnostics, impulse.node_id);
+                            attempt.status = Status::InvalidInput;
+                            return attempt;
                         }
                         if (impulse.t_s < (subchunk.t0_s - kChunkBoundaryEpsilonS))
                         {
@@ -719,7 +898,8 @@ namespace Game
                                                                   chunk_eph,
                                                                   planned_sim.config().softening_length_m,
                                                                   preview_sink,
-                                                                  boundary_sink))
+                                                                  boundary_sink,
+                                                                  attempt.diagnostics))
                         {
                             attempt.status = Status::InvalidInput;
                             return attempt;
@@ -846,9 +1026,7 @@ namespace Game
 
             OrbitPredictionService::PredictionChunkPlan effective_chunk = chunk;
             effective_chunk.profile_id = activity_probe.recommended_profile_id;
-            effective_chunk.allow_reuse = chunk.allow_reuse &&
-                                          effective_chunk.profile_id !=
-                                                  OrbitPredictionService::PredictionProfileId::Exact;
+            effective_chunk.allow_reuse = chunk.allow_reuse;
 
             bool split_chunk = activity_probe.should_split &&
                                (chunk.t1_s - chunk.t0_s) >=
@@ -864,6 +1042,10 @@ namespace Game
                 chunk_attempt = solve_chunk_attempt(effective_chunk, split_chunk, chunk_start_state);
                 if (chunk_attempt.status != Status::Success)
                 {
+                    accumulate_stage_diagnostics(summary.diagnostics,
+                                                 chunk_attempt.diagnostics,
+                                                 diagnostic_dt_sum_s,
+                                                 have_dt);
                     summary.status = chunk_attempt.status;
                     return summary;
                 }
@@ -897,9 +1079,7 @@ namespace Game
                 }
 
                 effective_chunk.profile_id = promoted_profile;
-                effective_chunk.allow_reuse = chunk.allow_reuse &&
-                                              effective_chunk.profile_id !=
-                                                      OrbitPredictionService::PredictionProfileId::Exact;
+                effective_chunk.allow_reuse = chunk.allow_reuse;
             }
 
             if (!chunk_solved)
@@ -950,7 +1130,8 @@ namespace Game
             chunk_packet.start_state = chunk_start_state;
             chunk_packet.end_state = chunk_attempt.end_state;
             chunk_packet.diagnostics = chunk_attempt.diagnostics;
-            chunk_packet.reused_from_cache = chunk_attempt.reused_from_cache;
+            chunk_packet.reused_from_cache =
+                    chunk_attempt.reused_from_cache || chunk_attempt.diagnostics.cache_reused;
             chunk_packet.previews = std::move(chunk_attempt.previews);
             chunk_packet.segments = std::move(chunk_attempt.segments);
             chunk_packet.samples = std::move(chunk_attempt.samples);

@@ -48,7 +48,35 @@ namespace
                                         glm::dvec3(1.0, 4.0, 0.0)));
         return segments;
     }
+
+    void expect_vec3_near(const glm::dvec3 &actual, const glm::dvec3 &expected, const double tol)
+    {
+        EXPECT_NEAR(actual.x, expected.x, tol);
+        EXPECT_NEAR(actual.y, expected.y, tol);
+        EXPECT_NEAR(actual.z, expected.z, tol);
+    }
 } // namespace
+
+TEST(TrajectorySegmentEvaluationTests, EvaluatesHermiteStateAndClampsToSegmentBounds)
+{
+    const orbitsim::TrajectorySegment segment = make_segment(10.0,
+                                                             2.0,
+                                                             glm::dvec3(0.0, 0.0, 0.0),
+                                                             glm::dvec3(5.0, 0.0, 0.0),
+                                                             glm::dvec3(10.0, 0.0, 0.0),
+                                                             glm::dvec3(5.0, 0.0, 0.0));
+
+    const orbitsim::State mid = orbitsim::trajectory_segment_state_at(segment, 11.0);
+    expect_vec3_near(mid.position_m, glm::dvec3(5.0, 0.0, 0.0), 1.0e-12);
+    expect_vec3_near(mid.velocity_mps, glm::dvec3(5.0, 0.0, 0.0), 1.0e-12);
+
+    expect_vec3_near(orbitsim::trajectory_segment_position_at(segment, 9.0),
+                     segment.start.position_m,
+                     1.0e-12);
+    expect_vec3_near(orbitsim::trajectory_segment_position_at(segment, 13.0),
+                     segment.end.position_m,
+                     1.0e-12);
+}
 
 TEST(OrbitRenderCurveTests, BuildCreatesHierarchyForCurvedSegments)
 {
@@ -100,6 +128,66 @@ TEST(OrbitRenderCurveTests, SelectSegmentsDescendsWhenErrorBudgetIsTiny)
     EXPECT_DOUBLE_EQ(selected.front().t0_s, segments.front().t0_s);
     EXPECT_DOUBLE_EQ(selected.back().t0_s + selected.back().dt_s,
                      segments.back().t0_s + segments.back().dt_s);
+}
+
+TEST(OrbitRenderCurveTests, SelectSegmentsNormalizesUnsortedAnchorTimes)
+{
+    const std::vector<orbitsim::TrajectorySegment> segments = make_curved_segments();
+    const Game::OrbitRenderCurve curve = Game::OrbitRenderCurve::build(segments);
+
+    const std::vector<double> anchor_times_s{3.0, 1.0};
+
+    Game::OrbitRenderCurve::SelectionContext ctx{};
+    ctx.camera_world = glm::dvec3(0.0, 0.0, 1.0e9);
+    ctx.tan_half_fov = 1.0;
+    ctx.viewport_height_px = 1080.0;
+    ctx.error_px = 1.0e30;
+    ctx.anchor_times_s = anchor_times_s;
+
+    std::vector<orbitsim::TrajectorySegment> selected{};
+    Game::OrbitRenderCurve::select_segments(curve, ctx, 0.0, 4.0, selected);
+
+    ASSERT_EQ(selected.size(), segments.size());
+    for (std::size_t i = 0; i < segments.size(); ++i)
+    {
+        EXPECT_DOUBLE_EQ(selected[i].t0_s, segments[i].t0_s);
+        EXPECT_DOUBLE_EQ(selected[i].dt_s, segments[i].dt_s);
+    }
+}
+
+TEST(OrbitRenderCurveTests, PickLodKeepsLongSegmentCrossingFrustum)
+{
+    const std::vector<orbitsim::TrajectorySegment> segments{
+            make_segment(0.0,
+                         1.0,
+                         glm::dvec3(-2.0, 0.0, 0.5),
+                         glm::dvec3(12.0, 0.0, 0.0),
+                         glm::dvec3(10.0, 0.0, 0.5),
+                         glm::dvec3(12.0, 0.0, 0.0)),
+    };
+
+    Game::OrbitRenderCurve::FrustumContext frustum{};
+    frustum.valid = true;
+    frustum.viewproj = glm::mat4(1.0f);
+
+    Game::OrbitRenderCurve::PickSettings settings{};
+    settings.max_segments = 8;
+    settings.frustum_margin_ratio = 0.0;
+
+    const Game::OrbitRenderCurve::PickResult result =
+            Game::OrbitRenderCurve::build_pick_lod(segments,
+                                                   WorldVec3(0.0, 0.0, 0.0),
+                                                   WorldVec3(0.0, 0.0, 0.0),
+                                                   frustum,
+                                                   settings,
+                                                   0.0,
+                                                   1.0);
+
+    EXPECT_EQ(result.segments_before_cull, 1u);
+    EXPECT_EQ(result.segments_after_cull, 1u);
+    ASSERT_EQ(result.segments.size(), 1u);
+    EXPECT_DOUBLE_EQ(result.segments.front().t0_s, 0.0);
+    EXPECT_DOUBLE_EQ(result.segments.front().t1_s, 1.0);
 }
 
 int main(int argc, char **argv)

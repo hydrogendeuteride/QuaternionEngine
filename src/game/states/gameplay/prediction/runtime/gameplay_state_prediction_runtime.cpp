@@ -27,6 +27,23 @@ namespace Game
             double t1_s{std::numeric_limits<double>::quiet_NaN()};
         };
 
+        double resolve_authored_plan_end_s(const PredictionTimeContext &time_ctx,
+                                           const double final_node_time_s,
+                                           const double plan_horizon_s,
+                                           const double post_node_coverage_s)
+        {
+            if (!std::isfinite(time_ctx.sim_now_s) ||
+                !std::isfinite(final_node_time_s) ||
+                !(plan_horizon_s > 0.0))
+            {
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+
+            const double horizon_end_s = time_ctx.sim_now_s + plan_horizon_s;
+            const double post_node_end_s = final_node_time_s + std::max(0.0, post_node_coverage_s);
+            return std::max(horizon_end_s, post_node_end_s);
+        }
+
         bool node_time_in_context_range(const PredictionTimeContext &time_ctx, const double node_time_s)
         {
             if (!std::isfinite(node_time_s))
@@ -62,7 +79,8 @@ namespace Game
         }
 
         AuthoredPlanWindow resolve_authored_plan_window(const PredictionTimeContext &time_ctx,
-                                                        const double plan_horizon_s)
+                                                        const double plan_horizon_s,
+                                                        const double post_node_coverage_s)
         {
             AuthoredPlanWindow out{};
             if (!(plan_horizon_s > 0.0) ||
@@ -74,7 +92,14 @@ namespace Game
             }
 
             out.t0_s = time_ctx.first_future_node_time_s;
-            out.t1_s = out.t0_s + plan_horizon_s;
+            const double final_node_time_s =
+                    std::isfinite(time_ctx.last_future_node_time_s)
+                            ? time_ctx.last_future_node_time_s
+                            : out.t0_s;
+            out.t1_s = resolve_authored_plan_end_s(time_ctx,
+                                                   final_node_time_s,
+                                                   plan_horizon_s,
+                                                   post_node_coverage_s);
             out.valid = std::isfinite(out.t1_s) &&
                         out.t1_s > (out.t0_s + kPredictionTimeEpsilonS);
             return out;
@@ -139,15 +164,6 @@ namespace Game
             return make_window_anchor(time_ctx, time_ctx.sim_now_s, PredictionTimeAnchorKind::SimNow);
         }
 
-        [[nodiscard]] bool live_preview_drag_active(const bool with_maneuvers,
-                                                    const bool live_preview_enabled,
-                                                    const ManeuverGizmoInteraction::State gizmo_state)
-        {
-            return with_maneuvers &&
-                   live_preview_enabled &&
-                   PredictionRuntimeDetail::maneuver_drag_active(gizmo_state);
-        }
-
         [[nodiscard]] double resolve_live_preview_visual_window_s(const double request_window_s,
                                                                   const double anchor_offset_s,
                                                                   const double configured_preview_window_s)
@@ -190,6 +206,21 @@ namespace Game
                    (covered_duration_s + coverage_epsilon_s) < (requested_duration_s - coverage_epsilon_s);
         }
 
+        [[nodiscard]] double prediction_coverage_refresh_lead_s(const double required_ahead_s, const float fixed_dt)
+        {
+            const double fixed_dt_lead_s =
+                    std::max(0.0, static_cast<double>(fixed_dt)) *
+                    OrbitPredictionTuning::kPredictionCoverageRefreshLeadFixedDtScale;
+            const double lead_s =
+                    std::max(OrbitPredictionTuning::kPredictionCoverageRefreshLeadS, fixed_dt_lead_s);
+            if (!(required_ahead_s > 0.0) || !std::isfinite(required_ahead_s))
+            {
+                return lead_s;
+            }
+
+            return std::min(required_ahead_s, lead_s);
+        }
+
         [[nodiscard]] double prediction_cache_end_time_s(const OrbitPredictionCache &cache)
         {
             double cache_end_s = std::numeric_limits<double>::quiet_NaN();
@@ -225,8 +256,8 @@ namespace Game
                 }
             };
 
-            accumulate_samples_end(cache.trajectory_inertial);
-            accumulate_segments_end(cache.trajectory_segments_inertial);
+            accumulate_samples_end(cache.resolved_trajectory_inertial());
+            accumulate_segments_end(cache.resolved_trajectory_segments_inertial());
             accumulate_samples_end(cache.trajectory_inertial_planned);
             accumulate_segments_end(cache.trajectory_segments_inertial_planned);
             return cache_end_s;
@@ -321,12 +352,12 @@ namespace Game
     {
         const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
                 PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
-        const bool preview_drag_active =
+        const bool preview_active =
                 track.supports_maneuvers &&
-                live_preview_drag_active(with_maneuvers, _maneuver_plan_live_preview_active, _maneuver_gizmo_interaction.state);
-        const ManeuverNode *selected = _maneuver_state.find_node(_maneuver_state.selected_node_id);
+                maneuver_live_preview_active(with_maneuvers);
+        const ManeuverNode *selected = _maneuver_state.find_node(active_maneuver_preview_anchor_node_id());
 
-        if (preview_drag_active && selected && std::isfinite(selected->time_s))
+        if (preview_active && selected && std::isfinite(selected->time_s))
         {
             const double request_window_s = prediction_required_window_s(track.key, now_s, with_maneuvers);
             const double anchor_offset_s = std::max(0.0, selected->time_s - now_s);
@@ -470,11 +501,12 @@ namespace Game
         out.request_window_s =
                 std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(key) : 0.0);
         const double solve_margin_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
+        const double post_node_coverage_s = OrbitPredictionTuning::kPostNodeCoverageMinS;
         const bool supports_maneuver_windows = with_maneuvers && time_ctx.has_plan;
         const double plan_horizon_s = maneuver_plan_horizon_s();
         const AuthoredPlanWindow authored_plan_window =
                 supports_maneuver_windows
-                        ? resolve_authored_plan_window(time_ctx, plan_horizon_s)
+                        ? resolve_authored_plan_window(time_ctx, plan_horizon_s, post_node_coverage_s)
                         : AuthoredPlanWindow{};
 
         if (std::isfinite(time_ctx.last_future_node_time_s) &&
@@ -484,7 +516,7 @@ namespace Game
             const double required_plan_end_s =
                     authored_plan_window.valid
                             ? authored_plan_window.t1_s
-                            : (time_ctx.last_future_node_time_s + solve_margin_s);
+                            : (time_ctx.last_future_node_time_s + post_node_coverage_s);
             out.request_window_s = std::max(
                     out.request_window_s,
                     std::max(0.0, required_plan_end_s - time_ctx.sim_now_s));
@@ -512,11 +544,20 @@ namespace Game
         out.pick_anchor_is_future = pick_anchor.is_future;
         out.exact_anchor_is_future = exact_anchor.is_future;
 
-        if (live_preview_drag_active(with_maneuvers, _maneuver_plan_live_preview_active, _maneuver_gizmo_interaction.state) &&
+        if (maneuver_live_preview_active(with_maneuvers) &&
             std::isfinite(time_ctx.selected_node_time_s) &&
             std::isfinite(time_ctx.sim_now_s))
         {
             const double anchor_offset_s = std::max(0.0, time_ctx.selected_node_time_s - time_ctx.sim_now_s);
+            const double preview_exact_window_s =
+                    std::min(solve_margin_s,
+                             std::max(OrbitPredictionTuning::kPreviewExactWindowMinS,
+                                      std::max(0.0, _maneuver_plan_windows.preview_window_s)));
+            if (preview_exact_window_s > 0.0)
+            {
+                out.request_window_s = std::max(out.request_window_s,
+                                                anchor_offset_s + (2.0 * preview_exact_window_s));
+            }
             const double anchored_visual_window_s = resolve_live_preview_visual_window_s(out.request_window_s,
                                                                                          anchor_offset_s,
                                                                                          _maneuver_plan_windows.preview_window_s);
@@ -553,7 +594,11 @@ namespace Game
         {
             if (!authored_plan_window.valid && std::isfinite(time_ctx.last_future_node_time_s))
             {
-                const double authored_plan_end_s = time_ctx.last_future_node_time_s + plan_horizon_s;
+                const double authored_plan_end_s =
+                        resolve_authored_plan_end_s(time_ctx,
+                                                    time_ctx.last_future_node_time_s,
+                                                    plan_horizon_s,
+                                                    post_node_coverage_s);
                 const double authored_plan_span_s = std::max(0.0, authored_plan_end_s - visual_anchor.time_s);
                 out.visual_window_s = std::max(out.visual_window_s, authored_plan_span_s);
             }
@@ -579,7 +624,11 @@ namespace Game
             !authored_plan_window.valid &&
             std::isfinite(time_ctx.last_future_node_time_s))
         {
-            const double authored_plan_end_s = time_ctx.last_future_node_time_s + plan_horizon_s;
+            const double authored_plan_end_s =
+                    resolve_authored_plan_end_s(time_ctx,
+                                                time_ctx.last_future_node_time_s,
+                                                plan_horizon_s,
+                                                post_node_coverage_s);
             const double authored_plan_span_s = std::max(0.0, authored_plan_end_s - pick_anchor.time_s);
             out.pick_window_s = std::max(out.pick_window_s, authored_plan_span_s);
         }
@@ -623,7 +672,7 @@ namespace Game
             rebuild = true;
         }
 
-        if (rebuild || !track.cache.valid || track.cache.trajectory_inertial.empty())
+        if (rebuild || !track.cache.valid || track.cache.resolved_trajectory_inertial().empty())
         {
             return rebuild;
         }
@@ -640,6 +689,12 @@ namespace Game
         const double coverage_epsilon_s =
                 std::max(1.0e-3, std::min(0.25, std::max(0.0, static_cast<double>(fixed_dt)) * 0.5));
         if ((cache_end_s - now_s + coverage_epsilon_s) >= required_ahead_s)
+        {
+            return false;
+        }
+
+        const double coverage_refresh_lead_s = prediction_coverage_refresh_lead_s(required_ahead_s, fixed_dt);
+        if ((cache_end_s - now_s + coverage_epsilon_s) > coverage_refresh_lead_s)
         {
             return false;
         }

@@ -135,48 +135,15 @@ namespace Game
                                          const double t_s,
                                          orbitsim::State &out_state)
         {
-            out_state = segment.start;
-            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s) || !std::isfinite(t_s))
-            {
-                return finite_state(out_state);
-            }
-
-            double u = (t_s - segment.t0_s) / segment.dt_s;
-            if (!std::isfinite(u))
-            {
-                u = 0.0;
-            }
-            u = std::clamp(u, 0.0, 1.0);
-
-            const double u2 = u * u;
-            const double u3 = u2 * u;
-            const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-            const double h10 = u3 - (2.0 * u2) + u;
-            const double h01 = (-2.0 * u3) + (3.0 * u2);
-            const double h11 = u3 - u2;
-            const double dh00 = (6.0 * u2) - (6.0 * u);
-            const double dh10 = (3.0 * u2) - (4.0 * u) + 1.0;
-            const double dh01 = (-6.0 * u2) + (6.0 * u);
-            const double dh11 = (3.0 * u2) - (2.0 * u);
-
-            const glm::dvec3 p0 = glm::dvec3(segment.start.position_m);
-            const glm::dvec3 p1 = glm::dvec3(segment.end.position_m);
-            const glm::dvec3 m0 = glm::dvec3(segment.start.velocity_mps) * segment.dt_s;
-            const glm::dvec3 m1 = glm::dvec3(segment.end.velocity_mps) * segment.dt_s;
-            const glm::dvec3 pos = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
-            const glm::dvec3 vel = ((dh00 * p0) + (dh10 * m0) + (dh01 * p1) + (dh11 * m1)) / segment.dt_s;
-            if (!finite_vec3(pos) || !finite_vec3(vel))
-            {
-                return false;
-            }
-
-            out_state = orbitsim::make_state(pos, vel);
-            return true;
+            out_state = orbitsim::trajectory_segment_state_at(segment, t_s);
+            return finite_state(out_state);
         }
 
         bool sample_activity_segment_state(const std::vector<orbitsim::TrajectorySegment> &segments,
-                                           const double t_s,
-                                           orbitsim::State &out_state)
+                                            const double t_s,
+                                            orbitsim::State &out_state,
+                                            const TrajectoryBoundarySide boundary_side =
+                                                    TrajectoryBoundarySide::Before)
         {
             out_state = {};
             if (segments.empty() || !std::isfinite(t_s))
@@ -184,12 +151,23 @@ namespace Game
                 return false;
             }
 
-            auto it = std::lower_bound(segments.begin(),
-                                       segments.end(),
-                                       t_s,
-                                       [](const orbitsim::TrajectorySegment &segment, const double query_t_s) {
-                                           return prediction_segment_end_time(segment) < query_t_s;
-                                       });
+            const bool prefer_after = boundary_side == TrajectoryBoundarySide::After ||
+                                      boundary_side == TrajectoryBoundarySide::ContinuousPositionOnly;
+            auto it = prefer_after
+                              ? std::upper_bound(segments.begin(),
+                                                 segments.end(),
+                                                 t_s,
+                                                 [](const double query_t_s,
+                                                    const orbitsim::TrajectorySegment &segment) {
+                                                     return query_t_s < prediction_segment_end_time(segment);
+                                                 })
+                              : std::lower_bound(segments.begin(),
+                                                 segments.end(),
+                                                 t_s,
+                                                 [](const orbitsim::TrajectorySegment &segment,
+                                                    const double query_t_s) {
+                                                     return prediction_segment_end_time(segment) < query_t_s;
+                                                 });
             if (it == segments.end())
             {
                 return eval_activity_segment_state(segments.back(),
@@ -246,9 +224,15 @@ namespace Game
         orbitsim::State start_state{};
         orbitsim::State mid_state{};
         orbitsim::State end_state{};
-        if (!sample_activity_segment_state(*baseline_segments, chunk.t0_s, start_state) ||
+        if (!sample_activity_segment_state(*baseline_segments,
+                                           chunk.t0_s,
+                                           start_state,
+                                           TrajectoryBoundarySide::After) ||
             !sample_activity_segment_state(*baseline_segments, mid_t_s, mid_state) ||
-            !sample_activity_segment_state(*baseline_segments, chunk.t1_s, end_state))
+            !sample_activity_segment_state(*baseline_segments,
+                                           chunk.t1_s,
+                                           end_state,
+                                           TrajectoryBoundarySide::Before))
         {
             return probe;
         }
@@ -296,12 +280,6 @@ namespace Game
                 chunk.t1_s,
                 probe.primary_body_id_mid);
 
-        if (chunk.profile_id == PredictionProfileId::Exact ||
-            chunk.profile_id == PredictionProfileId::Near)
-        {
-            return probe;
-        }
-
         for (const OrbitPredictionService::ManeuverImpulse &impulse : request.maneuver_impulses)
         {
             if (!std::isfinite(impulse.t_s))
@@ -309,26 +287,32 @@ namespace Game
                 continue;
             }
 
-            const double distance_s = std::min(std::abs(impulse.t_s - chunk.t0_s), std::abs(impulse.t_s - chunk.t1_s));
+            const double distance_s = std::min(std::abs(impulse.t_s - chunk.t0_s),
+                                               std::abs(impulse.t_s - chunk.t1_s));
             probe.maneuver_proximity_s = std::min(probe.maneuver_proximity_s, distance_s);
         }
 
+        const bool tail_profile = chunk.profile_id == PredictionProfileId::Tail;
         uint32_t promote_steps = 0u;
-        if (probe.heading_change_rad >= OrbitPredictionTuning::kPredictionActivityProbeHeadingPromoteRad)
+        if (tail_profile &&
+            probe.heading_change_rad >= OrbitPredictionTuning::kPredictionActivityProbeHeadingPromoteRad)
         {
             promote_steps = std::max(promote_steps, 1u);
         }
-        if (probe.heading_change_rad >= OrbitPredictionTuning::kPredictionActivityProbeHeadingSplitRad)
+        if (tail_profile &&
+            probe.heading_change_rad >= OrbitPredictionTuning::kPredictionActivityProbeHeadingSplitRad)
         {
             promote_steps = std::max(promote_steps, 2u);
             probe.should_split = true;
         }
 
-        if (normalized_jerk >= OrbitPredictionTuning::kPredictionActivityProbeNormalizedJerkPromote)
+        if (tail_profile &&
+            normalized_jerk >= OrbitPredictionTuning::kPredictionActivityProbeNormalizedJerkPromote)
         {
             promote_steps = std::max(promote_steps, 1u);
         }
-        if (normalized_jerk >= OrbitPredictionTuning::kPredictionActivityProbeNormalizedJerkSplit)
+        if (tail_profile &&
+            normalized_jerk >= OrbitPredictionTuning::kPredictionActivityProbeNormalizedJerkSplit)
         {
             promote_steps = std::max(promote_steps, 2u);
             probe.should_split = true;

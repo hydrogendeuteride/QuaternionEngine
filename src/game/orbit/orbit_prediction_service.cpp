@@ -7,6 +7,104 @@
 
 namespace Game
 {
+    namespace
+    {
+        constexpr std::size_t kMaxPendingCompletedResults = 64;
+
+        bool prediction_result_is_streaming(const OrbitPredictionService::Result &result)
+        {
+            return result.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming ||
+                   result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
+        }
+
+        bool should_drop_completed_result_for_incoming(
+                const OrbitPredictionService::Result &queued,
+                const OrbitPredictionService::Result &incoming)
+        {
+            if (queued.track_id != incoming.track_id || !prediction_result_is_streaming(queued))
+            {
+                return false;
+            }
+
+            if (!prediction_result_is_streaming(incoming))
+            {
+                return incoming.generation_id > queued.generation_id;
+            }
+
+            if (incoming.generation_id > queued.generation_id)
+            {
+                return true;
+            }
+
+            // Preview publishes are visual snapshots. Keep only the newest queued
+            // preview for a track, while preserving full-stream chunk batches.
+            return incoming.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming &&
+                   queued.publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming;
+        }
+
+        void coalesce_completed_results(
+                std::deque<OrbitPredictionService::Result> &completed,
+                const OrbitPredictionService::Result &incoming)
+        {
+            completed.erase(std::remove_if(completed.begin(),
+                                           completed.end(),
+                                           [&incoming](const OrbitPredictionService::Result &queued) {
+                                               return should_drop_completed_result_for_incoming(queued, incoming);
+                                           }),
+                            completed.end());
+        }
+
+        void trim_completed_results(std::deque<OrbitPredictionService::Result> &completed)
+        {
+            while (completed.size() > kMaxPendingCompletedResults)
+            {
+                auto streaming_it = std::find_if(completed.begin(),
+                                                 completed.end(),
+                                                 [](const OrbitPredictionService::Result &queued) {
+                                                     return prediction_result_is_streaming(queued);
+                                                 });
+                if (streaming_it == completed.end())
+                {
+                    return;
+                }
+                completed.erase(streaming_it);
+            }
+        }
+
+        void enqueue_completed_result(std::deque<OrbitPredictionService::Result> &completed,
+                                      OrbitPredictionService::Result result)
+        {
+            coalesce_completed_results(completed, result);
+            completed.push_back(std::move(result));
+            trim_completed_results(completed);
+        }
+
+        OrbitPredictionService::AdaptiveStageDiagnostics make_reused_ephemeris_diagnostics(
+                const OrbitPredictionService::CachedEphemerisEntry &entry,
+                const OrbitPredictionService::EphemerisBuildRequest &request)
+        {
+            OrbitPredictionService::AdaptiveStageDiagnostics out = entry.diagnostics;
+            out.requested_duration_s = std::max(0.0, request.duration_s);
+            out.cache_reused = true;
+
+            if (entry.ephemeris && !entry.ephemeris->empty())
+            {
+                const double request_start_s = request.sim_time_s;
+                const double request_end_s = request.sim_time_s + request.duration_s;
+                const double covered_start_s = std::max(entry.ephemeris->t0_s(), request_start_s);
+                const double covered_end_s = std::min(entry.ephemeris->t_end_s(), request_end_s);
+                if (std::isfinite(covered_start_s) &&
+                    std::isfinite(covered_end_s) &&
+                    covered_end_s > covered_start_s)
+                {
+                    out.covered_duration_s = covered_end_s - covered_start_s;
+                }
+            }
+
+            return out;
+        }
+    } // namespace
+
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
     OrbitPredictionService::OrbitPredictionService()
@@ -113,8 +211,8 @@ namespace Game
 
         {
             std::lock_guard<std::mutex> lock(_planned_chunk_cache_mutex);
+            _planned_chunk_cache_by_key.clear();
             _planned_chunk_cache.clear();
-            _next_planned_chunk_cache_use_serial = 1;
         }
 
         {
@@ -210,8 +308,7 @@ namespace Game
                 entry.last_use_serial = _next_ephemeris_use_serial++;
                 if (out_diagnostics)
                 {
-                    *out_diagnostics = entry.diagnostics;
-                    out_diagnostics->cache_reused = true;
+                    *out_diagnostics = make_reused_ephemeris_diagnostics(entry, request);
                 }
                 if (out_cache_reused)
                 {
@@ -240,8 +337,7 @@ namespace Game
             entry.last_use_serial = _next_ephemeris_use_serial++;
             if (out_diagnostics)
             {
-                *out_diagnostics = entry.diagnostics;
-                out_diagnostics->cache_reused = true;
+                *out_diagnostics = make_reused_ephemeris_diagnostics(entry, request);
             }
             if (out_cache_reused)
             {
@@ -385,7 +481,7 @@ namespace Game
             return false;
         }
 
-        _completed.push_back(std::move(result));
+        enqueue_completed_result(_completed, std::move(result));
         return true;
     }
 

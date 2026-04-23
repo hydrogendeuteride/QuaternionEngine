@@ -1,5 +1,6 @@
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
+#include "game/orbit/orbit_prediction_tuning.h"
 
 #include <algorithm>
 #include <cmath>
@@ -126,9 +127,14 @@ namespace Game
 
         out.is_active = track.key == _prediction_selection.active_subject;
         out.active_player_track = out.is_active && prediction_subject_is_player(track.key);
+        const bool with_maneuver_live_preview =
+                out.active_player_track &&
+                prediction_subject_supports_maneuvers(track.key) &&
+                _maneuver_nodes_enabled &&
+                !_maneuver_state.nodes.empty();
         out.maneuver_drag_active =
                 out.active_player_track &&
-                _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
+                maneuver_live_preview_active(with_maneuver_live_preview);
 
         if (out.is_active)
         {
@@ -218,9 +224,16 @@ namespace Game
                             std::isfinite(authored_plan_ctx.first_future_node_time_s)
                                     ? authored_plan_ctx.first_future_node_time_s
                                     : authored_plan_ctx.first_relevant_node_time_s;
+                    const double authored_plan_tail_anchor_s =
+                            std::isfinite(authored_plan_ctx.last_future_node_time_s)
+                                    ? authored_plan_ctx.last_future_node_time_s
+                                    : authored_plan_start_s;
                     const double authored_plan_end_s =
-                            std::isfinite(authored_plan_start_s)
-                                    ? (authored_plan_start_s + maneuver_plan_horizon_s())
+                            std::isfinite(authored_plan_ctx.sim_now_s) &&
+                                            std::isfinite(authored_plan_tail_anchor_s)
+                                    ? std::max(authored_plan_ctx.sim_now_s + maneuver_plan_horizon_s(),
+                                               authored_plan_tail_anchor_s +
+                                                       OrbitPredictionTuning::kPostNodeCoverageMinS)
                                     : std::numeric_limits<double>::quiet_NaN();
                     if (std::isfinite(authored_plan_start_s) &&
                         authored_plan_end_s > (authored_plan_start_s + kPredictionTimeEpsilonS))

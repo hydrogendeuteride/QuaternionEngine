@@ -378,6 +378,16 @@ namespace Game
         std::uint32_t flags{orbitsim::kTrajectorySegmentFlagImpulseBoundary};
     };
 
+    enum class TrajectoryBoundarySide
+    {
+        // At t == segment boundary, return the state from the segment ending at t.
+        Before,
+        // At t == segment boundary, return the state from the segment starting at t.
+        After,
+        // Position-only callers should not interpret boundary velocity.
+        ContinuousPositionOnly,
+    };
+
     struct CelestialPredictionSamplingSpec
     {
         bool valid{false};
@@ -400,8 +410,9 @@ namespace Game
                             orbitsim::State &out_state);
 
     bool sample_trajectory_segment_state(const std::vector<orbitsim::TrajectorySegment> &segments,
-                                         const double t_s,
-                                         orbitsim::State &out_state);
+                                          const double t_s,
+                                          orbitsim::State &out_state,
+                                          TrajectoryBoundarySide boundary_side = TrajectoryBoundarySide::Before);
 
     void append_or_merge_planned_boundary_state(std::vector<PlannedSegmentBoundaryState> &states,
                                                 const double t_s,

@@ -7,6 +7,7 @@
 
 #include "orbitsim/coordinate_frames.hpp"
 #include "orbitsim/frame_utils.hpp"
+#include "orbitsim/math.hpp"
 #include "orbitsim/trajectory_transforms.hpp"
 
 #include <algorithm>
@@ -24,16 +25,25 @@ namespace Game
                 const OrbitPredictionCache &cache)
         {
             OrbitPredictionService::Result result{};
+            const auto &base_samples = cache.resolved_trajectory_inertial();
+            const auto &base_segments = cache.resolved_trajectory_segments_inertial();
             result.track_id = track_id;
             result.generation_id = cache.generation_id;
-            result.valid = cache.trajectory_inertial.size() >= 2 && !cache.trajectory_segments_inertial.empty();
+            result.valid = base_samples.size() >= 2 && !base_segments.empty();
             result.solve_quality = OrbitPredictionService::SolveQuality::Full;
             result.build_time_s = cache.build_time_s;
-            result.shared_ephemeris = cache.shared_ephemeris;
-            result.massive_bodies = cache.massive_bodies;
-            result.trajectory_inertial = cache.trajectory_inertial;
+            if (cache.shared_solver_core_data)
+            {
+                result.set_shared_core_data(cache.shared_solver_core_data);
+            }
+            else
+            {
+                result.shared_ephemeris = cache.shared_ephemeris;
+                result.massive_bodies = cache.massive_bodies;
+                result.trajectory_inertial = cache.trajectory_inertial;
+                result.trajectory_segments_inertial = cache.trajectory_segments_inertial;
+            }
             result.trajectory_inertial_planned = cache.trajectory_inertial_planned;
-            result.trajectory_segments_inertial = cache.trajectory_segments_inertial;
             result.trajectory_segments_inertial_planned = cache.trajectory_segments_inertial_planned;
             result.maneuver_previews = cache.maneuver_previews;
             return result;
@@ -145,9 +155,11 @@ namespace Game
 
         const auto body_position_at = [&](const std::size_t i) -> orbitsim::Vec3 {
             const orbitsim::MassiveBody &body = bodies[i];
-            if (cache && cache->shared_ephemeris && !cache->shared_ephemeris->empty())
+            const auto &ephemeris = cache ? cache->resolved_shared_ephemeris()
+                                          : OrbitPredictionService::SharedCelestialEphemeris{};
+            if (ephemeris && !ephemeris->empty())
             {
-                return cache->shared_ephemeris->body_state_at_by_id(body.id, query_time_s).position_m;
+                return ephemeris->body_state_at_by_id(body.id, query_time_s).position_m;
             }
             return body.state.position_m;
         };
@@ -227,7 +239,7 @@ namespace Game
         const orbitsim::MassiveBody *body = nullptr;
         if (position_cache)
         {
-            body = find_massive_body(position_cache->massive_bodies, body_id);
+            body = find_massive_body(position_cache->resolved_massive_bodies(), body_id);
         }
         if (!body && _orbitsim)
         {
@@ -239,9 +251,11 @@ namespace Game
         }
 
         const auto body_state_at = [&](const orbitsim::MassiveBody &massive_body) -> orbitsim::State {
-            if (position_cache && position_cache->shared_ephemeris && !position_cache->shared_ephemeris->empty())
+            const auto &ephemeris = position_cache ? position_cache->resolved_shared_ephemeris()
+                                                   : OrbitPredictionService::SharedCelestialEphemeris{};
+            if (ephemeris && !ephemeris->empty())
             {
-                return position_cache->shared_ephemeris->body_state_at_by_id(massive_body.id, sample_time_s);
+                return ephemeris->body_state_at_by_id(massive_body.id, sample_time_s);
             }
             return massive_body.state;
         };
@@ -256,7 +270,7 @@ namespace Game
                 if (position_cache)
                 {
                     if (const orbitsim::MassiveBody *world_ref_body =
-                                find_massive_body(position_cache->massive_bodies, world_ref_info->sim_id))
+                                find_massive_body(position_cache->resolved_massive_bodies(), world_ref_info->sim_id))
                     {
                         world_ref_state = body_state_at(*world_ref_body);
                         have_world_ref_state = true;
@@ -299,9 +313,9 @@ namespace Game
         {
             trajectory_segments = &player_cache->trajectory_segments_inertial_planned;
         }
-        else if (!player_cache->trajectory_segments_inertial.empty())
+        else if (!player_cache->resolved_trajectory_segments_inertial().empty())
         {
-            trajectory_segments = &player_cache->trajectory_segments_inertial;
+            trajectory_segments = &player_cache->resolved_trajectory_segments_inertial();
         }
         if (!trajectory_segments)
         {
@@ -315,9 +329,10 @@ namespace Game
                                                                                        double display_time_s) const
     {
         orbitsim::TrajectoryFrameSpec resolved = _prediction_frame_selection.spec;
+        const auto &bodies = cache.resolved_massive_bodies();
         if (resolved.type != orbitsim::TrajectoryFrameType::LVLH ||
             resolved.primary_body_id != orbitsim::kInvalidBodyId ||
-            cache.massive_bodies.empty())
+            bodies.empty())
         {
             return resolved;
         }
@@ -346,7 +361,7 @@ namespace Game
                         ? cache.resolved_frame_spec.primary_body_id
                         : _prediction_frame_selection.spec.primary_body_id;
         const orbitsim::BodyId primary_body_id = select_prediction_primary_body_id(
-                cache.massive_bodies,
+                bodies,
                 &cache,
                 target_state->position_m,
                 reference_time_s,
@@ -551,23 +566,27 @@ namespace Game
             return _prediction_analysis_selection.spec.fixed_body_id;
         }
 
-        if (cache.massive_bodies.empty())
+        const auto &bodies = cache.resolved_massive_bodies();
+        const auto &base_segments = cache.resolved_trajectory_segments_inertial();
+        const auto &base_samples = cache.resolved_trajectory_inertial();
+        if (bodies.empty())
         {
             return orbitsim::kInvalidBodyId;
         }
 
         orbitsim::State query_state{};
-        if (!PredictionCacheInternal::sample_prediction_inertial_state(cache.trajectory_segments_inertial,
-                                                                       query_time_s,
-                                                                       query_state) &&
-            !sample_prediction_inertial_state(cache.trajectory_inertial, query_time_s, query_state))
+        if (!PredictionCacheInternal::sample_prediction_inertial_state(base_segments,
+                                                                        query_time_s,
+                                                                        query_state,
+                                                                        TrajectoryBoundarySide::ContinuousPositionOnly) &&
+            !sample_prediction_inertial_state(base_samples, query_time_s, query_state))
         {
             return orbitsim::kInvalidBodyId;
         }
 
         std::vector<orbitsim::MassiveBody> candidates;
-        candidates.reserve(cache.massive_bodies.size());
-        for (const orbitsim::MassiveBody &body : cache.massive_bodies)
+        candidates.reserve(bodies.size());
+        for (const orbitsim::MassiveBody &body : bodies)
         {
             if (key.kind == PredictionSubjectKind::Celestial &&
                 static_cast<uint32_t>(body.id) == key.value)
@@ -619,10 +638,12 @@ namespace Game
                 cache.resolved_frame_spec_valid
                     ? cache.resolved_frame_spec
                     : resolve_prediction_display_frame_spec(cache, reference_time_s);
+        const auto &ephemeris = cache.resolved_shared_ephemeris();
+        const auto &bodies = cache.resolved_massive_bodies();
         const auto state_at = [&](const orbitsim::MassiveBody &body) -> orbitsim::State {
-            if (cache.shared_ephemeris && !cache.shared_ephemeris->empty())
+            if (ephemeris && !ephemeris->empty())
             {
-                return cache.shared_ephemeris->body_state_at_by_id(body.id, reference_time_s);
+                return ephemeris->body_state_at_by_id(body.id, reference_time_s);
             }
             return body.state;
         };
@@ -634,7 +655,7 @@ namespace Game
             case orbitsim::TrajectoryFrameType::BodyCenteredInertial:
             {
                 const orbitsim::MassiveBody *body =
-                        find_massive_body(cache.massive_bodies, frame_spec.primary_body_id);
+                        find_massive_body(bodies, frame_spec.primary_body_id);
                 if (!body)
                 {
                     return false;
@@ -646,7 +667,7 @@ namespace Game
             case orbitsim::TrajectoryFrameType::BodyFixed:
             {
                 const orbitsim::MassiveBody *body =
-                        find_massive_body(cache.massive_bodies, frame_spec.primary_body_id);
+                        find_massive_body(bodies, frame_spec.primary_body_id);
                 if (!body)
                 {
                     return false;
@@ -663,9 +684,9 @@ namespace Game
             case orbitsim::TrajectoryFrameType::Synodic:
             {
                 const orbitsim::MassiveBody *body_a =
-                        find_massive_body(cache.massive_bodies, frame_spec.primary_body_id);
+                        find_massive_body(bodies, frame_spec.primary_body_id);
                 const orbitsim::MassiveBody *body_b =
-                        find_massive_body(cache.massive_bodies, frame_spec.secondary_body_id);
+                        find_massive_body(bodies, frame_spec.secondary_body_id);
                 if (!body_a || !body_b)
                 {
                     return false;
@@ -683,7 +704,7 @@ namespace Game
 
             case orbitsim::TrajectoryFrameType::LVLH:
             {
-                if (cache.massive_bodies.empty())
+                if (bodies.empty())
                 {
                     return false;
                 }
@@ -702,7 +723,7 @@ namespace Game
                 }
 
                 const orbitsim::MassiveBody *primary =
-                        find_massive_body(cache.massive_bodies, frame_spec.primary_body_id);
+                        find_massive_body(bodies, frame_spec.primary_body_id);
                 if (!primary)
                 {
                     return false;
@@ -731,11 +752,13 @@ namespace Game
         out_frame_to_world = glm::dmat3(1.0);
         const double reference_time_s = resolve_prediction_display_reference_time_s(cache, display_time_s);
         const WorldVec3 world_ref_world = prediction_world_reference_body_world();
+        const auto &ephemeris = cache.resolved_shared_ephemeris();
+        const auto &bodies = cache.resolved_massive_bodies();
 
         const auto state_at = [&](const orbitsim::MassiveBody &body) -> orbitsim::State {
-            if (cache.shared_ephemeris && !cache.shared_ephemeris->empty())
+            if (ephemeris && !ephemeris->empty())
             {
-                return cache.shared_ephemeris->body_state_at_by_id(body.id, reference_time_s);
+                return ephemeris->body_state_at_by_id(body.id, reference_time_s);
             }
             return body.state;
         };
@@ -746,7 +769,7 @@ namespace Game
         {
             if (const CelestialBodyInfo *world_ref_info = _orbitsim->world_reference_body())
             {
-                if (const orbitsim::MassiveBody *world_ref_body = find_massive_body(cache.massive_bodies, world_ref_info->sim_id))
+                if (const orbitsim::MassiveBody *world_ref_body = find_massive_body(bodies, world_ref_info->sim_id))
                 {
                     world_ref_state = state_at(*world_ref_body);
                     have_world_ref_state = true;
@@ -814,32 +837,7 @@ namespace Game
                                                              const double t_s,
                                                              double display_time_s) const
     {
-        const double ta = a.t_s;
-        const double tb = b.t_s;
-        const double h = tb - ta;
-        if (!std::isfinite(h) || !(h > 0.0))
-        {
-            return prediction_sample_position_world(cache, a, display_time_s);
-        }
-
-        double u = (t_s - ta) / h;
-        if (!std::isfinite(u))
-        {
-            u = 0.0;
-        }
-        u = std::clamp(u, 0.0, 1.0);
-
-        const double u2 = u * u;
-        const double u3 = u2 * u;
-        const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
-        const double h10 = u3 - (2.0 * u2) + u;
-        const double h01 = (-2.0 * u3) + (3.0 * u2);
-        const double h11 = u3 - u2;
-        const glm::dvec3 p0 = glm::dvec3(a.position_m);
-        const glm::dvec3 p1 = glm::dvec3(b.position_m);
-        const glm::dvec3 m0 = glm::dvec3(a.velocity_mps) * h;
-        const glm::dvec3 m1 = glm::dvec3(b.velocity_mps) * h;
-        const glm::dvec3 local = (h00 * p0) + (h10 * m0) + (h01 * p1) + (h11 * m1);
+        const glm::dvec3 local = OrbitPredictionMath::sample_pair_position_m(a, b, t_s);
 
         WorldVec3 origin_world{0.0};
         glm::dmat3 frame_to_world(1.0);
@@ -878,7 +876,8 @@ namespace Game
 
     bool GameplayState::request_prediction_derived_refresh(PredictionTrackState &track, double display_time_s)
     {
-        if (track.cache.trajectory_inertial.size() < 2 || track.cache.trajectory_segments_inertial.empty())
+        if (track.cache.resolved_trajectory_inertial().size() < 2 ||
+            track.cache.resolved_trajectory_segments_inertial().empty())
         {
             return false;
         }
@@ -923,7 +922,7 @@ namespace Game
             }
             else
             {
-                player_lookup_segments = track.cache.trajectory_segments_inertial;
+                player_lookup_segments = track.cache.resolved_trajectory_segments_inertial();
             }
         }
         else if (const PredictionTrackState *player_track = player_prediction_track())
@@ -934,9 +933,9 @@ namespace Game
                 {
                     player_lookup_segments = player_cache->trajectory_segments_inertial_planned;
                 }
-                else if (!player_cache->trajectory_segments_inertial.empty())
+                else if (!player_cache->resolved_trajectory_segments_inertial().empty())
                 {
-                    player_lookup_segments = player_cache->trajectory_segments_inertial;
+                    player_lookup_segments = player_cache->resolved_trajectory_segments_inertial();
                 }
             }
         }
@@ -982,7 +981,7 @@ namespace Game
     void GameplayState::refresh_prediction_derived_cache(PredictionTrackState &track,
                                                          double display_time_s)
     {
-        if (track.cache.trajectory_inertial.size() < 2)
+        if (track.cache.resolved_trajectory_inertial().size() < 2)
         {
             return;
         }

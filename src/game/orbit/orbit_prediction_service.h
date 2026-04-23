@@ -5,10 +5,12 @@
 #include "orbitsim/trajectory_types.hpp"
 
 #include <condition_variable>
+#include <cassert>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <limits>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -72,6 +74,8 @@ namespace Game
             bool hard_cap_hit{false};
             bool cancelled{false};
             bool cache_reused{false};
+            std::size_t maneuver_apply_failed_count{0};
+            int maneuver_apply_failed_node_id{-1};
         };
 
         struct Diagnostics
@@ -236,6 +240,16 @@ namespace Game
                 orbitsim::State anchor_state_inertial{};
             };
 
+            struct PlannedSuffixRefineSpec
+            {
+                bool active{false};
+                int anchor_node_id{-1};
+                double anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
+                orbitsim::State anchor_state_inertial{};
+                std::vector<orbitsim::TrajectorySegment> prefix_segments_inertial{};
+                std::vector<ManeuverNodePreview> prefix_previews{};
+            };
+
             struct FullStreamPublishSpec
             {
                 bool active{false};
@@ -265,6 +279,7 @@ namespace Game
             orbitsim::BodyId preferred_primary_body_id{orbitsim::kInvalidBodyId};
             std::vector<ManeuverImpulse> maneuver_impulses;
             PreviewPatchSpec preview_patch{};
+            PlannedSuffixRefineSpec planned_suffix_refine{};
             FullStreamPublishSpec full_stream_publish{};
         };
 
@@ -277,6 +292,7 @@ namespace Game
                 std::vector<orbitsim::TrajectorySample> trajectory_inertial{};
                 std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial{};
             };
+            using SharedCoreData = std::shared_ptr<const CoreData>;
 
             uint64_t track_id{0};
             uint64_t generation_id{0};
@@ -319,29 +335,56 @@ namespace Game
                 return _shared_core_data ? _shared_core_data->trajectory_segments_inertial : trajectory_segments_inertial;
             }
 
+            [[nodiscard]] const SharedCoreData &shared_core_data() const
+            {
+                return _shared_core_data;
+            }
+
+            [[nodiscard]] bool has_shared_core_data() const
+            {
+                return static_cast<bool>(_shared_core_data);
+            }
+
+            [[nodiscard]] std::vector<orbitsim::MassiveBody> clone_massive_bodies() const
+            {
+                return resolved_massive_bodies();
+            }
+
+            [[nodiscard]] std::vector<orbitsim::TrajectorySample> clone_trajectory_inertial() const
+            {
+                return resolved_trajectory_inertial();
+            }
+
+            [[nodiscard]] std::vector<orbitsim::TrajectorySegment> clone_trajectory_segments_inertial() const
+            {
+                return resolved_trajectory_segments_inertial();
+            }
+
             [[nodiscard]] std::vector<orbitsim::MassiveBody> take_massive_bodies()
             {
-                return _shared_core_data ? _shared_core_data->massive_bodies : std::move(massive_bodies);
+                assert(!_shared_core_data && "shared core data cannot be taken; use resolved_*(), shared_core_data(), or clone_*()");
+                return std::move(massive_bodies);
             }
 
             [[nodiscard]] std::vector<orbitsim::TrajectorySample> take_trajectory_inertial()
             {
-                return _shared_core_data ? _shared_core_data->trajectory_inertial : std::move(trajectory_inertial);
+                assert(!_shared_core_data && "shared core data cannot be taken; use resolved_*(), shared_core_data(), or clone_*()");
+                return std::move(trajectory_inertial);
             }
 
             [[nodiscard]] std::vector<orbitsim::TrajectorySegment> take_trajectory_segments_inertial()
             {
-                return _shared_core_data ? _shared_core_data->trajectory_segments_inertial
-                                         : std::move(trajectory_segments_inertial);
+                assert(!_shared_core_data && "shared core data cannot be taken; use resolved_*(), shared_core_data(), or clone_*()");
+                return std::move(trajectory_segments_inertial);
             }
 
-            void set_shared_core_data(std::shared_ptr<const CoreData> shared_core_data)
+            void set_shared_core_data(SharedCoreData shared_core_data)
             {
                 _shared_core_data = std::move(shared_core_data);
             }
 
         private:
-            std::shared_ptr<const CoreData> _shared_core_data{};
+            SharedCoreData _shared_core_data{};
         };
 
         struct EphemerisSamplingSpec
@@ -397,6 +440,8 @@ namespace Game
             uint64_t frame_independent_generation{0};
             double chunk_t0_s{std::numeric_limits<double>::quiet_NaN()};
             double chunk_t1_s{std::numeric_limits<double>::quiet_NaN()};
+            int64_t chunk_t0_tick{0};
+            int64_t chunk_t1_tick{0};
             PredictionProfileId profile_id{PredictionProfileId::Near};
         };
 
@@ -410,10 +455,43 @@ namespace Game
             std::vector<orbitsim::TrajectorySegment> seam_validation_segments{};
             std::vector<orbitsim::TrajectorySample> samples{};
             std::vector<ManeuverNodePreview> previews{};
-            uint64_t last_use_serial{0};
         };
 
     private:
+        struct PlannedChunkCacheKeyHash
+        {
+            [[nodiscard]] std::size_t operator()(const PlannedChunkCacheKey &key) const noexcept
+            {
+                std::size_t seed = std::hash<uint64_t>{}(key.track_id);
+                const auto combine = [&seed](const std::size_t value) {
+                    seed ^= value + 0x9e3779b97f4a7c15ull + (seed << 6u) + (seed >> 2u);
+                };
+
+                combine(std::hash<uint64_t>{}(key.baseline_generation_id));
+                combine(std::hash<uint64_t>{}(key.upstream_maneuver_hash));
+                combine(std::hash<uint64_t>{}(key.frame_independent_generation));
+                combine(std::hash<int64_t>{}(key.chunk_t0_tick));
+                combine(std::hash<int64_t>{}(key.chunk_t1_tick));
+                combine(std::hash<uint8_t>{}(static_cast<uint8_t>(key.profile_id)));
+                return seed;
+            }
+        };
+
+        struct PlannedChunkCacheKeyEqual
+        {
+            [[nodiscard]] bool operator()(const PlannedChunkCacheKey &a,
+                                          const PlannedChunkCacheKey &b) const noexcept
+            {
+                return a.track_id == b.track_id &&
+                       a.baseline_generation_id == b.baseline_generation_id &&
+                       a.upstream_maneuver_hash == b.upstream_maneuver_hash &&
+                       a.frame_independent_generation == b.frame_independent_generation &&
+                       a.chunk_t0_tick == b.chunk_t0_tick &&
+                       a.chunk_t1_tick == b.chunk_t1_tick &&
+                       a.profile_id == b.profile_id;
+            }
+        };
+
         struct ReusableBaselineCacheEntry
         {
             uint64_t generation_id{0};
@@ -469,8 +547,12 @@ namespace Game
         std::unordered_map<uint64_t, ReusableBaselineCacheEntry> _reusable_baseline_by_track{};
 
         mutable std::mutex _planned_chunk_cache_mutex;
-        std::vector<PlannedChunkCacheEntry> _planned_chunk_cache{};
-        uint64_t _next_planned_chunk_cache_use_serial{1};
+        std::list<PlannedChunkCacheEntry> _planned_chunk_cache{};
+        std::unordered_map<PlannedChunkCacheKey,
+                           std::list<PlannedChunkCacheEntry>::iterator,
+                           PlannedChunkCacheKeyHash,
+                           PlannedChunkCacheKeyEqual>
+                _planned_chunk_cache_by_key{};
 
         std::mutex _ephemeris_mutex;
         std::vector<CachedEphemerisEntry> _ephemeris_cache{};

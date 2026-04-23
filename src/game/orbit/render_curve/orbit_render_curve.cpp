@@ -56,7 +56,7 @@ namespace Game
             return t_s > (interval_t0_s + epsilon_s) && t_s < (interval_t1_s - epsilon_s);
         }
 
-        /// Anchor times are provided sorted by the draw/pick callers.
+        /// Anchor times are normalized by public entry points.
         /// Use a single lower_bound instead of scanning every authored node for every tree node.
         bool interval_contains_any_anchor_time(const double interval_t0_s,
                                                const double interval_t1_s,
@@ -357,6 +357,10 @@ namespace Game
             return;
         }
 
+        std::vector<double> scratch_anchor_times_s{};
+        const std::span<const double> anchor_times_s =
+                normalized_anchor_times(ctx.anchor_times_s, scratch_anchor_times_s);
+
         std::vector<uint32_t> stack{};
         stack.push_back(curve.root_index());
 
@@ -375,7 +379,7 @@ namespace Game
                 continue;
             }
 
-            bool descend = node_requires_anchor_descend(node, t_start_s, t_end_s, ctx.anchor_times_s);
+            bool descend = node_requires_anchor_descend(node, t_start_s, t_end_s, anchor_times_s);
             if (!node.is_leaf() &&
                 !descend &&
                 std::isfinite(node.max_error_m) &&
