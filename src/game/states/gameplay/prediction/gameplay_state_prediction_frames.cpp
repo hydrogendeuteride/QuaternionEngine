@@ -576,8 +576,9 @@ namespace Game
 
         orbitsim::State query_state{};
         if (!PredictionCacheInternal::sample_prediction_inertial_state(base_segments,
-                                                                       query_time_s,
-                                                                       query_state) &&
+                                                                        query_time_s,
+                                                                        query_state,
+                                                                        TrajectoryBoundarySide::ContinuousPositionOnly) &&
             !sample_prediction_inertial_state(base_samples, query_time_s, query_state))
         {
             return orbitsim::kInvalidBodyId;

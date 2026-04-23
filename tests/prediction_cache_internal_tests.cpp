@@ -6,6 +6,23 @@
 
 namespace
 {
+    orbitsim::TrajectorySegment make_test_segment(const double t0_s,
+                                                  const double dt_s,
+                                                  const orbitsim::Vec3 &p0,
+                                                  const orbitsim::Vec3 &v0,
+                                                  const orbitsim::Vec3 &p1,
+                                                  const orbitsim::Vec3 &v1,
+                                                  const std::uint32_t flags = 0u)
+    {
+        return orbitsim::TrajectorySegment{
+                .t0_s = t0_s,
+                .dt_s = dt_s,
+                .start = orbitsim::make_state(p0, v0),
+                .end = orbitsim::make_state(p1, v1),
+                .flags = flags,
+        };
+    }
+
     struct LinearPredictionFixture
     {
         orbitsim::GameSimulation sim{};
@@ -81,6 +98,76 @@ namespace
         return fixture;
     }
 } // namespace
+
+TEST(PredictionTrajectorySamplingTests, BoundarySideSelectsBeforeOrAfterImpulseVelocity)
+{
+    std::vector<orbitsim::TrajectorySegment> segments{
+            make_test_segment(0.0,
+                              10.0,
+                              orbitsim::Vec3{0.0, 0.0, 0.0},
+                              orbitsim::Vec3{1.0, 0.0, 0.0},
+                              orbitsim::Vec3{10.0, 0.0, 0.0},
+                              orbitsim::Vec3{1.0, 0.0, 0.0}),
+            make_test_segment(10.0,
+                              10.0,
+                              orbitsim::Vec3{10.0, 0.0, 0.0},
+                              orbitsim::Vec3{3.0, 0.0, 0.0},
+                              orbitsim::Vec3{40.0, 0.0, 0.0},
+                              orbitsim::Vec3{3.0, 0.0, 0.0},
+                              orbitsim::kTrajectorySegmentFlagImpulseBoundary),
+    };
+    ASSERT_TRUE(Game::validate_trajectory_segment_continuity(segments));
+
+    orbitsim::State default_state{};
+    ASSERT_TRUE(Game::sample_trajectory_segment_state(segments, 10.0, default_state));
+    EXPECT_DOUBLE_EQ(default_state.position_m.x, 10.0);
+    EXPECT_DOUBLE_EQ(default_state.velocity_mps.x, 1.0);
+
+    orbitsim::State before_state{};
+    ASSERT_TRUE(Game::sample_trajectory_segment_state(segments,
+                                                      10.0,
+                                                      before_state,
+                                                      Game::TrajectoryBoundarySide::Before));
+    EXPECT_DOUBLE_EQ(before_state.position_m.x, 10.0);
+    EXPECT_DOUBLE_EQ(before_state.velocity_mps.x, 1.0);
+
+    orbitsim::State after_state{};
+    ASSERT_TRUE(Game::sample_trajectory_segment_state(segments,
+                                                      10.0,
+                                                      after_state,
+                                                      Game::TrajectoryBoundarySide::After));
+    EXPECT_DOUBLE_EQ(after_state.position_m.x, 10.0);
+    EXPECT_DOUBLE_EQ(after_state.velocity_mps.x, 3.0);
+
+    orbitsim::State position_only_state{};
+    ASSERT_TRUE(Game::sample_trajectory_segment_state(segments,
+                                                      10.0,
+                                                      position_only_state,
+                                                      Game::TrajectoryBoundarySide::ContinuousPositionOnly));
+    EXPECT_DOUBLE_EQ(position_only_state.position_m.x, 10.0);
+}
+
+TEST(PredictionTrajectorySamplingTests, ContinuityRequiresImpulseFlagForVelocityDiscontinuity)
+{
+    std::vector<orbitsim::TrajectorySegment> segments{
+            make_test_segment(0.0,
+                              10.0,
+                              orbitsim::Vec3{0.0, 0.0, 0.0},
+                              orbitsim::Vec3{1.0, 0.0, 0.0},
+                              orbitsim::Vec3{10.0, 0.0, 0.0},
+                              orbitsim::Vec3{1.0, 0.0, 0.0}),
+            make_test_segment(10.0,
+                              10.0,
+                              orbitsim::Vec3{10.0, 0.0, 0.0},
+                              orbitsim::Vec3{3.0, 0.0, 0.0},
+                              orbitsim::Vec3{40.0, 0.0, 0.0},
+                              orbitsim::Vec3{3.0, 0.0, 0.0}),
+    };
+    EXPECT_FALSE(Game::validate_trajectory_segment_continuity(segments));
+
+    segments[1].flags = orbitsim::kTrajectorySegmentFlagImpulseBoundary;
+    EXPECT_TRUE(Game::validate_trajectory_segment_continuity(segments));
+}
 
 TEST(PredictionCacheInternalTests, RebuildFrameCacheProducesBodyCenteredSegments)
 {

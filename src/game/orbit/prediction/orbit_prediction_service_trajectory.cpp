@@ -75,8 +75,9 @@ namespace Game
     }
 
     bool sample_trajectory_segment_state(const std::vector<orbitsim::TrajectorySegment> &segments,
-                                         const double t_s,
-                                         orbitsim::State &out_state)
+                                          const double t_s,
+                                          orbitsim::State &out_state,
+                                          const TrajectoryBoundarySide boundary_side)
     {
         out_state = {};
         if (segments.empty() || !std::isfinite(t_s))
@@ -84,12 +85,23 @@ namespace Game
             return false;
         }
 
-        const auto it = std::lower_bound(segments.begin(),
-                                         segments.end(),
-                                         t_s,
-                                         [](const orbitsim::TrajectorySegment &segment, const double query_t_s) {
-                                             return prediction_segment_end_time(segment) < query_t_s;
-                                         });
+        const bool prefer_after = boundary_side == TrajectoryBoundarySide::After ||
+                                  boundary_side == TrajectoryBoundarySide::ContinuousPositionOnly;
+        const auto it = prefer_after
+                                ? std::upper_bound(segments.begin(),
+                                                   segments.end(),
+                                                   t_s,
+                                                   [](const double query_t_s,
+                                                      const orbitsim::TrajectorySegment &segment) {
+                                                       return query_t_s < prediction_segment_end_time(segment);
+                                                   })
+                                : std::lower_bound(segments.begin(),
+                                                   segments.end(),
+                                                   t_s,
+                                                   [](const orbitsim::TrajectorySegment &segment,
+                                                      const double query_t_s) {
+                                                       return prediction_segment_end_time(segment) < query_t_s;
+                                                   });
         if (it == segments.end())
         {
             return eval_segment_state(segments.back(), prediction_segment_end_time(segments.back()), out_state);

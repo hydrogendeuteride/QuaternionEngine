@@ -61,10 +61,12 @@ namespace Game::PredictionCacheInternal
     }
 
     inline bool sample_prediction_inertial_state(const std::vector<orbitsim::TrajectorySegment> &segments,
-                                                 const double query_time_s,
-                                                 orbitsim::State &out_state)
+                                                  const double query_time_s,
+                                                  orbitsim::State &out_state,
+                                                  const TrajectoryBoundarySide boundary_side =
+                                                          TrajectoryBoundarySide::Before)
     {
-        return sample_trajectory_segment_state(segments, query_time_s, out_state);
+        return sample_trajectory_segment_state(segments, query_time_s, out_state, boundary_side);
     }
 
     inline orbitsim::SpacecraftStateLookup build_player_lookup(
@@ -107,7 +109,7 @@ namespace Game::PredictionCacheInternal
             }
 
             orbitsim::State sampled{};
-            if (!sample_prediction_inertial_state(segments, t_s, sampled))
+            if (!sample_prediction_inertial_state(segments, t_s, sampled, TrajectoryBoundarySide::After))
             {
                 return std::nullopt;
             }
@@ -979,7 +981,10 @@ namespace Game::PredictionCacheInternal
                                            double &out_radius_m)
     {
         orbitsim::State state{};
-        if (!sample_trajectory_segment_state(segments, t_s, state))
+        if (!sample_trajectory_segment_state(segments,
+                                             t_s,
+                                             state,
+                                             TrajectoryBoundarySide::ContinuousPositionOnly))
         {
             return false;
         }

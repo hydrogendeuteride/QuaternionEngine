@@ -235,16 +235,18 @@ namespace Game
 
         return PredictionCacheInternal::sample_prediction_inertial_state(anchor_cache.trajectory_segments_inertial_planned,
                                                                          track.preview_anchor.anchor_time_s,
-                                                                         out_state) ||
+                                                                         out_state,
+                                                                         TrajectoryBoundarySide::Before) ||
                sample_prediction_inertial_state(anchor_cache.trajectory_inertial_planned,
-                                                track.preview_anchor.anchor_time_s,
-                                                out_state) ||
+                                                 track.preview_anchor.anchor_time_s,
+                                                 out_state) ||
                PredictionCacheInternal::sample_prediction_inertial_state(track.cache.resolved_trajectory_segments_inertial(),
                                                                          track.preview_anchor.anchor_time_s,
-                                                                         out_state) ||
+                                                                         out_state,
+                                                                         TrajectoryBoundarySide::Before) ||
                sample_prediction_inertial_state(track.cache.resolved_trajectory_inertial(),
-                                                track.preview_anchor.anchor_time_s,
-                                                out_state);
+                                                 track.preview_anchor.anchor_time_s,
+                                                 out_state);
     }
 
     bool GameplayState::build_orbiter_prediction_request(PredictionTrackState &track,
