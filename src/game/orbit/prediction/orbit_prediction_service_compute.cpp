@@ -220,6 +220,91 @@ namespace Game
                                     : OrbitPredictionService::Status::TrajectorySamplesUnavailable;
             return output;
         }
+
+        std::vector<OrbitPredictionService::ManeuverNodePreview> collect_prefix_chunk_previews(
+                const std::vector<OrbitPredictionService::ManeuverNodePreview> &previews,
+                const double chunk_t0_s,
+                const double chunk_t1_s)
+        {
+            std::vector<OrbitPredictionService::ManeuverNodePreview> out;
+            for (const OrbitPredictionService::ManeuverNodePreview &preview : previews)
+            {
+                if (!preview.valid || !std::isfinite(preview.t_s))
+                {
+                    continue;
+                }
+
+                const double start_epsilon_s = continuity_time_epsilon_s(chunk_t0_s);
+                const double end_epsilon_s = continuity_time_epsilon_s(chunk_t1_s);
+                if (preview.t_s >= (chunk_t0_s - start_epsilon_s) &&
+                    preview.t_s < (chunk_t1_s - end_epsilon_s))
+                {
+                    out.push_back(preview);
+                }
+            }
+            return out;
+        }
+
+        bool build_cached_prefix_stream_chunks(
+                const OrbitPredictionService::Request &request,
+                const OrbitPredictionService::PredictionSolvePlan &solve_plan,
+                const std::size_t suffix_begin_index,
+                const PlannedSolveOutput &prefix_output,
+                std::vector<OrbitPredictionService::PublishedChunk> &out_published_chunks,
+                std::vector<OrbitPredictionService::StreamedPlannedChunk> &out_streamed_chunks)
+        {
+            out_published_chunks.clear();
+            out_streamed_chunks.clear();
+            if (suffix_begin_index == 0u || suffix_begin_index > solve_plan.chunks.size())
+            {
+                return true;
+            }
+
+            out_published_chunks.reserve(suffix_begin_index);
+            out_streamed_chunks.reserve(suffix_begin_index);
+            for (std::size_t chunk_index = 0u; chunk_index < suffix_begin_index; ++chunk_index)
+            {
+                const OrbitPredictionService::PredictionChunkPlan &chunk = solve_plan.chunks[chunk_index];
+                std::vector<orbitsim::TrajectorySegment> chunk_segments =
+                        slice_trajectory_segments(prefix_output.segments, chunk.t0_s, chunk.t1_s);
+                if (chunk_segments.empty() || !validate_trajectory_segment_continuity(chunk_segments))
+                {
+                    out_published_chunks.clear();
+                    out_streamed_chunks.clear();
+                    return false;
+                }
+
+                std::vector<orbitsim::TrajectorySample> chunk_samples =
+                        resample_segments_uniform(chunk_segments,
+                                                  prediction_sample_budget(request, chunk_segments.size()));
+                if (chunk_samples.size() < 2u)
+                {
+                    out_published_chunks.clear();
+                    out_streamed_chunks.clear();
+                    return false;
+                }
+
+                OrbitPredictionService::PublishedChunk published_chunk =
+                        make_published_chunk_from_plan(chunk, chunk.chunk_id, true);
+                OrbitPredictionService::StreamedPlannedChunk streamed_chunk{};
+                streamed_chunk.published_chunk = published_chunk;
+                streamed_chunk.trajectory_segments_inertial = std::move(chunk_segments);
+                streamed_chunk.trajectory_inertial = std::move(chunk_samples);
+                streamed_chunk.maneuver_previews =
+                        collect_prefix_chunk_previews(prefix_output.previews, chunk.t0_s, chunk.t1_s);
+                streamed_chunk.diagnostics =
+                        make_stage_diagnostics_from_segments(streamed_chunk.trajectory_segments_inertial,
+                                                             chunk.t1_s - chunk.t0_s,
+                                                             true);
+                streamed_chunk.start_state = streamed_chunk.trajectory_segments_inertial.front().start;
+                streamed_chunk.end_state = streamed_chunk.trajectory_segments_inertial.back().end;
+
+                out_published_chunks.push_back(std::move(published_chunk));
+                out_streamed_chunks.push_back(std::move(streamed_chunk));
+            }
+
+            return true;
+        }
     } // namespace
 
     void OrbitPredictionService::compute_prediction(const PendingJob &job)
@@ -1120,10 +1205,6 @@ namespace Game
                         return prefix_output.status;
                     }
 
-                    PlannedSolveOutput suffix_output{};
-                    std::vector<PublishedChunk> suffix_published_chunks;
-                    std::vector<PublishedChunk> pending_stream_published_chunks;
-                    std::vector<StreamedPlannedChunk> pending_stream_chunks;
                     const bool full_streaming_active =
                             planned_request.solve_quality == SolveQuality::Full &&
                             planned_request.full_stream_publish.active;
@@ -1133,6 +1214,36 @@ namespace Game
                                     : OrbitPredictionTuning::kFullStreamPublishMinIntervalS;
                     std::chrono::steady_clock::time_point last_full_stream_publish_tp = compute_start;
                     bool published_any_full_stream_batch = false;
+
+                    if (full_streaming_active && *suffix_begin_index > 0u)
+                    {
+                        std::vector<PublishedChunk> prefix_stream_published_chunks;
+                        std::vector<StreamedPlannedChunk> prefix_stream_chunks;
+                        if (build_cached_prefix_stream_chunks(planned_request,
+                                                              solve_plan,
+                                                              *suffix_begin_index,
+                                                              prefix_output,
+                                                              prefix_stream_published_chunks,
+                                                              prefix_stream_chunks) &&
+                            !prefix_stream_published_chunks.empty())
+                        {
+                            if (!publish(make_stage_result(prefix_output,
+                                                           prefix_stream_published_chunks,
+                                                           PublishStage::FullStreaming,
+                                                           std::move(prefix_stream_chunks),
+                                                           false)))
+                            {
+                                return Status::Cancelled;
+                            }
+                            last_full_stream_publish_tp = std::chrono::steady_clock::now();
+                            published_any_full_stream_batch = true;
+                        }
+                    }
+
+                    PlannedSolveOutput suffix_output{};
+                    std::vector<PublishedChunk> suffix_published_chunks;
+                    std::vector<PublishedChunk> pending_stream_published_chunks;
+                    std::vector<StreamedPlannedChunk> pending_stream_chunks;
                     const auto flush_full_stream_batch = [&](const bool force_publish) {
                         if (!full_streaming_active || pending_stream_published_chunks.empty())
                         {
