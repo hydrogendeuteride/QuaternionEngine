@@ -127,9 +127,14 @@ namespace Game
 
         out.is_active = track.key == _prediction_selection.active_subject;
         out.active_player_track = out.is_active && prediction_subject_is_player(track.key);
+        const bool with_maneuver_live_preview =
+                out.active_player_track &&
+                prediction_subject_supports_maneuvers(track.key) &&
+                _maneuver_nodes_enabled &&
+                !_maneuver_state.nodes.empty();
         out.maneuver_drag_active =
                 out.active_player_track &&
-                _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
+                maneuver_live_preview_active(with_maneuver_live_preview);
 
         if (out.is_active)
         {

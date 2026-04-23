@@ -305,10 +305,9 @@ namespace Game
             return;
         }
 
-        const bool drag_preview_active_now =
+        const bool live_preview_active_now =
                 track->supports_maneuvers &&
-                _maneuver_plan_live_preview_active &&
-                PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
+                maneuver_live_preview_active(true);
         const bool full_streaming_result =
                 PredictionRuntimeDetail::prediction_track_is_full_streaming_publish(result.solve_quality,
                                                                                     result.publish_stage);
@@ -332,7 +331,7 @@ namespace Game
             track->preview_state = PredictionRuntimeDetail::prediction_track_preview_state_after_preview_publish(
                     lifecycle_before_apply,
                     result.publish_stage,
-                    drag_preview_active_now);
+                    live_preview_active_now);
 
             track->cache = std::move(cache_to_publish);
             track->pick_cache.clear();
@@ -364,7 +363,7 @@ namespace Game
             track->full_stream_overlay.clear();
             track->preview_state = PredictionPreviewRuntimeState::Idle;
             if (PredictionRuntimeDetail::prediction_track_should_clear_preview_anchor_after_final_publish(
-                        drag_preview_active_now))
+                        live_preview_active_now))
             {
                 track->preview_anchor = {};
             }

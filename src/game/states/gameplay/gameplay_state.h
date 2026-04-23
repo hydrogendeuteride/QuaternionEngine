@@ -68,6 +68,7 @@ namespace Game
         using ManeuverGizmoBasisMode = Game::ManeuverGizmoBasisMode;
         using ManeuverGizmoStyle = Game::ManeuverGizmoStyle;
         using ManeuverGizmoInteraction = Game::ManeuverGizmoInteraction;
+        using ManeuverNodeEditPreview = Game::ManeuverNodeEditPreview;
         using ManeuverGizmoViewContext = Game::ManeuverGizmoViewContext;
         using ManeuverHubMarker = Game::ManeuverHubMarker;
         using ManeuverAxisMarker = Game::ManeuverAxisMarker;
@@ -277,6 +278,12 @@ namespace Game
         void emit_maneuver_node_debug_overlay(GameStateContext &ctx);
         void mark_prediction_dirty();
         void mark_maneuver_plan_dirty();
+        bool maneuver_live_preview_active(bool with_maneuvers) const;
+        int active_maneuver_preview_anchor_node_id() const;
+        void begin_maneuver_node_dv_edit_preview(int node_id);
+        void update_maneuver_node_dv_edit_preview(int node_id);
+        void finish_maneuver_node_dv_edit_preview(bool changed);
+        void cancel_maneuver_node_dv_edit_preview();
 
         // Time warp
         void reset_time_warp_state();
@@ -472,6 +479,7 @@ namespace Game
         ManeuverGizmoStyle _maneuver_gizmo_style{};
         ManeuverUIConfig _maneuver_ui_config{};
         ManeuverGizmoInteraction _maneuver_gizmo_interaction{};
+        ManeuverNodeEditPreview _maneuver_node_edit_preview{};
         // Maneuver-node warp/execute helpers
         bool _warp_to_time_active{false};
         double _warp_to_time_target_s{0.0};

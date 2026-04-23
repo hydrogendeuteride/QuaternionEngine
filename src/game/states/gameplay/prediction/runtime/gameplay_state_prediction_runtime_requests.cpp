@@ -44,20 +44,18 @@ namespace Game
 
         bool prediction_request_is_interactive(const PredictionSelectionState &selection,
                                                const std::vector<ManeuverNode> &nodes,
-                                               const ManeuverGizmoInteraction::State gizmo_state,
+                                               const bool live_preview_active,
                                                const PredictionTrackState &track,
                                                const double now_s,
                                                const bool thrusting,
                                                const bool with_maneuvers)
         {
-            const bool dragging_maneuver_axis =
-                    with_maneuvers &&
-                    PredictionRuntimeDetail::maneuver_drag_active(gizmo_state);
             const bool active_subject = track.key == selection.active_subject;
             (void) nodes;
             (void) now_s;
+            (void) with_maneuvers;
             return active_subject &&
-                   (thrusting || dragging_maneuver_axis);
+                   (thrusting || live_preview_active);
         }
 
         bool prediction_request_is_throttled(const PredictionTrackState &track, const bool interactive_request)
@@ -291,11 +289,12 @@ namespace Game
 
         refresh_prediction_preview_anchor(track, now_s, with_maneuvers);
 
+        const bool live_preview_active = maneuver_live_preview_active(with_maneuvers);
         const bool interactive_request =
                 prediction_request_is_interactive(
                         _prediction_selection,
                         _maneuver_state.nodes,
-                        _maneuver_gizmo_interaction.state,
+                        live_preview_active,
                         track,
                         now_s,
                         thrusting,
@@ -304,8 +303,7 @@ namespace Game
                 track.preview_anchor.valid &&
                 track.supports_maneuvers &&
                 with_maneuvers &&
-                _maneuver_plan_live_preview_active &&
-                PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
+                live_preview_active;
         if (out_interactive_request)
         {
             *out_interactive_request = interactive_request;
@@ -580,14 +578,12 @@ namespace Game
 
         const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
                 PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
-        const bool live_preview_drag_pending_override =
-                PredictionRuntimeDetail::prediction_track_live_preview_drag_pending_override(lifecycle) &&
+        const bool live_preview_pending_override =
+                PredictionRuntimeDetail::prediction_track_live_preview_pending_override(lifecycle) &&
                 track.supports_maneuvers &&
                 track.key == _prediction_selection.active_subject &&
-                with_maneuvers &&
-                _maneuver_plan_live_preview_active &&
-                PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state);
-        if (!live_preview_drag_pending_override &&
+                maneuver_live_preview_active(with_maneuvers);
+        if (!live_preview_pending_override &&
             should_defer_solver_request_until_publish(track))
         {
             return;

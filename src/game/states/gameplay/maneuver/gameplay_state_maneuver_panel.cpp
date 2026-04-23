@@ -162,6 +162,7 @@ namespace Game
             {
                 clear_maneuver_gizmo_instances(ctx);
                 _maneuver_gizmo_interaction = {};
+                cancel_maneuver_node_dv_edit_preview();
             }
             mark_maneuver_plan_dirty();
         }
@@ -200,6 +201,7 @@ namespace Game
             _execute_node_armed = false;
             _execute_node_id = -1;
             _maneuver_gizmo_interaction = {};
+            cancel_maneuver_node_dv_edit_preview();
             clear_maneuver_gizmo_instances(ctx);
             mark_maneuver_plan_dirty();
         }
@@ -235,6 +237,7 @@ namespace Game
                     track.preview_overlay.clear();
                     track.pick_cache.clear();
                 }
+                cancel_maneuver_node_dv_edit_preview();
             }
             mark_maneuver_plan_dirty();
         }
@@ -850,6 +853,11 @@ namespace Game
             sel->dv_rtn_mps = glm::dvec3(dv[0], dv[1], dv[2]);
             sel->total_dv_mps = safe_length(sel->dv_rtn_mps);
             mark_maneuver_plan_dirty();
+            update_maneuver_node_dv_edit_preview(sel->id);
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit())
+        {
+            finish_maneuver_node_dv_edit_preview(true);
         }
 
         ImGui::Text("DV total: %.2f m/s", safe_length(sel->dv_rtn_mps));

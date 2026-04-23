@@ -199,7 +199,7 @@ namespace Game::PredictionRuntimeDetail
                !snapshot.derived_request_pending;
     }
 
-    inline bool prediction_track_live_preview_drag_pending_override(const PredictionTrackLifecycleSnapshot &snapshot)
+    inline bool prediction_track_live_preview_pending_override(const PredictionTrackLifecycleSnapshot &snapshot)
     {
         return snapshot.dirty || snapshot.invalidated_while_pending;
     }
@@ -272,7 +272,7 @@ namespace Game::PredictionRuntimeDetail
     inline PredictionPreviewRuntimeState prediction_track_preview_state_after_preview_publish(
             const PredictionTrackLifecycleSnapshot &snapshot,
             const OrbitPredictionService::PublishStage publish_stage,
-            const bool drag_preview_active_now)
+            const bool live_preview_active_now)
     {
         if (publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming)
         {
@@ -284,14 +284,14 @@ namespace Game::PredictionRuntimeDetail
             return PredictionPreviewRuntimeState::AwaitFullRefine;
         }
 
-        return drag_preview_active_now
+        return live_preview_active_now
                        ? PredictionPreviewRuntimeState::PreviewStreaming
                        : PredictionPreviewRuntimeState::Idle;
     }
 
-    inline bool prediction_track_should_clear_preview_anchor_after_final_publish(const bool drag_preview_active_now)
+    inline bool prediction_track_should_clear_preview_anchor_after_final_publish(const bool live_preview_active_now)
     {
-        return !drag_preview_active_now;
+        return !live_preview_active_now;
     }
 
     inline const char *prediction_track_lifecycle_name(const PredictionTrackLifecycleState state)

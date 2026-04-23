@@ -164,15 +164,6 @@ namespace Game
             return make_window_anchor(time_ctx, time_ctx.sim_now_s, PredictionTimeAnchorKind::SimNow);
         }
 
-        [[nodiscard]] bool live_preview_drag_active(const bool with_maneuvers,
-                                                    const bool live_preview_enabled,
-                                                    const ManeuverGizmoInteraction::State gizmo_state)
-        {
-            return with_maneuvers &&
-                   live_preview_enabled &&
-                   PredictionRuntimeDetail::maneuver_drag_active(gizmo_state);
-        }
-
         [[nodiscard]] double resolve_live_preview_visual_window_s(const double request_window_s,
                                                                   const double anchor_offset_s,
                                                                   const double configured_preview_window_s)
@@ -361,12 +352,12 @@ namespace Game
     {
         const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
                 PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
-        const bool preview_drag_active =
+        const bool preview_active =
                 track.supports_maneuvers &&
-                live_preview_drag_active(with_maneuvers, _maneuver_plan_live_preview_active, _maneuver_gizmo_interaction.state);
-        const ManeuverNode *selected = _maneuver_state.find_node(_maneuver_state.selected_node_id);
+                maneuver_live_preview_active(with_maneuvers);
+        const ManeuverNode *selected = _maneuver_state.find_node(active_maneuver_preview_anchor_node_id());
 
-        if (preview_drag_active && selected && std::isfinite(selected->time_s))
+        if (preview_active && selected && std::isfinite(selected->time_s))
         {
             const double request_window_s = prediction_required_window_s(track.key, now_s, with_maneuvers);
             const double anchor_offset_s = std::max(0.0, selected->time_s - now_s);
@@ -553,7 +544,7 @@ namespace Game
         out.pick_anchor_is_future = pick_anchor.is_future;
         out.exact_anchor_is_future = exact_anchor.is_future;
 
-        if (live_preview_drag_active(with_maneuvers, _maneuver_plan_live_preview_active, _maneuver_gizmo_interaction.state) &&
+        if (maneuver_live_preview_active(with_maneuvers) &&
             std::isfinite(time_ctx.selected_node_time_s) &&
             std::isfinite(time_ctx.sim_now_s))
         {
