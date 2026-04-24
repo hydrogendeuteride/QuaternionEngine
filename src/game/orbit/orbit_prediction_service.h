@@ -20,6 +20,12 @@
 
 namespace Game
 {
+    #if defined(VULKAN_ENGINE_GAMEPLAY_TEST_ACCESS)
+    #define VULKAN_ENGINE_ORBIT_PREDICTION_SERVICE_PRIVATE public
+    #else
+    #define VULKAN_ENGINE_ORBIT_PREDICTION_SERVICE_PRIVATE private
+    #endif
+
     class OrbitPredictionService
     {
     public:
@@ -457,7 +463,7 @@ namespace Game
             std::vector<ManeuverNodePreview> previews{};
         };
 
-    private:
+    VULKAN_ENGINE_ORBIT_PREDICTION_SERVICE_PRIVATE:
         struct PlannedChunkCacheKeyHash
         {
             [[nodiscard]] std::size_t operator()(const PlannedChunkCacheKey &key) const noexcept
@@ -558,4 +564,6 @@ namespace Game
         std::vector<CachedEphemerisEntry> _ephemeris_cache{};
         uint64_t _next_ephemeris_use_serial{1};
     };
+
+    #undef VULKAN_ENGINE_ORBIT_PREDICTION_SERVICE_PRIVATE
 } // namespace Game

@@ -633,9 +633,19 @@ namespace Game
                 // Keep dragged nodes inside the visible timeline window and never allow them into the past.
                 const double u_clamped = std::clamp(u_drag, 0.0, 1.0);
                 const double t_new = t_start_s + u_clamped * span_s;
-                node.time_s = std::max(time_ctx.sim_now_s, t_new);
-                needs_sort = true;
-                mark_maneuver_plan_dirty();
+                const double previous_time_s = node.time_s;
+                const double new_time_s = std::max(time_ctx.sim_now_s, t_new);
+                if (std::isfinite(new_time_s) && std::abs(new_time_s - previous_time_s) > 1.0e-9)
+                {
+                    node.time_s = new_time_s;
+                    needs_sort = true;
+                    mark_maneuver_plan_dirty();
+                    update_maneuver_node_time_edit_preview(node.id, previous_time_s);
+                }
+            }
+            if (ImGui::IsItemDeactivated())
+            {
+                finish_maneuver_node_time_edit_preview(false);
             }
 
             if (ImGui::IsItemHovered())
@@ -828,6 +838,7 @@ namespace Game
         ImGui::TextDisabled("%s from now", selected_t_plus_label.c_str());
 
         double node_time_input = sel->time_s;
+        const double previous_node_time_s = sel->time_s;
         const double min_node_time_s = time_ctx.sim_now_s;
         if (ImGui::DragScalar("Sim Time (s)",
                               ImGuiDataType_Double,
@@ -837,9 +848,18 @@ namespace Game
                               nullptr,
                               "%.3f"))
         {
-            sel->time_s = std::max(min_node_time_s, node_time_input);
-            needs_sort = true;
-            mark_maneuver_plan_dirty();
+            const double new_time_s = std::max(min_node_time_s, node_time_input);
+            if (std::isfinite(new_time_s) && std::abs(new_time_s - previous_node_time_s) > 1.0e-9)
+            {
+                sel->time_s = new_time_s;
+                needs_sort = true;
+                mark_maneuver_plan_dirty();
+                update_maneuver_node_time_edit_preview(sel->id, previous_node_time_s);
+            }
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit())
+        {
+            finish_maneuver_node_time_edit_preview(true);
         }
 
         float dv[3]{

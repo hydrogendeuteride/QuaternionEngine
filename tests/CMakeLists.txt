@@ -244,6 +244,7 @@ set_property(TARGET gameplay_prediction_maneuver_tests PROPERTY CXX_STANDARD 20)
 
 target_compile_definitions(gameplay_prediction_maneuver_tests PRIVATE
   VULKAN_ENGINE_USE_JOLT=0
+  VULKAN_ENGINE_GAMEPLAY_TEST_ACCESS=1
 )
 
 target_include_directories(gameplay_prediction_maneuver_tests PRIVATE

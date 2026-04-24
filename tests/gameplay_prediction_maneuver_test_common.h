@@ -2,9 +2,10 @@
 
 #include <sstream>
 
-#define private public
+#ifndef VULKAN_ENGINE_GAMEPLAY_TEST_ACCESS
+#define VULKAN_ENGINE_GAMEPLAY_TEST_ACCESS 1
+#endif
 #include "game/states/gameplay/gameplay_state.h"
-#undef private
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
