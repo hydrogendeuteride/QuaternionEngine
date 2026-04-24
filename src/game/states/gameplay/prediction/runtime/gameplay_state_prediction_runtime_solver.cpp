@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 
+#include "core/util/logger.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include <cmath>
@@ -154,6 +155,34 @@ namespace Game
         }
         const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle_before_apply =
                 PredictionRuntimeDetail::describe_prediction_track_lifecycle(*track);
+        if (track->supports_maneuvers &&
+            track->latest_requested_generation_id != 0 &&
+            result.generation_id < track->latest_requested_generation_id)
+        {
+            return;
+        }
+        if (track->supports_maneuvers && result.maneuver_plan_revision != _maneuver_plan_revision)
+        {
+            Logger::warn("Dropping stale maneuver solver result: track={} gen={} result_plan_rev={} current_plan_rev={} "
+                         "latest_request_gen={} request_pending={} derived_pending={} invalidated={} dirty={}",
+                         result.track_id,
+                         result.generation_id,
+                         result.maneuver_plan_revision,
+                         _maneuver_plan_revision,
+                         track->latest_requested_generation_id,
+                         track->request_pending,
+                         track->derived_request_pending,
+                         track->invalidated_while_pending,
+                         track->dirty);
+            if (result.generation_id == track->latest_requested_generation_id)
+            {
+                track->request_pending = false;
+                track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+                track->invalidated_while_pending = false;
+                track->dirty = true;
+            }
+            return;
+        }
 
         const OrbitPredictionService::AdaptiveStageDiagnostics previous_frame_base_diagnostics =
                 track->derived_diagnostics.frame_base;
@@ -244,6 +273,7 @@ namespace Game
         OrbitPredictionDerivedService::Request derived_request{};
         derived_request.track_id = result.track_id;
         derived_request.generation_id = result.generation_id;
+        derived_request.maneuver_plan_revision = result.maneuver_plan_revision;
         derived_request.priority = PredictionRuntimeDetail::classify_prediction_subject_priority(
                 _prediction_selection,
                 track->key,

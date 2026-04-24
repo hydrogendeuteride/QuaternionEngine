@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 
+#include "core/util/logger.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_cache_internal.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
@@ -253,6 +254,27 @@ namespace Game
         const OrbitPredictionCache &anchor_cache =
                 track.authoritative_cache.valid ? track.authoritative_cache : track.cache;
 
+        const bool editing_anchor_time =
+                _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime &&
+                _maneuver_node_edit_preview.node_id == track.preview_anchor.anchor_node_id;
+        const bool anchor_node_is_current =
+                _maneuver_state.find_node(track.preview_anchor.anchor_node_id) != nullptr;
+        if (anchor_node_is_current && editing_anchor_time)
+        {
+            const double sim_now_s = current_sim_time_s();
+            const bool has_prior_future_maneuver =
+                    current_plan_has_prior_future_maneuver(_maneuver_state.nodes,
+                                                           track.preview_anchor.anchor_node_id,
+                                                           track.preview_anchor.anchor_time_s,
+                                                           sim_now_s);
+            if (has_prior_future_maneuver)
+            {
+                return false;
+            }
+
+            return sample_unplanned_anchor_state(anchor_cache, track.preview_anchor.anchor_time_s, out_state);
+        }
+
         const auto preview_it =
                 std::find_if(anchor_cache.maneuver_previews.begin(),
                              anchor_cache.maneuver_previews.end(),
@@ -272,12 +294,7 @@ namespace Game
             return true;
         }
 
-        const bool editing_anchor_time =
-                _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime &&
-                _maneuver_node_edit_preview.node_id == track.preview_anchor.anchor_node_id;
-        const bool anchor_node_is_current =
-                _maneuver_state.find_node(track.preview_anchor.anchor_node_id) != nullptr;
-        if (anchor_node_is_current && (editing_anchor_time || cache_has_planned_prediction_data(anchor_cache)))
+        if (anchor_node_is_current && cache_has_planned_prediction_data(anchor_cache))
         {
             const double sim_now_s = current_sim_time_s();
             const bool has_prior_future_maneuver =
@@ -383,6 +400,7 @@ namespace Game
 
         OrbitPredictionService::Request request{};
         request.track_id = track.key.track_id();
+        request.maneuver_plan_revision = track.supports_maneuvers ? _maneuver_plan_revision : 0u;
         request.sim_time_s = now_s;
         request.sim_config = _orbitsim->sim.config();
         request.shared_ephemeris = track.cache.resolved_shared_ephemeris();
@@ -564,8 +582,35 @@ namespace Game
         }
 
         const OrbitPredictionService::SolveQuality submitted_quality = request.solve_quality;
+        const uint64_t submitted_track_id = request.track_id;
+        const uint64_t submitted_plan_revision = request.maneuver_plan_revision;
+        const auto submitted_priority = request.priority;
+        const bool submitted_preview_patch = request.preview_patch.active;
+        const bool submitted_anchor_state_valid = request.preview_patch.anchor_state_valid;
+        const double submitted_anchor_time_s = request.preview_patch.anchor_time_s;
+        const double submitted_future_window_s = request.future_window_s;
+        const std::size_t submitted_maneuver_count = request.maneuver_impulses.size();
         const uint64_t generation_id = _prediction_service.request(std::move(request));
         mark_prediction_request_submitted(track, generation_id, now_s, submitted_quality);
+        if (track.supports_maneuvers)
+        {
+            Logger::debug("Maneuver prediction request: track={} gen={} plan_rev={} quality={} priority={} "
+                          "preview={} anchor_t={:.6f} anchor_state={} impulses={} future_window={:.3f} "
+                          "pending_solver={} pending_derived={} dirty={}",
+                          submitted_track_id,
+                          generation_id,
+                          submitted_plan_revision,
+                          static_cast<int>(submitted_quality),
+                          static_cast<int>(submitted_priority),
+                          submitted_preview_patch,
+                          submitted_anchor_time_s,
+                          submitted_anchor_state_valid,
+                          submitted_maneuver_count,
+                          submitted_future_window_s,
+                          track.request_pending,
+                          track.derived_request_pending,
+                          track.dirty);
+        }
         if (preview_request_active)
         {
             track.preview_state = PredictionPreviewRuntimeState::DragPreviewPending;

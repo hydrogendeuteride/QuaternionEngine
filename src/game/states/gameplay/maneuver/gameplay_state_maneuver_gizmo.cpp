@@ -598,7 +598,6 @@ namespace Game
             node.dv_rtn_mps = dv_new;
             node.total_dv_mps = safe_length(node.dv_rtn_mps);
             _maneuver_gizmo_interaction.applied_delta = true;
-            mark_maneuver_plan_dirty();
 
             if (PredictionTrackState *track = active_prediction_track())
             {
@@ -609,6 +608,7 @@ namespace Game
                         track->cache.resolved_frame_spec_valid ? track->cache.resolved_frame_spec
                                                                : _prediction_frame_selection.spec;
                 (void) display_frame_spec;
+                sync_prediction_dirty_flag();
             }
         }
 

@@ -145,6 +145,7 @@ namespace Game
 
         bool valid{false};
         uint64_t generation_id{0};
+        uint64_t maneuver_plan_revision{0};
         double build_time_s{0.0};
         WorldVec3 build_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 build_vel_world{0.0, 0.0, 0.0};
@@ -229,6 +230,7 @@ namespace Game
         {
             valid = false;
             generation_id = 0;
+            maneuver_plan_revision = 0;
             build_time_s = 0.0;
             build_pos_world = WorldVec3(0.0, 0.0, 0.0);
             build_vel_world = glm::dvec3(0.0, 0.0, 0.0);

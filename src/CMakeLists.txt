@@ -136,6 +136,9 @@ if (WIN32)
         NOMINMAX
         _CRT_SECURE_NO_WARNINGS
     )
+    target_link_libraries(vulkan_engine PRIVATE Dbghelp)
+    target_compile_options(vulkan_engine PRIVATE /Zi)
+    target_link_options(vulkan_engine PRIVATE /DEBUG:FULL /MAP)
 endif()
 
 if (UNIX AND NOT APPLE)

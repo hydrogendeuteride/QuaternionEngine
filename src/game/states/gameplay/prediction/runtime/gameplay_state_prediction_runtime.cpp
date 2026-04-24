@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 
+#include "core/util/logger.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
@@ -310,6 +311,33 @@ namespace Game
 
     void GameplayState::mark_maneuver_plan_dirty()
     {
+        ++_maneuver_plan_revision;
+        Logger::debug("Maneuver plan dirty: revision={} selected_node={} node_count={}",
+                      _maneuver_plan_revision,
+                      _maneuver_state.selected_node_id,
+                      _maneuver_state.nodes.size());
+
+        for (PredictionTrackState &track : _prediction_tracks)
+        {
+            if (!track.supports_maneuvers)
+            {
+                continue;
+            }
+
+            const uint64_t track_id = track.key.track_id();
+            _prediction_service.invalidate_maneuver_plan_revision(track_id, _maneuver_plan_revision);
+            _prediction_derived_service.invalidate_maneuver_plan_revision(track_id, _maneuver_plan_revision);
+
+            if (track.request_pending || track.derived_request_pending)
+            {
+                track.request_pending = false;
+                track.derived_request_pending = false;
+                track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+                track.invalidated_while_pending = false;
+                track.dirty = true;
+            }
+        }
+
         mark_prediction_dirty();
     }
 

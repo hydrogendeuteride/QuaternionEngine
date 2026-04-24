@@ -108,6 +108,66 @@ TEST(GameplayPredictionManeuverTests, PreviewStreamingSolverResultMarksPreviewSt
     EXPECT_EQ(lifecycle.state, Game::PredictionTrackLifecycleState::PreviewStreaming);
 }
 
+TEST(GameplayPredictionManeuverTests, StaleManeuverPlanSolverResultIsDroppedAndRebuildQueued)
+{
+    Game::GameplayState state{};
+    state._maneuver_plan_revision = 2u;
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.supports_maneuvers = true;
+    track.request_pending = true;
+    track.latest_requested_generation_id = 6u;
+    track.dirty = false;
+    state._prediction_tracks.push_back(track);
+
+    Game::OrbitPredictionService::Result result{};
+    result.track_id = state._prediction_tracks.front().key.track_id();
+    result.generation_id = 6u;
+    result.maneuver_plan_revision = 1u;
+    result.valid = true;
+    result.build_time_s = 0.0;
+    result.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(60.0, 7'100'000.0)};
+    result.trajectory_segments_inertial = {make_segment(0.0, 60.0, 7'000'000.0, 7'100'000.0)};
+
+    state.apply_completed_prediction_result(std::move(result));
+
+    ASSERT_EQ(state._prediction_tracks.size(), 1u);
+    const Game::PredictionTrackState &updated_track = state._prediction_tracks.front();
+    EXPECT_FALSE(updated_track.request_pending);
+    EXPECT_FALSE(updated_track.derived_request_pending);
+    EXPECT_TRUE(updated_track.dirty);
+    EXPECT_EQ(updated_track.cache.generation_id, 0u);
+}
+
+TEST(GameplayPredictionManeuverTests, MarkManeuverPlanDirtyUnblocksPendingManeuverRequests)
+{
+    Game::GameplayState state{};
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.supports_maneuvers = true;
+    track.dirty = false;
+    track.request_pending = true;
+    track.derived_request_pending = true;
+    track.pending_solve_quality = Game::OrbitPredictionService::SolveQuality::FastPreview;
+    track.invalidated_while_pending = true;
+    state._prediction_tracks.push_back(track);
+
+    state.mark_maneuver_plan_dirty();
+
+    ASSERT_EQ(state._prediction_tracks.size(), 1u);
+    const Game::PredictionTrackState &updated_track = state._prediction_tracks.front();
+    EXPECT_EQ(state._maneuver_plan_revision, 1u);
+    EXPECT_FALSE(updated_track.request_pending);
+    EXPECT_FALSE(updated_track.derived_request_pending);
+    EXPECT_FALSE(updated_track.invalidated_while_pending);
+    EXPECT_TRUE(updated_track.dirty);
+    EXPECT_EQ(updated_track.pending_solve_quality, Game::OrbitPredictionService::SolveQuality::Full);
+    EXPECT_EQ(state._prediction_service._latest_maneuver_plan_revision_by_track[updated_track.key.track_id()], 1u);
+    EXPECT_EQ(state._prediction_derived_service._latest_maneuver_plan_revision_by_track[updated_track.key.track_id()], 1u);
+}
+
 TEST(GameplayPredictionManeuverTests, DerivedPreviewStreamingBuildSkipsPlannedRenderCurve)
 {
     Game::OrbitPredictionDerivedService service{};
@@ -261,4 +321,3 @@ TEST(GameplayPredictionManeuverTests, GameplayDefaultsEnableLivePreview)
     EXPECT_TRUE(state._maneuver_plan_live_preview_active);
     EXPECT_TRUE(settings.maneuver_plan_live_preview_active);
 }
-

@@ -176,6 +176,26 @@ namespace Game
                    std::isfinite(node.time_s) &&
                    std::abs(preview->t_s - node.time_s) <= kNodePreviewTimeMatchEpsilonS;
         }
+
+        bool current_plan_has_prior_future_maneuver(const std::vector<ManeuverNode> &nodes,
+                                                    const int anchor_node_id,
+                                                    const double anchor_time_s,
+                                                    const double sim_now_s)
+        {
+            if (!std::isfinite(anchor_time_s) || !std::isfinite(sim_now_s))
+            {
+                return true;
+            }
+
+            return std::any_of(nodes.begin(),
+                               nodes.end(),
+                               [&](const ManeuverNode &node) {
+                                   return node.id != anchor_node_id &&
+                                          std::isfinite(node.time_s) &&
+                                          node.time_s + kNodePreviewTimeMatchEpsilonS >= sim_now_s &&
+                                          node.time_s < (anchor_time_s - kNodePreviewTimeMatchEpsilonS);
+                               });
+        }
     } // namespace
 
     void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
@@ -439,11 +459,22 @@ namespace Game
             const bool use_stable_prefix =
                     stable_planned_prefix_available &&
                     false;
+            const bool editing_node_time =
+                    _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime &&
+                    _maneuver_node_edit_preview.node_id == node.id;
+            const bool time_edit_uses_unplanned_source =
+                    editing_node_time &&
+                    !current_plan_has_prior_future_maneuver(_maneuver_state.nodes,
+                                                            node.id,
+                                                            node.time_s,
+                                                            current_sim_time_s());
             const OrbitPredictionCache *node_pred_cache = use_stable_prefix ? stable_cache : pred_cache;
             const OrbitPredictionCache *node_disp_cache = use_stable_prefix ? stable_cache : display_cache;
             const PreviewMap *node_preview_map = use_stable_prefix ? &stable_preview_by_node_id : &preview_by_node_id;
             const std::vector<orbitsim::TrajectorySample> *node_traj_world =
-                    use_stable_prefix
+                    time_edit_uses_unplanned_source
+                            ? &traj_base
+                    : use_stable_prefix
                             ? stable_traj_node_world
                             : (traj_planned.size() >= 2
                                        ? &traj_planned
@@ -451,7 +482,9 @@ namespace Game
                                                   ? stable_traj_node_world
                                                   : (allow_base_fallback ? &traj_base : nullptr)));
             const std::vector<orbitsim::TrajectorySample> *node_traj_inertial =
-                    use_stable_prefix
+                    time_edit_uses_unplanned_source
+                            ? &pred_base_traj_inertial
+                    : use_stable_prefix
                             ? stable_traj_node_inertial
                             : (pred_cache->trajectory_inertial_planned.size() >= 2
                                        ? &pred_cache->trajectory_inertial_planned
@@ -462,9 +495,14 @@ namespace Game
             const OrbitPredictionCache::ManeuverNodePreview *preview =
                     (preview_it != node_preview_map->end()) ? preview_it->second : nullptr;
             bool preview_time_valid = preview_matches_node_time(preview, node);
+            if (time_edit_uses_unplanned_source)
+            {
+                preview = nullptr;
+                preview_time_valid = false;
+            }
 
             // Try stable fallback if the active cache doesn't cover this node.
-            if (!use_stable_prefix && stable_planned_prefix_available)
+            if (!time_edit_uses_unplanned_source && !use_stable_prefix && stable_planned_prefix_available)
             {
                 const auto stable_it = stable_preview_by_node_id.find(node.id);
                 const bool active_ok = preview && preview->valid;

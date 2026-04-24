@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <utility>
 
 TEST(GameplayPredictionManeuverTests, BuildEphemerisSamplingSpecAllowsFutureWindowBeyondLegacyCap)
 {
@@ -821,4 +822,36 @@ TEST(GameplayPredictionManeuverTests, PredictionServiceRejectsResultsFromPreviou
 
     const std::unordered_map<uint64_t, uint64_t> superseded_generation{{stale_job.track_id, stale_job.generation_id + 1}};
     EXPECT_FALSE(Game::OrbitPredictionService::should_publish_result(stale_job, 4, superseded_generation));
+}
+
+TEST(GameplayPredictionManeuverTests, PredictionServiceInvalidatesStaleManeuverRevision)
+{
+    Game::OrbitPredictionService service{};
+    constexpr uint64_t track_id = 77u;
+
+    Game::OrbitPredictionService::Result completed{};
+    completed.track_id = track_id;
+    completed.generation_id = 12u;
+    completed.maneuver_plan_revision = 2u;
+    service._completed.push_back(completed);
+
+    service._latest_requested_generation_by_track[track_id] = 12u;
+    service.invalidate_maneuver_plan_revision(track_id, 3u);
+
+    EXPECT_TRUE(service._completed.empty());
+    EXPECT_FALSE(service.should_continue_job(track_id, 12u, service._request_epoch, 2u));
+    EXPECT_TRUE(service.should_continue_job(track_id, 12u, service._request_epoch, 3u));
+
+    Game::OrbitPredictionService::PendingJob stale_job{};
+    stale_job.track_id = track_id;
+    stale_job.request_epoch = service._request_epoch;
+    stale_job.generation_id = 12u;
+    stale_job.request.maneuver_plan_revision = 2u;
+
+    Game::OrbitPredictionService::Result stale_result{};
+    stale_result.track_id = track_id;
+    stale_result.generation_id = 12u;
+    stale_result.maneuver_plan_revision = 2u;
+    EXPECT_FALSE(service.publish_completed_result(stale_job, std::move(stale_result)));
+    EXPECT_TRUE(service._completed.empty());
 }

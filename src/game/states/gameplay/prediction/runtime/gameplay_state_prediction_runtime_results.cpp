@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 
+#include "core/util/logger.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_cache_internal.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
@@ -265,6 +266,35 @@ namespace Game
         }
         if (full_stream_result_is_obsolete_after_final_publish(*track, result))
         {
+            return;
+        }
+
+        if (track->supports_maneuvers && result.maneuver_plan_revision != _maneuver_plan_revision)
+        {
+            Logger::warn("Dropping stale maneuver derived result: track={} gen={} result_plan_rev={} current_plan_rev={} "
+                         "latest_derived_gen={} frame_key={} frame_rev={} analysis_body={} "
+                         "request_pending={} derived_pending={} invalidated={} dirty={}",
+                         result.track_id,
+                         result.generation_id,
+                         result.maneuver_plan_revision,
+                         _maneuver_plan_revision,
+                         track->latest_requested_derived_generation_id,
+                         result.display_frame_key,
+                         result.display_frame_revision,
+                         static_cast<uint32_t>(result.analysis_body_id),
+                         track->request_pending,
+                         track->derived_request_pending,
+                         track->invalidated_while_pending,
+                         track->dirty);
+            if (result.generation_id == track->latest_requested_derived_generation_id &&
+                result.display_frame_key == track->latest_requested_derived_display_frame_key &&
+                result.display_frame_revision == track->latest_requested_derived_display_frame_revision &&
+                result.analysis_body_id == track->latest_requested_derived_analysis_body_id)
+            {
+                track->derived_request_pending = false;
+                track->invalidated_while_pending = false;
+                track->dirty = true;
+            }
             return;
         }
 

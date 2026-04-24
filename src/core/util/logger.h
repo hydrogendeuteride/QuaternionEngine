@@ -14,6 +14,7 @@ public:
                      LogLevel minLevel = LogLevel::Info,
                      const std::string& logDir = "logs");
     static void shutdown();
+    static void flush();
 
     static void set_level(LogLevel level) { s_minLevel = level; }
     static void set_output(LogOutput output) { s_output = output; }

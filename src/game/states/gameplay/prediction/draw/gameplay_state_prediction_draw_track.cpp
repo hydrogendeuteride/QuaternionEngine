@@ -328,7 +328,8 @@ namespace Game
                                                        track_ctx.track_color_plan.g,
                                                        track_ctx.track_color_plan.b,
                                                        std::clamp(std::max(track_ctx.track_color_plan.a, 0.98f), 0.0f, 1.0f));
-        const PredictionChunkAssembly &preview_assembly = track_ctx.track->preview_overlay.chunk_assembly;
+        const PredictionChunkAssembly preview_assembly_snapshot = track_ctx.track->preview_overlay.chunk_assembly;
+        const PredictionChunkAssembly &preview_assembly = preview_assembly_snapshot;
         const PredictionChunkAssembly *full_stream_assembly =
                 track_ctx.track->full_stream_overlay.ready_for_draw(planned_cache.generation_id,
                                                                     planned_cache.display_frame_key,

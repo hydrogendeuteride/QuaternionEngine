@@ -29,6 +29,7 @@ namespace Game
             const auto &base_segments = cache.resolved_trajectory_segments_inertial();
             result.track_id = track_id;
             result.generation_id = cache.generation_id;
+            result.maneuver_plan_revision = cache.maneuver_plan_revision;
             result.valid = base_samples.size() >= 2 && !base_segments.empty();
             result.solve_quality = OrbitPredictionService::SolveQuality::Full;
             result.build_time_s = cache.build_time_s;
@@ -943,6 +944,7 @@ namespace Game
         OrbitPredictionDerivedService::Request derived_request{};
         derived_request.track_id = track.key.track_id();
         derived_request.generation_id = track.cache.generation_id;
+        derived_request.maneuver_plan_revision = track.cache.maneuver_plan_revision;
         derived_request.priority = PredictionRuntimeDetail::classify_prediction_subject_priority(
                 _prediction_selection,
                 track.key,

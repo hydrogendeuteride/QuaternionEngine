@@ -35,6 +35,62 @@ TEST(GameplayPredictionManeuverTests, StaleDerivedResultDoesNotReplaceNewerDispl
     EXPECT_TRUE(state._prediction_tracks.front().derived_request_pending);
 }
 
+TEST(GameplayPredictionManeuverTests, StaleManeuverPlanDerivedResultIsDroppedAndRebuildQueued)
+{
+    Game::GameplayState state{};
+    state._maneuver_plan_revision = 3u;
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.supports_maneuvers = true;
+    track.cache = make_prediction_cache(7u, 0.0, 60.0, 7'000'000.0, 7'100'000.0);
+    track.dirty = false;
+    track.derived_request_pending = true;
+    track.latest_requested_derived_generation_id = 8u;
+    track.latest_requested_derived_display_frame_key = 1u;
+    track.latest_requested_derived_display_frame_revision = 2u;
+    track.latest_requested_derived_analysis_body_id = 1;
+    state._prediction_tracks.push_back(track);
+
+    Game::OrbitPredictionDerivedService::Result result{};
+    result.track_id = state._prediction_tracks.front().key.track_id();
+    result.generation_id = 8u;
+    result.maneuver_plan_revision = 2u;
+    result.display_frame_key = 1u;
+    result.display_frame_revision = 2u;
+    result.analysis_body_id = 1;
+    result.valid = true;
+    result.cache = make_prediction_cache(8u, 0.0, 60.0, 8'000'000.0, 8'100'000.0);
+
+    state.apply_completed_prediction_derived_result(std::move(result));
+
+    ASSERT_EQ(state._prediction_tracks.size(), 1u);
+    const Game::PredictionTrackState &updated_track = state._prediction_tracks.front();
+    EXPECT_FALSE(updated_track.derived_request_pending);
+    EXPECT_TRUE(updated_track.dirty);
+    EXPECT_EQ(updated_track.cache.generation_id, 7u);
+    EXPECT_DOUBLE_EQ(updated_track.cache.trajectory_frame.front().position_m.x, 7'000'000.0);
+}
+
+TEST(GameplayPredictionManeuverTests, DerivedServiceInvalidatesStaleManeuverRevision)
+{
+    Game::OrbitPredictionDerivedService service{};
+    constexpr uint64_t track_id = 77u;
+
+    Game::OrbitPredictionDerivedService::Result completed{};
+    completed.track_id = track_id;
+    completed.generation_id = 12u;
+    completed.maneuver_plan_revision = 2u;
+    service._completed.push_back(completed);
+
+    service._latest_requested_generation_by_track[track_id] = 12u;
+    service.invalidate_maneuver_plan_revision(track_id, 3u);
+
+    EXPECT_TRUE(service._completed.empty());
+    EXPECT_FALSE(service.should_continue_job(track_id, 12u, service._request_epoch, 2u));
+    EXPECT_TRUE(service.should_continue_job(track_id, 12u, service._request_epoch, 3u));
+}
+
 TEST(GameplayPredictionManeuverTests, ReusedBaseFrameDerivedResultPreservesBaseDiagnostics)
 {
     Game::GameplayState state{};

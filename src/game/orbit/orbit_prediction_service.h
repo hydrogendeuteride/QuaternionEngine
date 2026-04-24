@@ -265,6 +265,7 @@ namespace Game
             // The worker handles both spacecraft and celestial prediction jobs.
             RequestKind kind{RequestKind::Spacecraft};
             uint64_t track_id{0};
+            uint64_t maneuver_plan_revision{0};
             double sim_time_s{0.0};
             orbitsim::GameSimulation::Config sim_config{};
             std::vector<orbitsim::MassiveBody> massive_bodies;
@@ -302,6 +303,7 @@ namespace Game
 
             uint64_t track_id{0};
             uint64_t generation_id{0};
+            uint64_t maneuver_plan_revision{0};
             bool valid{false};
             bool baseline_reused{false};
             SolveQuality solve_quality{SolveQuality::Full};
@@ -429,6 +431,8 @@ namespace Game
         // Queue or replace the latest prediction job for a track; work runs on the background thread.
         // Returns the assigned generation so runtime can track request ordering.
         uint64_t request(Request request);
+        // Mark maneuver-backed completed/published work stale before a replacement request is submitted.
+        void invalidate_maneuver_plan_revision(uint64_t track_id, uint64_t maneuver_plan_revision);
         // Non-blocking poll for the next completed prediction result.
         std::optional<Result> poll_completed();
         // Invalidate queued/in-flight work and clear cached ephemerides.
@@ -529,7 +533,10 @@ namespace Game
         static bool should_publish_result(const PendingJob &job,
                                           uint64_t current_request_epoch,
                                           const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track);
-        bool should_continue_job(uint64_t track_id, uint64_t generation_id, uint64_t request_epoch) const;
+        bool should_continue_job(uint64_t track_id,
+                                 uint64_t generation_id,
+                                 uint64_t request_epoch,
+                                 uint64_t maneuver_plan_revision) const;
         // Background loop that consumes queued jobs and publishes fresh results.
         void worker_loop();
         SharedCelestialEphemeris get_or_build_ephemeris(const EphemerisBuildRequest &request,
@@ -548,6 +555,7 @@ namespace Game
         uint64_t _request_epoch{1};
         uint64_t _next_generation_id{1};
         std::unordered_map<uint64_t, uint64_t> _latest_requested_generation_by_track{};
+        std::unordered_map<uint64_t, uint64_t> _latest_maneuver_plan_revision_by_track{};
 
         mutable std::mutex _baseline_cache_mutex;
         std::unordered_map<uint64_t, ReusableBaselineCacheEntry> _reusable_baseline_by_track{};

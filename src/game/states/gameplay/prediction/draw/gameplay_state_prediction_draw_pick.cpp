@@ -235,7 +235,8 @@ namespace Game
             pick_group_planned != Draw::kInvalidPickGroup &&
             remaining_pick_budget > 0)
         {
-            const PredictionChunkAssembly &preview_assembly = track.preview_overlay.chunk_assembly;
+            const PredictionChunkAssembly preview_assembly_snapshot = track.preview_overlay.chunk_assembly;
+            const PredictionChunkAssembly &preview_assembly = preview_assembly_snapshot;
             const PredictionChunkAssembly *full_stream_assembly =
                     track.full_stream_overlay.ready_for_draw(planned_cache.generation_id,
                                                              planned_cache.display_frame_key,

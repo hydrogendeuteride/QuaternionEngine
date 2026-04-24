@@ -739,7 +739,7 @@ TEST(GameplayPredictionManeuverTests, TimeEditUsesBaselineAnchorStateForMovedFir
     };
     track.cache.maneuver_previews.push_back(Game::OrbitPredictionService::ManeuverNodePreview{
             .node_id = selected.id,
-            .t_s = 240.0,
+            .t_s = selected.time_s,
             .valid = true,
             .inertial_position_m = glm::dvec3(9'000'000.0, 0.0, 0.0),
             .inertial_velocity_mps = glm::dvec3(0.0, 7'500.0, 0.0),

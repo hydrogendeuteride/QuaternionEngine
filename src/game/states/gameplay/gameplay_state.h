@@ -418,6 +418,7 @@ namespace Game
         ManeuverPlanWindowSettings _maneuver_plan_windows{};
         OrbitPlotBudgetSettings _orbit_plot_budget{};
         bool _maneuver_plan_live_preview_active{true};
+        uint64_t _maneuver_plan_revision{0};
 
         OrbitPlotPerfStats _orbit_plot_perf{};
         OrbitPredictionDrawConfig _prediction_draw_config{};
