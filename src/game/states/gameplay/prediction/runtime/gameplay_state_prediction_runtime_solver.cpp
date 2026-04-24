@@ -274,6 +274,8 @@ namespace Game
         derived_request.track_id = result.track_id;
         derived_request.generation_id = result.generation_id;
         derived_request.maneuver_plan_revision = result.maneuver_plan_revision;
+        derived_request.maneuver_plan_signature_valid = result.maneuver_plan_signature_valid;
+        derived_request.maneuver_plan_signature = result.maneuver_plan_signature;
         derived_request.priority = PredictionRuntimeDetail::classify_prediction_subject_priority(
                 _prediction_selection,
                 track->key,

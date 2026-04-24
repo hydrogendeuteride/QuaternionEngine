@@ -118,12 +118,31 @@ namespace Game
             draw_cpu_base_window_once(window_t0_s, window_t1_s);
         };
 
+        const auto planned_cache_drawable = [&](const OrbitPredictionCache &cache) {
+            if (!track_ctx.planned_cache_current)
+            {
+                return false;
+            }
+
+            if (track_ctx.direct_world_polyline)
+            {
+                return cache.trajectory_frame_planned.size() >= 2;
+            }
+
+            if (track_ctx.use_planned_adaptive_curve)
+            {
+                return !cache.render_curve_frame_planned.empty();
+            }
+
+            return !cache.trajectory_segments_frame_planned.empty();
+        };
+
         const auto draw_planned_window_from_cache = [&](OrbitPredictionCache &cache,
                                                         const double window_t0_s,
                                                         const double window_t1_s,
                                                         const glm::vec4 &color,
                                                         const bool force_solid = false) {
-            if (!(window_t1_s > window_t0_s))
+            if (!(window_t1_s > window_t0_s) || !planned_cache_drawable(cache))
             {
                 return;
             }
@@ -165,12 +184,23 @@ namespace Game
                                     dashed);
         };
 
+        const auto chunk_drawable = [&](const OrbitChunk &chunk) {
+            if (track_ctx.direct_world_polyline)
+            {
+                return chunk.frame_samples.size() >= 2 ||
+                       !chunk.render_curve.empty() ||
+                       !chunk.frame_segments.empty();
+            }
+
+            return !chunk.render_curve.empty() || !chunk.frame_segments.empty();
+        };
+
         const auto draw_planned_window_from_chunk = [&](const OrbitChunk &chunk,
                                                         const double window_t0_s,
                                                         const double window_t1_s,
                                                         const glm::vec4 &color,
                                                         const bool force_solid = false) {
-            if (!(window_t1_s > window_t0_s))
+            if (!(window_t1_s > window_t0_s) || !chunk_drawable(chunk))
             {
                 return false;
             }
@@ -218,20 +248,56 @@ namespace Game
         };
 
         track_ctx.base_pick_window = {};
+        const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
+                PredictionRuntimeDetail::describe_prediction_track_lifecycle(*track_ctx.track);
+        const bool active_maneuver_track =
+                track_ctx.active_player_track &&
+                track_ctx.track->supports_maneuvers &&
+                _maneuver_nodes_enabled &&
+                !_maneuver_state.nodes.empty();
+        const bool preview_lifecycle_fallback_active =
+                PredictionRuntimeDetail::prediction_track_preview_fallback_active(lifecycle);
+        const bool preview_window_available =
+                active_maneuver_track &&
+                track_ctx.track->preview_anchor.valid &&
+                preview_lifecycle_fallback_active &&
+                std::isfinite(track_ctx.track->preview_anchor.anchor_time_s) &&
+                track_ctx.track->preview_anchor.visual_window_s > 0.0;
+        const auto preview_anchor_window = [&]() {
+            Draw::PickWindow window{};
+            if (!preview_window_available)
+            {
+                return window;
+            }
+
+            window.valid = true;
+            window.t0_s = track_ctx.track->preview_anchor.anchor_time_s;
+            window.t1_s = window.t0_s + track_ctx.track->preview_anchor.visual_window_s;
+            window.anchor_time_s = track_ctx.track->preview_anchor.anchor_time_s;
+            return window;
+        };
+        const auto preview_anchor_pick_window = [&]() {
+            Draw::PickWindow window = preview_anchor_window();
+            if (window.valid && track_ctx.track->preview_anchor.exact_window_s > 0.0)
+            {
+                window.t1_s = window.t0_s + track_ctx.track->preview_anchor.exact_window_s;
+            }
+            return window;
+        };
         track_ctx.planned_draw_window =
-                (track_ctx.active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty() &&
+                (active_maneuver_track &&
                  track_ctx.planned_window_segments && !track_ctx.planned_window_segments->empty())
                         ? Draw::build_planned_draw_window(*track_ctx.planned_window_segments,
                                                           _prediction_draw_config,
                                                           track_ctx.planned_window_policy)
-                        : Draw::PickWindow{};
+                        : preview_anchor_window();
         track_ctx.planned_pick_window =
-                (track_ctx.active_player_track && _maneuver_nodes_enabled && !_maneuver_state.nodes.empty() &&
+                (active_maneuver_track &&
                  track_ctx.planned_window_segments && !track_ctx.planned_window_segments->empty())
                         ? Draw::build_planned_pick_window(*track_ctx.planned_window_segments,
                                                           _prediction_draw_config,
                                                           track_ctx.planned_window_policy)
-                        : Draw::PickWindow{};
+                        : preview_anchor_pick_window();
 
         if (_prediction_draw_full_orbit)
         {
@@ -328,13 +394,28 @@ namespace Game
                                                        track_ctx.track_color_plan.g,
                                                        track_ctx.track_color_plan.b,
                                                        std::clamp(std::max(track_ctx.track_color_plan.a, 0.98f), 0.0f, 1.0f));
-        const PredictionChunkAssembly preview_assembly_snapshot = track_ctx.track->preview_overlay.chunk_assembly;
+        const bool preview_overlay_draw_active =
+                PredictionRuntimeDetail::prediction_track_preview_overlay_draw_active(
+                        lifecycle,
+                        track_ctx.track->preview_anchor.valid);
+        const PredictionChunkAssembly preview_assembly_snapshot =
+                preview_overlay_draw_active ? track_ctx.track->preview_overlay.chunk_assembly
+                                            : PredictionChunkAssembly{};
         const PredictionChunkAssembly &preview_assembly = preview_assembly_snapshot;
+        const bool full_stream_overlay_draw_active =
+                !active_maneuver_track &&
+                !track_ctx.maneuver_drag_active &&
+                !preview_lifecycle_fallback_active;
+        const PredictionChunkAssembly full_stream_assembly_snapshot =
+                (full_stream_overlay_draw_active &&
+                 track_ctx.track->full_stream_overlay.ready_for_draw(planned_cache.generation_id,
+                                                                     planned_cache.display_frame_key,
+                                                                     planned_cache.display_frame_revision))
+                        ? track_ctx.track->full_stream_overlay.chunk_assembly
+                        : PredictionChunkAssembly{};
         const PredictionChunkAssembly *full_stream_assembly =
-                track_ctx.track->full_stream_overlay.ready_for_draw(planned_cache.generation_id,
-                                                                    planned_cache.display_frame_key,
-                                                                    planned_cache.display_frame_revision)
-                        ? &track_ctx.track->full_stream_overlay.chunk_assembly
+                full_stream_assembly_snapshot.valid && !full_stream_assembly_snapshot.chunks.empty()
+                        ? &full_stream_assembly_snapshot
                         : nullptr;
         const auto draw_chunk_assembly_ranges =
                 [&](const PredictionChunkAssembly &assembly,
@@ -386,6 +467,11 @@ namespace Game
         const auto draw_cache_fallback_ranges =
                 [&](const std::vector<std::pair<double, double>> &covered_ranges,
                     const double fresh_cutoff_s) {
+                    if (!planned_cache_drawable(planned_cache))
+                    {
+                        return;
+                    }
+
                     const std::vector<std::pair<double, double>> uncovered_ranges =
                             Draw::compute_uncovered_ranges(planned_window_t0_s,
                                                            planned_window_t1_s,
@@ -486,8 +572,6 @@ namespace Game
         const bool draw_matching_cached_tail = preview_tail_matches_planned_cache();
         if (!preview_assembly.valid || preview_assembly.chunks.empty())
         {
-            const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
-                    PredictionRuntimeDetail::describe_prediction_track_lifecycle(*track_ctx.track);
             const bool preview_fallback_active =
                     track_ctx.track->preview_anchor.valid &&
                     PredictionRuntimeDetail::prediction_track_preview_fallback_active(lifecycle) &&

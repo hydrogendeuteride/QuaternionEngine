@@ -266,6 +266,8 @@ namespace Game
             RequestKind kind{RequestKind::Spacecraft};
             uint64_t track_id{0};
             uint64_t maneuver_plan_revision{0};
+            bool maneuver_plan_signature_valid{false};
+            uint64_t maneuver_plan_signature{0};
             double sim_time_s{0.0};
             orbitsim::GameSimulation::Config sim_config{};
             std::vector<orbitsim::MassiveBody> massive_bodies;
@@ -304,6 +306,8 @@ namespace Game
             uint64_t track_id{0};
             uint64_t generation_id{0};
             uint64_t maneuver_plan_revision{0};
+            bool maneuver_plan_signature_valid{false};
+            uint64_t maneuver_plan_signature{0};
             bool valid{false};
             bool baseline_reused{false};
             SolveQuality solve_quality{SolveQuality::Full};

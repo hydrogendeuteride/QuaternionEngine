@@ -472,6 +472,8 @@ namespace Game
         out.track_id = job.track_id;
         out.generation_id = job.generation_id;
         out.maneuver_plan_revision = job.request.maneuver_plan_revision;
+        out.maneuver_plan_signature_valid = job.request.maneuver_plan_signature_valid;
+        out.maneuver_plan_signature = job.request.maneuver_plan_signature;
         out.display_frame_key = job.request.display_frame_key;
         out.display_frame_revision = job.request.display_frame_revision;
         out.analysis_body_id = job.request.analysis_body_id;
@@ -512,6 +514,8 @@ namespace Game
         OrbitPredictionCache cache{};
         cache.generation_id = job.generation_id;
         cache.maneuver_plan_revision = job.request.maneuver_plan_revision;
+        cache.maneuver_plan_signature_valid = job.request.maneuver_plan_signature_valid;
+        cache.maneuver_plan_signature = job.request.maneuver_plan_signature;
         cache.build_time_s = solver.build_time_s;
         cache.build_pos_world = request.build_pos_world;
         cache.build_vel_world = request.build_vel_world;

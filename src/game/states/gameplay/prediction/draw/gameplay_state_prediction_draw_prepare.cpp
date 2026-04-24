@@ -135,11 +135,26 @@ namespace Game
         out.maneuver_drag_active =
                 out.active_player_track &&
                 maneuver_live_preview_active(with_maneuver_live_preview);
+        const bool planned_cache_current =
+                with_maneuver_live_preview &&
+                out.planned_cache &&
+                out.planned_cache->maneuver_plan_signature_valid &&
+                out.planned_cache->maneuver_plan_signature == current_maneuver_plan_signature();
+        out.planned_cache_current = planned_cache_current;
+        if (!planned_cache_current)
+        {
+            out.traj_planned = nullptr;
+            out.traj_planned_segments = nullptr;
+            out.planned_window_segments = nullptr;
+        }
 
         if (out.is_active)
         {
             _orbit_plot_perf.solver_segments_base = static_cast<uint32_t>(out.traj_base_segments->size());
-            _orbit_plot_perf.solver_segments_planned = static_cast<uint32_t>(out.traj_planned_segments->size());
+            _orbit_plot_perf.solver_segments_planned =
+                    out.traj_planned_segments
+                            ? static_cast<uint32_t>(out.traj_planned_segments->size())
+                            : 0u;
         }
 
         out.i_hi = Draw::lower_bound_sample_index(*out.traj_base, out.now_s);
@@ -180,6 +195,7 @@ namespace Game
         const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
                 PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
         out.use_planned_adaptive_curve =
+                planned_cache_current &&
                 lifecycle.preview_state != PredictionPreviewRuntimeState::PreviewStreaming &&
                 !out.planned_cache->render_curve_frame_planned.empty();
 

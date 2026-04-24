@@ -84,6 +84,7 @@ namespace Game::PredictionDrawDetail
         bool is_active{false};
         bool active_player_track{false};
         bool maneuver_drag_active{false};
+        bool planned_cache_current{false};
         bool direct_world_polyline{false};
         bool identity_frame_transform{true};
         bool use_base_adaptive_curve{false};

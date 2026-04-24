@@ -28,6 +28,8 @@ namespace Game
             uint64_t track_id{0};
             uint64_t generation_id{0};
             uint64_t maneuver_plan_revision{0};
+            bool maneuver_plan_signature_valid{false};
+            uint64_t maneuver_plan_signature{0};
             OrbitPredictionService::RequestPriority priority{
                     OrbitPredictionService::RequestPriority::BackgroundOrbiter};
             OrbitPredictionService::Result solver_result{};
@@ -55,6 +57,8 @@ namespace Game
             uint64_t track_id{0};
             uint64_t generation_id{0};
             uint64_t maneuver_plan_revision{0};
+            bool maneuver_plan_signature_valid{false};
+            uint64_t maneuver_plan_signature{0};
             uint64_t display_frame_key{0};
             uint64_t display_frame_revision{0};
             orbitsim::BodyId analysis_body_id{orbitsim::kInvalidBodyId};

@@ -30,6 +30,8 @@ namespace Game
             result.track_id = track_id;
             result.generation_id = cache.generation_id;
             result.maneuver_plan_revision = cache.maneuver_plan_revision;
+            result.maneuver_plan_signature_valid = cache.maneuver_plan_signature_valid;
+            result.maneuver_plan_signature = cache.maneuver_plan_signature;
             result.valid = base_samples.size() >= 2 && !base_segments.empty();
             result.solve_quality = OrbitPredictionService::SolveQuality::Full;
             result.build_time_s = cache.build_time_s;
@@ -945,6 +947,8 @@ namespace Game
         derived_request.track_id = track.key.track_id();
         derived_request.generation_id = track.cache.generation_id;
         derived_request.maneuver_plan_revision = track.cache.maneuver_plan_revision;
+        derived_request.maneuver_plan_signature_valid = track.cache.maneuver_plan_signature_valid;
+        derived_request.maneuver_plan_signature = track.cache.maneuver_plan_signature;
         derived_request.priority = PredictionRuntimeDetail::classify_prediction_subject_priority(
                 _prediction_selection,
                 track.key,

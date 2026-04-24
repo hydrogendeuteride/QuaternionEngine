@@ -212,14 +212,19 @@ TEST(GameplayPredictionManeuverTests, LifecycleHelperRecognizesPreviewTransition
     EXPECT_TRUE(Game::PredictionRuntimeDetail::prediction_track_can_transition_to_await_full_refine(snapshot));
     EXPECT_TRUE(Game::PredictionRuntimeDetail::prediction_track_preview_fallback_active(snapshot));
     EXPECT_TRUE(Game::PredictionRuntimeDetail::prediction_track_preview_pick_clamp_active(snapshot));
+    EXPECT_TRUE(Game::PredictionRuntimeDetail::prediction_track_preview_overlay_draw_active(snapshot, true));
 
     track.preview_state = Game::PredictionPreviewRuntimeState::AwaitFullRefine;
+    track.preview_overlay.chunk_assembly.valid = true;
+    track.preview_overlay.chunk_assembly.chunks = {make_chunk(0u, 4u, 10.0, 20.0, 7'100'000.0, 7'200'000.0)};
     track.derived_request_pending = true;
     track.latest_requested_generation_id = 4u;
     track.latest_requested_authoritative_generation_id = 4u;
     snapshot = Game::PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
     EXPECT_EQ(snapshot.state, Game::PredictionTrackLifecycleState::FinalDerivedPending);
     EXPECT_TRUE(Game::PredictionRuntimeDetail::prediction_track_preserves_await_full_refine(snapshot));
+    EXPECT_FALSE(Game::PredictionRuntimeDetail::prediction_track_preview_pick_clamp_active(snapshot));
+    EXPECT_FALSE(Game::PredictionRuntimeDetail::prediction_track_preview_overlay_draw_active(snapshot, true));
 }
 
 TEST(GameplayPredictionManeuverTests, LifecycleHelperCoversPendingAndDirtyPromotionPolicies)

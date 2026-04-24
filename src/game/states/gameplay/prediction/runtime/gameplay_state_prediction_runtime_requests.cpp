@@ -496,6 +496,11 @@ namespace Game
                 request.maneuver_impulses.push_back(impulse);
             }
         }
+        if (!request.maneuver_impulses.empty())
+        {
+            request.maneuver_plan_signature_valid = true;
+            request.maneuver_plan_signature = current_maneuver_plan_signature();
+        }
 
         const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
                 PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
@@ -584,6 +589,8 @@ namespace Game
         const OrbitPredictionService::SolveQuality submitted_quality = request.solve_quality;
         const uint64_t submitted_track_id = request.track_id;
         const uint64_t submitted_plan_revision = request.maneuver_plan_revision;
+        const bool submitted_plan_signature_valid = request.maneuver_plan_signature_valid;
+        const uint64_t submitted_plan_signature = request.maneuver_plan_signature;
         const auto submitted_priority = request.priority;
         const bool submitted_preview_patch = request.preview_patch.active;
         const bool submitted_anchor_state_valid = request.preview_patch.anchor_state_valid;
@@ -594,12 +601,15 @@ namespace Game
         mark_prediction_request_submitted(track, generation_id, now_s, submitted_quality);
         if (track.supports_maneuvers)
         {
-            Logger::debug("Maneuver prediction request: track={} gen={} plan_rev={} quality={} priority={} "
+            Logger::debug("Maneuver prediction request: track={} gen={} plan_rev={} plan_sig={} plan_sig_valid={} "
+                          "quality={} priority={} "
                           "preview={} anchor_t={:.6f} anchor_state={} impulses={} future_window={:.3f} "
                           "pending_solver={} pending_derived={} dirty={}",
                           submitted_track_id,
                           generation_id,
                           submitted_plan_revision,
+                          submitted_plan_signature,
+                          submitted_plan_signature_valid,
                           static_cast<int>(submitted_quality),
                           static_cast<int>(submitted_priority),
                           submitted_preview_patch,

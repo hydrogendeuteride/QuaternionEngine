@@ -171,6 +171,7 @@ namespace Game
         std::vector<PredictionSubjectKey> collect_visible_prediction_subjects() const;
         double prediction_future_window_s(PredictionSubjectKey key) const;
         double maneuver_plan_horizon_s() const;
+        uint64_t current_maneuver_plan_signature() const;
         PredictionTimeContext build_prediction_time_context(
                 PredictionSubjectKey key,
                 double sim_now_s,

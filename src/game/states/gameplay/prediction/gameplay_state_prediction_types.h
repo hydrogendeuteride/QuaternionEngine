@@ -146,6 +146,8 @@ namespace Game
         bool valid{false};
         uint64_t generation_id{0};
         uint64_t maneuver_plan_revision{0};
+        bool maneuver_plan_signature_valid{false};
+        uint64_t maneuver_plan_signature{0};
         double build_time_s{0.0};
         WorldVec3 build_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 build_vel_world{0.0, 0.0, 0.0};
@@ -231,6 +233,8 @@ namespace Game
             valid = false;
             generation_id = 0;
             maneuver_plan_revision = 0;
+            maneuver_plan_signature_valid = false;
+            maneuver_plan_signature = 0;
             build_time_s = 0.0;
             build_pos_world = WorldVec3(0.0, 0.0, 0.0);
             build_vel_world = glm::dvec3(0.0, 0.0, 0.0);
@@ -276,6 +280,8 @@ namespace Game
         cache.trajectory_segments_frame_planned.clear();
         cache.render_curve_frame_planned.clear();
         cache.maneuver_previews.clear();
+        cache.maneuver_plan_signature_valid = false;
+        cache.maneuver_plan_signature = 0;
     }
 
     inline void copy_prediction_cache_planned_data(OrbitPredictionCache &dst, const OrbitPredictionCache &src)
@@ -286,6 +292,8 @@ namespace Game
         dst.trajectory_segments_frame_planned = src.trajectory_segments_frame_planned;
         dst.render_curve_frame_planned = src.render_curve_frame_planned;
         dst.maneuver_previews = src.maneuver_previews;
+        dst.maneuver_plan_signature_valid = src.maneuver_plan_signature_valid;
+        dst.maneuver_plan_signature = src.maneuver_plan_signature;
     }
 
     struct OrbitChunk
