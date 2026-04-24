@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace Game
@@ -93,6 +94,103 @@ namespace Game
     {
         const glm::vec3 point_local = world_to_local(point_world, frustum.origin_world);
         return frustum.viewproj * glm::vec4(point_local, 1.0f);
+    }
+
+    inline bool project_world_to_ndc_xy(const OrbitRenderCurve::FrustumContext &frustum,
+                                        const WorldVec3 &point_world,
+                                        glm::dvec2 &out_ndc_xy)
+    {
+        const glm::vec4 clip = project_world_to_clip(frustum, point_world);
+        if (!clip_point_is_finite(clip) || !(static_cast<double>(clip.w) > 1.0e-6))
+        {
+            return false;
+        }
+
+        const double inv_w = 1.0 / static_cast<double>(clip.w);
+        out_ndc_xy = glm::dvec2(static_cast<double>(clip.x) * inv_w,
+                                static_cast<double>(clip.y) * inv_w);
+        return std::isfinite(out_ndc_xy.x) && std::isfinite(out_ndc_xy.y);
+    }
+
+    inline double ndc_distance_to_pixels(const double viewport_height_px, const double ndc_distance)
+    {
+        if (!std::isfinite(viewport_height_px) || viewport_height_px <= 1.0 ||
+            !std::isfinite(ndc_distance) || ndc_distance < 0.0)
+        {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+
+        return 0.5 * viewport_height_px * ndc_distance;
+    }
+
+    inline double projected_point_to_segment_error_px(const OrbitRenderCurve::FrustumContext &frustum,
+                                                      const double viewport_height_px,
+                                                      const WorldVec3 &segment_a_world,
+                                                      const WorldVec3 &segment_b_world,
+                                                      const WorldVec3 &point_world)
+    {
+        if (!frustum.valid)
+        {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+
+        glm::dvec2 a_ndc{0.0};
+        glm::dvec2 b_ndc{0.0};
+        glm::dvec2 p_ndc{0.0};
+        if (!project_world_to_ndc_xy(frustum, segment_a_world, a_ndc) ||
+            !project_world_to_ndc_xy(frustum, segment_b_world, b_ndc) ||
+            !project_world_to_ndc_xy(frustum, point_world, p_ndc))
+        {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+
+        const glm::dvec2 ab = b_ndc - a_ndc;
+        const double ab_len_sq = glm::dot(ab, ab);
+        glm::dvec2 closest_ndc = a_ndc;
+        if (ab_len_sq > 1.0e-18)
+        {
+            const double t = std::clamp(glm::dot(p_ndc - a_ndc, ab) / ab_len_sq, 0.0, 1.0);
+            closest_ndc = a_ndc + (ab * t);
+        }
+
+        return ndc_distance_to_pixels(viewport_height_px, glm::length(p_ndc - closest_ndc));
+    }
+
+    inline double projected_pixels_per_meter_upper_bound(const OrbitRenderCurve::FrustumContext &frustum,
+                                                         const double viewport_height_px,
+                                                         const WorldVec3 &point_world)
+    {
+        if (!frustum.valid)
+        {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+
+        glm::dvec2 point_ndc{0.0};
+        if (!project_world_to_ndc_xy(frustum, point_world, point_ndc))
+        {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+
+        double max_px_per_meter = 0.0;
+        constexpr std::array<glm::dvec3, 3> kWorldAxes{
+                glm::dvec3(1.0, 0.0, 0.0),
+                glm::dvec3(0.0, 1.0, 0.0),
+                glm::dvec3(0.0, 0.0, 1.0),
+        };
+        for (const glm::dvec3 &axis : kWorldAxes)
+        {
+            glm::dvec2 offset_ndc{0.0};
+            if (!project_world_to_ndc_xy(frustum, point_world + axis, offset_ndc))
+            {
+                continue;
+            }
+
+            max_px_per_meter = std::max(max_px_per_meter,
+                                        ndc_distance_to_pixels(viewport_height_px,
+                                                               glm::length(offset_ndc - point_ndc)));
+        }
+
+        return (max_px_per_meter > 0.0) ? max_px_per_meter : std::numeric_limits<double>::quiet_NaN();
     }
 
     inline bool vec3_is_finite(const glm::dvec3 &v)

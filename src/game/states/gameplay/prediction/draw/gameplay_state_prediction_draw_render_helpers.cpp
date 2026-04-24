@@ -214,6 +214,7 @@ namespace Game::PredictionDrawDetail
         selection_ctx.camera_world = ctx.camera_world;
         selection_ctx.tan_half_fov = ctx.tan_half_fov;
         selection_ctx.viewport_height_px = ctx.viewport_height_px;
+        selection_ctx.error_frustum = ctx.render_frustum;
         selection_ctx.error_px = ctx.render_error_px;
 
         const auto render_lod_start_tp = std::chrono::steady_clock::now();

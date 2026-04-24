@@ -63,6 +63,7 @@ namespace Game
         /// Evaluates the curve midpoint, compares against the chord midpoint,
         /// and converts the distance to screen pixels using the camera's perspective.
         bool should_split_interval(const OrbitRenderCurve::CameraContext &camera,
+                                   const OrbitRenderCurve::FrustumContext &frustum,
                                    const double error_px_threshold,
                                    const WorldVec3 &a_world,
                                    const WorldVec3 &b_world,
@@ -73,8 +74,19 @@ namespace Game
                 return false;
             }
 
-            const WorldVec3 chord_mid_world = 0.5 * (a_world + b_world);
+            const double projected_error_px = projected_point_to_segment_error_px(
+                    frustum, camera.viewport_height_px, a_world, b_world, curve_mid_world);
+            if (std::isfinite(projected_error_px) && projected_error_px > error_px_threshold)
+            {
+                return true;
+            }
 
+            if (std::isfinite(projected_error_px))
+            {
+                return false;
+            }
+
+            const WorldVec3 chord_mid_world = 0.5 * (a_world + b_world);
             const double error_m = glm::length(glm::dvec3(curve_mid_world - chord_mid_world));
             if (!std::isfinite(error_m) || error_m <= 0.0)
             {
@@ -190,6 +202,7 @@ namespace Game
                     const bool split_for_frustum_curve = !chord_in_frustum;
                     const bool split_for_screen_error =
                             should_split_interval(camera,
+                                                  frustum,
                                                   error_px_threshold,
                                                   item.a_world,
                                                   item.b_world,
