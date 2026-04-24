@@ -45,6 +45,12 @@ namespace Game
     // Owns GameWorld, physics, and orbital simulation.
     // ============================================================================
 
+    #if defined(VULKAN_ENGINE_GAMEPLAY_TEST_ACCESS)
+    #define VULKAN_ENGINE_GAMEPLAY_STATE_PRIVATE public
+    #else
+    #define VULKAN_ENGINE_GAMEPLAY_STATE_PRIVATE private
+    #endif
+
     class GameplayState : public IGameState
     {
     public:
@@ -91,7 +97,7 @@ namespace Game
         bool wants_fixed_update() const override { return true; }
         const char *name() const override { return "Gameplay"; }
 
-    private:
+    VULKAN_ENGINE_GAMEPLAY_STATE_PRIVATE:
         // Settings
         GameplaySettings extract_settings() const;
         void apply_settings(const GameplaySettings &s);
@@ -283,6 +289,10 @@ namespace Game
         void begin_maneuver_node_dv_edit_preview(int node_id);
         void update_maneuver_node_dv_edit_preview(int node_id);
         void finish_maneuver_node_dv_edit_preview(bool changed);
+        void begin_maneuver_node_time_edit_preview(int node_id, double previous_time_s);
+        void update_maneuver_node_time_edit_preview(int node_id, double previous_time_s);
+        void finish_maneuver_node_time_edit_preview(bool changed);
+        void cancel_maneuver_node_edit_preview();
         void cancel_maneuver_node_dv_edit_preview();
 
         // Time warp
@@ -500,4 +510,6 @@ namespace Game
         glm::vec3 _rails_last_thrust_dir_local{0.0f};
         glm::vec3 _rails_last_torque_dir_local{0.0f};
     };
+
+    #undef VULKAN_ENGINE_GAMEPLAY_STATE_PRIVATE
 } // namespace Game

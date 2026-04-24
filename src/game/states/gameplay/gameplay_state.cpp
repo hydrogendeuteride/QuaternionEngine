@@ -18,7 +18,7 @@ namespace Game
     using detail::contact_event_type_name;
 
     GameplayState::GameplayState()
-        : _scenario_config(default_earth_moon_config())
+        : _scenario_config()
     {
     }
 
@@ -78,8 +78,8 @@ namespace Game
                 }
                 else
                 {
-                    Logger::warn("Falling back to compiled default scenario config.");
-                    _scenario_config = default_earth_moon_config();
+                    Logger::error("Failed to load gameplay scenario '{}'", scenario_path);
+                    return;
                 }
             }
 

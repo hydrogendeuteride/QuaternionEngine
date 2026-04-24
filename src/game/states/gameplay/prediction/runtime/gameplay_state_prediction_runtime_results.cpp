@@ -173,6 +173,37 @@ namespace Game
                    !cache.maneuver_previews.empty();
         }
 
+        bool planned_cache_matches_current_maneuver_times(
+                const OrbitPredictionCache &cache,
+                const std::vector<GameplayState::ManeuverNode> &nodes)
+        {
+            constexpr double kPreviewTimeMatchEpsilonS = 1.0e-6;
+            for (const OrbitPredictionService::ManeuverNodePreview &preview : cache.maneuver_previews)
+            {
+                if (!preview.valid || !std::isfinite(preview.t_s))
+                {
+                    continue;
+                }
+
+                const auto node_it = std::find_if(nodes.begin(),
+                                                  nodes.end(),
+                                                  [&preview](const GameplayState::ManeuverNode &node) {
+                                                      return node.id == preview.node_id;
+                                                  });
+                if (node_it == nodes.end() || !std::isfinite(node_it->time_s))
+                {
+                    continue;
+                }
+
+                if (std::abs(preview.t_s - node_it->time_s) > kPreviewTimeMatchEpsilonS)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         bool full_stream_result_is_obsolete_after_final_publish(
                 const PredictionTrackState &track,
                 const OrbitPredictionDerivedService::Result &result)
@@ -183,15 +214,21 @@ namespace Game
                    track.authoritative_cache.generation_id >= result.generation_id;
         }
 
-        void restore_authoritative_planned_data(const PredictionTrackState &track, OrbitPredictionCache &cache)
+        void restore_authoritative_planned_data(const PredictionTrackState &track,
+                                                OrbitPredictionCache &cache,
+                                                const std::vector<GameplayState::ManeuverNode> &nodes)
         {
-            if (track.authoritative_cache.valid && cache_has_planned_data(track.authoritative_cache))
+            if (track.authoritative_cache.valid &&
+                cache_has_planned_data(track.authoritative_cache) &&
+                planned_cache_matches_current_maneuver_times(track.authoritative_cache, nodes))
             {
                 copy_prediction_cache_planned_data(cache, track.authoritative_cache);
                 return;
             }
 
-            if (track.cache.valid && cache_has_planned_data(track.cache))
+            if (track.cache.valid &&
+                cache_has_planned_data(track.cache) &&
+                planned_cache_matches_current_maneuver_times(track.cache, nodes))
             {
                 copy_prediction_cache_planned_data(cache, track.cache);
             }
@@ -326,7 +363,7 @@ namespace Game
             }
 
             merge_chunk_assembly(track->preview_overlay.chunk_assembly, result.chunk_assembly);
-            restore_authoritative_planned_data(*track, cache_to_publish);
+            restore_authoritative_planned_data(*track, cache_to_publish, _maneuver_state.nodes);
 
             track->preview_state = PredictionRuntimeDetail::prediction_track_preview_state_after_preview_publish(
                     lifecycle_before_apply,
@@ -344,7 +381,7 @@ namespace Game
                                                                   result.display_frame_revision);
             if (!already_seeded_for_generation)
             {
-                restore_authoritative_planned_data(*track, cache_to_publish);
+                restore_authoritative_planned_data(*track, cache_to_publish, _maneuver_state.nodes);
                 track->cache = std::move(cache_to_publish);
                 track->pick_cache.clear();
             }

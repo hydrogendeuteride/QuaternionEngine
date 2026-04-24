@@ -392,8 +392,19 @@ namespace Game
                         ctx.reference_body_world +
                         WorldVec3(ctx.frame_to_world * OrbitPlotUtil::eval_segment_local_position(node.segment, tm_s)) +
                         ctx.align_delta_world;
-                const double error_px = node.max_error_m / OrbitPlotUtil::meters_per_px_at_world(
-                        ctx.camera_world, ctx.tan_half_fov, ctx.viewport_height_px, midpoint_world);
+                double error_px = 0.0;
+                const double px_per_meter = projected_pixels_per_meter_upper_bound(
+                        ctx.error_frustum, ctx.viewport_height_px, midpoint_world);
+                if (std::isfinite(px_per_meter) && px_per_meter > 0.0)
+                {
+                    error_px = node.max_error_m * px_per_meter;
+                }
+                else
+                {
+                    const double meters_per_px = OrbitPlotUtil::meters_per_px_at_world(
+                            ctx.camera_world, ctx.tan_half_fov, ctx.viewport_height_px, midpoint_world);
+                    error_px = node.max_error_m / meters_per_px;
+                }
                 descend = std::isfinite(error_px) && error_px > ctx.error_px;
             }
 

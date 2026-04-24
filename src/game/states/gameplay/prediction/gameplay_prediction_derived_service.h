@@ -14,6 +14,12 @@
 
 namespace Game
 {
+    #if defined(VULKAN_ENGINE_GAMEPLAY_TEST_ACCESS)
+    #define VULKAN_ENGINE_PREDICTION_DERIVED_SERVICE_PRIVATE public
+    #else
+    #define VULKAN_ENGINE_PREDICTION_DERIVED_SERVICE_PRIVATE private
+    #endif
+
     class OrbitPredictionDerivedService
     {
     public:
@@ -71,7 +77,7 @@ namespace Game
         std::optional<Result> poll_completed();
         void reset();
 
-    private:
+    VULKAN_ENGINE_PREDICTION_DERIVED_SERVICE_PRIVATE:
         struct PendingJob
         {
             uint64_t track_id{0};
@@ -103,4 +109,6 @@ namespace Game
         std::unordered_map<uint64_t, uint64_t> _latest_requested_generation_by_track{};
         std::unordered_set<uint64_t> _tracks_in_flight{};
     };
+
+    #undef VULKAN_ENGINE_PREDICTION_DERIVED_SERVICE_PRIVATE
 } // namespace Game

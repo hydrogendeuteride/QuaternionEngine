@@ -154,6 +154,7 @@ namespace Game
         }
 
         using PreviewMap = std::unordered_map<int, const OrbitPredictionCache::ManeuverNodePreview *>;
+        constexpr double kNodePreviewTimeMatchEpsilonS = 1.0e-6;
 
         PreviewMap build_preview_map(const OrbitPredictionCache &cache)
         {
@@ -164,6 +165,16 @@ namespace Game
                 map[p.node_id] = &p;
             }
             return map;
+        }
+
+        bool preview_matches_node_time(const OrbitPredictionCache::ManeuverNodePreview *preview,
+                                       const ManeuverNode &node)
+        {
+            return preview &&
+                   preview->valid &&
+                   std::isfinite(preview->t_s) &&
+                   std::isfinite(node.time_s) &&
+                   std::abs(preview->t_s - node.time_s) <= kNodePreviewTimeMatchEpsilonS;
         }
     } // namespace
 
@@ -450,6 +461,7 @@ namespace Game
             auto preview_it = node_preview_map->find(node.id);
             const OrbitPredictionCache::ManeuverNodePreview *preview =
                     (preview_it != node_preview_map->end()) ? preview_it->second : nullptr;
+            bool preview_time_valid = preview_matches_node_time(preview, node);
 
             // Try stable fallback if the active cache doesn't cover this node.
             if (!use_stable_prefix && stable_planned_prefix_available)
@@ -470,6 +482,7 @@ namespace Game
                     node_traj_inertial = stable_traj_node_inertial;
                     preview_it = node_preview_map->find(node.id);
                     preview = (preview_it != node_preview_map->end()) ? preview_it->second : nullptr;
+                    preview_time_valid = preview_matches_node_time(preview, node);
                 }
             }
 
@@ -497,10 +510,10 @@ namespace Game
             }
 
             const bool have_preview_pos =
-                    preview && preview->valid &&
+                    preview_time_valid &&
                     sample_preview_node_world(*node_disp_cache, node.time_s,
-                                              glm::dvec3(preview->inertial_position_m),
-                                              glm::dvec3(preview->inertial_velocity_mps),
+                                               glm::dvec3(preview->inertial_position_m),
+                                               glm::dvec3(preview->inertial_velocity_mps),
                                               node_position_world);
             if (!have_preview_pos &&
                 (!node_traj_world ||
@@ -522,7 +535,7 @@ namespace Game
             }
 
             // --- Resolve orbital state for basis computation ---
-            if (preview && preview->valid)
+            if (preview_time_valid)
             {
                 const glm::dvec3 preview_pos_m = glm::dvec3(preview->inertial_position_m);
                 const orbitsim::BodyId primary_id =
@@ -613,7 +626,7 @@ namespace Game
 
                     // Try preview tangent, then chunk tangent, then displayed tangent for more accurate prograde direction.
                     glm::dvec3 tangent_world{0.0, 0.0, 0.0};
-                    if (preview && preview->valid &&
+                    if (preview_time_valid &&
                         sample_preview_tangent_world(*node_disp_cache, node.time_s,
                                                      glm::dvec3(preview->inertial_position_m),
                                                      glm::dvec3(preview->inertial_velocity_mps),

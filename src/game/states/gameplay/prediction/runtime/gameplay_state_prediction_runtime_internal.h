@@ -204,6 +204,11 @@ namespace Game::PredictionRuntimeDetail
         return snapshot.dirty || snapshot.invalidated_while_pending;
     }
 
+    inline bool prediction_track_live_preview_drag_pending_override(const PredictionTrackLifecycleSnapshot &snapshot)
+    {
+        return prediction_track_live_preview_pending_override(snapshot);
+    }
+
     inline bool prediction_track_can_enter_preview_drag(const PredictionTrackLifecycleSnapshot &snapshot)
     {
         return snapshot.preview_state == PredictionPreviewRuntimeState::Idle ||

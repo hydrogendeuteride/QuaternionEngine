@@ -658,6 +658,249 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestFallsBackToInertialCache
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.velocity_mps.y, 7'500.0);
 }
 
+TEST(GameplayPredictionManeuverTests, TimeEditActivatesFastPreviewRequest)
+{
+    Game::GameplayState state{};
+    state._orbitsim = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbitsim);
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+    state._maneuver_plan_windows.preview_window_s = 180.0;
+    state._maneuver_plan_windows.solve_margin_s = 300.0;
+    state._maneuver_plan_live_preview_active = true;
+
+    Game::GameplayState::ManeuverNode selected{};
+    selected.id = 5;
+    selected.time_s = 360.0;
+    selected.dv_rtn_mps = glm::dvec3(0.0, 10.0, 0.0);
+    state._maneuver_state.selected_node_id = selected.id;
+    state._maneuver_state.nodes.push_back(selected);
+    state._maneuver_node_edit_preview.state = Game::GameplayState::ManeuverNodeEditPreview::State::EditingTime;
+    state._maneuver_node_edit_preview.node_id = selected.id;
+    state._maneuver_node_edit_preview.changed = true;
+    state._maneuver_node_edit_preview.start_time_s = 240.0;
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+    track.cache.trajectory_inertial = {
+            make_sample(100.0, 7'000'000.0),
+            make_sample(selected.time_s, 7'200'000.0),
+    };
+
+    Game::OrbitPredictionService::Request request{};
+    const bool built = state.build_orbiter_prediction_request(track,
+                                                              WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                              glm::dvec3(0.0, 7'500.0, 0.0),
+                                                              100.0,
+                                                              false,
+                                                              true,
+                                                              request);
+
+    ASSERT_TRUE(built);
+    EXPECT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
+    ASSERT_TRUE(request.preview_patch.active);
+    EXPECT_DOUBLE_EQ(request.preview_patch.anchor_time_s, selected.time_s);
+    ASSERT_EQ(request.maneuver_impulses.size(), 1u);
+    EXPECT_DOUBLE_EQ(request.maneuver_impulses.front().t_s, selected.time_s);
+}
+
+TEST(GameplayPredictionManeuverTests, TimeEditUsesBaselineAnchorStateForMovedFirstNode)
+{
+    Game::GameplayState state{};
+    state._orbitsim = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbitsim);
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+    state._maneuver_plan_windows.preview_window_s = 180.0;
+    state._maneuver_plan_windows.solve_margin_s = 300.0;
+    state._maneuver_plan_live_preview_active = true;
+
+    Game::GameplayState::ManeuverNode selected{};
+    selected.id = 5;
+    selected.time_s = 300.0;
+    selected.dv_rtn_mps = glm::dvec3(0.0, 10.0, 0.0);
+    state._maneuver_state.selected_node_id = selected.id;
+    state._maneuver_state.nodes.push_back(selected);
+    state._maneuver_node_edit_preview.state = Game::GameplayState::ManeuverNodeEditPreview::State::EditingTime;
+    state._maneuver_node_edit_preview.node_id = selected.id;
+    state._maneuver_node_edit_preview.changed = true;
+    state._maneuver_node_edit_preview.start_time_s = 240.0;
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+    track.cache.valid = true;
+    track.cache.trajectory_inertial = {
+            make_sample(100.0, 7'000'000.0),
+            make_sample(selected.time_s, 7'200'000.0),
+    };
+    track.cache.trajectory_inertial_planned = {
+            make_sample(100.0, 7'000'000.0),
+            make_sample(selected.time_s, 9'000'000.0),
+    };
+    track.cache.maneuver_previews.push_back(Game::OrbitPredictionService::ManeuverNodePreview{
+            .node_id = selected.id,
+            .t_s = 240.0,
+            .valid = true,
+            .inertial_position_m = glm::dvec3(9'000'000.0, 0.0, 0.0),
+            .inertial_velocity_mps = glm::dvec3(0.0, 7'500.0, 0.0),
+    });
+
+    Game::OrbitPredictionService::Request request{};
+    const bool built = state.build_orbiter_prediction_request(track,
+                                                              WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                              glm::dvec3(0.0, 7'500.0, 0.0),
+                                                              100.0,
+                                                              false,
+                                                              true,
+                                                              request);
+
+    ASSERT_TRUE(built);
+    ASSERT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
+    ASSERT_TRUE(request.preview_patch.active);
+    ASSERT_TRUE(request.preview_patch.anchor_state_valid);
+    EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.position_m.x, 7'200'000.0);
+}
+
+TEST(GameplayPredictionManeuverTests, TimeEditLeavesAnchorStateUnseededWhenPriorManeuverExists)
+{
+    Game::GameplayState state{};
+    state._orbitsim = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbitsim);
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+    state._maneuver_plan_windows.preview_window_s = 180.0;
+    state._maneuver_plan_windows.solve_margin_s = 300.0;
+    state._maneuver_plan_live_preview_active = true;
+
+    Game::GameplayState::ManeuverNode upstream{};
+    upstream.id = 4;
+    upstream.time_s = 180.0;
+    upstream.dv_rtn_mps = glm::dvec3(0.0, 5.0, 0.0);
+
+    Game::GameplayState::ManeuverNode selected{};
+    selected.id = 5;
+    selected.time_s = 300.0;
+    selected.dv_rtn_mps = glm::dvec3(0.0, 10.0, 0.0);
+    state._maneuver_state.selected_node_id = selected.id;
+    state._maneuver_state.nodes.push_back(upstream);
+    state._maneuver_state.nodes.push_back(selected);
+    state._maneuver_node_edit_preview.state = Game::GameplayState::ManeuverNodeEditPreview::State::EditingTime;
+    state._maneuver_node_edit_preview.node_id = selected.id;
+    state._maneuver_node_edit_preview.changed = true;
+    state._maneuver_node_edit_preview.start_time_s = 240.0;
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+    track.cache.trajectory_inertial = {
+            make_sample(100.0, 7'000'000.0),
+            make_sample(selected.time_s, 7'200'000.0),
+    };
+
+    Game::OrbitPredictionService::Request request{};
+    const bool built = state.build_orbiter_prediction_request(track,
+                                                              WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                              glm::dvec3(0.0, 7'500.0, 0.0),
+                                                              100.0,
+                                                              false,
+                                                              true,
+                                                              request);
+
+    ASSERT_TRUE(built);
+    ASSERT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
+    ASSERT_TRUE(request.preview_patch.active);
+    EXPECT_FALSE(request.preview_patch.anchor_state_valid);
+    ASSERT_EQ(request.maneuver_impulses.size(), 2u);
+}
+
+TEST(GameplayPredictionManeuverTests, TimeEditFinishRequestsFullRefine)
+{
+    Game::GameplayState state{};
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+    state._prediction_dirty = false;
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.preview_state = Game::PredictionPreviewRuntimeState::PreviewStreaming;
+    state._prediction_tracks.push_back(track);
+
+    state._maneuver_node_edit_preview.state = Game::GameplayState::ManeuverNodeEditPreview::State::EditingTime;
+    state._maneuver_node_edit_preview.node_id = 5;
+    state._maneuver_node_edit_preview.changed = true;
+    state._maneuver_node_edit_preview.start_time_s = 240.0;
+
+    state.finish_maneuver_node_time_edit_preview(false);
+
+    ASSERT_EQ(state._prediction_tracks.size(), 1u);
+    EXPECT_EQ(state._prediction_tracks.front().preview_state, Game::PredictionPreviewRuntimeState::AwaitFullRefine);
+    EXPECT_EQ(state._maneuver_node_edit_preview.state, Game::GameplayState::ManeuverNodeEditPreview::State::Idle);
+    EXPECT_TRUE(state._prediction_dirty);
+}
+
+TEST(GameplayPredictionManeuverTests, FinishedTimeEditDoesNotSeedAnchorFromStalePlannedPath)
+{
+    Game::GameplayState state{};
+    state._orbitsim = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbitsim);
+    state._prediction_selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
+
+    Game::GameplayState::ManeuverNode selected{};
+    selected.id = 5;
+    selected.time_s = 300.0;
+    selected.dv_rtn_mps = glm::dvec3(0.0, 10.0, 0.0);
+    state._maneuver_state.selected_node_id = selected.id;
+    state._maneuver_state.nodes.push_back(selected);
+
+    Game::PredictionTrackState track{};
+    track.key = state._prediction_selection.active_subject;
+    track.supports_maneuvers = true;
+    track.preview_state = Game::PredictionPreviewRuntimeState::AwaitFullRefine;
+    track.preview_anchor.valid = true;
+    track.preview_anchor.anchor_node_id = selected.id;
+    track.preview_anchor.anchor_time_s = selected.time_s;
+    track.cache.valid = true;
+    track.cache.trajectory_inertial = {
+            make_sample(100.0, 7'000'000.0),
+            make_sample(selected.time_s, 7'200'000.0),
+    };
+    track.cache.trajectory_segments_inertial = {
+            make_segment(100.0, selected.time_s, 7'000'000.0, 7'200'000.0),
+    };
+    track.cache.trajectory_inertial_planned = {
+            make_sample(100.0, 7'000'000.0),
+            make_sample(240.0, 9'000'000.0),
+            make_sample(selected.time_s, 9'500'000.0),
+    };
+    track.cache.trajectory_segments_inertial_planned = {
+            make_segment(100.0, 240.0, 7'000'000.0, 9'000'000.0),
+            make_segment(240.0, selected.time_s, 9'000'000.0, 9'500'000.0),
+    };
+    track.cache.maneuver_previews.push_back(Game::OrbitPredictionService::ManeuverNodePreview{
+            .node_id = selected.id,
+            .t_s = 240.0,
+            .valid = true,
+            .inertial_position_m = glm::dvec3(9'000'000.0, 0.0, 0.0),
+            .inertial_velocity_mps = glm::dvec3(0.0, 7'500.0, 0.0),
+    });
+    track.authoritative_cache = track.cache;
+
+    orbitsim::State anchor_state{};
+    ASSERT_TRUE(state.resolve_prediction_preview_anchor_state(track, anchor_state));
+    EXPECT_DOUBLE_EQ(anchor_state.position_m.x, 7'200'000.0);
+
+    Game::OrbitPredictionService::Request request{};
+    const bool built = state.build_orbiter_prediction_request(track,
+                                                              WorldVec3(7'000'000.0, 0.0, 0.0),
+                                                              glm::dvec3(0.0, 7'500.0, 0.0),
+                                                              100.0,
+                                                              false,
+                                                              true,
+                                                              request);
+
+    ASSERT_TRUE(built);
+    EXPECT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::Full);
+    EXPECT_FALSE(request.planned_suffix_refine.active);
+}
+
 TEST(GameplayPredictionManeuverTests, FullRequestKeepsFullStreamPublishDisabledForStableActivePlayerWithManeuvers)
 {
     Game::GameplayState state{};

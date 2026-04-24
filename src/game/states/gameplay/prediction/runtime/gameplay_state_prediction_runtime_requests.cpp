@@ -85,6 +85,7 @@ namespace Game
         }
 
         constexpr double kSuffixRefineAnchorTimeMatchEpsilonS = 1.0e-6;
+        constexpr double kPreviewAnchorTimeMatchEpsilonS = 1.0e-6;
 
         bool maneuver_node_matches_preview_anchor(const GameplayState::ManeuverNode &node,
                                                   const PredictionPreviewAnchor &anchor)
@@ -112,6 +113,47 @@ namespace Game
                 }
             }
             return out;
+        }
+
+        bool cache_has_planned_prediction_data(const OrbitPredictionCache &cache)
+        {
+            return !cache.trajectory_segments_inertial_planned.empty() ||
+                   !cache.trajectory_inertial_planned.empty() ||
+                   !cache.maneuver_previews.empty();
+        }
+
+        bool current_plan_has_prior_future_maneuver(const std::vector<GameplayState::ManeuverNode> &nodes,
+                                                    const int anchor_node_id,
+                                                    const double anchor_time_s,
+                                                    const double sim_now_s)
+        {
+            if (!std::isfinite(anchor_time_s) || !std::isfinite(sim_now_s))
+            {
+                return true;
+            }
+
+            return std::any_of(nodes.begin(),
+                               nodes.end(),
+                               [&](const GameplayState::ManeuverNode &node) {
+                                   return node.id != anchor_node_id &&
+                                          std::isfinite(node.time_s) &&
+                                          node.time_s + kPreviewAnchorTimeMatchEpsilonS >= sim_now_s &&
+                                          node.time_s < (anchor_time_s - kPreviewAnchorTimeMatchEpsilonS);
+                               });
+        }
+
+        bool sample_unplanned_anchor_state(const OrbitPredictionCache &cache,
+                                           const double anchor_time_s,
+                                           orbitsim::State &out_state)
+        {
+            return PredictionCacheInternal::sample_prediction_inertial_state(
+                           cache.resolved_trajectory_segments_inertial(),
+                           anchor_time_s,
+                           out_state,
+                           TrajectoryBoundarySide::Before) ||
+                   PredictionCacheInternal::sample_prediction_inertial_state(cache.resolved_trajectory_inertial(),
+                                                                             anchor_time_s,
+                                                                             out_state);
         }
 
         bool try_build_suffix_refine_prefix_from_cache(
@@ -211,7 +253,6 @@ namespace Game
         const OrbitPredictionCache &anchor_cache =
                 track.authoritative_cache.valid ? track.authoritative_cache : track.cache;
 
-        constexpr double kPreviewAnchorTimeMatchEpsilonS = 1.0e-6;
         const auto preview_it =
                 std::find_if(anchor_cache.maneuver_previews.begin(),
                              anchor_cache.maneuver_previews.end(),
@@ -229,6 +270,27 @@ namespace Game
             out_state.position_m = preview_it->inertial_position_m;
             out_state.velocity_mps = preview_it->inertial_velocity_mps;
             return true;
+        }
+
+        const bool editing_anchor_time =
+                _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime &&
+                _maneuver_node_edit_preview.node_id == track.preview_anchor.anchor_node_id;
+        const bool anchor_node_is_current =
+                _maneuver_state.find_node(track.preview_anchor.anchor_node_id) != nullptr;
+        if (anchor_node_is_current && (editing_anchor_time || cache_has_planned_prediction_data(anchor_cache)))
+        {
+            const double sim_now_s = current_sim_time_s();
+            const bool has_prior_future_maneuver =
+                    current_plan_has_prior_future_maneuver(_maneuver_state.nodes,
+                                                           track.preview_anchor.anchor_node_id,
+                                                           track.preview_anchor.anchor_time_s,
+                                                           sim_now_s);
+            if (has_prior_future_maneuver)
+            {
+                return false;
+            }
+
+            return sample_unplanned_anchor_state(anchor_cache, track.preview_anchor.anchor_time_s, out_state);
         }
 
         return PredictionCacheInternal::sample_prediction_inertial_state(anchor_cache.trajectory_segments_inertial_planned,

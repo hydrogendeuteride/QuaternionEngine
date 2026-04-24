@@ -243,26 +243,29 @@ namespace Game
                                                OrbitPredictionTuning::kFullOrbitDrawPeriodScale),
                                       track_ctx.t1_s);
             }
+            const double t_full_start =
+                    std::isfinite(track_ctx.now_s) ? std::clamp(track_ctx.now_s, track_ctx.t0_s, t_full_end)
+                                                   : track_ctx.t0_s;
 
             if (track_ctx.direct_world_polyline)
             {
                 Draw::draw_polyline_window(track_ctx.draw_ctx,
                                            _prediction_draw_config,
                                            *track_ctx.traj_base,
-                                           track_ctx.t0_s,
+                                           t_full_start,
                                            t_full_end,
                                            track_ctx.track_color_full,
                                            false);
             }
             else
             {
-                draw_cpu_base_window(track_ctx.t0_s, t_full_end, track_ctx.track_color_full);
+                draw_cpu_base_window(t_full_start, t_full_end, track_ctx.track_color_full);
             }
 
-            if (track_ctx.is_active && !_prediction_draw_future_segment && t_full_end > track_ctx.t0_s)
+            if (track_ctx.is_active && !_prediction_draw_future_segment && t_full_end > t_full_start)
             {
                 track_ctx.base_pick_window.valid = true;
-                track_ctx.base_pick_window.t0_s = track_ctx.t0_s;
+                track_ctx.base_pick_window.t0_s = t_full_start;
                 track_ctx.base_pick_window.t1_s = t_full_end;
             }
         }

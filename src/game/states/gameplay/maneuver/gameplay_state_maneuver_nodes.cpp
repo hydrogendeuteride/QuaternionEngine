@@ -26,10 +26,13 @@ namespace Game
 
         if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
         {
-            return _maneuver_state.find_node(_maneuver_gizmo_interaction.node_id) != nullptr;
+            return _maneuver_state.find_node(active_maneuver_preview_anchor_node_id()) != nullptr;
         }
 
-        return _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingDv &&
+        const bool node_edit_preview_active =
+                _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingDv ||
+                _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime;
+        return node_edit_preview_active &&
                _maneuver_state.find_node(_maneuver_node_edit_preview.node_id) != nullptr;
     }
 
@@ -37,10 +40,15 @@ namespace Game
     {
         if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
         {
-            return _maneuver_gizmo_interaction.node_id;
+            if (_maneuver_state.find_node(_maneuver_gizmo_interaction.node_id))
+            {
+                return _maneuver_gizmo_interaction.node_id;
+            }
+            return _maneuver_state.selected_node_id;
         }
 
-        if (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingDv)
+        if (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingDv ||
+            _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime)
         {
             return _maneuver_node_edit_preview.node_id;
         }
@@ -52,7 +60,7 @@ namespace Game
     {
         if (!_maneuver_state.find_node(node_id))
         {
-            cancel_maneuver_node_dv_edit_preview();
+            cancel_maneuver_node_edit_preview();
             return;
         }
 
@@ -88,7 +96,10 @@ namespace Game
                 changed ||
                 (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingDv &&
                  _maneuver_node_edit_preview.changed);
-        _maneuver_node_edit_preview = {};
+        if (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingDv)
+        {
+            _maneuver_node_edit_preview = {};
+        }
 
         if (!preview_changed)
         {
@@ -102,9 +113,76 @@ namespace Game
         mark_maneuver_plan_dirty();
     }
 
-    void GameplayState::cancel_maneuver_node_dv_edit_preview()
+    void GameplayState::begin_maneuver_node_time_edit_preview(const int node_id,
+                                                              const double previous_time_s)
+    {
+        const ManeuverNode *node = _maneuver_state.find_node(node_id);
+        if (!node)
+        {
+            cancel_maneuver_node_edit_preview();
+            return;
+        }
+
+        if (_maneuver_node_edit_preview.state != ManeuverNodeEditPreview::State::EditingTime ||
+            _maneuver_node_edit_preview.node_id != node_id)
+        {
+            _maneuver_node_edit_preview = {};
+            _maneuver_node_edit_preview.state = ManeuverNodeEditPreview::State::EditingTime;
+            _maneuver_node_edit_preview.node_id = node_id;
+            _maneuver_node_edit_preview.start_time_s =
+                    std::isfinite(previous_time_s) ? previous_time_s : node->time_s;
+        }
+    }
+
+    void GameplayState::update_maneuver_node_time_edit_preview(const int node_id,
+                                                               const double previous_time_s)
+    {
+        begin_maneuver_node_time_edit_preview(node_id, previous_time_s);
+        if (_maneuver_node_edit_preview.state != ManeuverNodeEditPreview::State::EditingTime)
+        {
+            return;
+        }
+
+        _maneuver_node_edit_preview.changed = true;
+        if (PredictionTrackState *track = active_prediction_track())
+        {
+            track->dirty = true;
+            track->invalidated_while_pending = track->request_pending || track->derived_request_pending;
+            sync_prediction_dirty_flag();
+        }
+    }
+
+    void GameplayState::finish_maneuver_node_time_edit_preview(const bool changed)
+    {
+        const bool preview_changed =
+                changed ||
+                (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime &&
+                 _maneuver_node_edit_preview.changed);
+        if (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime)
+        {
+            _maneuver_node_edit_preview = {};
+        }
+
+        if (!preview_changed)
+        {
+            return;
+        }
+
+        if (PredictionTrackState *track = active_prediction_track())
+        {
+            track->preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
+        }
+        mark_maneuver_plan_dirty();
+    }
+
+    void GameplayState::cancel_maneuver_node_edit_preview()
     {
         _maneuver_node_edit_preview = {};
+    }
+
+    void GameplayState::cancel_maneuver_node_dv_edit_preview()
+    {
+        cancel_maneuver_node_edit_preview();
     }
 
     orbitsim::BodyId GameplayState::resolve_maneuver_node_primary_body_id(const ManeuverNode &node,

@@ -190,6 +190,46 @@ TEST(OrbitRenderCurveTests, PickLodKeepsLongSegmentCrossingFrustum)
     EXPECT_DOUBLE_EQ(result.segments.front().t1_s, 1.0);
 }
 
+TEST(OrbitRenderCurveTests, RenderLodSplitsCurvedSegmentWithProjectedScreenError)
+{
+    const std::vector<orbitsim::TrajectorySegment> segments{
+            make_segment(0.0,
+                         1.0,
+                         glm::dvec3(-0.8, 0.0, 0.5),
+                         glm::dvec3(1.6, 4.8, 0.0),
+                         glm::dvec3(0.8, 0.0, 0.5),
+                         glm::dvec3(1.6, -4.8, 0.0)),
+    };
+
+    Game::OrbitRenderCurve::CameraContext camera{};
+    camera.camera_world = glm::dvec3(0.0, 0.0, 0.0);
+    camera.tan_half_fov = 1.0;
+    camera.viewport_height_px = 1080.0;
+
+    Game::OrbitRenderCurve::RenderSettings settings{};
+    settings.error_px = 2.0;
+    settings.max_segments = 16;
+
+    Game::OrbitRenderCurve::FrustumContext frustum{};
+    frustum.valid = true;
+    frustum.viewproj = glm::mat4(1.0f);
+
+    const Game::OrbitRenderCurve::RenderResult result =
+            Game::OrbitRenderCurve::build_render_lod(segments,
+                                                     WorldVec3(0.0, 0.0, 0.0),
+                                                     WorldVec3(0.0, 0.0, 0.0),
+                                                     camera,
+                                                     settings,
+                                                     0.0,
+                                                     1.0,
+                                                     frustum);
+
+    EXPECT_FALSE(result.cap_hit);
+    ASSERT_GT(result.segments.size(), 1u);
+    EXPECT_DOUBLE_EQ(result.segments.front().t0_s, 0.0);
+    EXPECT_DOUBLE_EQ(result.segments.back().t1_s, 1.0);
+}
+
 int main(int argc, char **argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

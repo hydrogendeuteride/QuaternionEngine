@@ -53,6 +53,7 @@ namespace Game
             selection_ctx.camera_world = global_ctx.camera_world;
             selection_ctx.tan_half_fov = global_ctx.tan_half_fov;
             selection_ctx.viewport_height_px = track_ctx.draw_ctx.viewport_height_px;
+            selection_ctx.error_frustum = global_ctx.render_frustum;
             selection_ctx.error_px = global_ctx.render_error_px;
             selection_ctx.anchor_times_s = pick_anchor_times_span;
             return selection_ctx;

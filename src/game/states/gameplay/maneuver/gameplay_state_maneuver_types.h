@@ -169,12 +169,14 @@ namespace Game
         enum class State
         {
             Idle = 0,
-            EditingDv
+            EditingDv,
+            EditingTime
         };
 
         State state{State::Idle};
         int node_id{-1};
         bool changed{false};
+        double start_time_s{0.0};
     };
 
     struct ManeuverGizmoViewContext

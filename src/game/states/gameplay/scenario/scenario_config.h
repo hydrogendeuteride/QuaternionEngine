@@ -4,7 +4,9 @@
 #include "core/world.h"
 #include "physics/body_settings.h"
 
+#include <glm/gtc/quaternion.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <string>
 #include <vector>
@@ -66,6 +68,24 @@ namespace Game
                 return !albedo.empty() || !normal.empty() || !metal_rough.empty() ||
                        !occlusion.empty() || !emissive.empty();
             }
+
+            bool has_overrides() const
+            {
+                return has_any_texture() ||
+                       color_factor.x != 1.0f || color_factor.y != 1.0f ||
+                       color_factor.z != 1.0f || color_factor.w != 1.0f ||
+                       metallic != 0.0f || roughness != 0.5f;
+            }
+        };
+
+        struct AttachmentDef
+        {
+            std::string name;
+            GameAPI::PrimitiveType primitive{GameAPI::PrimitiveType::Cube};
+            MaterialDef material;
+            glm::vec3 local_position{0.0f};
+            glm::quat local_rotation{1.0f, 0.0f, 0.0f, 0.0f};
+            glm::vec3 local_scale{1.0f};
         };
 
         struct OrbiterDef
@@ -74,6 +94,8 @@ namespace Game
             double orbit_altitude_m{0.0};      // altitude above reference body surface
             glm::dvec3 offset_from_player{0.0}; // relative spawn offset for non-player orbiters
             glm::dvec3 relative_velocity{0.0};  // initial velocity relative to player
+            bool derive_spawn_from_player_orbit{false}; // derive initial spawn state from the player's current orbit
+            double player_orbit_along_track_offset_m{0.0};
             bool formation_hold_enabled{false};
             std::string formation_leader;
             glm::dvec3 formation_slot_lvlh_m{0.0}; // slot in leader-centered LVLH frame
@@ -84,6 +106,7 @@ namespace Game
             GameAPI::PrimitiveType primitive{GameAPI::PrimitiveType::Capsule};
             MaterialDef material;              // textures for primitive mesh (ignored when gltf_path is set)
             glm::vec3 render_scale{1.0f};
+            std::vector<AttachmentDef> attachments; // optional child primitives attached to the orbiter render
             Physics::BodySettings body_settings{};
             bool is_player{false};
             bool is_rebase_anchor{false}; // explicit floating-origin anchor candidate
@@ -111,5 +134,4 @@ namespace Game
         WorldVec3 system_center{1.0e12, 0.0, 0.0};
     };
 
-    ScenarioConfig default_earth_moon_config();
 } // namespace Game

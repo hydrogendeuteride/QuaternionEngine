@@ -132,6 +132,7 @@ namespace Game
             glm::dvec3 camera_world{0.0, 0.0, 0.0};
             double tan_half_fov{0.0};
             double viewport_height_px{1.0};
+            FrustumContext error_frustum{};                  ///< optional projection data for camera-angle-aware error estimates
             double error_px{0.75};                           ///< pixel-error threshold for tree descent
             std::span<const double> anchor_times_s{};        ///< finite times that should lie on segment boundaries
         };

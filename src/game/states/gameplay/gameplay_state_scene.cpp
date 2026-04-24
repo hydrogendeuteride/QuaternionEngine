@@ -12,7 +12,6 @@
 #endif
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <optional>
 #include <string>
@@ -26,8 +25,6 @@ namespace Game
 
     namespace
     {
-        constexpr const char *kSelectionDemoCompositeName = "selection_demo_composite";
-
         glm::vec4 celestial_mesh_base_color(const std::string &name)
         {
             if (name == "moon")
@@ -36,172 +33,100 @@ namespace Game
             }
             return glm::vec4(0.86f, 0.86f, 0.88f, 1.0f);
         }
+
+        void update_orbiter_spawn_from_player_orbit(ScenarioConfig::OrbiterDef &orbiter_def,
+                                                    const WorldVec3 &player_pos_world,
+                                                    const glm::dvec3 &player_vel_world,
+                                                    const WorldVec3 &system_center)
+        {
+            if (!orbiter_def.derive_spawn_from_player_orbit)
+            {
+                return;
+            }
+
+            const double along_track_offset_m = orbiter_def.player_orbit_along_track_offset_m;
+            if (std::abs(along_track_offset_m) <= 1e-6)
+            {
+                return;
+            }
+
+            const glm::dvec3 player_rel_pos = glm::dvec3(player_pos_world - system_center);
+            const glm::dvec3 player_orbit_normal = glm::cross(player_rel_pos, player_vel_world);
+            const double player_orbit_radius_m = glm::length(player_rel_pos);
+            const double player_orbit_normal_len = glm::length(player_orbit_normal);
+
+            if (player_orbit_radius_m <= 1.0 || player_orbit_normal_len <= 1e-6)
+            {
+                return;
+            }
+
+            const double phase_offset_rad = along_track_offset_m / player_orbit_radius_m;
+            const glm::dquat phase_rotation = glm::angleAxis(
+                    phase_offset_rad,
+                    player_orbit_normal / player_orbit_normal_len);
+            const glm::dvec3 demo_rel_pos = phase_rotation * player_rel_pos;
+            const glm::dvec3 demo_vel_world = phase_rotation * player_vel_world;
+
+            orbiter_def.offset_from_player = demo_rel_pos - player_rel_pos;
+            orbiter_def.relative_velocity = demo_vel_world - player_vel_world;
+        }
+
+        void update_orbiter_spawn_from_authored_circular_orbit(ScenarioConfig::OrbiterDef &orbiter_def,
+                                                               const WorldVec3 &player_pos_world,
+                                                               const glm::dvec3 &player_vel_world,
+                                                               const WorldVec3 &system_center,
+                                                               const double gravitational_constant,
+                                                               const double central_mass_kg,
+                                                               const double central_body_radius_m)
+        {
+            if (orbiter_def.is_player || orbiter_def.derive_spawn_from_player_orbit)
+            {
+                return;
+            }
+
+            const double offset_len2 =
+                    glm::dot(orbiter_def.offset_from_player, orbiter_def.offset_from_player);
+            const double rel_vel_len2 =
+                    glm::dot(orbiter_def.relative_velocity, orbiter_def.relative_velocity);
+            if (offset_len2 > 1e-12 || rel_vel_len2 > 1e-12)
+            {
+                return;
+            }
+
+            const double orbit_radius_m = central_body_radius_m + orbiter_def.orbit_altitude_m;
+            if (!(orbit_radius_m > central_body_radius_m) ||
+                !(central_mass_kg > 0.0) ||
+                !std::isfinite(gravitational_constant))
+            {
+                return;
+            }
+
+            const glm::dvec3 player_rel_pos = glm::dvec3(player_pos_world - system_center);
+            const glm::dvec3 player_orbit_normal = glm::cross(player_rel_pos, player_vel_world);
+            const double player_rel_radius_m = glm::length(player_rel_pos);
+            const double player_orbit_normal_len = glm::length(player_orbit_normal);
+            if (player_rel_radius_m <= 1.0 || player_orbit_normal_len <= 1e-6)
+            {
+                return;
+            }
+
+            const glm::dvec3 radial_dir = player_rel_pos / player_rel_radius_m;
+            const glm::dvec3 orbit_normal_dir = player_orbit_normal / player_orbit_normal_len;
+            const glm::dvec3 tangential_dir = glm::normalize(glm::cross(orbit_normal_dir, radial_dir));
+            if (!std::isfinite(tangential_dir.x) || !std::isfinite(tangential_dir.y) || !std::isfinite(tangential_dir.z))
+            {
+                return;
+            }
+
+            const double mu = gravitational_constant * central_mass_kg;
+            const double circular_speed_mps = std::sqrt(mu / orbit_radius_m);
+            const glm::dvec3 target_rel_pos = radial_dir * orbit_radius_m;
+            const glm::dvec3 target_rel_vel = tangential_dir * circular_speed_mps;
+
+            orbiter_def.offset_from_player = target_rel_pos - player_rel_pos;
+            orbiter_def.relative_velocity = target_rel_vel - player_vel_world;
+        }
     } // namespace
-
-    // ---- Default scenario ----
-
-    ScenarioConfig default_earth_moon_config()
-    {
-        ScenarioConfig cfg;
-        cfg.system_center = WorldVec3{0.0, 0.0, 0.0};
-        cfg.speed_scale = 1.0;
-        cfg.mu_base = 3.986004418e14;
-
-        // Earth (reference body — index 0)
-        {
-            ScenarioConfig::CelestialDef earth{};
-            earth.name = "earth";
-            earth.mass_kg = 5.972e24;
-            earth.radius_m = 6'371'000.0;
-            earth.atmosphere_top_m = 100'000.0;
-            earth.terrain_max_m = 8'848.0;
-            earth.soi_radius_m = 9.24e8;
-            earth.orbit_distance_m = 0.0; // this IS the reference body
-            earth.has_terrain = true;
-            earth.albedo_dir = "planets/earth/albedo/L0";
-            earth.height_dir = "planets/earth/height/L0";
-            earth.height_max_m = 8'848.0;
-            earth.detail_normal_strength = 0.0f;
-            earth.cavity_strength = 0.0f;
-            earth.enable_terminator_shadow = false;
-            earth.emission_dir = "planets/earth/emission/L0";
-            earth.emission_factor = glm::vec3(2.0f, 2.0f, 2.0f);
-            earth.specular_dir = "planets/earth/specular/L0";
-            earth.specular_strength = 1.0f;
-            earth.specular_roughness = 0.06f;
-            earth.prediction_orbit_color = glm::vec3(0.60f, 0.68f, 0.82f);
-            earth.has_prediction_orbit_color = true;
-            cfg.celestials.push_back(std::move(earth));
-        }
-
-        // Moon
-        {
-            ScenarioConfig::CelestialDef moon{};
-            moon.name = "moon";
-            moon.mass_kg = 7.342e22;
-            moon.radius_m = 1'728'418.5;
-            moon.has_terrain = true;
-            moon.terrain_max_m = 19'667.0;
-            moon.albedo_dir = "planets/moon/albedo/L0";
-            moon.height_dir = "planets/moon/height/L0";
-            moon.height_max_m = 19'667.0;
-            moon.detail_normal_dir = "planets/moon/detail_normal/L0";
-            moon.detail_normal_strength = 0.5f;
-            moon.cavity_dir = "planets/moon/cavity/L0";
-            moon.cavity_strength = 0.35f;
-            moon.enable_terminator_shadow = true;
-            moon.patch_resolution_override = 65;
-            moon.target_sse_px_override = 18.0f;
-            moon.soi_radius_m = 6.61e7;
-            moon.orbit_distance_m = 384'400'000.0;
-            moon.prediction_orbit_color = glm::vec3(0.84f, 0.84f, 0.87f);
-            moon.has_prediction_orbit_color = true;
-            cfg.celestials.push_back(std::move(moon));
-        }
-
-        // Ship (player)
-        {
-            ScenarioConfig::OrbiterDef ship{};
-            ship.name = "ship";
-            ship.orbit_altitude_m = 400'000.0;
-            ship.prediction_group = "flight";
-            ship.prediction_orbit_color = glm::vec3(0.70f, 0.35f, 1.00f);
-            ship.has_prediction_orbit_color = true;
-            ship.is_player = true;
-            ship.is_rebase_anchor = true;
-            ship.gltf_path = "orion/scene.gltf";
-            ship.primitive = GameAPI::PrimitiveType::Capsule;
-
-            constexpr float ship_radius_m = 2.0f;
-            constexpr float ship_half_height_m = 2.0f;
-            ship.render_scale = glm::vec3(1.0f);
-
-            ship.body_settings
-                    .set_shape(Physics::CollisionShape::Capsule(ship_radius_m, ship_half_height_m))
-                    .set_dynamic()
-                    .set_layer(Physics::Layer::Player)
-                    .set_gravity_scale(0.0f)
-                    .set_friction(0.2f)
-                    .set_restitution(0.05f)
-                    .set_linear_damping(0.0f)
-                    .set_angular_damping(0.0f)
-                    .set_mass(10000.0f);
-
-            cfg.orbiters.push_back(std::move(ship));
-        }
-
-        // Probe
-        {
-            ScenarioConfig::OrbiterDef probe{};
-            probe.name = "probe";
-            probe.formation_hold_enabled = true;
-            probe.formation_leader = "ship";
-            probe.formation_slot_lvlh_m = glm::dvec3(0.0, -60.0, 0.0);
-            probe.prediction_group = "flight";
-            probe.prediction_orbit_color = glm::vec3(0.25f, 0.52f, 1.00f);
-            probe.has_prediction_orbit_color = true;
-            probe.is_player = false;
-            probe.offset_from_player = glm::dvec3(0.0, 0.0, -60.0);
-            probe.relative_velocity = glm::dvec3(0.0);
-            probe.primitive = GameAPI::PrimitiveType::Sphere;
-            probe.render_scale = glm::vec3(2.0f);
-
-            probe.body_settings
-                    .set_shape(Physics::CollisionShape::Sphere(1.0f))
-                    .set_dynamic()
-                    .set_layer(Physics::Layer::Dynamic)
-                    .set_gravity_scale(0.0f)
-                    .set_friction(0.2f)
-                    .set_restitution(0.1f)
-                    .set_linear_damping(0.0f)
-                    .set_angular_damping(0.0f)
-                    .set_mass(1000.0f);
-
-            cfg.orbiters.push_back(std::move(probe));
-        }
-
-        // Collision experiment target
-        {
-            ScenarioConfig::OrbiterDef collision_test{};
-            collision_test.name = "collision_test";
-            collision_test.is_player = false;
-            collision_test.prediction_group = "flight";
-            collision_test.prediction_orbit_color = glm::vec3(1.00f, 0.25f, 0.25f);
-            collision_test.has_prediction_orbit_color = true;
-            collision_test.offset_from_player = glm::dvec3(0.0, -0.5, 150.0);
-            collision_test.relative_velocity = glm::dvec3(0.0, 0.0, -25.0);
-            collision_test.primitive = GameAPI::PrimitiveType::Cube;
-            collision_test.render_scale = glm::vec3(3.0f);
-
-            collision_test.body_settings
-                    .set_shape(Physics::CollisionShape::Box(1.5f, 1.5f, 1.5f))
-                    .set_dynamic()
-                    .set_layer(Physics::Layer::Dynamic)
-                    .set_gravity_scale(0.0f)
-                    .set_friction(0.2f)
-                    .set_restitution(0.1f)
-                    .set_linear_damping(0.0f)
-                    .set_angular_damping(0.0f)
-                    .set_mass(500.0f);
-
-            cfg.orbiters.push_back(std::move(collision_test));
-        }
-
-        // Environment
-        {
-            ScenarioConfig::EnvironmentDef env{};
-            env.ibl_specular = "ibl/blue_nebula_4k.ktx2";
-            env.ibl_diffuse = "ibl/blue_nebula_4k.ktx2";
-            env.ibl_brdf_lut = "ibl/brdf_lut.ktx2";
-            env.ibl_background = "ibl/darkstar.ktx2";
-            env.has_atmosphere = true;
-            env.has_particles = true;
-            env.rocket_plume_noise = "vfx/simplex.ktx2";
-            cfg.environment = std::move(env);
-        }
-
-        return cfg;
-    }
 
     Physics::BodyId GameplayState::create_orbiter_physics_body(const bool render_is_gltf,
                                                                Entity &entity,
@@ -409,42 +334,25 @@ namespace Game
         const glm::dvec3 v_origin_world =
                 _physics_context ? _physics_context->velocity_origin_world() : glm::dvec3(0.0);
 
-        auto attach_selection_demo_composite = [&](Entity &entity) -> bool {
+        auto attach_orbiter_attachments = [&](const ScenarioConfig::OrbiterDef &orbiter_def,
+                                              Entity &entity) -> bool {
+            if (orbiter_def.attachments.empty())
+            {
+                return true;
+            }
             if (!ctx.api || entity.render_name().empty())
             {
                 return false;
             }
 
-            struct MemberSpec
-            {
-                const char *name;
-                GameAPI::PrimitiveType primitive{GameAPI::PrimitiveType::Cube};
-                glm::vec3 local_position{0.0f};
-                glm::vec3 local_scale{1.0f};
-                glm::vec4 color{1.0f};
-            };
-
-            const std::array<MemberSpec, 2> member_specs{{
-                    {"port_pod",
-                     GameAPI::PrimitiveType::Cube,
-                     glm::vec3(-1.05f, 0.0f, -0.25f),
-                     glm::vec3(0.38f, 0.22f, 0.82f),
-                     glm::vec4(0.92f, 0.48f, 0.18f, 1.0f)},
-                    {"starboard_pod",
-                     GameAPI::PrimitiveType::Cube,
-                     glm::vec3(1.05f, 0.0f, -0.25f),
-                     glm::vec3(0.38f, 0.22f, 0.82f),
-                     glm::vec4(0.18f, 0.78f, 0.98f, 1.0f)},
-            }};
-
-            for (const MemberSpec &spec : member_specs)
+            for (const auto &attachment_def : orbiter_def.attachments)
             {
                 Attachment attachment{};
-                attachment.name = spec.name;
-                attachment.render_name = entity.render_name() + "_" + spec.name;
-                attachment.local_position = spec.local_position;
-                attachment.local_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-                attachment.local_scale = spec.local_scale;
+                attachment.name = attachment_def.name;
+                attachment.render_name = entity.render_name() + "_" + attachment_def.name;
+                attachment.local_position = attachment_def.local_position;
+                attachment.local_rotation = attachment_def.local_rotation;
+                attachment.local_scale = attachment_def.local_scale;
 
                 Transform local_transform{};
                 local_transform.position_world = WorldVec3(attachment.local_position);
@@ -458,15 +366,30 @@ namespace Game
                 api_transform.rotation = world_transform.rotation;
                 api_transform.scale = world_transform.scale;
 
-                GameAPI::PrimitiveMaterial material{};
-                material.colorFactor = spec.color;
-                material.metallic = 0.0f;
-                material.roughness = 0.35f;
-
-                if (!ctx.api->add_textured_primitive(attachment.render_name,
-                                                     spec.primitive,
-                                                     material,
-                                                     api_transform))
+                bool created = false;
+                if (attachment_def.material.has_overrides())
+                {
+                    GameAPI::PrimitiveMaterial material{};
+                    material.albedoPath = attachment_def.material.albedo;
+                    material.normalPath = attachment_def.material.normal;
+                    material.metalRoughPath = attachment_def.material.metal_rough;
+                    material.occlusionPath = attachment_def.material.occlusion;
+                    material.emissivePath = attachment_def.material.emissive;
+                    material.colorFactor = attachment_def.material.color_factor;
+                    material.metallic = attachment_def.material.metallic;
+                    material.roughness = attachment_def.material.roughness;
+                    created = ctx.api->add_textured_primitive(attachment.render_name,
+                                                              attachment_def.primitive,
+                                                              material,
+                                                              api_transform);
+                }
+                else
+                {
+                    created = ctx.api->add_primitive_instance(attachment.render_name,
+                                                              attachment_def.primitive,
+                                                              api_transform);
+                }
+                if (!created)
                 {
                     return false;
                 }
@@ -497,15 +420,12 @@ namespace Game
 
             auto builder = _world.builder(orbiter_def.name).transform(tr);
             builder.selection_binding(orbiter_def.name, "body");
-            if (orbiter_def.name == kSelectionDemoCompositeName)
-            {
-                builder.render_sync_mode(Entity::RenderSyncMode::Authoritative);
-            }
+            builder.render_sync_mode(Entity::RenderSyncMode::Authoritative);
             if (render_is_gltf)
             {
                 builder.render_gltf(orbiter_def.gltf_path);
             }
-            else if (orbiter_def.material.has_any_texture())
+            else if (orbiter_def.material.has_overrides())
             {
                 GameAPI::PrimitiveMaterial mat{};
                 mat.albedoPath = orbiter_def.material.albedo;
@@ -531,8 +451,7 @@ namespace Game
                 return;
             }
 
-            if (orbiter_def.name == kSelectionDemoCompositeName &&
-                !attach_selection_demo_composite(*ent))
+            if (!attach_orbiter_attachments(orbiter_def, *ent))
             {
                 (void) _world.destroy_entity(ent->id());
                 out_id = EntityId{};
@@ -550,7 +469,7 @@ namespace Game
                                                                             tr.rotation,
                                                                             &origin_offset_local);
                 if (!body_id.is_valid() ||
-                    !_world.bind_physics(ent->id(), body_id.value, true, false, origin_offset_local))
+                    !_world.bind_physics(ent->id(), body_id.value, false, false, origin_offset_local))
                 {
                     (void) _world.destroy_entity(ent->id());
                     out_id = EntityId{};
@@ -573,49 +492,24 @@ namespace Game
         // Spawn all orbiters from config
         const auto &cfg = _scenario_config;
         std::vector<ScenarioConfig::OrbiterDef> orbiter_defs = cfg.orbiters;
-
+        const CelestialBodyInfo *ref_info = _orbitsim ? _orbitsim->world_reference_body() : nullptr;
+        const double reference_radius_m = ref_info ? ref_info->radius_m : 0.0;
+        const double reference_mass_kg = ref_info ? ref_info->mass_kg : 0.0;
+        const double gravitational_constant =
+                _orbitsim ? _orbitsim->sim.config().gravitational_constant : 0.0;
+        for (auto &orbiter_def : orbiter_defs)
         {
-            ScenarioConfig::OrbiterDef demo_composite{};
-            demo_composite.name = kSelectionDemoCompositeName;
-            demo_composite.prediction_group = "flight";
-            demo_composite.primitive = GameAPI::PrimitiveType::Capsule;
-            demo_composite.render_scale = glm::vec3(1.35f);
-            demo_composite.body_settings
-                    .set_shape(Physics::CollisionShape::Capsule(0.7f, 1.1f))
-                    .set_dynamic()
-                    .set_layer(Physics::Layer::Dynamic)
-                    .set_gravity_scale(0.0f)
-                    .set_friction(0.2f)
-                    .set_restitution(0.1f)
-                    .set_linear_damping(0.0f)
-                    .set_angular_damping(0.0f)
-                    .set_mass(850.0f);
-
-            const glm::dvec3 player_rel_pos = glm::dvec3(player_pos_world - cfg.system_center);
-            const glm::dvec3 player_orbit_normal = glm::cross(player_rel_pos, player_vel_world);
-            const double player_orbit_radius_m = glm::length(player_rel_pos);
-            const double player_orbit_normal_len = glm::length(player_orbit_normal);
-
-            if (player_orbit_radius_m > 1.0 && player_orbit_normal_len > 1e-6)
-            {
-                constexpr double kDemoShipAlongTrackSpacingM = 120.0;
-                const double phase_offset_rad = kDemoShipAlongTrackSpacingM / player_orbit_radius_m;
-                const glm::dquat phase_rotation = glm::angleAxis(
-                        phase_offset_rad,
-                        player_orbit_normal / player_orbit_normal_len);
-                const glm::dvec3 demo_rel_pos = phase_rotation * player_rel_pos;
-                const glm::dvec3 demo_vel_world = phase_rotation * player_vel_world;
-
-                demo_composite.offset_from_player = demo_rel_pos - player_rel_pos;
-                demo_composite.relative_velocity = demo_vel_world - player_vel_world;
-            }
-            else
-            {
-                demo_composite.offset_from_player = glm::dvec3(0.0, 0.0, -120.0);
-                demo_composite.relative_velocity = glm::dvec3(0.0);
-            }
-
-            orbiter_defs.push_back(std::move(demo_composite));
+            update_orbiter_spawn_from_player_orbit(orbiter_def,
+                                                   player_pos_world,
+                                                   player_vel_world,
+                                                   cfg.system_center);
+            update_orbiter_spawn_from_authored_circular_orbit(orbiter_def,
+                                                              player_pos_world,
+                                                              player_vel_world,
+                                                              cfg.system_center,
+                                                              gravitational_constant,
+                                                              reference_mass_kg,
+                                                              reference_radius_m);
         }
 
         bool primary_player_spawned = false;
@@ -649,7 +543,7 @@ namespace Game
             info.render_is_gltf = !orbiter_def.gltf_path.empty();
             info.mass_kg = std::max(0.0, static_cast<double>(orbiter_def.body_settings.mass));
             info.physics_settings = orbiter_def.body_settings;
-            info.use_physics_interpolation = true;
+            info.use_physics_interpolation = false;
             info.formation_hold_enabled = orbiter_def.formation_hold_enabled;
             info.formation_leader_name = orbiter_def.formation_leader;
             info.formation_slot_lvlh_m = orbiter_def.formation_slot_lvlh_m;
