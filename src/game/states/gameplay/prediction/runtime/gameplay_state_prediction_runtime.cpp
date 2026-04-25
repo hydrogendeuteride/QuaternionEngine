@@ -333,12 +333,51 @@ namespace Game
                 track.request_pending = false;
                 track.derived_request_pending = false;
                 track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+                track.pending_solver_has_maneuver_plan = false;
+                track.pending_solver_plan_signature = 0u;
+                track.pending_derived_has_maneuver_plan = false;
+                track.pending_derived_plan_signature = 0u;
                 track.invalidated_while_pending = false;
                 track.dirty = true;
             }
         }
 
         mark_prediction_dirty();
+    }
+
+    void GameplayState::clear_maneuver_prediction_artifacts()
+    {
+        for (PredictionTrackState &track : _prediction_tracks)
+        {
+            if (!track.supports_maneuvers)
+            {
+                continue;
+            }
+
+            clear_prediction_cache_planned_data(track.cache);
+            clear_prediction_cache_planned_data(track.authoritative_cache);
+            track.preview_state = PredictionPreviewRuntimeState::Idle;
+            track.preview_anchor = {};
+            track.preview_overlay.clear();
+            track.full_stream_overlay.clear();
+            track.pick_cache.clear();
+
+            if (track.request_pending && track.pending_solver_has_maneuver_plan)
+            {
+                track.request_pending = false;
+                track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+            }
+            if (track.derived_request_pending && track.pending_derived_has_maneuver_plan)
+            {
+                track.derived_request_pending = false;
+            }
+
+            track.pending_solver_has_maneuver_plan = false;
+            track.pending_solver_plan_signature = 0u;
+            track.pending_derived_has_maneuver_plan = false;
+            track.pending_derived_plan_signature = 0u;
+            track.invalidated_while_pending = false;
+        }
     }
 
     void GameplayState::clear_prediction_runtime()

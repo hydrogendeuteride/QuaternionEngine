@@ -155,6 +155,29 @@ TEST(OrbitRenderCurveTests, SelectSegmentsNormalizesUnsortedAnchorTimes)
     }
 }
 
+TEST(OrbitRenderCurveTests, SelectSegmentsDoesNotMergeAcrossForcedBoundaries)
+{
+    std::vector<orbitsim::TrajectorySegment> segments = make_curved_segments();
+    segments[1].flags = orbitsim::kTrajectorySegmentFlagImpulseBoundary;
+
+    const Game::OrbitRenderCurve curve = Game::OrbitRenderCurve::build(segments);
+
+    Game::OrbitRenderCurve::SelectionContext ctx{};
+    ctx.camera_world = glm::dvec3(0.0, 0.0, 1.0e12);
+    ctx.tan_half_fov = 1.0;
+    ctx.viewport_height_px = 1080.0;
+    ctx.error_px = 1.0e30;
+
+    std::vector<orbitsim::TrajectorySegment> selected{};
+    Game::OrbitRenderCurve::select_segments(curve, ctx, 0.0, 4.0, selected);
+
+    ASSERT_GE(selected.size(), 2u);
+    for (const orbitsim::TrajectorySegment &segment : selected)
+    {
+        EXPECT_FALSE(segment.t0_s < 1.0 && segment.t0_s + segment.dt_s > 1.0);
+    }
+}
+
 TEST(OrbitRenderCurveTests, PickLodKeepsLongSegmentCrossingFrustum)
 {
     const std::vector<orbitsim::TrajectorySegment> segments{
@@ -228,6 +251,44 @@ TEST(OrbitRenderCurveTests, RenderLodSplitsCurvedSegmentWithProjectedScreenError
     ASSERT_GT(result.segments.size(), 1u);
     EXPECT_DOUBLE_EQ(result.segments.front().t0_s, 0.0);
     EXPECT_DOUBLE_EQ(result.segments.back().t1_s, 1.0);
+}
+
+TEST(OrbitRenderCurveTests, RenderLodSkipsCurveIntervalsOutsideFrustum)
+{
+    const std::vector<orbitsim::TrajectorySegment> segments{
+            make_segment(0.0,
+                         1.0,
+                         glm::dvec3(-0.5, 2.0, 0.5),
+                         glm::dvec3(1.0, 0.0, 0.0),
+                         glm::dvec3(0.5, 2.0, 0.5),
+                         glm::dvec3(1.0, 0.0, 0.0)),
+    };
+
+    Game::OrbitRenderCurve::CameraContext camera{};
+    camera.camera_world = glm::dvec3(0.0, 0.0, 0.0);
+    camera.tan_half_fov = 1.0;
+    camera.viewport_height_px = 1080.0;
+
+    Game::OrbitRenderCurve::RenderSettings settings{};
+    settings.error_px = 2.0;
+    settings.max_segments = 16;
+
+    Game::OrbitRenderCurve::FrustumContext frustum{};
+    frustum.valid = true;
+    frustum.viewproj = glm::mat4(1.0f);
+
+    const Game::OrbitRenderCurve::RenderResult result =
+            Game::OrbitRenderCurve::build_render_lod(segments,
+                                                     WorldVec3(0.0, 0.0, 0.0),
+                                                     WorldVec3(0.0, 0.0, 0.0),
+                                                     camera,
+                                                     settings,
+                                                     0.0,
+                                                     1.0,
+                                                     frustum);
+
+    EXPECT_TRUE(result.segments.empty());
+    EXPECT_FALSE(result.cap_hit);
 }
 
 int main(int argc, char **argv)

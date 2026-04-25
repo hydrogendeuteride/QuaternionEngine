@@ -3,7 +3,7 @@
 /// build_render_lod() walks each input segment and recursively bisects intervals
 /// whose chord-vs-curve midpoint deviation exceeds a screen-pixel threshold.
 /// Subdivision is stack-based (not recursive) to avoid deep call stacks.
-/// Segments outside the frustum are accepted as-is without further subdivision.
+/// Segments outside the frustum are skipped.
 
 #include "game/orbit/orbit_render_curve.h"
 #include "game/orbit/render_curve/orbit_render_curve_internal.h"
@@ -183,7 +183,6 @@ namespace Game
                 const bool chord_in_frustum = frustum_accept_segment_margin(
                         frustum, item.a_world, item.b_world, kRenderFrustumMargin);
                 const bool curve_may_enter_frustum =
-                        chord_in_frustum ||
                         frustum_accept_hermite_interval_margin(frustum,
                                                                *item.segment,
                                                                item.t0_s,
@@ -191,6 +190,10 @@ namespace Game
                                                                reference_body_world,
                                                                align_delta_world,
                                                                kRenderFrustumMargin);
+                if (!curve_may_enter_frustum)
+                {
+                    continue;
+                }
 
                 WorldVec3 mid_world{};
                 double mid_t_s = 0.0;

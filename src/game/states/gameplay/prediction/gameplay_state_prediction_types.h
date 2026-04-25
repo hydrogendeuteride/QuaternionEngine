@@ -642,6 +642,10 @@ namespace Game
         OrbitPredictionService::PublishStage latest_requested_derived_publish_stage{
                 OrbitPredictionService::PublishStage::Final};
         OrbitPredictionService::SolveQuality pending_solve_quality{OrbitPredictionService::SolveQuality::Full};
+        bool pending_solver_has_maneuver_plan{false};
+        uint64_t pending_solver_plan_signature{0};
+        bool pending_derived_has_maneuver_plan{false};
+        uint64_t pending_derived_plan_signature{0};
         bool invalidated_while_pending{false};
         PredictionDragDebugTelemetry drag_debug{};
         bool supports_maneuvers{false};
@@ -674,6 +678,10 @@ namespace Game
             latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
             latest_requested_derived_publish_stage = OrbitPredictionService::PublishStage::Final;
             pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+            pending_solver_has_maneuver_plan = false;
+            pending_solver_plan_signature = 0;
+            pending_derived_has_maneuver_plan = false;
+            pending_derived_plan_signature = 0;
             invalidated_while_pending = false;
             drag_debug.clear();
             auto_primary_body_id = orbitsim::kInvalidBodyId;

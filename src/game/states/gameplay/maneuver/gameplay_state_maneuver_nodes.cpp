@@ -276,6 +276,10 @@ namespace Game
             _execute_node_armed = false;
             _execute_node_id = -1;
         }
+        if (_maneuver_state.nodes.empty())
+        {
+            clear_maneuver_prediction_artifacts();
+        }
 
         mark_maneuver_plan_dirty();
     }

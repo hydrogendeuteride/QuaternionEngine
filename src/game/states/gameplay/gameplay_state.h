@@ -285,6 +285,7 @@ namespace Game
         void emit_maneuver_node_debug_overlay(GameStateContext &ctx);
         void mark_prediction_dirty();
         void mark_maneuver_plan_dirty();
+        void clear_maneuver_prediction_artifacts();
         bool maneuver_live_preview_active(bool with_maneuvers) const;
         int active_maneuver_preview_anchor_node_id() const;
         void begin_maneuver_node_dv_edit_preview(int node_id);

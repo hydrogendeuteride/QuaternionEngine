@@ -16,7 +16,9 @@ namespace Game
         void mark_prediction_request_submitted(PredictionTrackState &track,
                                                const uint64_t generation_id,
                                                const double now_s,
-                                               const OrbitPredictionService::SolveQuality solve_quality)
+                                               const OrbitPredictionService::SolveQuality solve_quality,
+                                               const bool request_has_maneuver_plan,
+                                               const uint64_t plan_signature)
         {
             track.latest_requested_generation_id = generation_id;
             if (solve_quality == OrbitPredictionService::SolveQuality::Full)
@@ -26,6 +28,10 @@ namespace Game
             track.request_pending = true;
             track.derived_request_pending = false;
             track.pending_solve_quality = solve_quality;
+            track.pending_solver_has_maneuver_plan = request_has_maneuver_plan;
+            track.pending_solver_plan_signature = request_has_maneuver_plan ? plan_signature : 0u;
+            track.pending_derived_has_maneuver_plan = false;
+            track.pending_derived_plan_signature = 0u;
             track.invalidated_while_pending = false;
             (void) now_s;
 
@@ -598,7 +604,12 @@ namespace Game
         const double submitted_future_window_s = request.future_window_s;
         const std::size_t submitted_maneuver_count = request.maneuver_impulses.size();
         const uint64_t generation_id = _prediction_service.request(std::move(request));
-        mark_prediction_request_submitted(track, generation_id, now_s, submitted_quality);
+        mark_prediction_request_submitted(track,
+                                          generation_id,
+                                          now_s,
+                                          submitted_quality,
+                                          submitted_plan_signature_valid,
+                                          submitted_plan_signature);
         if (track.supports_maneuvers)
         {
             Logger::debug("Maneuver prediction request: track={} gen={} plan_rev={} plan_sig={} plan_sig_valid={} "
@@ -674,7 +685,9 @@ namespace Game
                 track,
                 generation_id,
                 now_s,
-                OrbitPredictionService::SolveQuality::Full);
+                OrbitPredictionService::SolveQuality::Full,
+                false,
+                0u);
         return true;
     }
 
