@@ -535,6 +535,7 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestUsesSelectedNodePreviewF
     ASSERT_TRUE(request.preview_patch.active);
     EXPECT_FALSE(request.planned_suffix_refine.active);
     ASSERT_TRUE(request.preview_patch.anchor_state_valid);
+    EXPECT_FALSE(request.preview_patch.anchor_state_trusted);
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.position_m.x, 7'250'000.0);
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.position_m.y, 123.0);
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.velocity_mps.y, 7'650.0);
@@ -654,6 +655,7 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestFallsBackToInertialCache
     ASSERT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
     ASSERT_TRUE(request.preview_patch.active);
     ASSERT_TRUE(request.preview_patch.anchor_state_valid);
+    EXPECT_TRUE(request.preview_patch.anchor_state_trusted);
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.position_m.x, 7'100'000.0);
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.velocity_mps.y, 7'500.0);
 }
@@ -758,6 +760,7 @@ TEST(GameplayPredictionManeuverTests, TimeEditUsesBaselineAnchorStateForMovedFir
     ASSERT_EQ(request.solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
     ASSERT_TRUE(request.preview_patch.active);
     ASSERT_TRUE(request.preview_patch.anchor_state_valid);
+    EXPECT_TRUE(request.preview_patch.anchor_state_trusted);
     EXPECT_DOUBLE_EQ(request.preview_patch.anchor_state_inertial.position_m.x, 7'200'000.0);
 }
 

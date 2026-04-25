@@ -222,6 +222,9 @@ namespace Game
                                               orbitsim::State &out_state) const;
         bool resolve_prediction_preview_anchor_state(const PredictionTrackState &track,
                                                      orbitsim::State &out_state) const;
+        bool resolve_prediction_preview_anchor_state(const PredictionTrackState &track,
+                                                     orbitsim::State &out_state,
+                                                     bool &out_trusted) const;
         orbitsim::SpacecraftStateLookup build_prediction_player_lookup() const;
         orbitsim::TrajectoryFrameSpec resolve_prediction_display_frame_spec(
                 const OrbitPredictionCache &cache,

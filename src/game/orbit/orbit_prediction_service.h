@@ -240,6 +240,7 @@ namespace Game
             {
                 bool active{false};
                 bool anchor_state_valid{false};
+                bool anchor_state_trusted{false};
                 double anchor_time_s{std::numeric_limits<double>::quiet_NaN()};
                 double visual_window_s{0.0};
                 double exact_window_s{0.0};

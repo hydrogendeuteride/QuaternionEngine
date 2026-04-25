@@ -199,6 +199,7 @@ TEST(GameplayPredictionManeuverTests, PredictionServicePublishesPreviewPatchThen
     request.solve_quality = Game::OrbitPredictionService::SolveQuality::FastPreview;
     request.preview_patch.active = true;
     request.preview_patch.anchor_state_valid = true;
+    request.preview_patch.anchor_state_trusted = true;
     request.preview_patch.anchor_time_s = 20.0;
     request.preview_patch.visual_window_s = 10.0;
     request.preview_patch.exact_window_s = request.preview_patch.visual_window_s;
@@ -327,6 +328,7 @@ TEST(GameplayPredictionManeuverTests, PredictionServiceFinalizingStageRetainsPre
     request.solve_quality = Game::OrbitPredictionService::SolveQuality::FastPreview;
     request.preview_patch.active = true;
     request.preview_patch.anchor_state_valid = true;
+    request.preview_patch.anchor_state_trusted = true;
     request.preview_patch.anchor_time_s = 20.0;
     request.preview_patch.visual_window_s = 10.0;
     request.preview_patch.exact_window_s = 10.0;

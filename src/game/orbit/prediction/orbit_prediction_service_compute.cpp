@@ -968,6 +968,7 @@ namespace Game
 
                 orbitsim::State preview_start_state = ship_sc.state;
                 if (planned_request.preview_patch.anchor_state_valid &&
+                    planned_request.preview_patch.anchor_state_trusted &&
                     finite_state(planned_request.preview_patch.anchor_state_inertial))
                 {
                     preview_start_state = planned_request.preview_patch.anchor_state_inertial;

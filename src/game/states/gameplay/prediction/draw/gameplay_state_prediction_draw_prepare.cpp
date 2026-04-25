@@ -192,12 +192,10 @@ namespace Game
 
         out.identity_frame_transform = Draw::frame_transform_is_identity(out.frame_to_world);
         out.use_base_adaptive_curve = !out.stable_cache->render_curve_frame.empty();
-        const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
-                PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
-        out.use_planned_adaptive_curve =
-                planned_cache_current &&
-                lifecycle.preview_state != PredictionPreviewRuntimeState::PreviewStreaming &&
-                !out.planned_cache->render_curve_frame_planned.empty();
+        // Planned maneuver paths need to stay on the segment path. Preview streaming
+        // publishes segment chunks, and switching the tail back to the cached adaptive
+        // render curve on final publish can visibly move the post-preview tail.
+        out.use_planned_adaptive_curve = false;
 
         out.world_basis_draw_ctx = out.draw_ctx;
         if (!out.identity_frame_transform)

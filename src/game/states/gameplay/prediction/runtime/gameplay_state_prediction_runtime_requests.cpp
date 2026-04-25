@@ -251,7 +251,16 @@ namespace Game
     bool GameplayState::resolve_prediction_preview_anchor_state(const PredictionTrackState &track,
                                                                 orbitsim::State &out_state) const
     {
+        bool trusted = false;
+        return resolve_prediction_preview_anchor_state(track, out_state, trusted);
+    }
+
+    bool GameplayState::resolve_prediction_preview_anchor_state(const PredictionTrackState &track,
+                                                                orbitsim::State &out_state,
+                                                                bool &out_trusted) const
+    {
         out_state = {};
+        out_trusted = false;
         if (!track.preview_anchor.valid || !std::isfinite(track.preview_anchor.anchor_time_s))
         {
             return false;
@@ -265,20 +274,30 @@ namespace Game
                 _maneuver_node_edit_preview.node_id == track.preview_anchor.anchor_node_id;
         const bool anchor_node_is_current =
                 _maneuver_state.find_node(track.preview_anchor.anchor_node_id) != nullptr;
+        const double sim_now_s = current_sim_time_s();
+        const bool has_prior_future_maneuver =
+                anchor_node_is_current &&
+                current_plan_has_prior_future_maneuver(_maneuver_state.nodes,
+                                                       track.preview_anchor.anchor_node_id,
+                                                       track.preview_anchor.anchor_time_s,
+                                                       sim_now_s);
         if (anchor_node_is_current && editing_anchor_time)
         {
-            const double sim_now_s = current_sim_time_s();
-            const bool has_prior_future_maneuver =
-                    current_plan_has_prior_future_maneuver(_maneuver_state.nodes,
-                                                           track.preview_anchor.anchor_node_id,
-                                                           track.preview_anchor.anchor_time_s,
-                                                           sim_now_s);
             if (has_prior_future_maneuver)
             {
                 return false;
             }
 
-            return sample_unplanned_anchor_state(anchor_cache, track.preview_anchor.anchor_time_s, out_state);
+            out_trusted = sample_unplanned_anchor_state(anchor_cache, track.preview_anchor.anchor_time_s, out_state);
+            return out_trusted;
+        }
+
+        if (anchor_node_is_current &&
+            !has_prior_future_maneuver &&
+            sample_unplanned_anchor_state(anchor_cache, track.preview_anchor.anchor_time_s, out_state))
+        {
+            out_trusted = true;
+            return true;
         }
 
         const auto preview_it =
@@ -297,39 +316,38 @@ namespace Game
         {
             out_state.position_m = preview_it->inertial_position_m;
             out_state.velocity_mps = preview_it->inertial_velocity_mps;
+            out_trusted = false;
             return true;
         }
 
         if (anchor_node_is_current && cache_has_planned_prediction_data(anchor_cache))
         {
-            const double sim_now_s = current_sim_time_s();
-            const bool has_prior_future_maneuver =
-                    current_plan_has_prior_future_maneuver(_maneuver_state.nodes,
-                                                           track.preview_anchor.anchor_node_id,
-                                                           track.preview_anchor.anchor_time_s,
-                                                           sim_now_s);
             if (has_prior_future_maneuver)
             {
                 return false;
             }
 
-            return sample_unplanned_anchor_state(anchor_cache, track.preview_anchor.anchor_time_s, out_state);
+            out_trusted = sample_unplanned_anchor_state(anchor_cache, track.preview_anchor.anchor_time_s, out_state);
+            return out_trusted;
         }
 
-        return PredictionCacheInternal::sample_prediction_inertial_state(anchor_cache.trajectory_segments_inertial_planned,
-                                                                         track.preview_anchor.anchor_time_s,
-                                                                         out_state,
-                                                                         TrajectoryBoundarySide::Before) ||
-               sample_prediction_inertial_state(anchor_cache.trajectory_inertial_planned,
-                                                 track.preview_anchor.anchor_time_s,
-                                                 out_state) ||
-               PredictionCacheInternal::sample_prediction_inertial_state(track.cache.resolved_trajectory_segments_inertial(),
-                                                                         track.preview_anchor.anchor_time_s,
-                                                                         out_state,
-                                                                         TrajectoryBoundarySide::Before) ||
-               sample_prediction_inertial_state(track.cache.resolved_trajectory_inertial(),
-                                                 track.preview_anchor.anchor_time_s,
-                                                 out_state);
+        const bool resolved =
+                PredictionCacheInternal::sample_prediction_inertial_state(anchor_cache.trajectory_segments_inertial_planned,
+                                                                          track.preview_anchor.anchor_time_s,
+                                                                          out_state,
+                                                                          TrajectoryBoundarySide::Before) ||
+                sample_prediction_inertial_state(anchor_cache.trajectory_inertial_planned,
+                                                  track.preview_anchor.anchor_time_s,
+                                                  out_state) ||
+                PredictionCacheInternal::sample_prediction_inertial_state(track.cache.resolved_trajectory_segments_inertial(),
+                                                                          track.preview_anchor.anchor_time_s,
+                                                                          out_state,
+                                                                          TrajectoryBoundarySide::Before) ||
+                sample_prediction_inertial_state(track.cache.resolved_trajectory_inertial(),
+                                                  track.preview_anchor.anchor_time_s,
+                                                  out_state);
+        out_trusted = false;
+        return resolved;
     }
 
     bool GameplayState::build_orbiter_prediction_request(PredictionTrackState &track,
@@ -439,9 +457,11 @@ namespace Game
             request.preview_patch.visual_window_s = track.preview_anchor.visual_window_s;
             request.preview_patch.exact_window_s = preview_exact_window_s;
             orbitsim::State anchor_state{};
-            if (resolve_prediction_preview_anchor_state(track, anchor_state))
+            bool anchor_state_trusted = false;
+            if (resolve_prediction_preview_anchor_state(track, anchor_state, anchor_state_trusted))
             {
                 request.preview_patch.anchor_state_valid = true;
+                request.preview_patch.anchor_state_trusted = anchor_state_trusted;
                 request.preview_patch.anchor_state_inertial = anchor_state;
             }
         }
@@ -600,6 +620,7 @@ namespace Game
         const auto submitted_priority = request.priority;
         const bool submitted_preview_patch = request.preview_patch.active;
         const bool submitted_anchor_state_valid = request.preview_patch.anchor_state_valid;
+        const bool submitted_anchor_state_trusted = request.preview_patch.anchor_state_trusted;
         const double submitted_anchor_time_s = request.preview_patch.anchor_time_s;
         const double submitted_future_window_s = request.future_window_s;
         const std::size_t submitted_maneuver_count = request.maneuver_impulses.size();
@@ -614,7 +635,8 @@ namespace Game
         {
             Logger::debug("Maneuver prediction request: track={} gen={} plan_rev={} plan_sig={} plan_sig_valid={} "
                           "quality={} priority={} "
-                          "preview={} anchor_t={:.6f} anchor_state={} impulses={} future_window={:.3f} "
+                          "preview={} anchor_t={:.6f} anchor_state={} anchor_trusted={} impulses={} "
+                          "future_window={:.3f} "
                           "pending_solver={} pending_derived={} dirty={}",
                           submitted_track_id,
                           generation_id,
@@ -626,6 +648,7 @@ namespace Game
                           submitted_preview_patch,
                           submitted_anchor_time_s,
                           submitted_anchor_state_valid,
+                          submitted_anchor_state_trusted,
                           submitted_maneuver_count,
                           submitted_future_window_s,
                           track.request_pending,
