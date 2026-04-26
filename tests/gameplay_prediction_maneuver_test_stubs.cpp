@@ -8,6 +8,10 @@
 
 #include <glm/gtc/quaternion.hpp>
 
+#include <algorithm>
+#include <cmath>
+#include <iterator>
+#include <limits>
 #include <unordered_map>
 
 namespace
@@ -300,6 +304,79 @@ namespace Game
         (void) origin_offset_local;
         return true;
     }
+
+    namespace PredictionDrawDetail
+    {
+        glm::vec4 scale_line_color(glm::vec4 color, const float line_alpha_scale)
+        {
+            color.a = std::clamp(color.a * line_alpha_scale, 0.0f, 1.0f);
+            return color;
+        }
+
+        double compute_prediction_now_s(const double display_time_s,
+                                        const double t0,
+                                        const double t1)
+        {
+            if (!std::isfinite(display_time_s))
+            {
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            return std::clamp(display_time_s, t0, t1);
+        }
+
+        std::size_t lower_bound_sample_index(const std::vector<orbitsim::TrajectorySample> &traj,
+                                             const double t_s)
+        {
+            const auto it = std::lower_bound(traj.cbegin(),
+                                             traj.cend(),
+                                             t_s,
+                                             [](const orbitsim::TrajectorySample &sample, const double t) {
+                                                 return sample.t_s < t;
+                                             });
+            return static_cast<std::size_t>(std::distance(traj.cbegin(), it));
+        }
+
+        bool frame_transform_is_identity(const glm::dmat3 &frame_to_world)
+        {
+            constexpr double kIdentityEpsilon = 1.0e-12;
+            for (int col = 0; col < 3; ++col)
+            {
+                for (int row = 0; row < 3; ++row)
+                {
+                    const double expected = (col == row) ? 1.0 : 0.0;
+                    if (std::abs(frame_to_world[col][row] - expected) > kIdentityEpsilon)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        WorldVec3 compute_align_delta(const std::vector<orbitsim::TrajectorySegment> &traj_segments,
+                                      const std::vector<orbitsim::TrajectorySample> &traj_base,
+                                      std::size_t i_hi,
+                                      const WorldVec3 &ship_pos_world,
+                                      double now_s,
+                                      const WorldVec3 &frame_origin_world,
+                                      const glm::dmat3 &frame_to_world)
+        {
+            (void) traj_segments;
+            (void) traj_base;
+            (void) i_hi;
+            (void) ship_pos_world;
+            (void) now_s;
+            (void) frame_origin_world;
+            (void) frame_to_world;
+            return WorldVec3(0.0, 0.0, 0.0);
+        }
+
+        bool frame_spec_uses_direct_world_polyline(const orbitsim::TrajectoryFrameSpec &spec)
+        {
+            (void) spec;
+            return false;
+        }
+    } // namespace PredictionDrawDetail
 } // namespace Game
 
 bool InputState::key_down(Key key) const

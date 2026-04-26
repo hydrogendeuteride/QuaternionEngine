@@ -64,6 +64,7 @@ namespace Game::PredictionDrawDetail
         PredictionTrackState *track{nullptr};
         OrbitPredictionCache *stable_cache{nullptr};
         OrbitPredictionCache *planned_cache{nullptr};
+        OrbitPredictionCache *stale_planned_cache{nullptr};
         OrbitPredictionCache *display_cache{nullptr};
         const std::vector<orbitsim::TrajectorySample> *traj_base{nullptr};
         const std::vector<orbitsim::TrajectorySample> *traj_planned{nullptr};
@@ -84,6 +85,12 @@ namespace Game::PredictionDrawDetail
         bool is_active{false};
         bool active_player_track{false};
         bool maneuver_drag_active{false};
+        bool planned_cache_current{false};
+        bool planned_cache_drawable{false};
+        bool planned_cache_prefix_only{false};
+        double planned_cache_prefix_cutoff_s{std::numeric_limits<double>::quiet_NaN()};
+        bool stale_planned_cache_drawable{false};
+        double stale_planned_cache_prefix_cutoff_s{std::numeric_limits<double>::quiet_NaN()};
         bool direct_world_polyline{false};
         bool identity_frame_transform{true};
         bool use_base_adaptive_curve{false};
@@ -102,6 +109,7 @@ namespace Game::PredictionDrawDetail
         PickWindow planned_draw_window{};
         PickWindow planned_pick_window{};
         std::vector<orbitsim::TrajectorySegment> traj_base_segments_world_basis{};
+        OrbitPredictionCache *traj_planned_segments_world_basis_source{nullptr};
         std::vector<orbitsim::TrajectorySegment> traj_stable_planned_segments_world_basis{};
     };
 

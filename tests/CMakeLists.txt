@@ -232,8 +232,10 @@ add_executable(gameplay_prediction_maneuver_tests
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_requests.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_results.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/gameplay_state_prediction_frames.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_prepare.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/gameplay_prediction_derived_service.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/gameplay_state_maneuver_nodes.cpp"
+  "${PROJECT_SOURCE_DIR}/src/core/util/logger.cpp"
   "${PROJECT_SOURCE_DIR}/third_party/imgui/imgui.cpp"
   "${PROJECT_SOURCE_DIR}/third_party/imgui/imgui_draw.cpp"
   "${PROJECT_SOURCE_DIR}/third_party/imgui/imgui_tables.cpp"
@@ -260,6 +262,7 @@ target_link_libraries(gameplay_prediction_maneuver_tests PRIVATE
   gtest
   fmt::fmt
   glm
+  Vulkan::Vulkan
   SDL2::SDL2
   orbitsim
 )

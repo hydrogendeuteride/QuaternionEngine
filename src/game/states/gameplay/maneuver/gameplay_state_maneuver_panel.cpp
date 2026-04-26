@@ -163,6 +163,7 @@ namespace Game
                 clear_maneuver_gizmo_instances(ctx);
                 _maneuver_gizmo_interaction = {};
                 cancel_maneuver_node_dv_edit_preview();
+                clear_maneuver_prediction_artifacts();
             }
             mark_maneuver_plan_dirty();
         }
@@ -203,6 +204,7 @@ namespace Game
             _maneuver_gizmo_interaction = {};
             cancel_maneuver_node_dv_edit_preview();
             clear_maneuver_gizmo_instances(ctx);
+            clear_maneuver_prediction_artifacts();
             mark_maneuver_plan_dirty();
         }
 
@@ -244,20 +246,37 @@ namespace Game
 
         if (player_track)
         {
-            const bool has_plan = !_maneuver_state.nodes.empty();
-            const bool solver_pending = player_track->request_pending;
-            const bool derived_pending = player_track->derived_request_pending;
-            const bool update_pending = solver_pending || derived_pending;
-            const bool queued_update = player_track->dirty && !update_pending;
+            const bool has_plan = _maneuver_nodes_enabled && !_maneuver_state.nodes.empty();
+            const uint64_t current_plan_signature = has_plan ? current_maneuver_plan_signature() : 0u;
             const bool has_ready_plan =
+                    has_plan &&
                     player_track->cache.valid &&
-                    player_track->cache.has_planned_frame_draw_data();
+                    player_track->cache.has_planned_frame_draw_data() &&
+                    player_track->cache.maneuver_plan_signature_valid &&
+                    player_track->cache.maneuver_plan_signature == current_plan_signature;
+            const bool solver_pending =
+                    has_plan &&
+                    player_track->request_pending &&
+                    player_track->pending_solver_has_maneuver_plan &&
+                    player_track->pending_solver_plan_signature == current_plan_signature;
+            const bool derived_pending =
+                    has_plan &&
+                    player_track->derived_request_pending &&
+                    player_track->pending_derived_has_maneuver_plan &&
+                    player_track->pending_derived_plan_signature == current_plan_signature;
+            const bool update_pending = solver_pending || derived_pending;
+            const bool queued_update = has_plan && player_track->dirty && !update_pending && !has_ready_plan;
 
             const char *status_label = "Idle";
             const char *status_detail = "Add a maneuver node to start a planned solve.";
             ImVec4 status_color = ImVec4(0.70f, 0.72f, 0.76f, 1.0f);
 
-            if (has_plan && queued_update)
+            if (!has_plan)
+            {
+                status_label = "Idle";
+                status_detail = "Add a maneuver node to start a planned solve.";
+            }
+            else if (queued_update)
             {
                 status_label = "Queued";
                 status_detail = "Plan preview is marked dirty and will rebuild on the next prediction tick.";
@@ -275,13 +294,13 @@ namespace Game
                 status_detail = "Solver output is being converted into frame-space render data.";
                 status_color = ImVec4(0.98f, 0.66f, 0.26f, 1.0f);
             }
-            else if (has_plan && has_ready_plan)
+            else if (has_ready_plan)
             {
                 status_label = "Ready";
                 status_detail = "Planned trajectory solve is complete.";
                 status_color = ImVec4(0.33f, 0.86f, 0.46f, 1.0f);
             }
-            else if (has_plan)
+            else
             {
                 status_label = prediction_derived_status_label(player_track->derived_diagnostics.status);
                 status_detail = "The last planned solve did not publish final draw data yet.";
@@ -294,14 +313,15 @@ namespace Game
             if (has_plan)
             {
                 float progress = 1.0f;
-                if (queued_update || update_pending)
+                const bool plan_progress_active = queued_update || update_pending;
+                if (plan_progress_active)
                 {
                     const double pulse = 0.5 + 0.5 * std::sin(ImGui::GetTime() * 3.0);
                     progress = static_cast<float>(0.20 + 0.60 * pulse);
                 }
 
                 char progress_label[128];
-                if (queued_update || update_pending)
+                if (plan_progress_active)
                 {
                     std::snprintf(progress_label,
                                   sizeof(progress_label),
@@ -639,7 +659,6 @@ namespace Game
                 {
                     node.time_s = new_time_s;
                     needs_sort = true;
-                    mark_maneuver_plan_dirty();
                     update_maneuver_node_time_edit_preview(node.id, previous_time_s);
                 }
             }
@@ -853,7 +872,6 @@ namespace Game
             {
                 sel->time_s = new_time_s;
                 needs_sort = true;
-                mark_maneuver_plan_dirty();
                 update_maneuver_node_time_edit_preview(sel->id, previous_node_time_s);
             }
         }
@@ -872,7 +890,6 @@ namespace Game
         {
             sel->dv_rtn_mps = glm::dvec3(dv[0], dv[1], dv[2]);
             sel->total_dv_mps = safe_length(sel->dv_rtn_mps);
-            mark_maneuver_plan_dirty();
             update_maneuver_node_dv_edit_preview(sel->id);
         }
         if (ImGui::IsItemDeactivatedAfterEdit())

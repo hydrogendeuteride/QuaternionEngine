@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 
+#include "core/util/logger.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include <cmath>
@@ -154,6 +155,39 @@ namespace Game
         }
         const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle_before_apply =
                 PredictionRuntimeDetail::describe_prediction_track_lifecycle(*track);
+        const bool live_fast_preview_result =
+                track->supports_maneuvers &&
+                result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+                maneuver_live_preview_active(true);
+        if (track->supports_maneuvers &&
+            track->latest_requested_generation_id != 0 &&
+            result.generation_id < track->latest_requested_generation_id &&
+            !live_fast_preview_result)
+        {
+            return;
+        }
+        if (track->supports_maneuvers && result.maneuver_plan_revision != _maneuver_plan_revision)
+        {
+            Logger::warn("Dropping stale maneuver solver result: track={} gen={} result_plan_rev={} current_plan_rev={} "
+                         "latest_request_gen={} request_pending={} derived_pending={} invalidated={} dirty={}",
+                         result.track_id,
+                         result.generation_id,
+                         result.maneuver_plan_revision,
+                         _maneuver_plan_revision,
+                         track->latest_requested_generation_id,
+                         track->request_pending,
+                         track->derived_request_pending,
+                         track->invalidated_while_pending,
+                         track->dirty);
+            if (result.generation_id == track->latest_requested_generation_id)
+            {
+                track->request_pending = false;
+                track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+                track->invalidated_while_pending = false;
+                track->dirty = true;
+            }
+            return;
+        }
 
         const OrbitPredictionService::AdaptiveStageDiagnostics previous_frame_base_diagnostics =
                 track->derived_diagnostics.frame_base;
@@ -161,6 +195,30 @@ namespace Game
         track->solver_diagnostics = result.diagnostics;
         track->derived_diagnostics = {};
         record_solver_result_debug(*track, result, solver_result_tp);
+
+        const bool current_plan_active =
+                track->supports_maneuvers &&
+                _maneuver_nodes_enabled &&
+                !_maneuver_state.nodes.empty();
+        const bool active_maneuver_edit =
+                current_plan_active &&
+                (PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state) ||
+                 _maneuver_node_edit_preview.state != ManeuverNodeEditPreview::State::Idle) &&
+                track->key == _prediction_selection.active_subject &&
+                maneuver_live_preview_active(true);
+        const uint64_t current_plan_signature =
+                current_plan_active ? current_maneuver_plan_signature() : 0u;
+        if (active_maneuver_edit &&
+            result.maneuver_plan_signature_valid &&
+            result.maneuver_plan_signature != current_plan_signature &&
+            result.solve_quality != OrbitPredictionService::SolveQuality::FastPreview)
+        {
+            track->request_pending = false;
+            track->pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+            track->invalidated_while_pending = false;
+            track->dirty = true;
+            return;
+        }
 
         if (!result.valid || result.resolved_trajectory_inertial().size() < 2)
         {
@@ -244,6 +302,9 @@ namespace Game
         OrbitPredictionDerivedService::Request derived_request{};
         derived_request.track_id = result.track_id;
         derived_request.generation_id = result.generation_id;
+        derived_request.maneuver_plan_revision = result.maneuver_plan_revision;
+        derived_request.maneuver_plan_signature_valid = result.maneuver_plan_signature_valid;
+        derived_request.maneuver_plan_signature = result.maneuver_plan_signature;
         derived_request.priority = PredictionRuntimeDetail::classify_prediction_subject_priority(
                 _prediction_selection,
                 track->key,

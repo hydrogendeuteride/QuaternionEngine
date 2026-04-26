@@ -234,12 +234,24 @@ namespace Game::PredictionRuntimeDetail
                snapshot.preview_state == PredictionPreviewRuntimeState::PreviewStreaming;
     }
 
+    inline bool prediction_track_preview_overlay_draw_active(const PredictionTrackLifecycleSnapshot &snapshot,
+                                                             const bool preview_anchor_valid)
+    {
+        return preview_anchor_valid && prediction_track_preview_fallback_active(snapshot);
+    }
+
     inline bool prediction_track_preview_pick_clamp_active(const PredictionTrackLifecycleSnapshot &snapshot)
     {
         return snapshot.preview_state == PredictionPreviewRuntimeState::DragPreviewPending ||
-               snapshot.preview_state == PredictionPreviewRuntimeState::PreviewStreaming ||
-               (snapshot.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine &&
-                snapshot.preview_overlay_active);
+               snapshot.preview_state == PredictionPreviewRuntimeState::PreviewStreaming;
+    }
+
+    inline bool prediction_track_should_accept_preview_publish(const PredictionTrackLifecycleSnapshot &snapshot,
+                                                               const bool live_preview_active_now,
+                                                               const bool preview_anchor_valid)
+    {
+        return live_preview_active_now &&
+               prediction_track_preview_overlay_draw_active(snapshot, preview_anchor_valid);
     }
 
     inline bool prediction_track_is_preview_streaming_publish(const OrbitPredictionService::SolveQuality solve_quality,

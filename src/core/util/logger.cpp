@@ -56,6 +56,10 @@ void Logger::init(LogOutput output, LogLevel minLevel, const std::string &logDir
         {
             fmt::println(stderr, "[Logger] Failed to open log file: {}", filename.str());
         }
+        else
+        {
+            fmt::println("[Logger] Writing log file: {}", filename.str());
+        }
     }
 
     s_initialized = true;
@@ -63,9 +67,18 @@ void Logger::init(LogOutput output, LogLevel minLevel, const std::string &logDir
 
 void Logger::shutdown()
 {
+    flush();
     if (s_file.is_open())
         s_file.close();
     s_initialized = false;
+}
+
+void Logger::flush()
+{
+    if (s_file.is_open())
+        s_file.flush();
+    std::cout.flush();
+    std::cerr.flush();
 }
 
 void Logger::log(LogLevel level, std::string_view message)

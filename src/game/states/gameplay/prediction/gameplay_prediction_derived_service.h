@@ -27,6 +27,9 @@ namespace Game
         {
             uint64_t track_id{0};
             uint64_t generation_id{0};
+            uint64_t maneuver_plan_revision{0};
+            bool maneuver_plan_signature_valid{false};
+            uint64_t maneuver_plan_signature{0};
             OrbitPredictionService::RequestPriority priority{
                     OrbitPredictionService::RequestPriority::BackgroundOrbiter};
             OrbitPredictionService::Result solver_result{};
@@ -53,6 +56,9 @@ namespace Game
 
             uint64_t track_id{0};
             uint64_t generation_id{0};
+            uint64_t maneuver_plan_revision{0};
+            bool maneuver_plan_signature_valid{false};
+            uint64_t maneuver_plan_signature{0};
             uint64_t display_frame_key{0};
             uint64_t display_frame_revision{0};
             orbitsim::BodyId analysis_body_id{orbitsim::kInvalidBodyId};
@@ -74,6 +80,8 @@ namespace Game
         OrbitPredictionDerivedService &operator=(const OrbitPredictionDerivedService &) = delete;
 
         void request(Request request);
+        // Mark maneuver-backed completed/published work stale before a replacement request is submitted.
+        void invalidate_maneuver_plan_revision(uint64_t track_id, uint64_t maneuver_plan_revision);
         std::optional<Result> poll_completed();
         void reset();
 
@@ -92,8 +100,13 @@ namespace Game
                                           uint64_t generation_id,
                                           uint64_t request_epoch,
                                           uint64_t current_request_epoch,
+                                          OrbitPredictionService::SolveQuality solve_quality,
                                           const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track);
-        bool should_continue_job(uint64_t track_id, uint64_t generation_id, uint64_t request_epoch) const;
+        bool should_continue_job(uint64_t track_id,
+                                 uint64_t generation_id,
+                                 uint64_t request_epoch,
+                                 uint64_t maneuver_plan_revision,
+                                 OrbitPredictionService::SolveQuality solve_quality) const;
         void worker_loop();
 
         std::vector<std::thread> _workers{};
@@ -107,6 +120,7 @@ namespace Game
         uint64_t _request_epoch{1};
         uint64_t _next_enqueue_serial{1};
         std::unordered_map<uint64_t, uint64_t> _latest_requested_generation_by_track{};
+        std::unordered_map<uint64_t, uint64_t> _latest_maneuver_plan_revision_by_track{};
         std::unordered_set<uint64_t> _tracks_in_flight{};
     };
 

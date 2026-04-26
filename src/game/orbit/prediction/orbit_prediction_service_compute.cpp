@@ -317,13 +317,18 @@ namespace Game
         Result out{};
         out.generation_id = generation_id;
         out.track_id = request.track_id;
+        out.maneuver_plan_revision = request.maneuver_plan_revision;
+        out.maneuver_plan_signature_valid = request.maneuver_plan_signature_valid;
+        out.maneuver_plan_signature = request.maneuver_plan_signature;
         out.build_time_s = request.sim_time_s;
         out.solve_quality = request.solve_quality;
         const auto cancel_requested = [this,
-                                       track_id = request.track_id,
-                                       generation_id,
-                                       request_epoch]() {
-            return !should_continue_job(track_id, generation_id, request_epoch);
+                                        track_id = request.track_id,
+                                        generation_id,
+                                        request_epoch,
+                                        maneuver_plan_revision = request.maneuver_plan_revision,
+                                        solve_quality = request.solve_quality]() {
+            return !should_continue_job(track_id, generation_id, request_epoch, maneuver_plan_revision, solve_quality);
         };
         const auto elapsed_ms = [&compute_start]() {
             return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compute_start).count();
@@ -815,6 +820,9 @@ namespace Game
                         Result stage_result{};
                         stage_result.track_id = out.track_id;
                         stage_result.generation_id = out.generation_id;
+                        stage_result.maneuver_plan_revision = out.maneuver_plan_revision;
+                        stage_result.maneuver_plan_signature_valid = out.maneuver_plan_signature_valid;
+                        stage_result.maneuver_plan_signature = out.maneuver_plan_signature;
                         stage_result.valid = true;
                         stage_result.baseline_reused = out.baseline_reused;
                         stage_result.solve_quality = out.solve_quality;
@@ -961,6 +969,7 @@ namespace Game
 
                 orbitsim::State preview_start_state = ship_sc.state;
                 if (planned_request.preview_patch.anchor_state_valid &&
+                    planned_request.preview_patch.anchor_state_trusted &&
                     finite_state(planned_request.preview_patch.anchor_state_inertial))
                 {
                     preview_start_state = planned_request.preview_patch.anchor_state_inertial;

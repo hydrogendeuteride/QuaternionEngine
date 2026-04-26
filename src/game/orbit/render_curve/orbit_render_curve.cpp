@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 namespace Game
@@ -27,6 +28,12 @@ namespace Game
         constexpr std::size_t kUniformErrorSamples = 9;   // evenly spaced across the merged span
         constexpr std::size_t kMidpointErrorSamples = 8;  // midpoints of individual source segments
         constexpr std::size_t kBoundaryErrorSamples = 8;  // boundaries between adjacent source segments
+        constexpr std::uint32_t kLodMergeBarrierFlags =
+                orbitsim::kTrajectorySegmentFlagForcedBoundary |
+                orbitsim::kTrajectorySegmentFlagImpulseBoundary |
+                orbitsim::kTrajectorySegmentFlagBurnBoundary |
+                orbitsim::kTrajectorySegmentFlagImpactTerminal |
+                orbitsim::kTrajectorySegmentFlagFrameResegmented;
 
         /// Check if a node's time range [t0, t1) overlaps the query window [t_start, t_end).
         bool node_overlaps_window(const OrbitRenderCurve::Node &node,
@@ -110,6 +117,11 @@ namespace Game
             return interval_contains_any_anchor_time(query_t0_s, query_t1_s, anchor_times_s);
         }
 
+        bool node_requires_boundary_descend(const OrbitRenderCurve::Node &node)
+        {
+            return !node.is_leaf() && (node.segment.flags & kLodMergeBarrierFlags) != 0u;
+        }
+
         /// Binary search for the source segment containing time t_s within [first_index, last_index).
         std::size_t find_segment_for_time(const std::span<const orbitsim::TrajectorySegment> segments,
                                           const std::size_t first_index,
@@ -181,6 +193,10 @@ namespace Game
             merged.start = first.start;
             merged.end = last.end;
             merged.flags = 0u;
+            for (std::size_t i = first_index + 1; i < last_index; ++i)
+            {
+                merged.flags |= segments[i].flags & kLodMergeBarrierFlags;
+            }
             return merged;
         }
 
@@ -379,7 +395,8 @@ namespace Game
                 continue;
             }
 
-            bool descend = node_requires_anchor_descend(node, t_start_s, t_end_s, anchor_times_s);
+            bool descend = node_requires_boundary_descend(node) ||
+                           node_requires_anchor_descend(node, t_start_s, t_end_s, anchor_times_s);
             if (!node.is_leaf() &&
                 !descend &&
                 std::isfinite(node.max_error_m) &&

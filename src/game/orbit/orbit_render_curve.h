@@ -164,7 +164,7 @@ namespace Game
         /// Produce final render line segments from a flat segment array.
         /// This is the render-subdivision stage only; it does not walk the LOD tree.
         /// Adaptively subdivides each segment until chord-vs-curve error < error_px,
-        /// skipping segments outside the frustum.
+        /// and skips curve intervals outside the frustum.
         static RenderResult build_render_lod(
                 std::span<const orbitsim::TrajectorySegment> segments_bci,
                 const WorldVec3 &reference_body_world,

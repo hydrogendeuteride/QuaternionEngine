@@ -1,4 +1,5 @@
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
+#include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include <algorithm>
 #include <chrono>
@@ -235,15 +236,43 @@ namespace Game
             pick_group_planned != Draw::kInvalidPickGroup &&
             remaining_pick_budget > 0)
         {
-            const PredictionChunkAssembly &preview_assembly = track.preview_overlay.chunk_assembly;
+            const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
+                    PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
+            const bool preview_overlay_draw_active =
+                    PredictionRuntimeDetail::prediction_track_preview_overlay_draw_active(
+                            lifecycle,
+                            track.preview_anchor.valid);
+            const PredictionChunkAssembly preview_assembly_snapshot =
+                    preview_overlay_draw_active ? track.preview_overlay.chunk_assembly
+                                                : PredictionChunkAssembly{};
+            const PredictionChunkAssembly &preview_assembly = preview_assembly_snapshot;
+            const bool preview_lifecycle_fallback_active =
+                    PredictionRuntimeDetail::prediction_track_preview_fallback_active(lifecycle);
+            const bool active_maneuver_track =
+                    track_ctx.active_player_track &&
+                    track.supports_maneuvers &&
+                    _maneuver_nodes_enabled &&
+                    !_maneuver_state.nodes.empty();
+            const bool full_stream_overlay_draw_active =
+                    !active_maneuver_track &&
+                    !track_ctx.maneuver_drag_active &&
+                    !preview_lifecycle_fallback_active;
+            const PredictionChunkAssembly full_stream_assembly_snapshot =
+                    (full_stream_overlay_draw_active &&
+                     track.full_stream_overlay.ready_for_draw(planned_cache.generation_id,
+                                                              planned_cache.display_frame_key,
+                                                              planned_cache.display_frame_revision))
+                            ? track.full_stream_overlay.chunk_assembly
+                            : PredictionChunkAssembly{};
             const PredictionChunkAssembly *full_stream_assembly =
-                    track.full_stream_overlay.ready_for_draw(planned_cache.generation_id,
-                                                             planned_cache.display_frame_key,
-                                                             planned_cache.display_frame_revision)
-                            ? &track.full_stream_overlay.chunk_assembly
+                    full_stream_assembly_snapshot.valid && !full_stream_assembly_snapshot.chunks.empty()
+                            ? &full_stream_assembly_snapshot
                             : nullptr;
             const bool preview_overlay_active = preview_assembly.valid && !preview_assembly.chunks.empty();
             const bool full_stream_overlay_active = full_stream_assembly && !full_stream_assembly->chunks.empty();
+            const bool planned_cache_pickable =
+                    track_ctx.planned_cache_current &&
+                    planned_cache.has_planned_frame_draw_data();
             const auto assembly_has_pick_curve = [](const PredictionChunkAssembly &assembly) {
                 return std::any_of(assembly.chunks.begin(),
                                    assembly.chunks.end(),
@@ -452,7 +481,7 @@ namespace Game
                                                           preview_overlay_active ? &covered_ranges : nullptr,
                                                           full_stream_covered_ranges);
                     }
-                    else if (preview_overlay_active)
+                    else if (preview_overlay_active && planned_cache_pickable)
                     {
                         const std::vector<std::pair<double, double>> uncovered_ranges =
                                 Draw::compute_uncovered_ranges(track_ctx.planned_pick_window.t0_s,
@@ -510,7 +539,9 @@ namespace Game
                         }
                     }
                 }
-                else if (track_ctx.direct_world_polyline && !planned_cache.trajectory_frame_planned.empty())
+                else if (planned_cache_pickable &&
+                         track_ctx.direct_world_polyline &&
+                         !planned_cache.trajectory_frame_planned.empty())
                 {
                     build_pick_polyline_segments(planned_cache.trajectory_frame_planned,
                                                  track_ctx.planned_pick_window.t0_s,
@@ -518,7 +549,7 @@ namespace Game
                                                  remaining_pick_budget,
                                                  track.pick_cache.planned_segments);
                 }
-                else if (planned_pick_uses_adaptive_curve)
+                else if (planned_cache_pickable && planned_pick_uses_adaptive_curve)
                 {
                     bool cap_hit = false;
                     build_pick_curve_cache(planned_cache.render_curve_frame_planned,
@@ -527,7 +558,7 @@ namespace Game
                                            track.pick_cache.planned_segments,
                                            cap_hit);
                 }
-                else
+                else if (planned_cache_pickable)
                 {
                     bool cap_hit = false;
                     pick_settings.max_segments = std::max<std::size_t>(1, remaining_pick_budget);

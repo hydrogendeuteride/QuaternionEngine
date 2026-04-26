@@ -31,6 +31,23 @@ if (VULKAN_ENGINE_USE_JOLT)
   set(DOUBLE_PRECISION ${VULKAN_ENGINE_JOLT_DOUBLE_PRECISION} CACHE BOOL "Build Jolt with double precision math" FORCE)
 
   add_subdirectory(JoltPhysics/Build EXCLUDE_FROM_ALL)
+
+  if (TARGET Jolt AND MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    # Jolt's CMake does not emit its x86 instruction-set definitions for clang-cl
+    # in Ninja builds, while the engine target uses /arch:AVX2. Keep Jolt's ABI
+    # consistent with consumers that include Jolt headers.
+    target_compile_options(Jolt PUBLIC /arch:AVX2)
+    target_compile_definitions(Jolt PUBLIC
+      JPH_USE_AVX2
+      JPH_USE_AVX
+      JPH_USE_SSE4_1
+      JPH_USE_SSE4_2
+      JPH_USE_LZCNT
+      JPH_USE_TZCNT
+      JPH_USE_F16C
+      JPH_USE_FMADD
+    )
+  endif()
 endif()
 
 target_sources(vkbootstrap PRIVATE 

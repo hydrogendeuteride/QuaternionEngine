@@ -79,6 +79,49 @@ namespace Game
             trim_completed_results(completed);
         }
 
+        void discard_completed_results_before_generation(
+                std::deque<OrbitPredictionService::Result> &completed,
+                const uint64_t track_id,
+                const uint64_t generation_id,
+                const bool preserve_fast_preview)
+        {
+            completed.erase(std::remove_if(completed.begin(),
+                                           completed.end(),
+                                           [track_id, generation_id, preserve_fast_preview](
+                                                   const OrbitPredictionService::Result &queued) {
+                                                return queued.track_id == track_id &&
+                                                       queued.generation_id < generation_id &&
+                                                       !(preserve_fast_preview &&
+                                                         queued.solve_quality ==
+                                                                 OrbitPredictionService::SolveQuality::FastPreview);
+                                           }),
+                            completed.end());
+        }
+
+        void discard_stale_maneuver_completed_results(
+                std::deque<OrbitPredictionService::Result> &completed,
+                const uint64_t track_id,
+                const uint64_t maneuver_plan_revision)
+        {
+            completed.erase(std::remove_if(completed.begin(),
+                                           completed.end(),
+                                           [track_id, maneuver_plan_revision](const OrbitPredictionService::Result &queued) {
+                                               return queued.track_id == track_id &&
+                                                      queued.maneuver_plan_revision < maneuver_plan_revision;
+                                           }),
+                            completed.end());
+        }
+
+        bool maneuver_revision_is_current(
+                const uint64_t track_id,
+                const uint64_t maneuver_plan_revision,
+                const std::unordered_map<uint64_t, uint64_t> &latest_maneuver_plan_revision_by_track)
+        {
+            const auto latest_it = latest_maneuver_plan_revision_by_track.find(track_id);
+            return latest_it == latest_maneuver_plan_revision_by_track.end() ||
+                   maneuver_plan_revision >= latest_it->second;
+        }
+
         OrbitPredictionService::AdaptiveStageDiagnostics make_reused_ephemeris_diagnostics(
                 const OrbitPredictionService::CachedEphemerisEntry &entry,
                 const OrbitPredictionService::EphemerisBuildRequest &request)
@@ -150,6 +193,17 @@ namespace Game
             const uint64_t track_id = request.track_id;
             const uint64_t request_epoch = _request_epoch;
             _latest_requested_generation_by_track[track_id] = generation_id;
+            _latest_maneuver_plan_revision_by_track[track_id] =
+                    std::max(_latest_maneuver_plan_revision_by_track[track_id],
+                             request.maneuver_plan_revision);
+            discard_completed_results_before_generation(
+                    _completed,
+                    track_id,
+                    generation_id,
+                    request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview);
+            discard_stale_maneuver_completed_results(_completed,
+                                                     track_id,
+                                                     _latest_maneuver_plan_revision_by_track[track_id]);
 
             // Keep only the newest queued request per track to avoid backlogging stale previews.
             auto existing = std::find_if(_pending_jobs.begin(),
@@ -180,6 +234,22 @@ namespace Game
         return generation_id;
     }
 
+    void OrbitPredictionService::invalidate_maneuver_plan_revision(
+            const uint64_t track_id,
+            const uint64_t maneuver_plan_revision)
+    {
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            uint64_t &latest_revision = _latest_maneuver_plan_revision_by_track[track_id];
+            if (maneuver_plan_revision > latest_revision)
+            {
+                latest_revision = maneuver_plan_revision;
+            }
+
+            discard_stale_maneuver_completed_results(_completed, track_id, latest_revision);
+        }
+    }
+
     std::optional<OrbitPredictionService::Result> OrbitPredictionService::poll_completed()
     {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -202,6 +272,7 @@ namespace Game
             _pending_jobs.clear();
             _completed.clear();
             _latest_requested_generation_by_track.clear();
+            _latest_maneuver_plan_revision_by_track.clear();
         }
 
         {
@@ -450,12 +521,15 @@ namespace Game
         // Only publish the newest generation for each track.
         const auto latest_it = latest_requested_generation_by_track.find(job.track_id);
         return latest_it == latest_requested_generation_by_track.end() ||
-               job.generation_id >= latest_it->second;
+               job.generation_id >= latest_it->second ||
+               job.request.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
     }
 
     bool OrbitPredictionService::should_continue_job(const uint64_t track_id,
                                                      const uint64_t generation_id,
-                                                     const uint64_t request_epoch) const
+                                                     const uint64_t request_epoch,
+                                                     const uint64_t maneuver_plan_revision,
+                                                     const SolveQuality solve_quality) const
     {
         std::lock_guard<std::mutex> lock(_mutex);
         if (!_running || request_epoch != _request_epoch)
@@ -464,8 +538,21 @@ namespace Game
         }
 
         const auto latest_it = _latest_requested_generation_by_track.find(track_id);
-        return latest_it == _latest_requested_generation_by_track.end() ||
-               generation_id >= latest_it->second;
+        if (latest_it != _latest_requested_generation_by_track.end() &&
+            generation_id < latest_it->second &&
+            solve_quality != OrbitPredictionService::SolveQuality::FastPreview)
+        {
+            return false;
+        }
+
+        const auto latest_revision_it = _latest_maneuver_plan_revision_by_track.find(track_id);
+        if (latest_revision_it != _latest_maneuver_plan_revision_by_track.end() &&
+            maneuver_plan_revision < latest_revision_it->second)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     bool OrbitPredictionService::publish_completed_result(const PendingJob &job, Result result)
@@ -477,6 +564,12 @@ namespace Game
         }
 
         if (!should_publish_result(job, _request_epoch, _latest_requested_generation_by_track))
+        {
+            return false;
+        }
+        if (!maneuver_revision_is_current(job.track_id,
+                                          job.request.maneuver_plan_revision,
+                                          _latest_maneuver_plan_revision_by_track))
         {
             return false;
         }
@@ -510,7 +603,11 @@ namespace Game
                 _pending_jobs.pop_front();
             }
 
-            if (!should_continue_job(job.track_id, job.generation_id, job.request_epoch))
+            if (!should_continue_job(job.track_id,
+                                     job.generation_id,
+                                     job.request_epoch,
+                                     job.request.maneuver_plan_revision,
+                                     job.request.solve_quality))
             {
                 continue;
             }

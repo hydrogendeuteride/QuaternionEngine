@@ -171,6 +171,7 @@ namespace Game
         std::vector<PredictionSubjectKey> collect_visible_prediction_subjects() const;
         double prediction_future_window_s(PredictionSubjectKey key) const;
         double maneuver_plan_horizon_s() const;
+        uint64_t current_maneuver_plan_signature() const;
         PredictionTimeContext build_prediction_time_context(
                 PredictionSubjectKey key,
                 double sim_now_s,
@@ -221,6 +222,9 @@ namespace Game
                                               orbitsim::State &out_state) const;
         bool resolve_prediction_preview_anchor_state(const PredictionTrackState &track,
                                                      orbitsim::State &out_state) const;
+        bool resolve_prediction_preview_anchor_state(const PredictionTrackState &track,
+                                                     orbitsim::State &out_state,
+                                                     bool &out_trusted) const;
         orbitsim::SpacecraftStateLookup build_prediction_player_lookup() const;
         orbitsim::TrajectoryFrameSpec resolve_prediction_display_frame_spec(
                 const OrbitPredictionCache &cache,
@@ -284,6 +288,7 @@ namespace Game
         void emit_maneuver_node_debug_overlay(GameStateContext &ctx);
         void mark_prediction_dirty();
         void mark_maneuver_plan_dirty();
+        void clear_maneuver_prediction_artifacts();
         bool maneuver_live_preview_active(bool with_maneuvers) const;
         int active_maneuver_preview_anchor_node_id() const;
         void begin_maneuver_node_dv_edit_preview(int node_id);
@@ -418,6 +423,7 @@ namespace Game
         ManeuverPlanWindowSettings _maneuver_plan_windows{};
         OrbitPlotBudgetSettings _orbit_plot_budget{};
         bool _maneuver_plan_live_preview_active{true};
+        uint64_t _maneuver_plan_revision{0};
 
         OrbitPlotPerfStats _orbit_plot_perf{};
         OrbitPredictionDrawConfig _prediction_draw_config{};

@@ -477,10 +477,7 @@ namespace Game
         _maneuver_gizmo_interaction.applied_delta = false;
         if (PredictionTrackState *track = active_prediction_track())
         {
-            track->dirty = true;
-            track->invalidated_while_pending = track->request_pending || track->derived_request_pending;
-            (void) drag_display_reference_time_s;
-            sync_prediction_dirty_flag();
+            refresh_prediction_preview_anchor(*track, current_sim_time_s(), true);
 
             PredictionDragDebugTelemetry &debug = track->drag_debug;
             const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
@@ -598,17 +595,11 @@ namespace Game
             node.dv_rtn_mps = dv_new;
             node.total_dv_mps = safe_length(node.dv_rtn_mps);
             _maneuver_gizmo_interaction.applied_delta = true;
-            mark_maneuver_plan_dirty();
 
             if (PredictionTrackState *track = active_prediction_track())
             {
-                // Let the runtime submit a fresher preview even while an older drag solve is still in flight.
                 track->dirty = true;
-                track->invalidated_while_pending = track->request_pending || track->derived_request_pending;
-                const orbitsim::TrajectoryFrameSpec display_frame_spec =
-                        track->cache.resolved_frame_spec_valid ? track->cache.resolved_frame_spec
-                                                               : _prediction_frame_selection.spec;
-                (void) display_frame_spec;
+                sync_prediction_dirty_flag();
             }
         }
 
