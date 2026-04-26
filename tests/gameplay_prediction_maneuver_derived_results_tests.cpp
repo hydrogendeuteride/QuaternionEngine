@@ -107,8 +107,16 @@ TEST(GameplayPredictionManeuverTests, DerivedServiceInvalidatesStaleManeuverRevi
     service.invalidate_maneuver_plan_revision(track_id, 3u);
 
     EXPECT_TRUE(service._completed.empty());
-    EXPECT_FALSE(service.should_continue_job(track_id, 12u, service._request_epoch, 2u));
-    EXPECT_TRUE(service.should_continue_job(track_id, 12u, service._request_epoch, 3u));
+    EXPECT_FALSE(service.should_continue_job(track_id,
+                                             12u,
+                                             service._request_epoch,
+                                             2u,
+                                             Game::OrbitPredictionService::SolveQuality::Full));
+    EXPECT_TRUE(service.should_continue_job(track_id,
+                                            12u,
+                                            service._request_epoch,
+                                            3u,
+                                            Game::OrbitPredictionService::SolveQuality::Full));
 }
 
 TEST(GameplayPredictionManeuverTests, ReusedBaseFrameDerivedResultPreservesBaseDiagnostics)

@@ -73,13 +73,24 @@ namespace Game
             }
 
             const PredictionDragDebugTelemetry &debug = track.drag_debug;
+            const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
+            if (debug.drag_active && PredictionDragDebugTelemetry::has_time(debug.drag_started_tp))
+            {
+                const double elapsed_drag_s =
+                        std::chrono::duration<double>(now_tp - debug.drag_started_tp).count();
+                if (elapsed_drag_s < OrbitPredictionTuning::kDragStalePreviewGraceS)
+                {
+                    return true;
+                }
+            }
+
             if (!PredictionDragDebugTelemetry::has_time(debug.last_request_tp))
             {
                 return false;
             }
 
             const double elapsed_s = std::chrono::duration<double>(
-                                             PredictionDragDebugTelemetry::Clock::now() - debug.last_request_tp)
+                                             now_tp - debug.last_request_tp)
                                              .count();
             return elapsed_s < OrbitPredictionTuning::kDragRebuildMinIntervalS;
         }
@@ -316,7 +327,10 @@ namespace Game
         {
             out_state.position_m = preview_it->inertial_position_m;
             out_state.velocity_mps = preview_it->inertial_velocity_mps;
-            out_trusted = false;
+            // Maneuver previews store the pre-burn state at the node. During DV drags/edits,
+            // upstream burns and node time are unchanged, so this is a valid preview seed even
+            // for the second-or-later node. Time edits still need a fresh prefix solve.
+            out_trusted = !editing_anchor_time;
             return true;
         }
 

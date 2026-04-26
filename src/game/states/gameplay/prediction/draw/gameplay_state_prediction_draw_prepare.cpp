@@ -47,6 +47,29 @@ namespace Game
 
             return std::numeric_limits<double>::quiet_NaN();
         }
+
+        [[nodiscard]] bool draw_frame_specs_compatible(const orbitsim::TrajectoryFrameSpec &a,
+                                                       const orbitsim::TrajectoryFrameSpec &b)
+        {
+            return a.type == b.type &&
+                   a.primary_body_id == b.primary_body_id &&
+                   a.secondary_body_id == b.secondary_body_id &&
+                   a.target_spacecraft_id == b.target_spacecraft_id;
+        }
+
+        [[nodiscard]] bool planned_cache_frame_compatible(const OrbitPredictionCache &candidate,
+                                                          const OrbitPredictionCache &reference)
+        {
+            if (candidate.display_frame_key != reference.display_frame_key ||
+                candidate.display_frame_revision != reference.display_frame_revision)
+            {
+                return false;
+            }
+
+            return !candidate.resolved_frame_spec_valid ||
+                   !reference.resolved_frame_spec_valid ||
+                   draw_frame_specs_compatible(candidate.resolved_frame_spec, reference.resolved_frame_spec);
+        }
     }
 
     bool GameplayState::build_orbit_prediction_track_draw_context(
@@ -141,11 +164,82 @@ namespace Game
                 out.planned_cache->maneuver_plan_signature_valid &&
                 out.planned_cache->maneuver_plan_signature == current_maneuver_plan_signature();
         out.planned_cache_current = planned_cache_current;
+        out.planned_cache_drawable = planned_cache_current;
         if (!planned_cache_current)
         {
-            out.traj_planned = nullptr;
-            out.traj_planned_segments = nullptr;
-            out.planned_window_segments = nullptr;
+            const auto resolve_stale_prefix_cutoff_s = [&]() {
+                double cutoff_s = std::numeric_limits<double>::quiet_NaN();
+                if (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime)
+                {
+                    if (const ManeuverNode *edit_node =
+                                _maneuver_state.find_node(_maneuver_node_edit_preview.node_id))
+                    {
+                        cutoff_s = edit_node->time_s;
+                        if (std::isfinite(_maneuver_node_edit_preview.start_time_s))
+                        {
+                            cutoff_s = std::isfinite(cutoff_s)
+                                               ? std::min(cutoff_s, _maneuver_node_edit_preview.start_time_s)
+                                               : _maneuver_node_edit_preview.start_time_s;
+                        }
+                    }
+                    return cutoff_s;
+                }
+
+                cutoff_s = track.preview_anchor.valid ? track.preview_anchor.anchor_time_s
+                                                      : std::numeric_limits<double>::quiet_NaN();
+                if (!std::isfinite(cutoff_s) && out.active_player_track)
+                {
+                    if (const ManeuverNode *anchor_node =
+                                _maneuver_state.find_node(active_maneuver_preview_anchor_node_id()))
+                    {
+                        cutoff_s = anchor_node->time_s;
+                    }
+                }
+                return cutoff_s;
+            };
+
+            const double stale_prefix_cutoff_s = resolve_stale_prefix_cutoff_s();
+            const auto stale_candidate_drawable = [&](const OrbitPredictionCache &candidate) {
+                return candidate.valid &&
+                       candidate.has_planned_frame_draw_data() &&
+                       out.planned_cache &&
+                       planned_cache_frame_compatible(candidate, *out.planned_cache);
+            };
+
+            OrbitPredictionCache *stale_candidate = nullptr;
+            if (out.active_player_track &&
+                track.authoritative_cache.valid &&
+                stale_candidate_drawable(track.authoritative_cache))
+            {
+                stale_candidate = &track.authoritative_cache;
+            }
+            else if (out.active_player_track &&
+                     out.planned_cache &&
+                     stale_candidate_drawable(*out.planned_cache))
+            {
+                stale_candidate = out.planned_cache;
+            }
+
+            const bool can_draw_stale_prefix =
+                    out.active_player_track &&
+                    stale_candidate &&
+                    std::isfinite(stale_prefix_cutoff_s);
+            if (can_draw_stale_prefix)
+            {
+                out.stale_planned_cache = stale_candidate;
+                out.stale_planned_cache_drawable = maneuver_live_preview_active(with_maneuver_live_preview);
+                out.stale_planned_cache_prefix_cutoff_s = stale_prefix_cutoff_s;
+                if (!out.stale_planned_cache->trajectory_segments_frame_planned.empty())
+                {
+                    out.planned_window_segments = &out.stale_planned_cache->trajectory_segments_frame_planned;
+                }
+            }
+            else
+            {
+                out.traj_planned = nullptr;
+                out.traj_planned_segments = nullptr;
+                out.planned_window_segments = nullptr;
+            }
         }
 
         if (out.is_active)

@@ -70,6 +70,10 @@ namespace Game
             _maneuver_node_edit_preview = {};
             _maneuver_node_edit_preview.state = ManeuverNodeEditPreview::State::EditingDv;
             _maneuver_node_edit_preview.node_id = node_id;
+            if (PredictionTrackState *track = active_prediction_track())
+            {
+                refresh_prediction_preview_anchor(*track, current_sim_time_s(), true);
+            }
         }
     }
 
@@ -131,6 +135,10 @@ namespace Game
             _maneuver_node_edit_preview.node_id = node_id;
             _maneuver_node_edit_preview.start_time_s =
                     std::isfinite(previous_time_s) ? previous_time_s : node->time_s;
+            if (PredictionTrackState *track = active_prediction_track())
+            {
+                refresh_prediction_preview_anchor(*track, current_sim_time_s(), true);
+            }
         }
     }
 

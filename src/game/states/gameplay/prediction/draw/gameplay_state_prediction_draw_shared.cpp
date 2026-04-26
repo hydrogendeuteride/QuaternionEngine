@@ -43,6 +43,11 @@ namespace Game::PredictionDrawDetail
 
         std::vector<orbitsim::TrajectorySegment> &world_basis_segments =
                 track_ctx.traj_stable_planned_segments_world_basis;
+        if (track_ctx.traj_planned_segments_world_basis_source != &cache)
+        {
+            world_basis_segments.clear();
+            track_ctx.traj_planned_segments_world_basis_source = &cache;
+        }
         if (world_basis_segments.empty() && !cache.trajectory_segments_frame_planned.empty())
         {
             world_basis_segments =

@@ -100,11 +100,13 @@ namespace Game
                                           uint64_t generation_id,
                                           uint64_t request_epoch,
                                           uint64_t current_request_epoch,
+                                          OrbitPredictionService::SolveQuality solve_quality,
                                           const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track);
         bool should_continue_job(uint64_t track_id,
                                  uint64_t generation_id,
                                  uint64_t request_epoch,
-                                 uint64_t maneuver_plan_revision) const;
+                                 uint64_t maneuver_plan_revision,
+                                 OrbitPredictionService::SolveQuality solve_quality) const;
         void worker_loop();
 
         std::vector<std::thread> _workers{};

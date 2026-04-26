@@ -119,7 +119,13 @@ namespace Game
         };
 
         const auto planned_cache_drawable = [&](const OrbitPredictionCache &cache) {
-            if (!track_ctx.planned_cache_current)
+            const bool primary_cache_enabled =
+                    &cache == track_ctx.planned_cache &&
+                    track_ctx.planned_cache_drawable;
+            const bool stale_cache_enabled =
+                    &cache == track_ctx.stale_planned_cache &&
+                    track_ctx.stale_planned_cache_drawable;
+            if (!primary_cache_enabled && !stale_cache_enabled)
             {
                 return false;
             }
@@ -140,9 +146,31 @@ namespace Game
         const auto draw_planned_window_from_cache = [&](OrbitPredictionCache &cache,
                                                         const double window_t0_s,
                                                         const double window_t1_s,
-                                                        const glm::vec4 &color,
-                                                        const bool force_solid = false) {
-            if (!(window_t1_s > window_t0_s) || !planned_cache_drawable(cache))
+                                                         const glm::vec4 &color,
+                                                         const bool force_solid = false,
+                                                         const bool ignore_prefix_clip = false) {
+            double clipped_window_t1_s = window_t1_s;
+            const bool drawing_stale_cache =
+                    &cache == track_ctx.stale_planned_cache &&
+                    track_ctx.stale_planned_cache_drawable;
+            if (drawing_stale_cache)
+            {
+                if (!std::isfinite(track_ctx.stale_planned_cache_prefix_cutoff_s))
+                {
+                    return;
+                }
+                clipped_window_t1_s = std::min(clipped_window_t1_s,
+                                               track_ctx.stale_planned_cache_prefix_cutoff_s);
+            }
+            else if (track_ctx.planned_cache_prefix_only && !ignore_prefix_clip)
+            {
+                if (!std::isfinite(track_ctx.planned_cache_prefix_cutoff_s))
+                {
+                    return;
+                }
+                clipped_window_t1_s = std::min(clipped_window_t1_s, track_ctx.planned_cache_prefix_cutoff_s);
+            }
+            if (!(clipped_window_t1_s > window_t0_s) || !planned_cache_drawable(cache))
             {
                 return;
             }
@@ -153,7 +181,7 @@ namespace Game
                                            _prediction_draw_config,
                                            cache.trajectory_frame_planned,
                                            window_t0_s,
-                                           window_t1_s,
+                                           clipped_window_t1_s,
                                            color,
                                            dashed);
                 return;
@@ -166,7 +194,7 @@ namespace Game
                                                  _orbit_plot_perf,
                                                  cache.render_curve_frame_planned,
                                                  window_t0_s,
-                                                 window_t1_s,
+                                                 clipped_window_t1_s,
                                                  color,
                                                  dashed);
                 return;
@@ -179,7 +207,7 @@ namespace Game
                                             ? cache.trajectory_segments_frame_planned
                                             : Draw::planned_segments_world_basis(track_ctx, cache),
                                     window_t0_s,
-                                    window_t1_s,
+                                    clipped_window_t1_s,
                                     color,
                                     dashed);
         };
@@ -245,6 +273,31 @@ namespace Game
                                     color,
                                     dashed);
             return true;
+        };
+
+        const auto prefix_fallback_cache = [&]() -> OrbitPredictionCache * {
+            if (track_ctx.stale_planned_cache && track_ctx.stale_planned_cache_drawable)
+            {
+                return track_ctx.stale_planned_cache;
+            }
+            if (planned_cache_drawable(planned_cache))
+            {
+                return &planned_cache;
+            }
+            return nullptr;
+        };
+
+        const auto clamp_prefix_cutoff_for_cache = [&](OrbitPredictionCache *cache,
+                                                       const double requested_cutoff_s) {
+            double cutoff_s = requested_cutoff_s;
+            if (cache == track_ctx.stale_planned_cache &&
+                std::isfinite(track_ctx.stale_planned_cache_prefix_cutoff_s))
+            {
+                cutoff_s = std::isfinite(cutoff_s)
+                                   ? std::min(cutoff_s, track_ctx.stale_planned_cache_prefix_cutoff_s)
+                                   : track_ctx.stale_planned_cache_prefix_cutoff_s;
+            }
+            return cutoff_s;
         };
 
         track_ctx.base_pick_window = {};
@@ -467,10 +520,13 @@ namespace Game
         const auto draw_cache_fallback_ranges =
                 [&](const std::vector<std::pair<double, double>> &covered_ranges,
                     const double fresh_cutoff_s) {
-                    if (!planned_cache_drawable(planned_cache))
+                    OrbitPredictionCache *fallback_cache = prefix_fallback_cache();
+                    if (!fallback_cache || !planned_cache_drawable(*fallback_cache))
                     {
                         return;
                     }
+                    const double prefix_cutoff_s =
+                            clamp_prefix_cutoff_for_cache(fallback_cache, fresh_cutoff_s);
 
                     const std::vector<std::pair<double, double>> uncovered_ranges =
                             Draw::compute_uncovered_ranges(planned_window_t0_s,
@@ -481,13 +537,13 @@ namespace Game
                     for (const auto &[range_t0_s, range_t1_s] : uncovered_ranges)
                     {
                         const bool prefix_range =
-                                std::isfinite(fresh_cutoff_s) &&
-                                range_t1_s <= (fresh_cutoff_s + 1.0e-6);
+                                std::isfinite(prefix_cutoff_s) &&
+                                range_t1_s <= (prefix_cutoff_s + 1.0e-6);
                         if (!prefix_range)
                         {
                             continue;
                         }
-                        draw_planned_window_from_cache(planned_cache,
+                        draw_planned_window_from_cache(*fallback_cache,
                                                        range_t0_s,
                                                        range_t1_s,
                                                        track_ctx.track_color_plan);
@@ -587,18 +643,22 @@ namespace Game
                                  preview_t0_s + track_ctx.track->preview_anchor.visual_window_s);
                 if (preview_t0_s > planned_window_t0_s)
                 {
-                    draw_planned_window_from_cache(planned_cache,
-                                                   planned_window_t0_s,
-                                                   preview_t0_s,
-                                                   track_ctx.track_color_plan);
+                    if (OrbitPredictionCache *fallback_cache = prefix_fallback_cache())
+                    {
+                        draw_planned_window_from_cache(*fallback_cache,
+                                                       planned_window_t0_s,
+                                                       preview_t0_s,
+                                                       track_ctx.track_color_plan);
+                    }
                 }
-                if (preview_t1_s > preview_t0_s)
+                if (preview_t1_s > preview_t0_s && planned_cache_drawable(planned_cache))
                 {
                     draw_planned_window_from_cache(planned_cache,
                                                    preview_t0_s,
                                                    preview_t1_s,
                                                    preview_plan_color,
-                                                   track_ctx.maneuver_drag_active);
+                                                   track_ctx.maneuver_drag_active,
+                                                   true);
                 }
                 return;
             }
@@ -622,11 +682,14 @@ namespace Game
             }
             if (track_ctx.maneuver_drag_active && std::isfinite(track_ctx.planned_draw_window.anchor_time_s))
             {
-                draw_planned_window_from_cache(planned_cache,
-                                               planned_window_t0_s,
-                                               std::min(planned_window_t1_s,
-                                                        track_ctx.planned_draw_window.anchor_time_s),
-                                               track_ctx.track_color_plan);
+                if (OrbitPredictionCache *fallback_cache = prefix_fallback_cache())
+                {
+                    draw_planned_window_from_cache(*fallback_cache,
+                                                   planned_window_t0_s,
+                                                   std::min(planned_window_t1_s,
+                                                            track_ctx.planned_draw_window.anchor_time_s),
+                                                   track_ctx.track_color_plan);
+                }
                 return;
             }
             draw_planned_window_from_cache(planned_cache,
@@ -688,19 +751,34 @@ namespace Game
                 track_ctx.maneuver_drag_active && std::isfinite(track_ctx.planned_draw_window.anchor_time_s)
                         ? track_ctx.planned_draw_window.anchor_time_s
                         : first_preview_t0_s;
+        OrbitPredictionCache *fallback_cache = prefix_fallback_cache();
+        const double fallback_prefix_cutoff_s =
+                fallback_cache ? clamp_prefix_cutoff_for_cache(fallback_cache, drag_prefix_cutoff_s)
+                               : std::numeric_limits<double>::quiet_NaN();
         for (const auto &[range_t0_s, range_t1_s] : uncovered_ranges)
         {
             const bool prefix_range =
-                    std::isfinite(drag_prefix_cutoff_s) &&
-                    range_t1_s <= (drag_prefix_cutoff_s + 1.0e-6);
-            if (!prefix_range && (track_ctx.maneuver_drag_active || !draw_matching_cached_tail))
+                    std::isfinite(fallback_prefix_cutoff_s) &&
+                    range_t1_s <= (fallback_prefix_cutoff_s + 1.0e-6);
+            if (prefix_range)
+            {
+                if (fallback_cache)
+                {
+                    draw_planned_window_from_cache(*fallback_cache,
+                                                   range_t0_s,
+                                                   range_t1_s,
+                                                   track_ctx.track_color_plan);
+                }
+                continue;
+            }
+            if (track_ctx.maneuver_drag_active || !draw_matching_cached_tail)
             {
                 continue;
             }
             draw_planned_window_from_cache(planned_cache,
                                            range_t0_s,
                                            range_t1_s,
-                                           prefix_range ? track_ctx.track_color_plan : preview_plan_color);
+                                           preview_plan_color);
         }
     }
 } // namespace Game

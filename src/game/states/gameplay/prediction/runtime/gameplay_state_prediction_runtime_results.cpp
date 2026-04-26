@@ -226,8 +226,13 @@ namespace Game
             return;
         }
 
+        const bool live_fast_preview_result =
+                track->supports_maneuvers &&
+                result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+                maneuver_live_preview_active(true);
         if (track->latest_requested_generation_id != 0 &&
-            result.generation_id < track->latest_requested_generation_id)
+            result.generation_id < track->latest_requested_generation_id &&
+            !live_fast_preview_result)
         {
             return;
         }
@@ -236,7 +241,8 @@ namespace Game
             (result.generation_id != track->latest_requested_derived_generation_id ||
              result.display_frame_key != track->latest_requested_derived_display_frame_key ||
              result.display_frame_revision != track->latest_requested_derived_display_frame_revision ||
-             result.analysis_body_id != track->latest_requested_derived_analysis_body_id))
+             result.analysis_body_id != track->latest_requested_derived_analysis_body_id) &&
+            !live_fast_preview_result)
         {
             return;
         }
@@ -367,6 +373,25 @@ namespace Game
                 current_plan_active &&
                 solved_plan_signature_valid &&
                 solved_plan_signature != current_plan_signature;
+        const bool active_maneuver_edit =
+                current_plan_active &&
+                (PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state) ||
+                 _maneuver_node_edit_preview.state != ManeuverNodeEditPreview::State::Idle) &&
+                track->key == _prediction_selection.active_subject &&
+                maneuver_live_preview_active(true);
+        const bool stale_fast_preview_during_edit =
+                active_maneuver_edit &&
+                result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview &&
+                result_plan_signature_mismatch;
+        if (active_maneuver_edit && result_plan_signature_mismatch && !stale_fast_preview_during_edit)
+        {
+            track->dirty = true;
+
+            const auto derived_apply_end_tp = PredictionDragDebugTelemetry::Clock::now();
+            record_derived_apply_debug(debug, result.generation_id, derived_apply_start_tp, derived_apply_end_tp);
+            return;
+        }
+
         const bool full_streaming_result =
                 PredictionRuntimeDetail::prediction_track_is_full_streaming_publish(result.solve_quality,
                                                                                     result.publish_stage);
@@ -376,7 +401,7 @@ namespace Game
                     !current_plan_active ||
                     !solved_plan_signature_valid ||
                     solved_plan_signature == current_plan_signature;
-            if (solved_plan_signature_valid && solved_plan_matches_current)
+            if (solved_plan_signature_valid && (solved_plan_matches_current || stale_fast_preview_during_edit))
             {
                 cache_to_publish.maneuver_plan_signature_valid = true;
                 cache_to_publish.maneuver_plan_signature = solved_plan_signature;

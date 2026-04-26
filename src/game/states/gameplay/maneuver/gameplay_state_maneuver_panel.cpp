@@ -660,7 +660,6 @@ namespace Game
                     node.time_s = new_time_s;
                     needs_sort = true;
                     update_maneuver_node_time_edit_preview(node.id, previous_time_s);
-                    mark_maneuver_plan_dirty();
                 }
             }
             if (ImGui::IsItemDeactivated())
@@ -874,7 +873,6 @@ namespace Game
                 sel->time_s = new_time_s;
                 needs_sort = true;
                 update_maneuver_node_time_edit_preview(sel->id, previous_node_time_s);
-                mark_maneuver_plan_dirty();
             }
         }
         if (ImGui::IsItemDeactivatedAfterEdit())
@@ -893,7 +891,6 @@ namespace Game
             sel->dv_rtn_mps = glm::dvec3(dv[0], dv[1], dv[2]);
             sel->total_dv_mps = safe_length(sel->dv_rtn_mps);
             update_maneuver_node_dv_edit_preview(sel->id);
-            mark_maneuver_plan_dirty();
         }
         if (ImGui::IsItemDeactivatedAfterEdit())
         {

@@ -326,8 +326,9 @@ namespace Game
                                         track_id = request.track_id,
                                         generation_id,
                                         request_epoch,
-                                        maneuver_plan_revision = request.maneuver_plan_revision]() {
-            return !should_continue_job(track_id, generation_id, request_epoch, maneuver_plan_revision);
+                                        maneuver_plan_revision = request.maneuver_plan_revision,
+                                        solve_quality = request.solve_quality]() {
+            return !should_continue_job(track_id, generation_id, request_epoch, maneuver_plan_revision, solve_quality);
         };
         const auto elapsed_ms = [&compute_start]() {
             return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compute_start).count();

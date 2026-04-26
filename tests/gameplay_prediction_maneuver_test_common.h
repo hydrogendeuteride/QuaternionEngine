@@ -16,6 +16,12 @@
 #include <mutex>
 #include <unordered_map>
 
+namespace GameplayTestHooks
+{
+    void register_entity(Game::Entity *entity);
+    void clear_entities();
+} // namespace GameplayTestHooks
+
 namespace
 {
     std::unique_ptr<Game::OrbitalScenario> make_reference_orbitsim(const double time_s,

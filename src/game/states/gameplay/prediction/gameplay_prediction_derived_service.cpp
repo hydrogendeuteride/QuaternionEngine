@@ -107,13 +107,18 @@ namespace Game
         void discard_derived_completed_results_before_generation(
                 std::deque<OrbitPredictionDerivedService::Result> &completed,
                 const uint64_t track_id,
-                const uint64_t generation_id)
+                const uint64_t generation_id,
+                const bool preserve_fast_preview)
         {
             completed.erase(std::remove_if(completed.begin(),
                                            completed.end(),
-                                           [track_id, generation_id](const OrbitPredictionDerivedService::Result &queued) {
-                                               return queued.track_id == track_id &&
-                                                      queued.generation_id < generation_id;
+                                           [track_id, generation_id, preserve_fast_preview](
+                                                   const OrbitPredictionDerivedService::Result &queued) {
+                                                return queued.track_id == track_id &&
+                                                       queued.generation_id < generation_id &&
+                                                       !(preserve_fast_preview &&
+                                                         queued.solve_quality ==
+                                                                 OrbitPredictionService::SolveQuality::FastPreview);
                                            }),
                             completed.end());
         }
@@ -278,18 +283,24 @@ namespace Game
             }
 
             const auto latest_it = _latest_requested_generation_by_track.find(request.track_id);
+            const bool fast_preview_request =
+                    request.solver_result.solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
             if (latest_it != _latest_requested_generation_by_track.end() &&
-                request.generation_id < latest_it->second)
+                request.generation_id < latest_it->second &&
+                !fast_preview_request)
             {
                 return;
             }
-            _latest_requested_generation_by_track[request.track_id] = request.generation_id;
+            _latest_requested_generation_by_track[request.track_id] =
+                    std::max(_latest_requested_generation_by_track[request.track_id],
+                             request.generation_id);
             _latest_maneuver_plan_revision_by_track[request.track_id] =
                     std::max(_latest_maneuver_plan_revision_by_track[request.track_id],
                              request.maneuver_plan_revision);
             discard_derived_completed_results_before_generation(_completed,
                                                                 request.track_id,
-                                                                request.generation_id);
+                                                                request.generation_id,
+                                                                fast_preview_request);
             discard_stale_maneuver_derived_completed_results(_completed,
                                                              request.track_id,
                                                              _latest_maneuver_plan_revision_by_track[request.track_id]);
@@ -339,7 +350,12 @@ namespace Game
 
                 if (it->generation_id > job.generation_id)
                 {
-                    return;
+                    if (!fast_preview_request)
+                    {
+                        return;
+                    }
+                    ++it;
+                    continue;
                 }
 
                 if (it->generation_id < job.generation_id)
@@ -425,6 +441,7 @@ namespace Game
             const uint64_t generation_id,
             const uint64_t request_epoch,
             const uint64_t current_request_epoch,
+            const OrbitPredictionService::SolveQuality solve_quality,
             const std::unordered_map<uint64_t, uint64_t> &latest_requested_generation_by_track)
     {
         if (request_epoch != current_request_epoch)
@@ -434,13 +451,15 @@ namespace Game
 
         const auto latest_it = latest_requested_generation_by_track.find(track_id);
         return latest_it == latest_requested_generation_by_track.end() ||
-               generation_id >= latest_it->second;
+               generation_id >= latest_it->second ||
+               solve_quality == OrbitPredictionService::SolveQuality::FastPreview;
     }
 
     bool OrbitPredictionDerivedService::should_continue_job(const uint64_t track_id,
                                                             const uint64_t generation_id,
                                                             const uint64_t request_epoch,
-                                                            const uint64_t maneuver_plan_revision) const
+                                                            const uint64_t maneuver_plan_revision,
+                                                            const OrbitPredictionService::SolveQuality solve_quality) const
     {
         std::lock_guard<std::mutex> lock(_mutex);
         if (!_running || request_epoch != _request_epoch)
@@ -450,7 +469,8 @@ namespace Game
 
         const auto latest_it = _latest_requested_generation_by_track.find(track_id);
         if (latest_it != _latest_requested_generation_by_track.end() &&
-            generation_id < latest_it->second)
+            generation_id < latest_it->second &&
+            solve_quality != OrbitPredictionService::SolveQuality::FastPreview)
         {
             return false;
         }
@@ -482,8 +502,9 @@ namespace Game
                                         track_id = job.track_id,
                                         generation_id = job.generation_id,
                                         request_epoch = job.request_epoch,
-                                        maneuver_plan_revision = job.request.maneuver_plan_revision]() {
-            return !should_continue_job(track_id, generation_id, request_epoch, maneuver_plan_revision);
+                                        maneuver_plan_revision = job.request.maneuver_plan_revision,
+                                        solve_quality = job.request.solver_result.solve_quality]() {
+            return !should_continue_job(track_id, generation_id, request_epoch, maneuver_plan_revision, solve_quality);
         };
 
         Request &request = job.request;
@@ -725,7 +746,8 @@ namespace Game
             if (!should_continue_job(job.track_id,
                                      job.generation_id,
                                      job.request_epoch,
-                                     job.request.maneuver_plan_revision))
+                                     job.request.maneuver_plan_revision,
+                                     job.request.solver_result.solve_quality))
             {
                 {
                     std::lock_guard<std::mutex> lock(_mutex);
@@ -753,6 +775,7 @@ namespace Game
                                                               completed_generation_id,
                                                               completed_request_epoch,
                                                               _request_epoch,
+                                                              result.solve_quality,
                                                               _latest_requested_generation_by_track);
                 should_enqueue_result = should_enqueue_result &&
                                         maneuver_revision_is_current(completed_track_id,

@@ -541,7 +541,8 @@ namespace Game
         bool should_continue_job(uint64_t track_id,
                                  uint64_t generation_id,
                                  uint64_t request_epoch,
-                                 uint64_t maneuver_plan_revision) const;
+                                 uint64_t maneuver_plan_revision,
+                                 SolveQuality solve_quality) const;
         // Background loop that consumes queued jobs and publishes fresh results.
         void worker_loop();
         SharedCelestialEphemeris get_or_build_ephemeris(const EphemerisBuildRequest &request,
