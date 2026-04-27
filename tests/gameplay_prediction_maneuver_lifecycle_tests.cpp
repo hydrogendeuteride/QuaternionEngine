@@ -227,6 +227,48 @@ TEST(GameplayPredictionManeuverTests, LifecycleHelperRecognizesPreviewTransition
     EXPECT_FALSE(Game::PredictionRuntimeDetail::prediction_track_preview_overlay_draw_active(snapshot, true));
 }
 
+TEST(GameplayPredictionManeuverTests, LifecycleHelperDescribesVisibleOverlayLayers)
+{
+    Game::PredictionTrackState track{};
+    track.cache = make_prediction_cache(11u, 0.0, 40.0, 7'000'000.0, 7'400'000.0);
+    track.authoritative_cache = track.cache;
+    track.preview_state = Game::PredictionPreviewRuntimeState::AwaitFullRefine;
+    track.preview_anchor.valid = true;
+    track.dirty = true;
+    track.full_stream_overlay.chunk_assembly.valid = true;
+    track.full_stream_overlay.chunk_assembly.generation_id = track.cache.generation_id;
+    track.full_stream_overlay.chunk_assembly.chunks = {
+            make_chunk(0u, track.cache.generation_id, 10.0, 20.0, 7'100'000.0, 7'200'000.0),
+    };
+
+    const auto snapshot = Game::PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
+    const auto layers = Game::PredictionRuntimeDetail::describe_prediction_overlay_layers(
+            snapshot,
+            true,
+            false,
+            track.preview_anchor.valid);
+    const Game::PredictionChunkAssembly preview_snapshot =
+            Game::PredictionRuntimeDetail::prediction_preview_overlay_snapshot_for_draw(track, layers);
+    const Game::PredictionChunkAssembly full_stream_snapshot =
+            Game::PredictionRuntimeDetail::prediction_full_stream_overlay_snapshot_for_draw(
+                    track,
+                    track.cache,
+                    layers);
+
+    EXPECT_TRUE(Game::PredictionRuntimeDetail::prediction_track_planned_preview_like(snapshot));
+    EXPECT_TRUE(Game::PredictionRuntimeDetail::prediction_track_should_keep_stale_planned_visible(
+            snapshot,
+            true,
+            false));
+    EXPECT_TRUE(Game::PredictionRuntimeDetail::prediction_track_should_hold_maneuver_node_cache(snapshot, true));
+    EXPECT_FALSE(layers.preview_fallback_active);
+    EXPECT_FALSE(layers.preview_overlay_draw_active);
+    EXPECT_TRUE(layers.full_stream_overlay_draw_active);
+    EXPECT_FALSE(preview_snapshot.valid);
+    EXPECT_TRUE(full_stream_snapshot.valid);
+    EXPECT_EQ(full_stream_snapshot.chunks.size(), 1u);
+}
+
 TEST(GameplayPredictionManeuverTests, LifecycleHelperCoversPendingAndDirtyPromotionPolicies)
 {
     Game::PredictionTrackState track{};

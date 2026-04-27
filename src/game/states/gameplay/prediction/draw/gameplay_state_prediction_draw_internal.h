@@ -84,6 +84,7 @@ namespace Game::PredictionDrawDetail
         std::size_t i_hi{0};
         bool is_active{false};
         bool active_player_track{false};
+        bool active_maneuver_track{false};
         bool maneuver_drag_active{false};
         bool planned_cache_current{false};
         bool planned_cache_drawable{false};

@@ -174,7 +174,10 @@ namespace Game
             {
                 return;
             }
-            const bool dashed = _prediction_draw_config.draw_planned_as_dashed && !force_solid;
+            const bool dashed =
+                    _prediction_draw_config.draw_planned_as_dashed &&
+                    !force_solid &&
+                    !track_ctx.maneuver_drag_active;
             if (track_ctx.direct_world_polyline)
             {
                 Draw::draw_polyline_window(track_ctx.draw_ctx,
@@ -232,7 +235,10 @@ namespace Game
             {
                 return false;
             }
-            const bool dashed = _prediction_draw_config.draw_planned_as_dashed && !force_solid;
+            const bool dashed =
+                    _prediction_draw_config.draw_planned_as_dashed &&
+                    !force_solid &&
+                    !track_ctx.maneuver_drag_active;
 
             if (track_ctx.direct_world_polyline && chunk.frame_samples.size() >= 2)
             {
@@ -303,17 +309,16 @@ namespace Game
         track_ctx.base_pick_window = {};
         const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
                 PredictionRuntimeDetail::describe_prediction_track_lifecycle(*track_ctx.track);
-        const bool active_maneuver_track =
-                track_ctx.active_player_track &&
-                track_ctx.track->supports_maneuvers &&
-                _maneuver_nodes_enabled &&
-                !_maneuver_state.nodes.empty();
-        const bool preview_lifecycle_fallback_active =
-                PredictionRuntimeDetail::prediction_track_preview_fallback_active(lifecycle);
+        const PredictionRuntimeDetail::PredictionOverlayLayerState overlay_layers =
+                PredictionRuntimeDetail::describe_prediction_overlay_layers(
+                        lifecycle,
+                        track_ctx.active_maneuver_track,
+                        track_ctx.maneuver_drag_active,
+                        track_ctx.track->preview_anchor.valid);
         const bool preview_window_available =
-                active_maneuver_track &&
+                overlay_layers.active_maneuver_track &&
                 track_ctx.track->preview_anchor.valid &&
-                preview_lifecycle_fallback_active &&
+                overlay_layers.preview_fallback_active &&
                 std::isfinite(track_ctx.track->preview_anchor.anchor_time_s) &&
                 track_ctx.track->preview_anchor.visual_window_s > 0.0;
         const auto preview_anchor_window = [&]() {
@@ -338,14 +343,14 @@ namespace Game
             return window;
         };
         track_ctx.planned_draw_window =
-                (active_maneuver_track &&
+                (overlay_layers.active_maneuver_track &&
                  track_ctx.planned_window_segments && !track_ctx.planned_window_segments->empty())
                         ? Draw::build_planned_draw_window(*track_ctx.planned_window_segments,
                                                           _prediction_draw_config,
                                                           track_ctx.planned_window_policy)
                         : preview_anchor_window();
         track_ctx.planned_pick_window =
-                (active_maneuver_track &&
+                (overlay_layers.active_maneuver_track &&
                  track_ctx.planned_window_segments && !track_ctx.planned_window_segments->empty())
                         ? Draw::build_planned_pick_window(*track_ctx.planned_window_segments,
                                                           _prediction_draw_config,
@@ -447,25 +452,16 @@ namespace Game
                                                        track_ctx.track_color_plan.g,
                                                        track_ctx.track_color_plan.b,
                                                        std::clamp(std::max(track_ctx.track_color_plan.a, 0.98f), 0.0f, 1.0f));
-        const bool preview_overlay_draw_active =
-                PredictionRuntimeDetail::prediction_track_preview_overlay_draw_active(
-                        lifecycle,
-                        track_ctx.track->preview_anchor.valid);
         const PredictionChunkAssembly preview_assembly_snapshot =
-                preview_overlay_draw_active ? track_ctx.track->preview_overlay.chunk_assembly
-                                            : PredictionChunkAssembly{};
+                PredictionRuntimeDetail::prediction_preview_overlay_snapshot_for_draw(
+                        *track_ctx.track,
+                        overlay_layers);
         const PredictionChunkAssembly &preview_assembly = preview_assembly_snapshot;
-        const bool full_stream_overlay_draw_active =
-                !active_maneuver_track &&
-                !track_ctx.maneuver_drag_active &&
-                !preview_lifecycle_fallback_active;
         const PredictionChunkAssembly full_stream_assembly_snapshot =
-                (full_stream_overlay_draw_active &&
-                 track_ctx.track->full_stream_overlay.ready_for_draw(planned_cache.generation_id,
-                                                                     planned_cache.display_frame_key,
-                                                                     planned_cache.display_frame_revision))
-                        ? track_ctx.track->full_stream_overlay.chunk_assembly
-                        : PredictionChunkAssembly{};
+                PredictionRuntimeDetail::prediction_full_stream_overlay_snapshot_for_draw(
+                        *track_ctx.track,
+                        planned_cache,
+                        overlay_layers);
         const PredictionChunkAssembly *full_stream_assembly =
                 full_stream_assembly_snapshot.valid && !full_stream_assembly_snapshot.chunks.empty()
                         ? &full_stream_assembly_snapshot
@@ -478,9 +474,15 @@ namespace Game
                     _orbit_plot_perf.planned_chunk_count += static_cast<uint32_t>(assembly.chunks.size());
                     for (const OrbitChunk &chunk : assembly.chunks)
                     {
+                        if (!std::isfinite(chunk.t0_s) || !std::isfinite(chunk.t1_s))
+                        {
+                            continue;
+                        }
                         const double clipped_t0_s = std::max(planned_window_t0_s, chunk.t0_s);
                         const double clipped_t1_s = std::min(planned_window_t1_s, chunk.t1_s);
-                        if (!(clipped_t1_s > clipped_t0_s))
+                        if (!std::isfinite(clipped_t0_s) ||
+                            !std::isfinite(clipped_t1_s) ||
+                            !(clipped_t1_s > clipped_t0_s))
                         {
                             continue;
                         }
@@ -630,7 +632,7 @@ namespace Game
         {
             const bool preview_fallback_active =
                     track_ctx.track->preview_anchor.valid &&
-                    PredictionRuntimeDetail::prediction_track_preview_fallback_active(lifecycle) &&
+                    overlay_layers.preview_fallback_active &&
                     std::isfinite(track_ctx.track->preview_anchor.anchor_time_s) &&
                     track_ctx.track->preview_anchor.visual_window_s > 0.0;
             if (preview_fallback_active)
@@ -664,6 +666,26 @@ namespace Game
             }
             if (full_stream_assembly)
             {
+                double first_full_stream_t0_s = std::numeric_limits<double>::quiet_NaN();
+                for (const OrbitChunk &chunk : full_stream_assembly->chunks)
+                {
+                    if (!std::isfinite(chunk.t0_s) || !std::isfinite(chunk.t1_s) || !chunk_drawable(chunk))
+                    {
+                        continue;
+                    }
+                    const double clipped_t0_s = std::max(planned_window_t0_s, chunk.t0_s);
+                    const double clipped_t1_s = std::min(planned_window_t1_s, chunk.t1_s);
+                    if (!std::isfinite(clipped_t0_s) ||
+                        !std::isfinite(clipped_t1_s) ||
+                        !(clipped_t1_s > clipped_t0_s))
+                    {
+                        continue;
+                    }
+                    first_full_stream_t0_s = std::isfinite(first_full_stream_t0_s)
+                                                     ? std::min(first_full_stream_t0_s, clipped_t0_s)
+                                                     : clipped_t0_s;
+                }
+
                 std::vector<std::pair<double, double>> full_stream_covered_ranges;
                 full_stream_covered_ranges.reserve(full_stream_assembly->chunks.size());
                 draw_chunk_assembly_ranges(
@@ -671,13 +693,19 @@ namespace Game
                         track_ctx.track_color_plan,
                         nullptr,
                         full_stream_covered_ranges);
-                double first_full_stream_t0_s = std::numeric_limits<double>::infinity();
-                for (const auto &[range_t0_s, range_t1_s] : full_stream_covered_ranges)
+
+                const double fallback_end_s =
+                        std::isfinite(first_full_stream_t0_s) ? first_full_stream_t0_s : planned_window_t1_s;
+                if (fallback_end_s > planned_window_t0_s)
                 {
-                    (void) range_t1_s;
-                    first_full_stream_t0_s = std::min(first_full_stream_t0_s, range_t0_s);
+                    if (OrbitPredictionCache *fallback_cache = prefix_fallback_cache())
+                    {
+                        draw_planned_window_from_cache(*fallback_cache,
+                                                       planned_window_t0_s,
+                                                       fallback_end_s,
+                                                       track_ctx.track_color_plan);
+                    }
                 }
-                draw_cache_fallback_ranges(full_stream_covered_ranges, first_full_stream_t0_s);
                 return;
             }
             if (track_ctx.maneuver_drag_active && std::isfinite(track_ctx.planned_draw_window.anchor_time_s))
@@ -692,16 +720,19 @@ namespace Game
                 }
                 return;
             }
-            draw_planned_window_from_cache(planned_cache,
-                                           planned_window_t0_s,
-                                           planned_window_t1_s,
-                                           track_ctx.track_color_plan);
+            if (OrbitPredictionCache *fallback_cache = prefix_fallback_cache())
+            {
+                draw_planned_window_from_cache(*fallback_cache,
+                                               planned_window_t0_s,
+                                               planned_window_t1_s,
+                                               track_ctx.track_color_plan);
+            }
             return;
         }
 
         std::vector<std::pair<double, double>> covered_ranges;
         covered_ranges.reserve(preview_assembly.chunks.size());
-        double first_preview_t0_s = std::numeric_limits<double>::infinity();
+        double first_preview_t0_s = std::numeric_limits<double>::quiet_NaN();
         _orbit_plot_perf.planned_chunk_count += static_cast<uint32_t>(preview_assembly.chunks.size());
         for (const OrbitChunk &chunk : preview_assembly.chunks)
         {
@@ -722,7 +753,9 @@ namespace Game
             }
 
             covered_ranges.emplace_back(clipped_t0_s, clipped_t1_s);
-            first_preview_t0_s = std::min(first_preview_t0_s, clipped_t0_s);
+            first_preview_t0_s = std::isfinite(first_preview_t0_s)
+                                         ? std::min(first_preview_t0_s, clipped_t0_s)
+                                         : clipped_t0_s;
             ++_orbit_plot_perf.planned_chunks_drawn;
         }
 
@@ -739,7 +772,7 @@ namespace Game
                                   full_stream_covered_ranges.begin(),
                                   full_stream_covered_ranges.end());
             const double fresh_cutoff_s =
-                    std::isfinite(first_preview_t0_s) ? first_preview_t0_s : std::numeric_limits<double>::infinity();
+                    std::isfinite(first_preview_t0_s) ? first_preview_t0_s : planned_window_t1_s;
             draw_cache_fallback_ranges(covered_ranges, fresh_cutoff_s);
             return;
         }

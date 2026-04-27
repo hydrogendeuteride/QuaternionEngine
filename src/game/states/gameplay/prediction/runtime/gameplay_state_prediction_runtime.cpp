@@ -40,7 +40,7 @@ namespace Game
                 return std::numeric_limits<double>::quiet_NaN();
             }
 
-            const double horizon_end_s = time_ctx.sim_now_s + plan_horizon_s;
+            const double horizon_end_s = final_node_time_s + plan_horizon_s;
             const double post_node_end_s = final_node_time_s + std::max(0.0, post_node_coverage_s);
             return std::max(horizon_end_s, post_node_end_s);
         }

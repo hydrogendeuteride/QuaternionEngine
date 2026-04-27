@@ -238,32 +238,20 @@ namespace Game
         {
             const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
                     PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
-            const bool preview_overlay_draw_active =
-                    PredictionRuntimeDetail::prediction_track_preview_overlay_draw_active(
+            const PredictionRuntimeDetail::PredictionOverlayLayerState overlay_layers =
+                    PredictionRuntimeDetail::describe_prediction_overlay_layers(
                             lifecycle,
+                            track_ctx.active_maneuver_track,
+                            track_ctx.maneuver_drag_active,
                             track.preview_anchor.valid);
             const PredictionChunkAssembly preview_assembly_snapshot =
-                    preview_overlay_draw_active ? track.preview_overlay.chunk_assembly
-                                                : PredictionChunkAssembly{};
+                    PredictionRuntimeDetail::prediction_preview_overlay_snapshot_for_draw(track, overlay_layers);
             const PredictionChunkAssembly &preview_assembly = preview_assembly_snapshot;
-            const bool preview_lifecycle_fallback_active =
-                    PredictionRuntimeDetail::prediction_track_preview_fallback_active(lifecycle);
-            const bool active_maneuver_track =
-                    track_ctx.active_player_track &&
-                    track.supports_maneuvers &&
-                    _maneuver_nodes_enabled &&
-                    !_maneuver_state.nodes.empty();
-            const bool full_stream_overlay_draw_active =
-                    !active_maneuver_track &&
-                    !track_ctx.maneuver_drag_active &&
-                    !preview_lifecycle_fallback_active;
             const PredictionChunkAssembly full_stream_assembly_snapshot =
-                    (full_stream_overlay_draw_active &&
-                     track.full_stream_overlay.ready_for_draw(planned_cache.generation_id,
-                                                              planned_cache.display_frame_key,
-                                                              planned_cache.display_frame_revision))
-                            ? track.full_stream_overlay.chunk_assembly
-                            : PredictionChunkAssembly{};
+                    PredictionRuntimeDetail::prediction_full_stream_overlay_snapshot_for_draw(
+                            track,
+                            planned_cache,
+                            overlay_layers);
             const PredictionChunkAssembly *full_stream_assembly =
                     full_stream_assembly_snapshot.valid && !full_stream_assembly_snapshot.chunks.empty()
                             ? &full_stream_assembly_snapshot

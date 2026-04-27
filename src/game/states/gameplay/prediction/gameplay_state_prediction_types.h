@@ -111,7 +111,7 @@ namespace Game
         double node_time_tolerance_s{1.0e-3};
         double dashed_segment_on_px{14.0};
         double dashed_segment_off_px{9.0};
-        int dash_max_chunks_per_segment{4096};
+        int dash_max_chunks_per_segment{128};
         bool draw_planned_as_dashed{true};
     };
 

@@ -23,6 +23,15 @@ namespace Game::PredictionRuntimeDetail
         bool needs_rebuild{false};
     };
 
+    struct PredictionOverlayLayerState
+    {
+        bool active_maneuver_track{false};
+        bool maneuver_drag_active{false};
+        bool preview_fallback_active{false};
+        bool preview_overlay_draw_active{false};
+        bool full_stream_overlay_draw_active{false};
+    };
+
     template<typename T>
     bool contains_key(const std::vector<T> &items, const T &needle)
     {
@@ -244,6 +253,82 @@ namespace Game::PredictionRuntimeDetail
     {
         return snapshot.preview_state == PredictionPreviewRuntimeState::DragPreviewPending ||
                snapshot.preview_state == PredictionPreviewRuntimeState::PreviewStreaming;
+    }
+
+    inline bool prediction_track_planned_preview_like(const PredictionTrackLifecycleSnapshot &snapshot)
+    {
+        return prediction_track_preview_fallback_active(snapshot) ||
+               snapshot.preview_overlay_active ||
+               snapshot.full_stream_overlay_active ||
+               snapshot.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine;
+    }
+
+    inline bool prediction_track_should_keep_stale_planned_visible(
+            const PredictionTrackLifecycleSnapshot &snapshot,
+            const bool active_player_track,
+            const bool live_preview_active)
+    {
+        return active_player_track &&
+               (live_preview_active ||
+                snapshot.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine ||
+                snapshot.request_pending ||
+                snapshot.derived_request_pending ||
+                snapshot.awaiting_authoritative_publish);
+    }
+
+    inline bool prediction_track_should_hold_maneuver_node_cache(
+            const PredictionTrackLifecycleSnapshot &snapshot,
+            const bool interaction_idle)
+    {
+        return interaction_idle &&
+               (snapshot.request_pending ||
+                snapshot.derived_request_pending ||
+                snapshot.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine ||
+                snapshot.dirty ||
+                snapshot.invalidated_while_pending ||
+                snapshot.awaiting_authoritative_publish);
+    }
+
+    inline PredictionOverlayLayerState describe_prediction_overlay_layers(
+            const PredictionTrackLifecycleSnapshot &snapshot,
+            const bool active_maneuver_track,
+            const bool maneuver_drag_active,
+            const bool preview_anchor_valid)
+    {
+        PredictionOverlayLayerState out{};
+        out.active_maneuver_track = active_maneuver_track;
+        out.maneuver_drag_active = maneuver_drag_active;
+        out.preview_fallback_active = prediction_track_preview_fallback_active(snapshot);
+        out.preview_overlay_draw_active =
+                prediction_track_preview_overlay_draw_active(snapshot, preview_anchor_valid);
+        out.full_stream_overlay_draw_active =
+                !maneuver_drag_active &&
+                !out.preview_fallback_active &&
+                (snapshot.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine ||
+                 !active_maneuver_track);
+        return out;
+    }
+
+    inline PredictionChunkAssembly prediction_preview_overlay_snapshot_for_draw(
+            const PredictionTrackState &track,
+            const PredictionOverlayLayerState &layers)
+    {
+        return layers.preview_overlay_draw_active
+                       ? track.preview_overlay.chunk_assembly
+                       : PredictionChunkAssembly{};
+    }
+
+    inline PredictionChunkAssembly prediction_full_stream_overlay_snapshot_for_draw(
+            const PredictionTrackState &track,
+            const OrbitPredictionCache &planned_cache,
+            const PredictionOverlayLayerState &layers)
+    {
+        return layers.full_stream_overlay_draw_active &&
+                       track.full_stream_overlay.ready_for_draw(planned_cache.generation_id,
+                                                                planned_cache.display_frame_key,
+                                                                planned_cache.display_frame_revision)
+                       ? track.full_stream_overlay.chunk_assembly
+                       : PredictionChunkAssembly{};
     }
 
     inline bool prediction_track_should_accept_preview_publish(const PredictionTrackLifecycleSnapshot &snapshot,

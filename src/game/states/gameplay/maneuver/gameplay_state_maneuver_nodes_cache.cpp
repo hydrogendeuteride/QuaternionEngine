@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
+#include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include "game/orbit/orbit_prediction_math.h"
 
@@ -200,10 +201,26 @@ namespace Game
 
     void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
     {
+        const PredictionTrackState *player_track = player_prediction_track();
+        const bool interaction_idle =
+                _maneuver_gizmo_interaction.state != ManeuverGizmoInteraction::State::DragAxis;
+        const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
+                player_track
+                    ? PredictionRuntimeDetail::describe_prediction_track_lifecycle(*player_track)
+                    : PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot{};
+        const bool hold_cached_release_state =
+                player_track &&
+                PredictionRuntimeDetail::prediction_track_should_hold_maneuver_node_cache(
+                        lifecycle,
+                        interaction_idle);
+
         for (ManeuverNode &node : _maneuver_state.nodes)
         {
             node.total_dv_mps = safe_length(node.dv_rtn_mps);
-            node.gizmo_valid = false;
+            if (!hold_cached_release_state)
+            {
+                node.gizmo_valid = false;
+            }
         }
 
         if (!_orbitsim || !_prediction_selection.active_subject.valid() ||
@@ -212,15 +229,13 @@ namespace Game
             return;
         }
 
-        const PredictionTrackState *player_track = player_prediction_track();
         const OrbitPredictionCache *effective_cache = player_prediction_cache();
         const OrbitPredictionCache *stable_cache =
-                (player_track && player_track->cache.valid) ? &player_track->cache : effective_cache;
-        const bool interaction_idle =
-                _maneuver_gizmo_interaction.state != ManeuverGizmoInteraction::State::DragAxis;
-        const bool hold_cached_release_state =
-                player_track && interaction_idle &&
-                (player_track->request_pending || player_track->derived_request_pending);
+                (player_track &&
+                 player_track->authoritative_cache.valid &&
+                 player_track->authoritative_cache.has_planned_frame_draw_data())
+                        ? &player_track->authoritative_cache
+                        : ((player_track && player_track->cache.valid) ? &player_track->cache : effective_cache);
         const OrbitPredictionCache *display_cache = effective_cache;
         const OrbitPredictionCache *pred_cache = display_cache;
         if (!display_cache || !display_cache->valid || display_cache->trajectory_frame.size() < 2)
@@ -275,7 +290,23 @@ namespace Game
                         : nullptr;
         const bool allow_base_fallback = _maneuver_state.nodes.size() <= 1;
         const bool stable_planned_prefix_available =
-                false;
+                stable_cache &&
+                stable_cache != pred_cache &&
+                stable_cache->valid &&
+                stable_cache->has_planned_frame_draw_data() &&
+                stable_cache->trajectory_inertial_planned.size() >= 2;
+        double stable_prefix_cutoff_s =
+                player_track && player_track->preview_anchor.valid
+                    ? player_track->preview_anchor.anchor_time_s
+                    : std::numeric_limits<double>::quiet_NaN();
+        if (!std::isfinite(stable_prefix_cutoff_s))
+        {
+            if (const ManeuverNode *anchor_node =
+                        _maneuver_state.find_node(active_maneuver_preview_anchor_node_id()))
+            {
+                stable_prefix_cutoff_s = anchor_node->time_s;
+            }
+        }
         const orbitsim::TrajectoryFrameSpec display_frame_spec =
                 display_cache->resolved_frame_spec_valid
                     ? display_cache->resolved_frame_spec
@@ -458,7 +489,9 @@ namespace Game
             // --- Resolve which cache/trajectory source to use for this node ---
             const bool use_stable_prefix =
                     stable_planned_prefix_available &&
-                    false;
+                    !active_drag_node &&
+                    std::isfinite(stable_prefix_cutoff_s) &&
+                    node.time_s <= stable_prefix_cutoff_s + kNodePreviewTimeMatchEpsilonS;
             const bool editing_node_time =
                     _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime &&
                     _maneuver_node_edit_preview.node_id == node.id;

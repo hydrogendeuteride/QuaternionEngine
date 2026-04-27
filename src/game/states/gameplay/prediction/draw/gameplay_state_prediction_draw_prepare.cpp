@@ -70,6 +70,24 @@ namespace Game
                    !reference.resolved_frame_spec_valid ||
                    draw_frame_specs_compatible(candidate.resolved_frame_spec, reference.resolved_frame_spec);
         }
+
+        [[nodiscard]] const OrbitPredictionCache *planned_window_source_cache(
+                const Draw::PredictionTrackDrawContext &ctx)
+        {
+            if (ctx.stale_planned_cache &&
+                ctx.planned_window_segments == &ctx.stale_planned_cache->trajectory_segments_frame_planned)
+            {
+                return ctx.stale_planned_cache;
+            }
+
+            if (ctx.stable_cache &&
+                ctx.planned_window_segments == &ctx.stable_cache->trajectory_segments_frame_planned)
+            {
+                return ctx.stable_cache;
+            }
+
+            return ctx.planned_cache;
+        }
     }
 
     bool GameplayState::build_orbit_prediction_track_draw_context(
@@ -155,9 +173,18 @@ namespace Game
                 prediction_subject_supports_maneuvers(track.key) &&
                 _maneuver_nodes_enabled &&
                 !_maneuver_state.nodes.empty();
+        out.active_maneuver_track = with_maneuver_live_preview;
+        const bool live_preview_active = maneuver_live_preview_active(with_maneuver_live_preview);
         out.maneuver_drag_active =
                 out.active_player_track &&
-                maneuver_live_preview_active(with_maneuver_live_preview);
+                live_preview_active;
+        const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
+                PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
+        const bool keep_stale_planned_visible =
+                PredictionRuntimeDetail::prediction_track_should_keep_stale_planned_visible(
+                        lifecycle,
+                        out.active_player_track,
+                        live_preview_active);
         const bool planned_cache_current =
                 with_maneuver_live_preview &&
                 out.planned_cache &&
@@ -227,7 +254,7 @@ namespace Game
             if (can_draw_stale_prefix)
             {
                 out.stale_planned_cache = stale_candidate;
-                out.stale_planned_cache_drawable = maneuver_live_preview_active(with_maneuver_live_preview);
+                out.stale_planned_cache_drawable = keep_stale_planned_visible;
                 out.stale_planned_cache_prefix_cutoff_s = stale_prefix_cutoff_s;
                 if (!out.stale_planned_cache->trajectory_segments_frame_planned.empty())
                 {
@@ -286,10 +313,13 @@ namespace Game
 
         out.identity_frame_transform = Draw::frame_transform_is_identity(out.frame_to_world);
         out.use_base_adaptive_curve = !out.stable_cache->render_curve_frame.empty();
-        // Planned maneuver paths need to stay on the segment path. Preview streaming
-        // publishes segment chunks, and switching the tail back to the cached adaptive
-        // render curve on final publish can visibly move the post-preview tail.
-        out.use_planned_adaptive_curve = false;
+        const bool planned_preview_like = PredictionRuntimeDetail::prediction_track_planned_preview_like(lifecycle);
+        out.use_planned_adaptive_curve =
+                !out.maneuver_drag_active &&
+                !planned_preview_like &&
+                out.planned_cache_drawable &&
+                out.planned_cache &&
+                !out.planned_cache->render_curve_frame_planned.empty();
 
         out.world_basis_draw_ctx = out.draw_ctx;
         if (!out.identity_frame_transform)
@@ -312,8 +342,10 @@ namespace Game
         out.world_basis_draw_ctx.line_overlay_boost = out.draw_ctx.line_overlay_boost;
 
         out.future_window_s = prediction_future_window_s(track.key);
+        const OrbitPredictionCache *planned_window_source = planned_window_source_cache(out);
+
         if (out.planned_window_segments && !out.planned_window_segments->empty() &&
-            out.planned_cache && out.planned_cache->has_planned_frame_draw_data())
+            planned_window_source && planned_window_source->has_planned_frame_draw_data())
         {
             const double planned_segments_t0_s = out.planned_window_segments->front().t0_s;
             const double planned_segments_t1_s =
@@ -337,9 +369,8 @@ namespace Game
                                     ? authored_plan_ctx.last_future_node_time_s
                                     : authored_plan_start_s;
                     const double authored_plan_end_s =
-                            std::isfinite(authored_plan_ctx.sim_now_s) &&
-                                            std::isfinite(authored_plan_tail_anchor_s)
-                                    ? std::max(authored_plan_ctx.sim_now_s + maneuver_plan_horizon_s(),
+                            std::isfinite(authored_plan_tail_anchor_s)
+                                    ? std::max(authored_plan_tail_anchor_s + maneuver_plan_horizon_s(),
                                                authored_plan_tail_anchor_s +
                                                        OrbitPredictionTuning::kPostNodeCoverageMinS)
                                     : std::numeric_limits<double>::quiet_NaN();
@@ -356,6 +387,21 @@ namespace Game
                     {
                         out.planned_window_policy.visual_window_end_time_s = authored_plan_end_s;
                         out.planned_window_policy.pick_window_end_time_s = authored_plan_end_s;
+                    }
+
+                    if (out.stale_planned_cache_drawable &&
+                        std::isfinite(out.stale_planned_cache_prefix_cutoff_s) &&
+                        out.planned_window_segments &&
+                        !out.planned_window_segments->empty())
+                    {
+                        const double prefix_start_s =
+                                std::max(out.now_s, out.planned_window_segments->front().t0_s);
+                        if (out.stale_planned_cache_prefix_cutoff_s >
+                            prefix_start_s + kPredictionTimeEpsilonS)
+                        {
+                            out.planned_window_policy.visual_window_start_time_s = prefix_start_s;
+                            out.planned_window_policy.pick_window_start_time_s = prefix_start_s;
+                        }
                     }
                 }
 

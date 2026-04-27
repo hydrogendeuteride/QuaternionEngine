@@ -48,7 +48,7 @@ void OrbitPlotSystem::clear_all()
 
 void OrbitPlotSystem::begin_frame()
 {
-    _active_lines = std::move(_pending_lines);
+    _active_lines.swap(_pending_lines);
     _pending_lines.clear();
     _stats.active_line_count = static_cast<uint32_t>(_active_lines.size());
     _stats.pending_line_count = 0;
