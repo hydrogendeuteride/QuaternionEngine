@@ -248,19 +248,25 @@ namespace Game
         {
             const bool has_plan = _maneuver_nodes_enabled && !_maneuver_state.nodes.empty();
             const uint64_t current_plan_signature = has_plan ? current_maneuver_plan_signature() : 0u;
+            const auto cache_has_ready_current_plan = [&](const OrbitPredictionCache &cache) {
+                return has_plan &&
+                       cache.valid &&
+                       cache.has_planned_frame_draw_data() &&
+                       cache.maneuver_plan_signature_valid &&
+                       cache.maneuver_plan_signature == current_plan_signature;
+            };
             const bool has_ready_plan =
-                    has_plan &&
-                    player_track->cache.valid &&
-                    player_track->cache.has_planned_frame_draw_data() &&
-                    player_track->cache.maneuver_plan_signature_valid &&
-                    player_track->cache.maneuver_plan_signature == current_plan_signature;
+                    cache_has_ready_current_plan(player_track->cache) ||
+                    cache_has_ready_current_plan(player_track->authoritative_cache);
             const bool solver_pending =
                     has_plan &&
+                    !has_ready_plan &&
                     player_track->request_pending &&
                     player_track->pending_solver_has_maneuver_plan &&
                     player_track->pending_solver_plan_signature == current_plan_signature;
             const bool derived_pending =
                     has_plan &&
+                    !has_ready_plan &&
                     player_track->derived_request_pending &&
                     player_track->pending_derived_has_maneuver_plan &&
                     player_track->pending_derived_plan_signature == current_plan_signature;
@@ -312,8 +318,8 @@ namespace Game
 
             if (has_plan)
             {
-                float progress = 1.0f;
-                const bool plan_progress_active = queued_update || update_pending;
+                float progress = has_ready_plan ? 1.0f : 0.0f;
+                const bool plan_progress_active = update_pending;
                 if (plan_progress_active)
                 {
                     const double pulse = 0.5 + 0.5 * std::sin(ImGui::GetTime() * 3.0);
@@ -327,9 +333,17 @@ namespace Game
                                   sizeof(progress_label),
                                   "Calculating plan...");
                 }
-                else
+                else if (queued_update)
+                {
+                    std::snprintf(progress_label, sizeof(progress_label), "Preview queued");
+                }
+                else if (has_ready_plan)
                 {
                     std::snprintf(progress_label, sizeof(progress_label), "Preview ready");
+                }
+                else
+                {
+                    std::snprintf(progress_label, sizeof(progress_label), "Preview unavailable");
                 }
                 ImGui::ProgressBar(progress, ImVec2(ImGui::GetContentRegionAvail().x, 0.0f), progress_label);
 
