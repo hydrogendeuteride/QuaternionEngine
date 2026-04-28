@@ -15,6 +15,7 @@ set(ORBIT_PREDICTION_POLICY_SOURCES
 )
 
 set(ORBIT_PREDICTION_SERVICE_SOURCES
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/trajectory/trajectory_utils.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_service.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_compute.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_planned.cpp"
@@ -284,6 +285,7 @@ add_executable(prediction_cache_internal_tests
   "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve_pick.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_trajectory.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_sampling.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/orbit/trajectory/trajectory_utils.cpp"
 )
 
 set_property(TARGET prediction_cache_internal_tests PROPERTY CXX_STANDARD 20)
@@ -298,6 +300,7 @@ target_link_libraries(prediction_cache_internal_tests PRIVATE
   gtest
   fmt::fmt
   glm
+  Vulkan::Vulkan
   orbitsim
 )
 

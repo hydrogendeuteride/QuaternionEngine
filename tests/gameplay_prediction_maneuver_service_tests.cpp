@@ -417,6 +417,67 @@ TEST(GameplayPredictionManeuverTests, PredictionServiceReusesPlannedChunksWhenRe
     }
 }
 
+TEST(GameplayPredictionManeuverTests, PredictionServiceObservationPinsPlannedChunkReuseShape)
+{
+    Game::OrbitPredictionService service{};
+    Game::OrbitPredictionService::Request request =
+            make_prediction_request(0.0, 2.0 * Game::OrbitPredictionTuning::kSecondsPerDay);
+
+    Game::OrbitPredictionService::ManeuverImpulse first{};
+    first.node_id = 1;
+    first.t_s = 6.0 * Game::OrbitPredictionTuning::kSecondsPerHour;
+    first.primary_body_id = 1;
+    first.dv_rtn_mps = glm::dvec3(0.0, 0.0, 5.0);
+    request.maneuver_impulses.push_back(first);
+
+    Game::OrbitPredictionService::ManeuverImpulse second{};
+    second.node_id = 2;
+    second.t_s = 30.0 * Game::OrbitPredictionTuning::kSecondsPerHour;
+    second.primary_body_id = 1;
+    second.dv_rtn_mps = glm::dvec3(0.0, 2.0, 0.0);
+    request.maneuver_impulses.push_back(second);
+
+    const std::vector<Game::OrbitPredictionService::Result> first_results =
+            run_prediction_results(service, 1, request, 1);
+    ASSERT_EQ(first_results.size(), 1u);
+    const Game::OrbitPredictionService::Result &first_result = first_results.front();
+    ASSERT_TRUE(first_result.valid);
+    ASSERT_GT(first_result.published_chunks.size(), 1u);
+    ASSERT_FALSE(first_result.trajectory_segments_inertial_planned.empty());
+
+    const std::vector<Game::OrbitPredictionService::Result> second_results =
+            run_prediction_results(service, 2, request, 1);
+    ASSERT_EQ(second_results.size(), 1u);
+    const Game::OrbitPredictionService::Result &second_result = second_results.front();
+    ASSERT_TRUE(second_result.valid);
+    ASSERT_EQ(second_result.published_chunks.size(), first_result.published_chunks.size());
+
+    EXPECT_TRUE(second_result.diagnostics.trajectory_planned.cache_reused);
+    EXPECT_EQ(second_result.diagnostics.trajectory_segment_count_planned,
+              first_result.diagnostics.trajectory_segment_count_planned);
+    EXPECT_EQ(second_result.diagnostics.trajectory_sample_count_planned,
+              first_result.diagnostics.trajectory_sample_count_planned);
+    EXPECT_EQ(second_result.trajectory_segments_inertial_planned.size(),
+              first_result.trajectory_segments_inertial_planned.size());
+    EXPECT_EQ(second_result.maneuver_previews.size(), first_result.maneuver_previews.size());
+
+    for (std::size_t i = 0; i < first_result.published_chunks.size(); ++i)
+    {
+        const Game::OrbitPredictionService::PublishedChunk &fresh_chunk = first_result.published_chunks[i];
+        const Game::OrbitPredictionService::PublishedChunk &reused_chunk = second_result.published_chunks[i];
+
+        EXPECT_EQ(reused_chunk.chunk_id, fresh_chunk.chunk_id);
+        EXPECT_EQ(reused_chunk.quality_state, Game::OrbitPredictionService::ChunkQualityState::Final);
+        EXPECT_EQ(reused_chunk.quality_state, fresh_chunk.quality_state);
+        EXPECT_DOUBLE_EQ(reused_chunk.t0_s, fresh_chunk.t0_s);
+        EXPECT_DOUBLE_EQ(reused_chunk.t1_s, fresh_chunk.t1_s);
+        EXPECT_TRUE(reused_chunk.includes_planned_path);
+        EXPECT_EQ(reused_chunk.includes_planned_path, fresh_chunk.includes_planned_path);
+        EXPECT_FALSE(fresh_chunk.reused_from_cache);
+        EXPECT_TRUE(reused_chunk.reused_from_cache);
+    }
+}
+
 TEST(GameplayPredictionManeuverTests, PredictionServicePlannedSuffixRefineStartsAtSelectedNode)
 {
     Game::OrbitPredictionService service{};

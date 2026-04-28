@@ -27,8 +27,11 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/orbit/orbit_plot_util.h
   game/orbit/orbit_plot_util.cpp
   game/orbit/orbit_prediction_tuning.h
+  game/orbit/trajectory/trajectory_utils.h
+  game/orbit/trajectory/trajectory_utils.cpp
   game/orbit/orbit_prediction_service.h
   game/orbit/orbit_prediction_service.cpp
+  game/orbit/prediction/prediction_diagnostics_util.h
   game/orbit/prediction/orbit_prediction_service_internal.h
   game/orbit/prediction/orbit_prediction_service_compute.cpp
   game/orbit/prediction/orbit_prediction_service_planned.cpp

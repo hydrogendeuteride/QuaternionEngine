@@ -149,8 +149,8 @@ TEST(OrbitPredictionPlannerTests, InsertsManeuverAndPreviewBoundaries)
     EXPECT_NE((exact_chunks[0].boundary_flags & static_cast<uint32_t>(Flags::PreviewAnchor)), 0u);
     EXPECT_NE((exact_chunks[0].boundary_flags & static_cast<uint32_t>(Flags::PreviewChunk)), 0u);
     EXPECT_NE((exact_chunks[1].boundary_flags & static_cast<uint32_t>(Flags::PreviewChunk)), 0u);
-    EXPECT_FALSE(exact_chunks[0].allow_reuse);
-    EXPECT_FALSE(exact_chunks[1].allow_reuse);
+    EXPECT_TRUE(exact_chunks[0].allow_reuse);
+    EXPECT_TRUE(exact_chunks[1].allow_reuse);
 
     std::size_t preview_chunk_count = 0u;
     std::size_t preview_anchor_count = 0u;

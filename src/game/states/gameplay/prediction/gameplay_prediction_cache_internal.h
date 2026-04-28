@@ -1,8 +1,10 @@
 #pragma once
 
 #include "game/orbit/orbit_prediction_math.h"
+#include "game/orbit/orbit_prediction_tuning.h"
 #include "game/orbit/orbit_render_curve.h"
-#include "game/orbit/prediction/orbit_prediction_service_internal.h"
+#include "game/orbit/prediction/prediction_diagnostics_util.h"
+#include "game/orbit/trajectory/trajectory_utils.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
 
 #include "orbitsim/math.hpp"
@@ -11,12 +13,15 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <vector>
 
 namespace Game::PredictionCacheInternal
 {
+    using CancelCheck = std::function<bool()>;
+
     inline constexpr orbitsim::SpacecraftId kPlayerDisplayTargetSpacecraftId =
             static_cast<orbitsim::SpacecraftId>(0x7000'0001u);
 

@@ -7,6 +7,8 @@
 #include "game/orbit/orbit_prediction_service.h"
 #include "game/orbit/orbit_prediction_math.h"
 #include "game/orbit/orbit_prediction_tuning.h"
+#include "game/orbit/prediction/prediction_diagnostics_util.h"
+#include "game/orbit/trajectory/trajectory_utils.h"
 
 #include "orbitsim/coordinate_frames.hpp"
 #include "orbitsim/game_sim.hpp"
@@ -27,9 +29,6 @@ namespace Game
     constexpr double kEphemerisDurationEpsilonS = 1.0e-6;
     constexpr double kEphemerisDtEpsilonS = 1.0e-9;
     constexpr std::size_t kMaxCachedEphemerides = 64;
-    constexpr double kContinuityMinTimeEpsilonS = 1.0e-6;
-    constexpr double kContinuityMinPosToleranceM = 1.0e-3;
-    constexpr double kContinuityMinVelToleranceMps = 1.0e-6;
 
     using CancelCheck = std::function<bool()>;
 
@@ -50,153 +49,9 @@ namespace Game
     }
 
     // ── Inline micro-helpers ──────────────────────────────────────────────────
-    inline bool finite_vec3(const glm::dvec3 &v)
-    {
-        return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-    }
-
-    inline bool finite_state(const orbitsim::State &state)
-    {
-        return finite_vec3(state.position_m) && finite_vec3(state.velocity_mps);
-    }
-
-    inline double prediction_segment_end_time(const orbitsim::TrajectorySegment &segment)
-    {
-        return segment.t0_s + segment.dt_s;
-    }
-
-    inline double prediction_segment_span_s(const std::vector<orbitsim::TrajectorySegment> &segments)
-    {
-        if (segments.empty())
-        {
-            return 0.0;
-        }
-
-        const double t0_s = segments.front().t0_s;
-        const double t1_s = prediction_segment_end_time(segments.back());
-        if (!std::isfinite(t0_s) || !std::isfinite(t1_s) || !(t1_s > t0_s))
-        {
-            return 0.0;
-        }
-
-        return t1_s - t0_s;
-    }
-
-    inline double continuity_time_epsilon_s(const double reference_time_s)
-    {
-        return std::max(kContinuityMinTimeEpsilonS, std::abs(reference_time_s) * 1.0e-12);
-    }
-
     inline double request_end_time_s(const OrbitPredictionService::Request &request)
     {
         return request.sim_time_s + std::max(0.0, std::isfinite(request.future_window_s) ? request.future_window_s : 0.0);
-    }
-
-    inline bool trajectory_segments_cover_window(const std::vector<orbitsim::TrajectorySegment> &segments,
-                                                 const double sim_time_s,
-                                                 const double required_duration_s)
-    {
-        if (segments.empty() || !std::isfinite(sim_time_s))
-        {
-            return false;
-        }
-
-        const double end_time_s = prediction_segment_end_time(segments.back());
-        const double start_epsilon_s = continuity_time_epsilon_s(sim_time_s);
-        const double end_epsilon_s = continuity_time_epsilon_s(end_time_s);
-        const double required_end_s = sim_time_s + std::max(0.0, required_duration_s);
-        return segments.front().t0_s <= (sim_time_s + start_epsilon_s) &&
-               end_time_s >= (required_end_s - end_epsilon_s);
-    }
-
-    inline double continuity_pos_tolerance_m(const orbitsim::State &a, const orbitsim::State &b)
-    {
-        const double scale_m =
-                std::max({1.0, glm::length(glm::dvec3(a.position_m)), glm::length(glm::dvec3(b.position_m))});
-        return std::max(kContinuityMinPosToleranceM, scale_m * 1.0e-10);
-    }
-
-    inline double continuity_vel_tolerance_mps(const orbitsim::State &a, const orbitsim::State &b)
-    {
-        const double scale_mps =
-                std::max({1.0, glm::length(glm::dvec3(a.velocity_mps)), glm::length(glm::dvec3(b.velocity_mps))});
-        return std::max(kContinuityMinVelToleranceMps, scale_mps * 1.0e-10);
-    }
-
-    inline bool states_are_continuous(const orbitsim::State &a, const orbitsim::State &b)
-    {
-        if (!finite_state(a) || !finite_state(b))
-        {
-            return false;
-        }
-
-        const double pos_gap_m = glm::length(glm::dvec3(a.position_m - b.position_m));
-        const double vel_gap_mps = glm::length(glm::dvec3(a.velocity_mps - b.velocity_mps));
-        return pos_gap_m <= continuity_pos_tolerance_m(a, b) &&
-               vel_gap_mps <= continuity_vel_tolerance_mps(a, b);
-    }
-
-    inline bool states_are_position_continuous(const orbitsim::State &a, const orbitsim::State &b)
-    {
-        if (!finite_state(a) || !finite_state(b))
-        {
-            return false;
-        }
-
-        const double pos_gap_m = glm::length(glm::dvec3(a.position_m - b.position_m));
-        return pos_gap_m <= continuity_pos_tolerance_m(a, b);
-    }
-
-    inline bool segment_allows_velocity_discontinuity(const orbitsim::TrajectorySegment &segment)
-    {
-        return (segment.flags & (orbitsim::kTrajectorySegmentFlagImpulseBoundary |
-                                 orbitsim::kTrajectorySegmentFlagBurnBoundary)) != 0u;
-    }
-
-    inline bool validate_trajectory_segment_continuity(const std::vector<orbitsim::TrajectorySegment> &segments)
-    {
-        if (segments.empty())
-        {
-            return false;
-        }
-
-        for (std::size_t i = 0; i < segments.size(); ++i)
-        {
-            const orbitsim::TrajectorySegment &segment = segments[i];
-            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.t0_s) || !std::isfinite(segment.dt_s) ||
-                !finite_state(segment.start) || !finite_state(segment.end))
-            {
-                return false;
-            }
-
-            if (i == 0)
-            {
-                continue;
-            }
-
-            const orbitsim::TrajectorySegment &prev = segments[i - 1];
-            const double prev_t1_s = prediction_segment_end_time(prev);
-            if (std::abs(segment.t0_s - prev_t1_s) > continuity_time_epsilon_s(prev_t1_s))
-            {
-                return false;
-            }
-
-            if (segment_allows_velocity_discontinuity(segment))
-            {
-                if (!states_are_position_continuous(prev.end, segment.start))
-                {
-                    return false;
-                }
-                continue;
-            }
-
-            if (!states_are_continuous(prev.end, segment.start))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     inline bool validate_ephemeris_continuity(const orbitsim::CelestialEphemeris &ephemeris)
@@ -248,127 +103,6 @@ namespace Game
         return true;
     }
 
-    template<typename AdaptiveDiag>
-    OrbitPredictionService::AdaptiveStageDiagnostics make_stage_diagnostics_from_adaptive(
-            const AdaptiveDiag &diag,
-            const double requested_duration_s,
-            const bool cache_reused = false)
-    {
-        OrbitPredictionService::AdaptiveStageDiagnostics out{};
-        out.requested_duration_s = std::max(0.0, requested_duration_s);
-        out.covered_duration_s = std::max(0.0, diag.covered_duration_s);
-        out.accepted_segments = diag.accepted_segments;
-        out.rejected_splits = diag.rejected_splits;
-        out.forced_boundary_splits = diag.forced_boundary_splits;
-        out.min_dt_s = diag.min_dt_s;
-        out.max_dt_s = diag.max_dt_s;
-        out.avg_dt_s = diag.avg_dt_s;
-        out.hard_cap_hit = diag.hard_cap_hit;
-        out.cancelled = diag.cancelled;
-        out.cache_reused = cache_reused;
-        return out;
-    }
-
-    inline OrbitPredictionService::AdaptiveStageDiagnostics make_stage_diagnostics_from_segments(
-            const std::vector<orbitsim::TrajectorySegment> &segments,
-            const double requested_duration_s,
-            const bool cache_reused = false)
-    {
-        OrbitPredictionService::AdaptiveStageDiagnostics out{};
-        out.requested_duration_s = std::max(0.0, requested_duration_s);
-        out.covered_duration_s = prediction_segment_span_s(segments);
-        out.accepted_segments = segments.size();
-        out.cache_reused = cache_reused;
-
-        bool first_dt = true;
-        double dt_sum_s = 0.0;
-        for (const orbitsim::TrajectorySegment &segment : segments)
-        {
-            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
-            {
-                continue;
-            }
-
-            if ((segment.flags & (orbitsim::kTrajectorySegmentFlagForcedBoundary |
-                                  orbitsim::kTrajectorySegmentFlagImpulseBoundary |
-                                  orbitsim::kTrajectorySegmentFlagBurnBoundary)) != 0u)
-            {
-                ++out.forced_boundary_splits;
-            }
-            if ((segment.flags & orbitsim::kTrajectorySegmentFlagFrameResegmented) != 0u)
-            {
-                ++out.frame_resegmentation_count;
-            }
-
-            if (first_dt)
-            {
-                out.min_dt_s = segment.dt_s;
-                out.max_dt_s = segment.dt_s;
-                first_dt = false;
-            }
-            else
-            {
-                out.min_dt_s = std::min(out.min_dt_s, segment.dt_s);
-                out.max_dt_s = std::max(out.max_dt_s, segment.dt_s);
-            }
-            dt_sum_s += segment.dt_s;
-        }
-
-        if (out.accepted_segments > 0 && dt_sum_s > 0.0)
-        {
-            out.avg_dt_s = dt_sum_s / static_cast<double>(out.accepted_segments);
-        }
-
-        return out;
-    }
-
-    inline OrbitPredictionService::AdaptiveStageDiagnostics make_stage_diagnostics_from_ephemeris(
-            const OrbitPredictionService::SharedCelestialEphemeris &ephemeris,
-            const double requested_duration_s,
-            const bool cache_reused = false)
-    {
-        OrbitPredictionService::AdaptiveStageDiagnostics out{};
-        out.requested_duration_s = std::max(0.0, requested_duration_s);
-        out.cache_reused = cache_reused;
-        if (!ephemeris || ephemeris->empty())
-        {
-            return out;
-        }
-
-        out.covered_duration_s = std::max(0.0, ephemeris->t_end_s() - ephemeris->t0_s());
-        out.accepted_segments = ephemeris->segments.size();
-
-        bool first_dt = true;
-        double dt_sum_s = 0.0;
-        for (const orbitsim::CelestialEphemerisSegment &segment : ephemeris->segments)
-        {
-            if (!(segment.dt_s > 0.0) || !std::isfinite(segment.dt_s))
-            {
-                continue;
-            }
-
-            if (first_dt)
-            {
-                out.min_dt_s = segment.dt_s;
-                out.max_dt_s = segment.dt_s;
-                first_dt = false;
-            }
-            else
-            {
-                out.min_dt_s = std::min(out.min_dt_s, segment.dt_s);
-                out.max_dt_s = std::max(out.max_dt_s, segment.dt_s);
-            }
-            dt_sum_s += segment.dt_s;
-        }
-
-        if (out.accepted_segments > 0 && dt_sum_s > 0.0)
-        {
-            out.avg_dt_s = dt_sum_s / static_cast<double>(out.accepted_segments);
-        }
-
-        return out;
-    }
-
     // ── Structs ───────────────────────────────────────────────────────────────
     struct PlannedSegmentBoundaryState
     {
@@ -376,16 +110,6 @@ namespace Game
         orbitsim::State state_before{};
         orbitsim::State state_after{};
         std::uint32_t flags{orbitsim::kTrajectorySegmentFlagImpulseBoundary};
-    };
-
-    enum class TrajectoryBoundarySide
-    {
-        // At t == segment boundary, return the state from the segment ending at t.
-        Before,
-        // At t == segment boundary, return the state from the segment starting at t.
-        After,
-        // Position-only callers should not interpret boundary velocity.
-        ContinuousPositionOnly,
     };
 
     struct CelestialPredictionSamplingSpec
@@ -405,15 +129,6 @@ namespace Game
             const orbitsim::CelestialEphemeris &ephemeris,
             orbitsim::BodyId body_id);
 
-    bool eval_segment_state(const orbitsim::TrajectorySegment &segment,
-                            const double t_s,
-                            orbitsim::State &out_state);
-
-    bool sample_trajectory_segment_state(const std::vector<orbitsim::TrajectorySegment> &segments,
-                                          const double t_s,
-                                          orbitsim::State &out_state,
-                                          TrajectoryBoundarySide boundary_side = TrajectoryBoundarySide::Before);
-
     void append_or_merge_planned_boundary_state(std::vector<PlannedSegmentBoundaryState> &states,
                                                 const double t_s,
                                                 const orbitsim::State &state_before,
@@ -424,16 +139,7 @@ namespace Game
             const std::vector<orbitsim::TrajectorySegment> &segments,
             const std::vector<PlannedSegmentBoundaryState> &boundaries);
 
-    std::vector<orbitsim::TrajectorySegment> slice_trajectory_segments(
-            const std::vector<orbitsim::TrajectorySegment> &segments,
-            double t0_s,
-            double t1_s);
-
     // ── Sampling helpers (orbit_prediction_service_sampling.cpp) ──────────────
-    std::vector<orbitsim::TrajectorySample> resample_segments_uniform(
-            const std::vector<orbitsim::TrajectorySegment> &segments,
-            std::size_t sample_count);
-
     std::vector<orbitsim::TrajectorySample> resample_ephemeris_uniform(
             const orbitsim::CelestialEphemeris &ephemeris,
             orbitsim::BodyId body_id,

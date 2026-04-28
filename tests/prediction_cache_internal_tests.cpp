@@ -404,18 +404,40 @@ TEST(PredictionCacheInternalTests, RebuildPredictionPatchChunksClipsStraddlingSe
             &diagnostics));
 
     ASSERT_TRUE(assembly.valid);
+    EXPECT_EQ(assembly.generation_id, 7u);
     ASSERT_EQ(assembly.chunks.size(), 2u);
+    EXPECT_TRUE(assembly.chunks[0].valid);
+    EXPECT_TRUE(assembly.chunks[1].valid);
+    EXPECT_EQ(assembly.chunks[0].chunk_id, published_chunks[0].chunk_id);
+    EXPECT_EQ(assembly.chunks[1].chunk_id, published_chunks[1].chunk_id);
+    EXPECT_EQ(assembly.chunks[0].generation_id, 7u);
+    EXPECT_EQ(assembly.chunks[1].generation_id, 7u);
+    EXPECT_EQ(assembly.chunks[0].quality_state, Game::OrbitPredictionService::ChunkQualityState::PreviewPatch);
+    EXPECT_EQ(assembly.chunks[1].quality_state, Game::OrbitPredictionService::ChunkQualityState::Final);
+    EXPECT_DOUBLE_EQ(assembly.chunks[0].t0_s, published_chunks[0].t0_s);
+    EXPECT_DOUBLE_EQ(assembly.chunks[0].t1_s, published_chunks[0].t1_s);
+    EXPECT_DOUBLE_EQ(assembly.chunks[1].t0_s, published_chunks[1].t0_s);
+    EXPECT_DOUBLE_EQ(assembly.chunks[1].t1_s, published_chunks[1].t1_s);
+    ASSERT_FALSE(assembly.chunks[0].frame_samples.empty());
+    ASSERT_FALSE(assembly.chunks[1].frame_samples.empty());
     EXPECT_DOUBLE_EQ(assembly.chunks[0].frame_segments.front().t0_s, 0.0);
     EXPECT_DOUBLE_EQ(assembly.chunks[0].frame_segments.front().dt_s, 10.0);
     EXPECT_DOUBLE_EQ(assembly.chunks[1].frame_segments.front().t0_s, 10.0);
     EXPECT_DOUBLE_EQ(assembly.chunks[1].frame_segments.front().dt_s, 10.0);
+    EXPECT_DOUBLE_EQ(assembly.chunks[0].frame_samples.front().t_s, published_chunks[0].t0_s);
+    EXPECT_DOUBLE_EQ(assembly.chunks[0].frame_samples.back().t_s, published_chunks[0].t1_s);
+    EXPECT_DOUBLE_EQ(assembly.chunks[1].frame_samples.front().t_s, published_chunks[1].t0_s);
+    EXPECT_DOUBLE_EQ(assembly.chunks[1].frame_samples.back().t_s, published_chunks[1].t1_s);
 
     Game::PredictionCacheInternal::flatten_chunk_assembly_to_cache(cache, assembly);
     ASSERT_EQ(cache.trajectory_segments_frame_planned.size(), 2u);
+    ASSERT_EQ(cache.trajectory_frame_planned.size(), 3u);
     EXPECT_DOUBLE_EQ(cache.trajectory_segments_frame_planned[0].t0_s, 0.0);
     EXPECT_DOUBLE_EQ(cache.trajectory_segments_frame_planned[0].dt_s, 10.0);
     EXPECT_DOUBLE_EQ(cache.trajectory_segments_frame_planned[1].t0_s, 10.0);
     EXPECT_DOUBLE_EQ(cache.trajectory_segments_frame_planned[1].dt_s, 10.0);
+    EXPECT_DOUBLE_EQ(cache.trajectory_frame_planned.front().t_s, 0.0);
+    EXPECT_DOUBLE_EQ(cache.trajectory_frame_planned.back().t_s, 20.0);
     EXPECT_EQ(diagnostics.status, Game::PredictionDerivedStatus::Success);
 }
 

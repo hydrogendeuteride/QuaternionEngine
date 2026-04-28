@@ -121,7 +121,7 @@ TEST(GameplayPredictionManeuverTests, PredictionFutureWindowClampsNegativeValues
     EXPECT_DOUBLE_EQ(state.prediction_future_window_s(celestial_key), 0.0);
 }
 
-TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowAnchorsPlanHorizonAfterLastNode)
+TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowAnchorsPlanHorizonAtFirstFutureNode)
 {
     Game::GameplayState state{};
     state._prediction_draw_future_segment = true;
@@ -140,7 +140,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowAnchorsPlanHorizon
 
     const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
     const double required_window_s = state.prediction_required_window_s(orbiter_key, 100.0, true);
-    EXPECT_DOUBLE_EQ(required_window_s, 740.0);
+    EXPECT_DOUBLE_EQ(required_window_s, 650.0);
 }
 
 TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowDoesNotAddLargeSolveMarginToNodeAnchoredPlanHorizon)

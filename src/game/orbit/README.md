@@ -9,9 +9,12 @@ orbit/
   orbit_prediction_tuning.h          # tuning constants
   orbit_prediction_math.h / .cpp     # orbital mechanics math
   orbit_prediction_service.h / .cpp  # prediction service public API, lifecycle, cache, threading
+  trajectory/
+    trajectory_utils.h / .cpp         # shared trajectory segment utilities
   orbit_render_curve.h               # LOD tree public API
   orbit_plot_util.h / .cpp           # shared plot helpers
   prediction/
+    prediction_diagnostics_util.h                   # shared diagnostics builders
     orbit_prediction_service_internal.h              # shared types, context, declarations
     orbit_prediction_service_compute.cpp             # compute_prediction entry + celestial/baseline paths
     orbit_prediction_service_planned.cpp             # planned trajectory solving (maneuvers)
@@ -46,12 +49,19 @@ orbit/
   `OrbitPredictionService` owns a thread pool that consumes `Request` jobs (spacecraft or celestial), propagates trajectories via `orbitsim`, applies maneuver impulses, builds/caches celestial ephemerides, and publishes `Result` structs with inertial trajectory samples and segments. Supports generation-based staleness detection and per-track request coalescing.
   The `.cpp` contains lifecycle (constructor, destructor, `request`, `poll_completed`, `reset`), threading (`worker_loop`), and caching (`get_or_build_ephemeris`, baseline cache). The compute and planned trajectory logic live in `prediction/`.
 
+- `trajectory/trajectory_utils.h / .cpp`
+  Public orbit-module trajectory helpers shared by prediction service and gameplay-derived caches.
+  Contains finite-state checks, trajectory continuity validation, segment end/span helpers, Hermite segment evaluation, boundary-aware segment sampling, segment slicing, and uniform segment resampling.
+
 ### `prediction/` subfolder
 
-Internal helpers split out from `orbit_prediction_service.cpp`. Not included by anything outside the orbit module.
+Internal helpers split out from `orbit_prediction_service.cpp`.
 
 - `orbit_prediction_service_internal.h`
-  Shared types (`PlannedSegmentBoundaryState`, `CelestialPredictionSamplingSpec`, `PlannedTrajectoryContext`, `PlannedChunkPacket`, `PlannedSolveOutput`, etc.), constants, inline micro-helpers (`finite_vec3`, `finite_state`, `prediction_segment_end_time`), and template functions (`select_primary_index_with_hysteresis`). Declares all functions implemented in the `.cpp` files below.
+  Shared service-only types (`PlannedSegmentBoundaryState`, `CelestialPredictionSamplingSpec`, `PlannedTrajectoryContext`, `PlannedChunkPacket`, `PlannedSolveOutput`, etc.), constants, and template functions (`select_primary_index_with_hysteresis`). Declares service implementation functions used across the `.cpp` files below.
+
+- `prediction_diagnostics_util.h`
+  Diagnostics builders shared by orbit prediction and gameplay-derived cache code.
 
 - `orbit_prediction_service_compute.cpp`
   `compute_prediction()` entry point: input validation, simulation setup, celestial prediction path, spacecraft baseline trajectory (reuse or compute), planned trajectory orchestration via `PlannedTrajectoryContext`, and final result publishing.
@@ -60,7 +70,7 @@ Internal helpers split out from `orbit_prediction_service.cpp`. Not included by 
   Planned trajectory solving for maneuver-bearing predictions. Contains `solve_planned_chunk_range()` (chunk-by-chunk adaptive solving with seam validation), `stream_chunk_stage()` (incremental result streaming), chunk cache operations, maneuver impulse application, and publishing helpers.
 
 - `orbit_prediction_service_trajectory.cpp`
-  Trajectory segment math: Hermite interpolation (`eval_segment_state`), binary-search lookup (`sample_trajectory_segment_state`), boundary splitting (`split_trajectory_segments_at_known_boundaries`), segment slicing, and maneuver preview building.
+  Service-specific trajectory helpers: maneuver preview building, celestial ephemeris-to-segment conversion, and planned boundary splitting. Shared segment math lives in `trajectory/trajectory_utils.*`.
 
 - `orbit_prediction_service_sampling.cpp`
   Uniform resampling of trajectory segments and ephemeris data.
@@ -147,7 +157,10 @@ The entry point is `GameplayState`, which:
 - Maneuver impulse application, planned chunk solving, seam validation, or chunk streaming:
   Start in `prediction/orbit_prediction_service_planned.cpp`.
 
-- Trajectory segment Hermite evaluation, boundary splitting, or segment slicing:
+- Trajectory segment Hermite evaluation or segment slicing:
+  Start in `trajectory/trajectory_utils.h/.cpp`.
+
+- Planned boundary splitting:
   Start in `prediction/orbit_prediction_service_trajectory.cpp`.
 
 - Trajectory or ephemeris resampling:
