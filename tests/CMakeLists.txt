@@ -239,6 +239,7 @@ add_executable(gameplay_prediction_maneuver_tests
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_render_helpers.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_shared.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_track.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/gameplay_prediction_cache_internal.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/gameplay_prediction_derived_service.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/gameplay_state_maneuver_nodes.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/gameplay_state_maneuver_nodes_cache.cpp"
@@ -286,6 +287,7 @@ add_executable(prediction_cache_internal_tests
   "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_trajectory.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/prediction/orbit_prediction_service_sampling.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/trajectory/trajectory_utils.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/gameplay_prediction_cache_internal.cpp"
 )
 
 set_property(TARGET prediction_cache_internal_tests PROPERTY CXX_STANDARD 20)

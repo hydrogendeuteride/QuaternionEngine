@@ -174,6 +174,55 @@ namespace
         return request;
     }
 
+    Game::OrbitPredictionService::ManeuverImpulse make_maneuver_impulse(
+            const int node_id,
+            const double time_s,
+            const glm::dvec3 &dv_rtn_mps,
+            const orbitsim::BodyId primary_body_id = 1)
+    {
+        Game::OrbitPredictionService::ManeuverImpulse impulse{};
+        impulse.node_id = node_id;
+        impulse.t_s = time_s;
+        impulse.primary_body_id = primary_body_id;
+        impulse.dv_rtn_mps = dv_rtn_mps;
+        return impulse;
+    }
+
+    Game::OrbitPredictionService::ManeuverImpulse &add_maneuver_impulse(
+            Game::OrbitPredictionService::Request &request,
+            const int node_id,
+            const double time_s,
+            const glm::dvec3 &dv_rtn_mps,
+            const orbitsim::BodyId primary_body_id = 1)
+    {
+        request.maneuver_impulses.push_back(
+                make_maneuver_impulse(node_id, time_s, dv_rtn_mps, primary_body_id));
+        return request.maneuver_impulses.back();
+    }
+
+    const Game::OrbitPredictionService::ManeuverNodePreview *find_maneuver_preview(
+            const Game::OrbitPredictionService::Result &result,
+            const int node_id)
+    {
+        for (const Game::OrbitPredictionService::ManeuverNodePreview &preview : result.maneuver_previews)
+        {
+            if (preview.node_id == node_id)
+            {
+                return &preview;
+            }
+        }
+        return nullptr;
+    }
+
+    const Game::OrbitPredictionService::ManeuverNodePreview *find_valid_maneuver_preview(
+            const Game::OrbitPredictionService::Result &result,
+            const int node_id)
+    {
+        const Game::OrbitPredictionService::ManeuverNodePreview *preview =
+                find_maneuver_preview(result, node_id);
+        return preview && preview->valid ? preview : nullptr;
+    }
+
     std::vector<Game::OrbitPredictionService::Result> run_prediction_results(
             Game::OrbitPredictionService &service,
             const uint64_t generation_id,

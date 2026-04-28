@@ -149,6 +149,7 @@ TEST(OrbitPredictionPlannerTests, InsertsManeuverAndPreviewBoundaries)
     EXPECT_NE((exact_chunks[0].boundary_flags & static_cast<uint32_t>(Flags::PreviewAnchor)), 0u);
     EXPECT_NE((exact_chunks[0].boundary_flags & static_cast<uint32_t>(Flags::PreviewChunk)), 0u);
     EXPECT_NE((exact_chunks[1].boundary_flags & static_cast<uint32_t>(Flags::PreviewChunk)), 0u);
+    // Preview exact chunks remain reusable when their maneuver inputs are unchanged.
     EXPECT_TRUE(exact_chunks[0].allow_reuse);
     EXPECT_TRUE(exact_chunks[1].allow_reuse);
 

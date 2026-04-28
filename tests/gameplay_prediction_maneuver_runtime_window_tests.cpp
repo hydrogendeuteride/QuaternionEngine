@@ -140,6 +140,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowAnchorsPlanHorizon
 
     const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
     const double required_window_s = state.prediction_required_window_s(orbiter_key, 100.0, true);
+    // The active solve anchors at the first future node, then adds the plan horizon and solve margin.
     EXPECT_DOUBLE_EQ(required_window_s, 650.0);
 }
 

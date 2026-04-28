@@ -97,6 +97,55 @@ namespace
                 orbitsim::sample_trajectory_segments_uniform_dt(root_segments, 1.0, 64, true, true);
         return fixture;
     }
+
+    class PredictionCacheInternalFixture : public ::testing::Test
+    {
+    protected:
+        LinearPredictionFixture fixture = make_linear_cache();
+
+        void assert_ready() const
+        {
+            ASSERT_TRUE(fixture.cache.valid);
+            ASSERT_NE(fixture.body_id, orbitsim::kInvalidBodyId);
+            ASSERT_GE(fixture.cache.trajectory_inertial.size(), 2u);
+            ASSERT_FALSE(fixture.cache.trajectory_segments_inertial.empty());
+        }
+
+        orbitsim::TrajectoryFrameSpec body_centered_frame() const
+        {
+            return orbitsim::TrajectoryFrameSpec::body_centered_inertial(fixture.body_id);
+        }
+
+        bool rebuild_body_centered_frame_cache(
+                Game::OrbitPredictionDerivedDiagnostics *diagnostics = nullptr,
+                const bool build_planned_render_curve = true)
+        {
+            return Game::PredictionCacheInternal::rebuild_prediction_frame_cache(
+                    fixture.cache,
+                    body_centered_frame(),
+                    fixture.cache.trajectory_segments_inertial,
+                    {},
+                    diagnostics,
+                    build_planned_render_curve);
+        }
+
+        bool rebuild_body_centered_planned_frame_cache(const bool build_planned_render_curve = true)
+        {
+            return Game::PredictionCacheInternal::rebuild_prediction_planned_frame_cache(
+                    fixture.cache,
+                    body_centered_frame(),
+                    fixture.cache.trajectory_segments_inertial,
+                    {},
+                    nullptr,
+                    build_planned_render_curve);
+        }
+
+        void seed_planned_from_base()
+        {
+            fixture.cache.trajectory_inertial_planned = fixture.cache.trajectory_inertial;
+            fixture.cache.trajectory_segments_inertial_planned = fixture.cache.trajectory_segments_inertial;
+        }
+    };
 } // namespace
 
 TEST(PredictionTrajectorySamplingTests, BoundarySideSelectsBeforeOrAfterImpulseVelocity)
@@ -169,20 +218,12 @@ TEST(PredictionTrajectorySamplingTests, ContinuityRequiresImpulseFlagForVelocity
     EXPECT_TRUE(Game::validate_trajectory_segment_continuity(segments));
 }
 
-TEST(PredictionCacheInternalTests, RebuildFrameCacheProducesBodyCenteredSegments)
+TEST_F(PredictionCacheInternalFixture, RebuildFrameCacheProducesBodyCenteredSegments)
 {
-    LinearPredictionFixture fixture = make_linear_cache();
-    ASSERT_TRUE(fixture.cache.valid);
-    ASSERT_NE(fixture.body_id, orbitsim::kInvalidBodyId);
-    ASSERT_GE(fixture.cache.trajectory_inertial.size(), 2u);
+    assert_ready();
 
     Game::OrbitPredictionDerivedDiagnostics diagnostics{};
-    const bool ok = Game::PredictionCacheInternal::rebuild_prediction_frame_cache(
-            fixture.cache,
-            orbitsim::TrajectoryFrameSpec::body_centered_inertial(fixture.body_id),
-            fixture.cache.trajectory_segments_inertial,
-            {},
-            &diagnostics);
+    const bool ok = rebuild_body_centered_frame_cache(&diagnostics);
 
     ASSERT_TRUE(ok);
     ASSERT_TRUE(fixture.cache.resolved_frame_spec_valid);
@@ -199,17 +240,11 @@ TEST(PredictionCacheInternalTests, RebuildFrameCacheProducesBodyCenteredSegments
     EXPECT_NEAR(fixture.cache.trajectory_frame.back().position_m.x, 15.0, 1.0e-4);
 }
 
-TEST(PredictionCacheInternalTests, RebuildPredictionMetricsUsesSegmentDerivedSamples)
+TEST_F(PredictionCacheInternalFixture, RebuildPredictionMetricsUsesSegmentDerivedSamples)
 {
-    LinearPredictionFixture fixture = make_linear_cache();
-    ASSERT_TRUE(fixture.cache.valid);
-    ASSERT_NE(fixture.body_id, orbitsim::kInvalidBodyId);
-    ASSERT_GE(fixture.cache.trajectory_inertial.size(), 2u);
+    assert_ready();
 
-    ASSERT_TRUE(Game::PredictionCacheInternal::rebuild_prediction_frame_cache(
-            fixture.cache,
-            orbitsim::TrajectoryFrameSpec::body_centered_inertial(fixture.body_id),
-            fixture.cache.trajectory_segments_inertial));
+    ASSERT_TRUE(rebuild_body_centered_frame_cache());
 
     Game::PredictionCacheInternal::rebuild_prediction_metrics(fixture.cache, fixture.sim.config(), fixture.body_id);
 
@@ -217,6 +252,10 @@ TEST(PredictionCacheInternalTests, RebuildPredictionMetricsUsesSegmentDerivedSam
     EXPECT_EQ(fixture.cache.metrics_body_id, fixture.body_id);
     ASSERT_EQ(fixture.cache.altitude_km.size(), fixture.cache.trajectory_frame.size());
     ASSERT_EQ(fixture.cache.speed_kmps.size(), fixture.cache.trajectory_frame.size());
+    EXPECT_TRUE(fixture.cache.analysis_cache_valid);
+    EXPECT_EQ(fixture.cache.analysis_cache_body_id, fixture.body_id);
+    EXPECT_FALSE(fixture.cache.trajectory_segments_analysis_bci.empty());
+    EXPECT_FALSE(fixture.cache.trajectory_analysis_bci.empty());
     EXPECT_NEAR(fixture.cache.altitude_km.front(), 0.009f, 1.0e-4f);
     EXPECT_NEAR(fixture.cache.speed_kmps.front(), 0.0005f, 1.0e-5f);
 }
@@ -270,72 +309,33 @@ TEST(PredictionCacheInternalTests, RebuildPredictionMetricsFindsPeriapsisFromSeg
     EXPECT_NEAR(cache.periapsis_alt_km, 0.004, 1.0e-6);
 }
 
-TEST(PredictionCacheInternalTests, RebuildFrameCacheCanSkipPreviewPlannedRenderCurve)
+TEST_F(PredictionCacheInternalFixture, RebuildFrameCacheCanSkipPreviewPlannedRenderCurve)
 {
-    LinearPredictionFixture fixture = make_linear_cache();
-    ASSERT_TRUE(fixture.cache.valid);
-    ASSERT_NE(fixture.body_id, orbitsim::kInvalidBodyId);
-    ASSERT_FALSE(fixture.cache.trajectory_segments_inertial.empty());
+    assert_ready();
+    seed_planned_from_base();
 
-    fixture.cache.trajectory_inertial_planned = fixture.cache.trajectory_inertial;
-    fixture.cache.trajectory_segments_inertial_planned = fixture.cache.trajectory_segments_inertial;
-
-    ASSERT_TRUE(Game::PredictionCacheInternal::rebuild_prediction_frame_cache(
-            fixture.cache,
-            orbitsim::TrajectoryFrameSpec::body_centered_inertial(fixture.body_id),
-            fixture.cache.trajectory_segments_inertial,
-            {},
-            nullptr,
-            false));
+    ASSERT_TRUE(rebuild_body_centered_frame_cache(nullptr, false));
 
     EXPECT_FALSE(fixture.cache.render_curve_frame.empty());
     EXPECT_FALSE(fixture.cache.trajectory_segments_frame_planned.empty());
     EXPECT_TRUE(fixture.cache.render_curve_frame_planned.empty());
 }
 
-TEST(PredictionCacheInternalTests, RebuildPlannedFrameCacheCanSkipPreviewPlannedRenderCurve)
+TEST_F(PredictionCacheInternalFixture, RebuildPlannedFrameCacheCanSkipPreviewPlannedRenderCurve)
 {
-    LinearPredictionFixture fixture = make_linear_cache();
-    ASSERT_TRUE(fixture.cache.valid);
-    ASSERT_NE(fixture.body_id, orbitsim::kInvalidBodyId);
-    ASSERT_FALSE(fixture.cache.trajectory_segments_inertial.empty());
+    assert_ready();
+    seed_planned_from_base();
 
-    fixture.cache.trajectory_inertial_planned = fixture.cache.trajectory_inertial;
-    fixture.cache.trajectory_segments_inertial_planned = fixture.cache.trajectory_segments_inertial;
-
-    ASSERT_TRUE(Game::PredictionCacheInternal::rebuild_prediction_planned_frame_cache(
-            fixture.cache,
-            orbitsim::TrajectoryFrameSpec::body_centered_inertial(fixture.body_id),
-            fixture.cache.trajectory_segments_inertial,
-            {},
-            nullptr,
-            false));
+    ASSERT_TRUE(rebuild_body_centered_planned_frame_cache(false));
 
     EXPECT_FALSE(fixture.cache.trajectory_segments_frame_planned.empty());
     EXPECT_GE(fixture.cache.trajectory_frame_planned.size(), 2u);
     EXPECT_TRUE(fixture.cache.render_curve_frame_planned.empty());
 }
 
-TEST(PredictionCacheInternalTests, RebuildPredictionMetricsCachesAnalysisTransformResults)
+TEST_F(PredictionCacheInternalFixture, RebuildFrameCacheRejectsDiscontinuousSegments)
 {
-    LinearPredictionFixture fixture = make_linear_cache();
-    ASSERT_TRUE(fixture.cache.valid);
-    ASSERT_NE(fixture.body_id, orbitsim::kInvalidBodyId);
-
-    Game::PredictionCacheInternal::rebuild_prediction_metrics(fixture.cache, fixture.sim.config(), fixture.body_id);
-
-    EXPECT_TRUE(fixture.cache.metrics_valid);
-    EXPECT_TRUE(fixture.cache.analysis_cache_valid);
-    EXPECT_EQ(fixture.cache.analysis_cache_body_id, fixture.body_id);
-    EXPECT_FALSE(fixture.cache.trajectory_segments_analysis_bci.empty());
-    EXPECT_FALSE(fixture.cache.trajectory_analysis_bci.empty());
-}
-
-TEST(PredictionCacheInternalTests, RebuildFrameCacheRejectsDiscontinuousSegments)
-{
-    LinearPredictionFixture fixture = make_linear_cache();
-    ASSERT_TRUE(fixture.cache.valid);
-    ASSERT_FALSE(fixture.cache.trajectory_segments_inertial.empty());
+    assert_ready();
 
     fixture.cache.trajectory_segments_inertial.push_back(orbitsim::TrajectorySegment{
             .t0_s = 20.0,
