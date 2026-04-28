@@ -654,7 +654,8 @@ namespace Game
                 };
                 if (effective_chunk.allow_reuse)
                 {
-                    if (const auto cached = ctx.find_cached_chunk(cache_key, attempt_start_state); cached.has_value())
+                    if (const auto cached = ctx.services.find_cached_chunk(cache_key, attempt_start_state);
+                        cached.has_value())
                     {
                         attempt.segments = cached->segments;
                         attempt.seam_validation_segments = cached->seam_validation_segments;
@@ -801,7 +802,7 @@ namespace Game
                                                                       ctx.cancel_requested);
 
                     const OrbitPredictionService::SharedCelestialEphemeris chunk_shared_ephemeris =
-                            ctx.get_or_build_ephemeris(chunk_ephemeris_request, ctx.cancel_requested);
+                            ctx.services.get_or_build_ephemeris(chunk_ephemeris_request, ctx.cancel_requested);
                     if (!chunk_shared_ephemeris || chunk_shared_ephemeris->empty())
                     {
                         attempt.status = ctx.cancel_requested() ? Status::Cancelled : Status::EphemerisUnavailable;
@@ -1018,7 +1019,7 @@ namespace Game
                     cache_entry.seam_validation_segments = attempt.seam_validation_segments;
                     cache_entry.samples = attempt.samples;
                     cache_entry.previews = attempt.previews;
-                    ctx.store_cached_chunk(std::move(cache_entry));
+                    ctx.services.store_cached_chunk(std::move(cache_entry));
                 }
 
                 return attempt;

@@ -17,9 +17,11 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -265,8 +267,119 @@ namespace Game
             const OrbitPredictionService::Request &request,
             const orbitsim::MassiveBody &subject_body);
 
-    // ── Planned trajectory types (orbit_prediction_service_planned.cpp) ────
+    using EphemerisResolverFn = std::function<OrbitPredictionService::SharedCelestialEphemeris(
+            const OrbitPredictionService::EphemerisBuildRequest &,
+            const CancelCheck &,
+            OrbitPredictionService::AdaptiveStageDiagnostics *)>;
     using PublishFn = std::function<bool(OrbitPredictionService::Result)>;
+
+    struct EphemerisResolveOutcome
+    {
+        OrbitPredictionService::Status status{OrbitPredictionService::Status::Success};
+        OrbitPredictionService::SharedCelestialEphemeris ephemeris{};
+        OrbitPredictionService::AdaptiveStageDiagnostics diagnostics{};
+    };
+
+    EphemerisResolveOutcome resolve_ephemeris_for_request(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec,
+            double horizon_s,
+            const CancelCheck &cancel_requested,
+            const EphemerisResolverFn &resolve_ephemeris);
+
+    OrbitPredictionService::Status solve_celestial_prediction_route(
+            const OrbitPredictionService::Request &request,
+            orbitsim::GameSimulation &sim,
+            const CancelCheck &cancel_requested,
+            const EphemerisResolverFn &resolve_ephemeris,
+            OrbitPredictionService::Result &out);
+
+    OrbitPredictionService::Status solve_spacecraft_baseline_trajectory(
+            const OrbitPredictionService::Request &request,
+            orbitsim::GameSimulation &sim,
+            const orbitsim::CelestialEphemeris &ephemeris,
+            orbitsim::GameSimulation::SpacecraftHandle ship_handle,
+            const orbitsim::AdaptiveSegmentOptions &segment_options,
+            double horizon_s,
+            const CancelCheck &cancel_requested,
+            OrbitPredictionService::Result &out);
+
+    // ── Spacecraft route types (orbit_prediction_service_spacecraft_route.cpp)
+    struct ReusableSpacecraftBaseline
+    {
+        std::vector<orbitsim::TrajectorySample> trajectory_inertial{};
+        std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial{};
+    };
+
+    struct PlannedTrajectoryServices
+    {
+        virtual ~PlannedTrajectoryServices() = default;
+        virtual std::optional<OrbitPredictionService::PlannedChunkCacheEntry> find_cached_chunk(
+                const OrbitPredictionService::PlannedChunkCacheKey &key,
+                const orbitsim::State &expected_start_state) = 0;
+        virtual void store_cached_chunk(OrbitPredictionService::PlannedChunkCacheEntry entry) = 0;
+        virtual OrbitPredictionService::SharedCelestialEphemeris get_or_build_ephemeris(
+                const OrbitPredictionService::EphemerisBuildRequest &request,
+                const CancelCheck &cancel_requested) = 0;
+    };
+
+    struct SpacecraftPredictionRouteServices : PlannedTrajectoryServices
+    {
+        virtual std::optional<ReusableSpacecraftBaseline> find_reusable_baseline(
+                uint64_t track_id,
+                uint64_t request_epoch) = 0;
+        virtual void store_reusable_baseline(
+                uint64_t track_id,
+                uint64_t generation_id,
+                uint64_t request_epoch,
+                OrbitPredictionService::SharedCelestialEphemeris shared_ephemeris,
+                std::vector<orbitsim::TrajectorySample> trajectory_inertial,
+                std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial) = 0;
+    };
+
+    struct SpacecraftPredictionRouteEnvironment
+    {
+        const OrbitPredictionService::Request &request;
+        uint64_t generation_id{0};
+        uint64_t request_epoch{0};
+        orbitsim::GameSimulation &sim;
+        const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec;
+        const CancelCheck &cancel_requested;
+        const EphemerisResolverFn &resolve_ephemeris;
+        OrbitPredictionService::Result &out;
+        PublishFn publish;
+        std::chrono::steady_clock::time_point compute_start;
+        SpacecraftPredictionRouteServices &services;
+    };
+
+    struct SpacecraftPredictionRouteOutcome
+    {
+        OrbitPredictionService::Status status{OrbitPredictionService::Status::Success};
+        bool published_staged_preview{false};
+    };
+
+    SpacecraftPredictionRouteOutcome solve_spacecraft_prediction_route(
+            const SpacecraftPredictionRouteEnvironment &env);
+
+    // ── Planned trajectory types (orbit_prediction_service_planned.cpp) ────
+
+    struct PlannedPredictionRouteEnvironment
+    {
+        const OrbitPredictionService::Request &request;
+        const CancelCheck &cancel_requested;
+        OrbitPredictionService::Result &out;
+        const orbitsim::CelestialEphemeris &ephemeris;
+        const orbitsim::State &ship_state;
+        PublishFn publish;
+        std::chrono::steady_clock::time_point compute_start;
+        PlannedTrajectoryServices &services;
+    };
+
+    struct PlannedPredictionRouteOutcome
+    {
+        OrbitPredictionService::Status status{OrbitPredictionService::Status::Success};
+        bool published_staged_preview{false};
+    };
 
     struct PlannedTrajectoryContext
     {
@@ -275,14 +388,7 @@ namespace Game
         OrbitPredictionService::Result &out;
         const orbitsim::CelestialEphemeris &ephemeris;
         PublishFn publish;
-
-        std::function<std::optional<OrbitPredictionService::PlannedChunkCacheEntry>(
-                const OrbitPredictionService::PlannedChunkCacheKey &,
-                const orbitsim::State &)> find_cached_chunk;
-        std::function<void(OrbitPredictionService::PlannedChunkCacheEntry)> store_cached_chunk;
-        std::function<OrbitPredictionService::SharedCelestialEphemeris(
-                const OrbitPredictionService::EphemerisBuildRequest &,
-                const CancelCheck &)> get_or_build_ephemeris;
+        PlannedTrajectoryServices &services;
     };
 
     struct PlannedChunkPacket
@@ -315,6 +421,38 @@ namespace Game
         OrbitPredictionService::Status status{OrbitPredictionService::Status::Success};
     };
 
+    struct StagedCoreDataBuilder
+    {
+        const OrbitPredictionService::Result &source;
+        std::shared_ptr<const OrbitPredictionService::Result::CoreData> staged_core_data{};
+
+        std::shared_ptr<const OrbitPredictionService::Result::CoreData> get();
+    };
+
+    struct FullStreamBatchPublisher
+    {
+        using MakeStageResultFn = std::function<OrbitPredictionService::Result(
+                const PlannedSolveOutput &,
+                const std::vector<OrbitPredictionService::PublishedChunk> &,
+                OrbitPredictionService::PublishStage,
+                std::vector<OrbitPredictionService::StreamedPlannedChunk>,
+                bool)>;
+
+        bool active{false};
+        double min_publish_interval_s{OrbitPredictionTuning::kFullStreamPublishMinIntervalS};
+        std::chrono::steady_clock::time_point last_publish_tp{};
+        bool published_any_batch{false};
+        std::vector<OrbitPredictionService::PublishedChunk> pending_published_chunks{};
+        std::vector<OrbitPredictionService::StreamedPlannedChunk> pending_streamed_chunks{};
+
+        void append(const OrbitPredictionService::PublishedChunk &published_chunk,
+                    const PlannedChunkPacket &packet);
+        bool flush(const PlannedSolveOutput &stage_output,
+                   const MakeStageResultFn &make_stage_result,
+                   const PublishFn &publish,
+                   bool force_publish);
+    };
+
     struct ChunkAttemptOutput
     {
         std::vector<orbitsim::TrajectorySegment> segments{};
@@ -331,6 +469,40 @@ namespace Game
     void append_planned_chunk_packet(PlannedSolveOutput &planned, PlannedChunkPacket packet);
     void apply_planned_range_summary(PlannedSolveOutput &planned, const PlannedSolveRangeSummary &summary);
 
+    OrbitPredictionService::PublishedChunk make_published_chunk(
+            const PlannedChunkPacket &packet,
+            uint32_t chunk_id,
+            OrbitPredictionService::ChunkQualityState quality_state);
+    void append_published_chunk(std::vector<OrbitPredictionService::PublishedChunk> &dst,
+                                const PlannedChunkPacket &packet,
+                                uint32_t chunk_id,
+                                OrbitPredictionService::ChunkQualityState quality_state);
+    void append_published_chunks_as_final(
+            std::vector<OrbitPredictionService::PublishedChunk> &dst,
+            const std::vector<OrbitPredictionService::PublishedChunk> &src);
+    OrbitPredictionService::PublishedChunk make_published_chunk_from_plan(
+            const OrbitPredictionService::PredictionChunkPlan &chunk,
+            uint32_t chunk_id,
+            bool reused_from_cache);
+    OrbitPredictionService::Result make_planned_stage_result(
+            const OrbitPredictionService::Result &base_result,
+            const PlannedSolveOutput &stage_output,
+            const std::vector<OrbitPredictionService::PublishedChunk> &published_chunks,
+            OrbitPredictionService::PublishStage publish_stage,
+            std::shared_ptr<const OrbitPredictionService::Result::CoreData> shared_core_data,
+            std::vector<OrbitPredictionService::StreamedPlannedChunk> streamed_planned_chunks = {},
+            bool include_cumulative_planned = true);
+    bool build_cached_prefix_stream_chunks(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionSolvePlan &solve_plan,
+            std::size_t suffix_begin_index,
+            const PlannedSolveOutput &prefix_output,
+            std::vector<OrbitPredictionService::PublishedChunk> &out_published_chunks,
+            std::vector<OrbitPredictionService::StreamedPlannedChunk> &out_streamed_chunks);
+    FullStreamBatchPublisher make_full_stream_batch_publisher(
+            const OrbitPredictionService::Request &request,
+            std::chrono::steady_clock::time_point compute_start);
+
     PlannedSolveRangeSummary solve_planned_chunk_range(
             PlannedTrajectoryContext &ctx,
             const OrbitPredictionService::PredictionSolvePlan &solve_plan,
@@ -338,5 +510,8 @@ namespace Game
             std::size_t chunk_end_index,
             const orbitsim::State &range_start_state,
             std::function<bool(PlannedChunkPacket &&)> chunk_sink);
+
+    PlannedPredictionRouteOutcome solve_planned_prediction_route(
+            const PlannedPredictionRouteEnvironment &env);
 
 } // namespace Game

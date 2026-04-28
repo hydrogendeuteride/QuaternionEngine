@@ -344,6 +344,82 @@ namespace Game
         entry.trajectory_segments_inertial = std::move(trajectory_segments_inertial);
     }
 
+    std::optional<OrbitPredictionService::PlannedChunkCacheEntry>
+    OrbitPredictionService::find_cached_planned_chunk(
+            const PlannedChunkCacheKey &key,
+            const orbitsim::State &expected_start_state)
+    {
+        std::lock_guard<std::mutex> lock(_planned_chunk_cache_mutex);
+        const auto cache_it = _planned_chunk_cache_by_key.find(key);
+        if (cache_it == _planned_chunk_cache_by_key.end())
+        {
+            return std::nullopt;
+        }
+
+        auto entry_it = cache_it->second;
+        PlannedChunkCacheEntry &entry = *entry_it;
+        if (entry.samples.size() < 2u ||
+            entry.segments.empty() ||
+            !validate_trajectory_segment_continuity(entry.segments) ||
+            (!entry.seam_validation_segments.empty() &&
+             !validate_trajectory_segment_continuity(entry.seam_validation_segments)))
+        {
+            _planned_chunk_cache_by_key.erase(cache_it);
+            _planned_chunk_cache.erase(entry_it);
+            return std::nullopt;
+        }
+
+        if (!states_are_continuous(entry.start_state, expected_start_state))
+        {
+            return std::nullopt;
+        }
+
+        _planned_chunk_cache.splice(_planned_chunk_cache.begin(),
+                                    _planned_chunk_cache,
+                                    entry_it);
+        cache_it->second = _planned_chunk_cache.begin();
+        return *_planned_chunk_cache.begin();
+    }
+
+    void OrbitPredictionService::store_cached_planned_chunk(PlannedChunkCacheEntry entry)
+    {
+        constexpr std::size_t kMaxCachedPlannedChunks = 512u;
+        if (entry.samples.size() < 2u ||
+            entry.segments.empty() ||
+            !validate_trajectory_segment_continuity(entry.segments) ||
+            (!entry.seam_validation_segments.empty() &&
+             !validate_trajectory_segment_continuity(entry.seam_validation_segments)) ||
+            !finite_state(entry.start_state) ||
+            !finite_state(entry.end_state))
+        {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(_planned_chunk_cache_mutex);
+        const auto existing_it = _planned_chunk_cache_by_key.find(entry.key);
+        if (existing_it != _planned_chunk_cache_by_key.end())
+        {
+            auto lru_it = existing_it->second;
+            *lru_it = std::move(entry);
+            _planned_chunk_cache.splice(_planned_chunk_cache.begin(),
+                                        _planned_chunk_cache,
+                                        lru_it);
+            existing_it->second = _planned_chunk_cache.begin();
+        }
+        else
+        {
+            _planned_chunk_cache.push_front(std::move(entry));
+            _planned_chunk_cache_by_key.emplace(_planned_chunk_cache.front().key,
+                                                _planned_chunk_cache.begin());
+        }
+
+        if (_planned_chunk_cache.size() > kMaxCachedPlannedChunks)
+        {
+            _planned_chunk_cache_by_key.erase(_planned_chunk_cache.back().key);
+            _planned_chunk_cache.pop_back();
+        }
+    }
+
     OrbitPredictionService::SharedCelestialEphemeris OrbitPredictionService::get_or_build_ephemeris(
             const EphemerisBuildRequest &request)
     {

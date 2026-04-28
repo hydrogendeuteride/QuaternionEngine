@@ -524,6 +524,8 @@ namespace Game
             Request request{};
         };
 
+        struct PredictionJobRunner;
+
         // Execute a single queued prediction request on the worker and publish zero or more staged results.
         void compute_prediction(const PendingJob &job);
         std::optional<ReusableBaselineCacheEntry> find_reusable_baseline(uint64_t track_id, uint64_t request_epoch) const;
@@ -533,6 +535,10 @@ namespace Game
                                      SharedCelestialEphemeris shared_ephemeris,
                                      std::vector<orbitsim::TrajectorySample> trajectory_inertial,
                                      std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial);
+        std::optional<PlannedChunkCacheEntry> find_cached_planned_chunk(
+                const PlannedChunkCacheKey &key,
+                const orbitsim::State &expected_start_state);
+        void store_cached_planned_chunk(PlannedChunkCacheEntry entry);
         bool publish_completed_result(const PendingJob &job, Result result);
         // Drop stale results after reset() or when a newer request supersedes the same track.
         static bool should_publish_result(const PendingJob &job,
