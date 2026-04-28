@@ -768,7 +768,11 @@ namespace Game
         track.dirty = !requested;
         if (!requested && !throttled)
         {
-            track.clear_runtime();
+            const bool has_cache_to_keep = track.cache.valid || track.authoritative_cache.valid;
+            if (!has_cache_to_keep)
+            {
+                track.clear_runtime();
+            }
         }
     }
 

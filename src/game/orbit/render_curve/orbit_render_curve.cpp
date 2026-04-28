@@ -317,6 +317,7 @@ namespace Game
     void OrbitRenderCurve::clear()
     {
         _nodes.clear();
+        _source_segments.clear();
         _root_index = kInvalidNodeIndex;
     }
 
@@ -328,6 +329,7 @@ namespace Game
             return curve;
         }
 
+        curve._source_segments.assign(source_segments.begin(), source_segments.end());
         curve._nodes.reserve((source_segments.size() * 2) - 1);
         const auto build_node = [&](auto &&self, const std::size_t first_index, const std::size_t last_index) -> uint32_t {
             if (last_index <= first_index || last_index > source_segments.size())

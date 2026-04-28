@@ -132,10 +132,19 @@ namespace Game
             applied_result = true;
         }
 
+        // Keep streaming publishes visible across frames instead of immediately
+        // draining a full-stream chunk and the final replacement in the same tick.
         while (auto completed = _prediction_derived_service.poll_completed())
         {
+            const bool streaming_publish =
+                    completed->publish_stage == OrbitPredictionService::PublishStage::PreviewStreaming ||
+                    completed->publish_stage == OrbitPredictionService::PublishStage::FullStreaming;
             apply_completed_prediction_derived_result(std::move(*completed));
             applied_result = true;
+            if (streaming_publish)
+            {
+                break;
+            }
         }
 
         if (applied_result)

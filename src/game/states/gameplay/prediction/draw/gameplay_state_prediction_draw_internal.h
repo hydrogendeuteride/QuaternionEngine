@@ -170,7 +170,9 @@ namespace Game::PredictionDrawDetail
                                     double t_start_s,
                                     double t_end_s,
                                     const glm::vec4 &color,
-                                    bool dashed);
+                                    bool dashed,
+                                    std::span<const double> anchor_times_s = {},
+                                    double selection_error_scale = 1.0);
     std::vector<std::pair<double, double>> compute_uncovered_ranges(
             double t_start_s,
             double t_end_s,

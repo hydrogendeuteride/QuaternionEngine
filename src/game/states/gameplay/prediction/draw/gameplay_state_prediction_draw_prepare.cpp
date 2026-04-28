@@ -191,8 +191,10 @@ namespace Game
                 out.planned_cache->maneuver_plan_signature_valid &&
                 out.planned_cache->maneuver_plan_signature == current_maneuver_plan_signature();
         out.planned_cache_current = planned_cache_current;
-        out.planned_cache_drawable = planned_cache_current;
-        if (!planned_cache_current)
+        out.planned_cache_drawable = planned_cache_current &&
+                                     out.planned_cache &&
+                                     out.planned_cache->has_planned_frame_draw_data();
+        if (!planned_cache_current || !out.planned_cache_drawable)
         {
             const auto resolve_stale_prefix_cutoff_s = [&]() {
                 double cutoff_s = std::numeric_limits<double>::quiet_NaN();
@@ -222,10 +224,32 @@ namespace Game
                         cutoff_s = anchor_node->time_s;
                     }
                 }
+                if (!std::isfinite(cutoff_s) && out.active_player_track &&
+                    (live_preview_active || lifecycle.preview_state != PredictionPreviewRuntimeState::Idle))
+                {
+                    if (const ManeuverNode *selected_node =
+                                _maneuver_state.find_node(_maneuver_state.selected_node_id))
+                    {
+                        cutoff_s = selected_node->time_s;
+                    }
+                }
                 return cutoff_s;
             };
 
-            const double stale_prefix_cutoff_s = resolve_stale_prefix_cutoff_s();
+            const auto planned_cache_end_time_s = [](const OrbitPredictionCache &candidate) {
+                if (!candidate.trajectory_segments_frame_planned.empty())
+                {
+                    const orbitsim::TrajectorySegment &last = candidate.trajectory_segments_frame_planned.back();
+                    return last.t0_s + last.dt_s;
+                }
+                if (candidate.trajectory_frame_planned.size() >= 2)
+                {
+                    return candidate.trajectory_frame_planned.back().t_s;
+                }
+                return std::numeric_limits<double>::quiet_NaN();
+            };
+
+            double stale_prefix_cutoff_s = resolve_stale_prefix_cutoff_s();
             const auto stale_candidate_drawable = [&](const OrbitPredictionCache &candidate) {
                 return candidate.valid &&
                        candidate.has_planned_frame_draw_data() &&
@@ -245,6 +269,14 @@ namespace Game
                      stale_candidate_drawable(*out.planned_cache))
             {
                 stale_candidate = out.planned_cache;
+            }
+
+            if (stale_candidate && !std::isfinite(stale_prefix_cutoff_s) &&
+                lifecycle.preview_state == PredictionPreviewRuntimeState::Idle &&
+                (lifecycle.dirty || lifecycle.request_pending || lifecycle.derived_request_pending ||
+                 lifecycle.awaiting_authoritative_publish))
+            {
+                stale_prefix_cutoff_s = planned_cache_end_time_s(*stale_candidate);
             }
 
             const bool can_draw_stale_prefix =
@@ -314,12 +346,18 @@ namespace Game
         out.identity_frame_transform = Draw::frame_transform_is_identity(out.frame_to_world);
         out.use_base_adaptive_curve = !out.stable_cache->render_curve_frame.empty();
         const bool planned_preview_like = PredictionRuntimeDetail::prediction_track_planned_preview_like(lifecycle);
-        out.use_planned_adaptive_curve =
-                !out.maneuver_drag_active &&
-                !planned_preview_like &&
+        const bool stale_planned_curve_drawable =
+                out.stale_planned_cache_drawable &&
+                out.stale_planned_cache &&
+                !out.stale_planned_cache->render_curve_frame_planned.empty();
+        const bool current_planned_curve_drawable =
                 out.planned_cache_drawable &&
                 out.planned_cache &&
                 !out.planned_cache->render_curve_frame_planned.empty();
+        out.use_planned_adaptive_curve =
+                !out.maneuver_drag_active &&
+                (!planned_preview_like || stale_planned_curve_drawable) &&
+                (current_planned_curve_drawable || stale_planned_curve_drawable);
 
         out.world_basis_draw_ctx = out.draw_ctx;
         if (!out.identity_frame_transform)
@@ -369,8 +407,8 @@ namespace Game
                                     ? authored_plan_ctx.last_future_node_time_s
                                     : authored_plan_start_s;
                     const double authored_plan_end_s =
-                            std::isfinite(authored_plan_tail_anchor_s)
-                                    ? std::max(authored_plan_tail_anchor_s + maneuver_plan_horizon_s(),
+                            std::isfinite(authored_plan_start_s) && std::isfinite(authored_plan_tail_anchor_s)
+                                    ? std::max(authored_plan_start_s + maneuver_plan_horizon_s(),
                                                authored_plan_tail_anchor_s +
                                                        OrbitPredictionTuning::kPostNodeCoverageMinS)
                                     : std::numeric_limits<double>::quiet_NaN();

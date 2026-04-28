@@ -152,6 +152,11 @@ namespace Game
             return std::span<const Node>(_nodes.data(), _nodes.size());
         }
 
+        [[nodiscard]] std::span<const orbitsim::TrajectorySegment> source_segments() const
+        {
+            return std::span<const orbitsim::TrajectorySegment>(_source_segments.data(), _source_segments.size());
+        }
+
         void clear();
 
         /// Build the binary LOD tree from a flat array of source trajectory segments.
@@ -184,6 +189,18 @@ namespace Game
                 const SelectionContext &ctx,
                 const FrustumContext &frustum,
                 std::size_t max_segments,
+                double t_start_s,
+                double t_end_s);
+
+        /// Convenience pipeline with separate thresholds for tree selection and
+        /// final render subdivision. Use this when the persistent curve should
+        /// select a conservative, stable segment set while the visible line keeps
+        /// the normal render-subdivision quality/budget.
+        static RenderResult build_render_lod(
+                const OrbitRenderCurve &curve,
+                const SelectionContext &ctx,
+                const FrustumContext &frustum,
+                const RenderSettings &settings,
                 double t_start_s,
                 double t_end_s);
 
@@ -234,6 +251,7 @@ namespace Game
                 double t_end_s);
 
         std::vector<Node> _nodes{};
+        std::vector<orbitsim::TrajectorySegment> _source_segments{};
         uint32_t _root_index{kInvalidNodeIndex};
     };
 } // namespace Game

@@ -271,6 +271,8 @@ namespace Game::PredictionRuntimeDetail
         return active_player_track &&
                (live_preview_active ||
                 snapshot.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine ||
+                snapshot.dirty ||
+                snapshot.invalidated_while_pending ||
                 snapshot.request_pending ||
                 snapshot.derived_request_pending ||
                 snapshot.awaiting_authoritative_publish);
@@ -304,7 +306,8 @@ namespace Game::PredictionRuntimeDetail
         out.full_stream_overlay_draw_active =
                 !maneuver_drag_active &&
                 !out.preview_fallback_active &&
-                (snapshot.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine ||
+                (snapshot.full_stream_overlay_active ||
+                 snapshot.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine ||
                  !active_maneuver_track);
         return out;
     }

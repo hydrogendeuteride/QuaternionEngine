@@ -29,18 +29,24 @@ namespace Game
         };
 
         double resolve_authored_plan_end_s(const PredictionTimeContext &time_ctx,
+                                           const double plan_start_time_s,
                                            const double final_node_time_s,
                                            const double plan_horizon_s,
                                            const double post_node_coverage_s)
         {
             if (!std::isfinite(time_ctx.sim_now_s) ||
+                !std::isfinite(plan_start_time_s) ||
                 !std::isfinite(final_node_time_s) ||
                 !(plan_horizon_s > 0.0))
             {
                 return std::numeric_limits<double>::quiet_NaN();
             }
 
-            const double horizon_end_s = final_node_time_s + plan_horizon_s;
+            // The authored horizon is a total plan window, anchored at the first
+            // future maneuver, not extra tail time appended after the final node.
+            // If a later node lies beyond that window, keep just enough post-node
+            // coverage to show/drag it instead of adding another full horizon.
+            const double horizon_end_s = plan_start_time_s + plan_horizon_s;
             const double post_node_end_s = final_node_time_s + std::max(0.0, post_node_coverage_s);
             return std::max(horizon_end_s, post_node_end_s);
         }
@@ -98,6 +104,7 @@ namespace Game
                             ? time_ctx.last_future_node_time_s
                             : out.t0_s;
             out.t1_s = resolve_authored_plan_end_s(time_ctx,
+                                                   out.t0_s,
                                                    final_node_time_s,
                                                    plan_horizon_s,
                                                    post_node_coverage_s);
@@ -663,6 +670,9 @@ namespace Game
             {
                 const double authored_plan_end_s =
                         resolve_authored_plan_end_s(time_ctx,
+                                                    std::isfinite(time_ctx.first_future_node_time_s)
+                                                            ? time_ctx.first_future_node_time_s
+                                                            : visual_anchor.time_s,
                                                     time_ctx.last_future_node_time_s,
                                                     plan_horizon_s,
                                                     post_node_coverage_s);
@@ -693,6 +703,9 @@ namespace Game
         {
             const double authored_plan_end_s =
                     resolve_authored_plan_end_s(time_ctx,
+                                                std::isfinite(time_ctx.first_future_node_time_s)
+                                                        ? time_ctx.first_future_node_time_s
+                                                        : pick_anchor.time_s,
                                                 time_ctx.last_future_node_time_s,
                                                 plan_horizon_s,
                                                 post_node_coverage_s);

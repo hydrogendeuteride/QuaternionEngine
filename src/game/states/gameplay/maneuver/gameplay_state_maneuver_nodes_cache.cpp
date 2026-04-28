@@ -486,6 +486,41 @@ namespace Game
             const glm::dvec3 cached_mbasis_t = node.maneuver_basis_t_world;
             const glm::dvec3 cached_mbasis_n = node.maneuver_basis_n_world;
 
+            const bool release_refine_in_flight =
+                    interaction_idle &&
+                    hold_cached_release_state &&
+                    (lifecycle.preview_state == PredictionPreviewRuntimeState::AwaitFullRefine ||
+                     lifecycle.dirty ||
+                     lifecycle.invalidated_while_pending ||
+                     lifecycle.request_pending ||
+                     lifecycle.derived_request_pending ||
+                     lifecycle.awaiting_authoritative_publish);
+            const bool release_anchor_node =
+                    player_track &&
+                    player_track->preview_anchor.valid &&
+                    player_track->preview_anchor.anchor_node_id == node.id;
+            const bool freeze_release_node =
+                    can_fallback_release &&
+                    release_refine_in_flight &&
+                    (node.id == _maneuver_state.selected_node_id || release_anchor_node);
+            if (freeze_release_node)
+            {
+                node.basis_r_world = cached_basis_r;
+                node.basis_t_world = cached_basis_t;
+                node.basis_n_world = cached_basis_n;
+                node.maneuver_basis_r_world = cached_mbasis_r;
+                node.maneuver_basis_t_world = cached_mbasis_t;
+                node.maneuver_basis_n_world = cached_mbasis_n;
+
+                const glm::dvec3 dv_world = compose_basis_vector(node.dv_rtn_mps,
+                                                                 node.maneuver_basis_r_world,
+                                                                 node.maneuver_basis_t_world,
+                                                                 node.maneuver_basis_n_world);
+                node.burn_direction_world = normalized_or(dv_world, node.basis_t_world);
+                node.gizmo_valid = true;
+                continue;
+            }
+
             // --- Resolve which cache/trajectory source to use for this node ---
             const bool use_stable_prefix =
                     stable_planned_prefix_available &&

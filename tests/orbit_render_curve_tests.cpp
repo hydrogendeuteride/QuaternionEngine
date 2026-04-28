@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 namespace
 {
     orbitsim::TrajectorySegment make_segment(const double t0_s,
@@ -251,6 +253,47 @@ TEST(OrbitRenderCurveTests, RenderLodSplitsCurvedSegmentWithProjectedScreenError
     ASSERT_GT(result.segments.size(), 1u);
     EXPECT_DOUBLE_EQ(result.segments.front().t0_s, 0.0);
     EXPECT_DOUBLE_EQ(result.segments.back().t1_s, 1.0);
+}
+
+
+TEST(OrbitRenderCurveTests, CurveRenderLodSamplesSourcePathWhenMergedNodeSelected)
+{
+    const std::vector<orbitsim::TrajectorySegment> segments = make_curved_segments();
+    const Game::OrbitRenderCurve curve = Game::OrbitRenderCurve::build(segments);
+
+    Game::OrbitRenderCurve::SelectionContext ctx{};
+    ctx.camera_world = glm::dvec3(0.0, 0.0, 10.0);
+    ctx.tan_half_fov = 1.0;
+    ctx.viewport_height_px = 1080.0;
+    ctx.error_px = 1.0e30; // force tree selection to accept the coarse merged root
+
+    Game::OrbitRenderCurve::RenderSettings settings{};
+    settings.error_px = 0.25;
+    settings.max_segments = 256;
+
+    Game::OrbitRenderCurve::FrustumContext frustum{};
+
+    const Game::OrbitRenderCurve::RenderResult result =
+            Game::OrbitRenderCurve::build_render_lod(curve, ctx, frustum, settings, 0.0, 4.0);
+
+    EXPECT_FALSE(result.cap_hit);
+    ASSERT_FALSE(result.segments.empty());
+
+    bool found_source_lobe_endpoint = false;
+    for (const Game::OrbitRenderCurve::LineSegment &segment : result.segments)
+    {
+        if (std::abs(segment.t0_s - 1.0) < 1.0e-12)
+        {
+            found_source_lobe_endpoint = true;
+            EXPECT_NEAR(segment.a_world.y, 2.0, 1.0e-9);
+        }
+        if (std::abs(segment.t1_s - 1.0) < 1.0e-12)
+        {
+            found_source_lobe_endpoint = true;
+            EXPECT_NEAR(segment.b_world.y, 2.0, 1.0e-9);
+        }
+    }
+    EXPECT_TRUE(found_source_lobe_endpoint);
 }
 
 TEST(OrbitRenderCurveTests, RenderLodSkipsCurveIntervalsOutsideFrustum)

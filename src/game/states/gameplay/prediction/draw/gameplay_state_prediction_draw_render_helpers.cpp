@@ -200,7 +200,9 @@ namespace Game::PredictionDrawDetail
                                     const double t_start_s,
                                     const double t_end_s,
                                     const glm::vec4 &color,
-                                    const bool dashed)
+                                    const bool dashed,
+                                    const std::span<const double> anchor_times_s,
+                                    const double selection_error_scale)
     {
         if (curve.empty() || !(t_end_s > t_start_s))
         {
@@ -216,11 +218,25 @@ namespace Game::PredictionDrawDetail
         selection_ctx.viewport_height_px = ctx.viewport_height_px;
         selection_ctx.error_frustum = ctx.render_frustum;
         selection_ctx.error_px = ctx.render_error_px;
+        selection_ctx.anchor_times_s = anchor_times_s;
+        if (std::isfinite(selection_error_scale) && selection_error_scale > 0.0 &&
+            selection_error_scale < 1.0)
+        {
+            selection_ctx.error_px = std::max(0.025, ctx.render_error_px * selection_error_scale);
+        }
+
+        OrbitRenderCurve::RenderSettings render_settings{};
+        render_settings.error_px = ctx.render_error_px;
+        render_settings.max_segments = ctx.render_max_segments;
 
         const auto render_lod_start_tp = std::chrono::steady_clock::now();
         const OrbitRenderCurve::RenderResult lod =
-                OrbitRenderCurve::build_render_lod(
-                        curve, selection_ctx, ctx.render_frustum, ctx.render_max_segments, t_start_s, t_end_s);
+                OrbitRenderCurve::build_render_lod(curve,
+                                                   selection_ctx,
+                                                   ctx.render_frustum,
+                                                   render_settings,
+                                                   t_start_s,
+                                                   t_end_s);
         perf.render_lod_ms_last +=
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - render_lod_start_tp)
                         .count();
