@@ -137,12 +137,12 @@ namespace Game
     void GameplayState::rebuild_prediction_subjects()
     {
         // Rebuild the subject list while preserving any reusable runtime cache/state.
-        const PredictionSubjectKey old_active = _prediction_selection.active_subject;
-        const std::vector<PredictionSubjectKey> old_overlays = _prediction_selection.overlay_subjects;
-        std::vector<PredictionTrackState> old_tracks = std::move(_prediction_tracks);
+        const PredictionSubjectKey old_active = _prediction.selection.active_subject;
+        const std::vector<PredictionSubjectKey> old_overlays = _prediction.selection.overlay_subjects;
+        std::vector<PredictionTrackState> old_tracks = std::move(_prediction.tracks);
 
-        _prediction_tracks.clear();
-        _prediction_groups.clear();
+        _prediction.tracks.clear();
+        _prediction.groups.clear();
 
         const auto find_old_track = [&](PredictionSubjectKey key) -> PredictionTrackState * {
             auto it = std::find_if(old_tracks.begin(),
@@ -174,7 +174,7 @@ namespace Game
             track.supports_maneuvers = orbiter.is_player ||
                                       (orbiter.formation_hold_enabled && !orbiter.formation_leader_name.empty());
             track.is_celestial = false;
-            _prediction_tracks.push_back(std::move(track));
+            _prediction.tracks.push_back(std::move(track));
         }
 
         // Add non-reference celestial bodies so overlays can compare against them.
@@ -202,7 +202,7 @@ namespace Game
                 track.label = body.name;
                 track.supports_maneuvers = false;
                 track.is_celestial = true;
-                _prediction_tracks.push_back(std::move(track));
+                _prediction.tracks.push_back(std::move(track));
             }
         }
 
@@ -213,23 +213,23 @@ namespace Game
         // Preserve the user's active subject when it still exists; otherwise fall back to the player.
         if (track_exists(old_active))
         {
-            _prediction_selection.active_subject = old_active;
+            _prediction.selection.active_subject = old_active;
         }
         else if (const PredictionTrackState *player_track = player_prediction_track())
         {
-            _prediction_selection.active_subject = player_track->key;
+            _prediction.selection.active_subject = player_track->key;
         }
-        else if (!_prediction_tracks.empty())
+        else if (!_prediction.tracks.empty())
         {
-            _prediction_selection.active_subject = _prediction_tracks.front().key;
+            _prediction.selection.active_subject = _prediction.tracks.front().key;
         }
         else
         {
-            _prediction_selection.active_subject = {};
+            _prediction.selection.active_subject = {};
         }
 
-        _prediction_selection.overlay_subjects.clear();
-        _prediction_selection.overlay_subjects.reserve(old_overlays.size());
+        _prediction.selection.overlay_subjects.clear();
+        _prediction.selection.overlay_subjects.reserve(old_overlays.size());
         for (PredictionSubjectKey key : old_overlays)
         {
             if (!track_exists(key))
@@ -237,30 +237,30 @@ namespace Game
                 continue;
             }
 
-            if (std::find(_prediction_selection.overlay_subjects.begin(),
-                          _prediction_selection.overlay_subjects.end(),
-                          key) == _prediction_selection.overlay_subjects.end())
+            if (std::find(_prediction.selection.overlay_subjects.begin(),
+                          _prediction.selection.overlay_subjects.end(),
+                          key) == _prediction.selection.overlay_subjects.end())
             {
-                _prediction_selection.overlay_subjects.push_back(key);
+                _prediction.selection.overlay_subjects.push_back(key);
             }
         }
 
         // There is no dedicated subject/overlay picker in the current UI yet, so keep
         // other live prediction subjects visible by default even after narrowing
         // prediction work to the active/overlay set.
-        if (_prediction_selection.overlay_subjects.empty())
+        if (_prediction.selection.overlay_subjects.empty())
         {
-            for (const PredictionTrackState &track : _prediction_tracks)
+            for (const PredictionTrackState &track : _prediction.tracks)
             {
-                if (track.key == _prediction_selection.active_subject)
+                if (track.key == _prediction.selection.active_subject)
                 {
                     continue;
                 }
 
-                _prediction_selection.overlay_subjects.push_back(track.key);
+                _prediction.selection.overlay_subjects.push_back(track.key);
             }
         }
-        _prediction_selection.selected_group_index = -1;
+        _prediction.selection.selected_group_index = -1;
 
         sync_prediction_dirty_flag();
     }
@@ -269,7 +269,7 @@ namespace Game
     {
         // Visible prediction work is centered on the focused subject plus any explicit overlays.
         std::vector<PredictionSubjectKey> out;
-        out.reserve(1 + _prediction_selection.overlay_subjects.size());
+        out.reserve(1 + _prediction.selection.overlay_subjects.size());
 
         const auto append_visible = [&](PredictionSubjectKey key) {
             if (!key.valid() || !find_prediction_track(key))
@@ -283,15 +283,15 @@ namespace Game
             }
         };
 
-        append_visible(_prediction_selection.active_subject);
-        for (PredictionSubjectKey key : _prediction_selection.overlay_subjects)
+        append_visible(_prediction.selection.active_subject);
+        for (PredictionSubjectKey key : _prediction.selection.overlay_subjects)
         {
             append_visible(key);
         }
 
-        if (out.empty() && !_prediction_tracks.empty())
+        if (out.empty() && !_prediction.tracks.empty())
         {
-            append_visible(_prediction_tracks.front().key);
+            append_visible(_prediction.tracks.front().key);
         }
 
         return out;
@@ -302,10 +302,10 @@ namespace Game
         // Celestials and spacecraft use different minimum look-ahead windows.
         if (key.kind == PredictionSubjectKind::Celestial)
         {
-            return std::max(0.0, _prediction_sampling_policy.celestial_min_window_s);
+            return std::max(0.0, _prediction.sampling_policy.celestial_min_window_s);
         }
 
-        return std::max(0.0, _prediction_sampling_policy.orbiter_min_window_s);
+        return std::max(0.0, _prediction.sampling_policy.orbiter_min_window_s);
     }
 
     double GameplayState::maneuver_plan_horizon_s() const
@@ -351,31 +351,31 @@ namespace Game
     GameplayState::PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key)
     {
         // Resolve mutable track state by stable subject key.
-        auto it = std::find_if(_prediction_tracks.begin(),
-                               _prediction_tracks.end(),
+        auto it = std::find_if(_prediction.tracks.begin(),
+                               _prediction.tracks.end(),
                                [key](const PredictionTrackState &track) { return track.key == key; });
-        return (it != _prediction_tracks.end()) ? &(*it) : nullptr;
+        return (it != _prediction.tracks.end()) ? &(*it) : nullptr;
     }
 
     const GameplayState::PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key) const
     {
         // Resolve immutable track state by stable subject key.
-        auto it = std::find_if(_prediction_tracks.begin(),
-                               _prediction_tracks.end(),
+        auto it = std::find_if(_prediction.tracks.begin(),
+                               _prediction.tracks.end(),
                                [key](const PredictionTrackState &track) { return track.key == key; });
-        return (it != _prediction_tracks.end()) ? &(*it) : nullptr;
+        return (it != _prediction.tracks.end()) ? &(*it) : nullptr;
     }
 
     GameplayState::PredictionTrackState *GameplayState::active_prediction_track()
     {
         // Return the track currently focused by the prediction UI.
-        return find_prediction_track(_prediction_selection.active_subject);
+        return find_prediction_track(_prediction.selection.active_subject);
     }
 
     const GameplayState::PredictionTrackState *GameplayState::active_prediction_track() const
     {
         // Return the track currently focused by the prediction UI.
-        return find_prediction_track(_prediction_selection.active_subject);
+        return find_prediction_track(_prediction.selection.active_subject);
     }
 
     GameplayState::PredictionTrackState *GameplayState::player_prediction_track()

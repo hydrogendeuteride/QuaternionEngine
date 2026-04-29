@@ -23,7 +23,10 @@ This folder contains the maneuver-node editor used by `GameplayState`.
 ### Implementation Files
 
 - `gameplay_state_maneuver_nodes.cpp`
-  Core node management: sim-time query (`current_sim_time_s`), primary-body resolution (`resolve_maneuver_node_primary_body_id`), node removal (`remove_maneuver_node`, `remove_maneuver_node_suffix`, `finalize_maneuver_node_removal`), and orbit-curve alignment delta (`compute_maneuver_align_delta`).
+  Core node coordination: sim-time query (`current_sim_time_s`), primary-body resolution (`resolve_maneuver_node_primary_body_id`), command side effects (`apply_maneuver_command`), node removal wrappers (`remove_maneuver_node`, `remove_maneuver_node_suffix`), and orbit-curve alignment delta (`compute_maneuver_align_delta`).
+
+- `maneuver_plan_model.*`, `maneuver_commands.*`, `maneuver_controller.*`
+  Plan mutation boundary. UI and gizmo code create commands, the controller applies them to `ManeuverPlanState`, and the returned result drives prediction dirty/artifact cleanup from `GameplayState`.
 
 - `gameplay_state_maneuver_nodes_cache.cpp`
   Per-frame runtime cache rebuild: `refresh_maneuver_node_runtime_cache()` and its internal helpers. Rebuilds all derived node state (world positions, RTN/PON bases, burn direction, gizmo validity) from prediction data. Contains shared sampling helpers as templates (`sample_traj_world_at`, `sample_chunk_world_at`, `sample_tangent_world_from`).

@@ -3,9 +3,13 @@
 #include "game/game_world.h"
 #include "game/state/game_state.h"
 #include "core/game_api.h"
+#include "game/states/gameplay/maneuver/maneuver_controller.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_types.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_derived_service.h"
+#include "game/states/gameplay/prediction/prediction_frame_controller.h"
+#include "game/states/gameplay/prediction/prediction_frame_resolver.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
+#include "game/states/gameplay/prediction/runtime/prediction_runtime_context.h"
 #include "game/states/gameplay/gameplay_settings.h"
 #include "game/input/keybinds.h"
 #include "game/states/gameplay/scenario/scenario_config.h"
@@ -37,6 +41,31 @@ namespace Game
         struct PredictionGlobalDrawContext;
         struct PredictionTrackDrawContext;
     }
+
+    struct GameplayPredictionState
+    {
+        bool enabled{true};
+        bool dirty{true};
+        bool draw_full_orbit{true};
+        bool draw_future_segment{true};
+        bool draw_velocity_ray{false};
+        float line_alpha_scale{1.0f};
+        float line_overlay_boost{0.0f};
+        double periodic_refresh_s{0.0};
+        double thrust_refresh_s{0.1};
+        PredictionSamplingPolicy sampling_policy{};
+
+        OrbitPlotPerfStats orbit_plot_perf{};
+        OrbitPredictionDrawConfig draw_config{};
+        OrbitPredictionService service{};
+        OrbitPredictionDerivedService derived_service{};
+        std::vector<PredictionTrackState> tracks{};
+        std::vector<PredictionGroup> groups{};
+        PredictionSelectionState selection{};
+        PredictionFrameSelectionState frame_selection{};
+        uint64_t display_frame_revision{1};
+        PredictionAnalysisSelectionState analysis_selection{};
+    };
 
     // ============================================================================
     // GameplayState: Main gameplay — orbital mechanics, combat, ship control
@@ -130,6 +159,7 @@ namespace Game
         void clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects);
         void apply_completed_prediction_result(OrbitPredictionService::Result result);
         void apply_completed_prediction_derived_result(OrbitPredictionDerivedService::Result result);
+        PredictionRuntimeContext build_prediction_runtime_context();
         bool should_rebuild_prediction_track(const PredictionTrackState &track,
                                              double now_s,
                                              float fixed_dt,
@@ -147,15 +177,6 @@ namespace Game
                                               bool thrusting,
                                               bool with_maneuvers,
                                               bool *out_throttled = nullptr);
-        bool build_orbiter_prediction_request(PredictionTrackState &track,
-                                              const WorldVec3 &subject_pos_world,
-                                              const glm::dvec3 &subject_vel_world,
-                                              double now_s,
-                                              bool thrusting,
-                                              bool with_maneuvers,
-                                              OrbitPredictionService::Request &out_request,
-                                              bool *out_interactive_request = nullptr,
-                                              bool *out_preview_request_active = nullptr);
         bool request_celestial_prediction_async(PredictionTrackState &track,
                                                 double now_s);
         void update_orbiter_prediction_track(PredictionTrackState &track,
@@ -220,12 +241,9 @@ namespace Game
         bool sample_prediction_inertial_state(const std::vector<orbitsim::TrajectorySample> &trajectory,
                                               double query_time_s,
                                               orbitsim::State &out_state) const;
-        bool resolve_prediction_preview_anchor_state(const PredictionTrackState &track,
-                                                     orbitsim::State &out_state) const;
-        bool resolve_prediction_preview_anchor_state(const PredictionTrackState &track,
-                                                     orbitsim::State &out_state,
-                                                     bool &out_trusted) const;
         orbitsim::SpacecraftStateLookup build_prediction_player_lookup() const;
+        PredictionFrameResolverContext build_prediction_frame_resolver_context() const;
+        PredictionFrameControllerContext build_prediction_frame_controller_context() const;
         orbitsim::TrajectoryFrameSpec resolve_prediction_display_frame_spec(
                 const OrbitPredictionCache &cache,
                 double display_time_s = std::numeric_limits<double>::quiet_NaN()) const;
@@ -409,32 +427,12 @@ namespace Game
         double _runtime_orbiter_rails_distance_m{kDefaultRuntimeOrbiterRailsDistanceM};
 
         // Orbit prediction (UI + debug draw)
-        bool _prediction_enabled{true};
-        bool _prediction_dirty{true};
-        bool _prediction_draw_full_orbit{true};
-        bool _prediction_draw_future_segment{true};
-        bool _prediction_draw_velocity_ray{false};
-        float _prediction_line_alpha_scale{1.0f};   // multiplier for orbit line alpha
-        float _prediction_line_overlay_boost{0.0f}; // extra always-on-top alpha fraction
-        double _prediction_periodic_refresh_s{0.0}; // 0 = never (cache is extended when horizon runs out)
-        double _prediction_thrust_refresh_s{0.1};    // rebuild at most this often while thrusting
-        PredictionSamplingPolicy _prediction_sampling_policy{};
+        GameplayPredictionState _prediction{};
         ManeuverPlanHorizonSettings _maneuver_plan_horizon{};
         ManeuverPlanWindowSettings _maneuver_plan_windows{};
         OrbitPlotBudgetSettings _orbit_plot_budget{};
         bool _maneuver_plan_live_preview_active{true};
         uint64_t _maneuver_plan_revision{0};
-
-        OrbitPlotPerfStats _orbit_plot_perf{};
-        OrbitPredictionDrawConfig _prediction_draw_config{};
-        OrbitPredictionService _prediction_service{};
-        OrbitPredictionDerivedService _prediction_derived_service{};
-        std::vector<PredictionTrackState> _prediction_tracks{};
-        std::vector<PredictionGroup> _prediction_groups{};
-        PredictionSelectionState _prediction_selection{};
-        PredictionFrameSelectionState _prediction_frame_selection{};
-        uint64_t _prediction_display_frame_revision{1};
-        PredictionAnalysisSelectionState _prediction_analysis_selection{};
 
         bool build_maneuver_gizmo_view_context(const GameStateContext &ctx, ManeuverGizmoViewContext &out_view) const;
         bool maneuver_gizmo_is_occluded(const ManeuverGizmoViewContext &view, const WorldVec3 &point_world) const;
@@ -480,12 +478,12 @@ namespace Game
         void update_maneuver_nodes_time_warp(GameStateContext &ctx, float fixed_dt);
         void update_maneuver_nodes_execution(GameStateContext &ctx);
         orbitsim::BodyId resolve_maneuver_node_primary_body_id(const ManeuverNode &node, double query_time_s) const;
+        ManeuverCommandResult apply_maneuver_command(const ManeuverCommand &command);
         void remove_maneuver_node(int node_id, int hint_index = -1);
         void remove_maneuver_node_suffix(int node_id, int hint_index = -1);
-        void finalize_maneuver_node_removal(bool removed_selected, bool removed_gizmo, bool removed_execute, int hint_index);
         WorldVec3 compute_maneuver_align_delta(GameStateContext &ctx,
-                                               const OrbitPredictionCache &cache,
-                                               const std::vector<orbitsim::TrajectorySample> &traj_base);
+                                                const OrbitPredictionCache &cache,
+                                                const std::vector<orbitsim::TrajectorySample> &traj_base);
 
         bool _maneuver_nodes_enabled{true};
         bool _maneuver_nodes_debug_draw{true};
@@ -518,4 +516,5 @@ namespace Game
     };
 
     #undef VULKAN_ENGINE_GAMEPLAY_STATE_PRIVATE
+
 } // namespace Game

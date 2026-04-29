@@ -270,13 +270,13 @@ namespace Game
         _maneuver_gizmo_interaction = {};
         _reset_requested = false;
         _contact_log.clear();
-        _prediction_tracks.clear();
-        _prediction_groups.clear();
-        _prediction_selection.clear();
-        _prediction_frame_selection.clear();
-        _prediction_dirty = true;
-        _prediction_service.reset();
-        _prediction_derived_service.reset();
+        _prediction.tracks.clear();
+        _prediction.groups.clear();
+        _prediction.selection.clear();
+        _prediction.frame_selection.clear();
+        _prediction.dirty = true;
+        _prediction.service.reset();
+        _prediction.derived_service.reset();
 
         _world.clear_rebase_anchor();
         _world.clear();
@@ -1199,9 +1199,9 @@ namespace Game
         sync_player_camera_target(ctx);
         sync_player_collision_callbacks();
 
-        _prediction_selection.active_subject = PredictionSubjectKey{PredictionSubjectKind::Orbiter, target->entity.value};
-        _prediction_selection.overlay_subjects.clear();
-        _prediction_selection.selected_group_index = -1;
+        _prediction.selection.active_subject = PredictionSubjectKey{PredictionSubjectKind::Orbiter, target->entity.value};
+        _prediction.selection.overlay_subjects.clear();
+        _prediction.selection.selected_group_index = -1;
         _execute_node_armed = false;
         _execute_node_id = -1;
         _maneuver_state.nodes.clear();

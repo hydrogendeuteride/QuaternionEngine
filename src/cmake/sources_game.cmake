@@ -86,6 +86,10 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/prediction/gameplay_prediction_cache_internal.cpp
   game/states/gameplay/prediction/prediction_trajectory_sampler.h
   game/states/gameplay/prediction/prediction_trajectory_sampler.cpp
+  game/states/gameplay/prediction/prediction_frame_resolver.h
+  game/states/gameplay/prediction/prediction_frame_resolver.cpp
+  game/states/gameplay/prediction/prediction_frame_controller.h
+  game/states/gameplay/prediction/prediction_frame_controller.cpp
   game/states/gameplay/prediction/prediction_frame_cache_builder.h
   game/states/gameplay/prediction/prediction_frame_cache_builder.cpp
   game/states/gameplay/prediction/prediction_metrics_builder.h
@@ -97,6 +101,17 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/prediction/gameplay_state_prediction.cpp
   game/states/gameplay/prediction/gameplay_state_prediction_frames.cpp
   game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h
+  game/states/gameplay/prediction/runtime/prediction_runtime_context.h
+  game/states/gameplay/prediction/runtime/prediction_request_factory.h
+  game/states/gameplay/prediction/runtime/prediction_request_factory.cpp
+  game/states/gameplay/prediction/runtime/prediction_invalidation_controller.h
+  game/states/gameplay/prediction/runtime/prediction_invalidation_controller.cpp
+  game/states/gameplay/prediction/runtime/prediction_maneuver_invalidation.h
+  game/states/gameplay/prediction/runtime/prediction_maneuver_invalidation.cpp
+  game/states/gameplay/prediction/runtime/prediction_result_applier.h
+  game/states/gameplay/prediction/runtime/prediction_result_applier.cpp
+  game/states/gameplay/prediction/runtime/prediction_solver_result_applier.h
+  game/states/gameplay/prediction/runtime/prediction_solver_result_applier.cpp
   game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime.cpp
   game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_solver.cpp
   game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_requests.cpp
@@ -112,6 +127,12 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/maneuver/gameplay_state_maneuver_colors.h
   game/states/gameplay/maneuver/gameplay_state_maneuver_types.h
   game/states/gameplay/maneuver/gameplay_state_maneuver_util.h
+  game/states/gameplay/maneuver/maneuver_plan_model.h
+  game/states/gameplay/maneuver/maneuver_plan_model.cpp
+  game/states/gameplay/maneuver/maneuver_commands.h
+  game/states/gameplay/maneuver/maneuver_commands.cpp
+  game/states/gameplay/maneuver/maneuver_controller.h
+  game/states/gameplay/maneuver/maneuver_controller.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_nodes.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_nodes_cache.cpp

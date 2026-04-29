@@ -8,6 +8,7 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
+#include "game/states/gameplay/prediction/runtime/prediction_request_factory.h"
 
 #include <gtest/gtest.h>
 
@@ -76,6 +77,47 @@ namespace
         segment.start = orbitsim::make_state(orbitsim::Vec3{x0_m, 0.0, 0.0}, orbitsim::Vec3{0.0, 7'500.0, 0.0});
         segment.end = orbitsim::make_state(orbitsim::Vec3{x1_m, 0.0, 0.0}, orbitsim::Vec3{0.0, 7'500.0, 0.0});
         return segment;
+    }
+
+    bool build_orbiter_prediction_request(Game::GameplayState &state,
+                                          Game::PredictionTrackState &track,
+                                          const WorldVec3 &subject_pos_world,
+                                          const glm::dvec3 &subject_vel_world,
+                                          const double now_s,
+                                          const bool thrusting,
+                                          const bool with_maneuvers,
+                                          Game::OrbitPredictionService::Request &out_request,
+                                          bool *out_interactive_request = nullptr,
+                                          bool *out_preview_request_active = nullptr)
+    {
+        const Game::PredictionOrbiterRequestBuildResult result =
+                Game::PredictionRequestFactory::build_orbiter_request(state.build_prediction_runtime_context(),
+                                                                      track,
+                                                                      subject_pos_world,
+                                                                      subject_vel_world,
+                                                                      now_s,
+                                                                      thrusting,
+                                                                      with_maneuvers);
+        out_request = result.request;
+        if (out_interactive_request)
+        {
+            *out_interactive_request = result.interactive_request;
+        }
+        if (out_preview_request_active)
+        {
+            *out_preview_request_active = result.preview_request_active;
+        }
+        return result.built;
+    }
+
+    bool resolve_prediction_preview_anchor_state(Game::GameplayState &state,
+                                                 const Game::PredictionTrackState &track,
+                                                 orbitsim::State &out_state)
+    {
+        return Game::PredictionRequestFactory::resolve_preview_anchor_state(
+                state.build_prediction_runtime_context(),
+                track,
+                out_state);
     }
 
     Game::OrbitChunk make_chunk(const uint32_t chunk_id,

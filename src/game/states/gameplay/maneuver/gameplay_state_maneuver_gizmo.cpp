@@ -1,6 +1,7 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
+#include "game/states/gameplay/prediction/runtime/prediction_invalidation_controller.h"
 
 #include "core/device/images.h"
 #include "core/engine.h"
@@ -272,8 +273,8 @@ namespace Game
         const PredictionTrackState *player_track = player_prediction_track();
         const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track);
         const orbitsim::BodyId occluder_body_id =
-                (_prediction_analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI)
-                    ? _prediction_analysis_selection.spec.fixed_body_id
+                (_prediction.analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI)
+                    ? _prediction.analysis_selection.spec.fixed_body_id
                     : ((player_track && player_cache)
                                ? resolve_prediction_analysis_body_id(*player_cache, player_track->key, analysis_time_s)
                                : orbitsim::kInvalidBodyId);
@@ -592,13 +593,13 @@ namespace Game
 
         if (finite3(dv_new) && safe_length(dv_new - node.dv_rtn_mps) > 1.0e-7)
         {
-            node.dv_rtn_mps = dv_new;
+            (void) apply_maneuver_command(ManeuverCommand::set_node_dv(node.id, dv_new, true));
             node.total_dv_mps = safe_length(node.dv_rtn_mps);
             _maneuver_gizmo_interaction.applied_delta = true;
 
             if (PredictionTrackState *track = active_prediction_track())
             {
-                track->dirty = true;
+                PredictionInvalidationController::mark_track_dirty_for_preview(*track);
                 sync_prediction_dirty_flag();
             }
         }

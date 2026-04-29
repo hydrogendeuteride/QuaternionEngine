@@ -117,10 +117,10 @@ namespace Game
             return format_t_plus_label(to_t_plus_s(absolute_time_s));
         };
         const auto default_node_primary_body_id = [&]() -> orbitsim::BodyId {
-            if (_prediction_analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
-                _prediction_analysis_selection.spec.fixed_body_id != orbitsim::kInvalidBodyId)
+            if (_prediction.analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
+                _prediction.analysis_selection.spec.fixed_body_id != orbitsim::kInvalidBodyId)
             {
-                return _prediction_analysis_selection.spec.fixed_body_id;
+                return _prediction.analysis_selection.spec.fixed_body_id;
             }
 
             if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track))
@@ -165,7 +165,7 @@ namespace Game
                 cancel_maneuver_node_dv_edit_preview();
                 clear_maneuver_prediction_artifacts();
             }
-            mark_maneuver_plan_dirty();
+            (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
         }
 
         ImGui::SameLine();
@@ -176,16 +176,13 @@ namespace Game
 
         auto add_maneuver_node_at_time = [&](const double time_s) {
             ManeuverNode n{};
-            n.id = _maneuver_state.next_node_id++;
+            n.id = -1;
             n.time_s = time_s;
             n.dv_rtn_mps = glm::dvec3(0.0, 0.0, 0.0);
             n.primary_body_id = default_node_primary_body_id();
             n.primary_body_auto = true;
             n.total_dv_mps = 0.0;
-            _maneuver_state.nodes.push_back(n);
-            _maneuver_state.selected_node_id = n.id;
-            _maneuver_state.sort_by_time();
-            mark_maneuver_plan_dirty();
+            (void) apply_maneuver_command(ManeuverCommand::add_node(n));
         };
 
         ImGui::SameLine();
@@ -197,15 +194,12 @@ namespace Game
         ImGui::SameLine();
         if (ImGui::Button("Clear") && !_maneuver_state.nodes.empty())
         {
-            _maneuver_state.nodes.clear();
-            _maneuver_state.selected_node_id = -1;
             _execute_node_armed = false;
             _execute_node_id = -1;
             _maneuver_gizmo_interaction = {};
             cancel_maneuver_node_dv_edit_preview();
             clear_maneuver_gizmo_instances(ctx);
-            clear_maneuver_prediction_artifacts();
-            mark_maneuver_plan_dirty();
+            (void) apply_maneuver_command(ManeuverCommand::clear_plan());
         }
 
         ImGui::SameLine();
@@ -220,14 +214,14 @@ namespace Game
         if (ImGui::DragFloat("Plan Horizon (s)", &plan_horizon_s, 10.0f, 0.0f, 15'552'000.0f, "%.0f"))
         {
             _maneuver_plan_horizon.horizon_s = static_cast<double>(std::max(0.0f, plan_horizon_s));
-            mark_maneuver_plan_dirty();
+            (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
         }
 
         if (ImGui::Checkbox("Live Preview", &_maneuver_plan_live_preview_active))
         {
             if (!_maneuver_plan_live_preview_active)
             {
-                for (PredictionTrackState &track : _prediction_tracks)
+                for (PredictionTrackState &track : _prediction.tracks)
                 {
                     if (!track.supports_maneuvers)
                     {
@@ -241,7 +235,7 @@ namespace Game
                 }
                 cancel_maneuver_node_dv_edit_preview();
             }
-            mark_maneuver_plan_dirty();
+            (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
         }
 
         if (player_track)
@@ -655,7 +649,7 @@ namespace Game
 
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
             {
-                _maneuver_state.selected_node_id = node.id;
+                (void) apply_maneuver_command(ManeuverCommand::select_node(node.id));
             }
 
             if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
@@ -671,7 +665,7 @@ namespace Game
                 const double new_time_s = std::max(time_ctx.sim_now_s, t_new);
                 if (std::isfinite(new_time_s) && std::abs(new_time_s - previous_time_s) > 1.0e-9)
                 {
-                    node.time_s = new_time_s;
+                    (void) apply_maneuver_command(ManeuverCommand::set_node_time(node.id, new_time_s, true));
                     needs_sort = true;
                     update_maneuver_node_time_edit_preview(node.id, previous_time_s);
                 }
@@ -720,7 +714,7 @@ namespace Game
 
         if (_maneuver_state.selected_node_id < 0 && !_maneuver_state.nodes.empty())
         {
-            _maneuver_state.selected_node_id = _maneuver_state.nodes.front().id;
+            (void) apply_maneuver_command(ManeuverCommand::ensure_selection());
         }
 
         if (_maneuver_state.nodes.empty())
@@ -728,7 +722,7 @@ namespace Game
             ImGui::TextUnformatted("No maneuver nodes. Add one with +Node or Add Node @ Pick.");
             if (needs_sort)
             {
-                _maneuver_state.sort_by_time();
+                (void) apply_maneuver_command(ManeuverCommand::sort_by_time());
             }
             ImGui::End();
             return;
@@ -770,7 +764,7 @@ namespace Game
             ImGui::PushID(node.id);
             if (ImGui::Selectable(label, node.id == _maneuver_state.selected_node_id))
             {
-                _maneuver_state.selected_node_id = node.id;
+                (void) apply_maneuver_command(ManeuverCommand::select_node(node.id));
             }
             if (_maneuver_gizmo_basis_mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal && node.gizmo_valid)
             {
@@ -800,7 +794,7 @@ namespace Game
             ImGui::EndChild();
             if (needs_sort)
             {
-                _maneuver_state.sort_by_time();
+                (void) apply_maneuver_command(ManeuverCommand::sort_by_time());
             }
             ImGui::End();
             return;
@@ -814,7 +808,7 @@ namespace Game
         ImGui::BeginDisabled(selected_idx <= 0);
         if (ImGui::Button("Prev"))
         {
-            _maneuver_state.selected_node_id = _maneuver_state.nodes[static_cast<size_t>(selected_idx - 1)].id;
+            (void) apply_maneuver_command(ManeuverCommand::select_node_by_index(selected_idx - 1));
         }
         ImGui::EndDisabled();
 
@@ -822,7 +816,7 @@ namespace Game
         ImGui::BeginDisabled(selected_idx < 0 || selected_idx + 1 >= static_cast<int>(_maneuver_state.nodes.size()));
         if (ImGui::Button("Next"))
         {
-            _maneuver_state.selected_node_id = _maneuver_state.nodes[static_cast<size_t>(selected_idx + 1)].id;
+            (void) apply_maneuver_command(ManeuverCommand::select_node_by_index(selected_idx + 1));
         }
         ImGui::EndDisabled();
 
@@ -854,7 +848,7 @@ namespace Game
             const int del_id = sel->id;
             if (needs_sort)
             {
-                _maneuver_state.sort_by_time();
+                (void) apply_maneuver_command(ManeuverCommand::sort_by_time());
                 needs_sort = false;
             }
             const int del_idx = find_node_index(del_id);
@@ -884,7 +878,7 @@ namespace Game
             const double new_time_s = std::max(min_node_time_s, node_time_input);
             if (std::isfinite(new_time_s) && std::abs(new_time_s - previous_node_time_s) > 1.0e-9)
             {
-                sel->time_s = new_time_s;
+                (void) apply_maneuver_command(ManeuverCommand::set_node_time(sel->id, new_time_s, true));
                 needs_sort = true;
                 update_maneuver_node_time_edit_preview(sel->id, previous_node_time_s);
             }
@@ -902,7 +896,7 @@ namespace Game
         // DV is always edited in node-local RTN order so the panel and gizmo write the same underlying data.
         if (ImGui::DragFloat3("DV RTN (m/s)", dv, 0.1f, -50'000.0f, 50'000.0f, "%.2f"))
         {
-            sel->dv_rtn_mps = glm::dvec3(dv[0], dv[1], dv[2]);
+            (void) apply_maneuver_command(ManeuverCommand::set_node_dv(sel->id, glm::dvec3(dv[0], dv[1], dv[2]), true));
             sel->total_dv_mps = safe_length(sel->dv_rtn_mps);
             update_maneuver_node_dv_edit_preview(sel->id);
         }
@@ -940,12 +934,9 @@ namespace Game
         bool auto_primary = sel->primary_body_auto;
         if (ImGui::Checkbox("Auto Primary", &auto_primary))
         {
-            sel->primary_body_auto = auto_primary;
-            if (sel->primary_body_auto)
-            {
-                sel->primary_body_id = effective_primary_body_id;
-            }
-            mark_maneuver_plan_dirty();
+            const orbitsim::BodyId primary_body_id = auto_primary ? effective_primary_body_id : sel->primary_body_id;
+            (void) apply_maneuver_command(
+                    ManeuverCommand::set_node_primary_body(sel->id, auto_primary, primary_body_id));
         }
 
         if (const CelestialBodyInfo *analysis_body = find_celestial_body_info(analysis_body_id))
@@ -953,19 +944,14 @@ namespace Game
             ImGui::Text("Analysis body: %s", analysis_body->name.c_str());
             if (ImGui::Button("Use Analysis Body"))
             {
-                sel->primary_body_id = analysis_body_id;
-                sel->primary_body_auto = false;
-                mark_maneuver_plan_dirty();
+                (void) apply_maneuver_command(
+                        ManeuverCommand::set_node_primary_body(sel->id, false, analysis_body_id));
             }
             ImGui::SameLine();
             if (ImGui::Button("Apply Analysis Body To All"))
             {
-                for (ManeuverNode &node : _maneuver_state.nodes)
-                {
-                    node.primary_body_id = analysis_body_id;
-                    node.primary_body_auto = false;
-                }
-                mark_maneuver_plan_dirty();
+                (void) apply_maneuver_command(
+                        ManeuverCommand::apply_primary_body_to_all(analysis_body_id, false));
             }
         }
 
@@ -975,7 +961,7 @@ namespace Game
 
         if (needs_sort)
         {
-            _maneuver_state.sort_by_time();
+            (void) apply_maneuver_command(ManeuverCommand::sort_by_time());
         }
 
         ImGui::End();

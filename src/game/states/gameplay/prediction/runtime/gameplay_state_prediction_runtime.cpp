@@ -3,6 +3,7 @@
 #include "core/util/logger.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
+#include "game/states/gameplay/prediction/runtime/prediction_invalidation_controller.h"
 
 #include <cmath>
 #include <limits>
@@ -276,43 +277,15 @@ namespace Game
     {
         // Collapse only visible-track rebuild demand into one cheap UI-facing flag.
         const std::vector<PredictionSubjectKey> visible_subjects = collect_visible_prediction_subjects();
-        _prediction_dirty = false;
-        for (const PredictionTrackState &track : _prediction_tracks)
-        {
-            if (!PredictionRuntimeDetail::contains_key(visible_subjects, track.key))
-            {
-                continue;
-            }
-
-            if (track.dirty)
-            {
-                _prediction_dirty = true;
-                return;
-            }
-        }
+        _prediction.dirty = PredictionInvalidationController::any_visible_track_dirty(_prediction.tracks,
+                                                                                      visible_subjects);
     }
 
     void GameplayState::mark_prediction_dirty()
     {
         // Force only the active/overlay-visible tracks to rebuild on the next prediction update.
         const std::vector<PredictionSubjectKey> visible_subjects = collect_visible_prediction_subjects();
-        for (PredictionTrackState &track : _prediction_tracks)
-        {
-            if (!PredictionRuntimeDetail::contains_key(visible_subjects, track.key))
-            {
-                continue;
-            }
-
-            const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
-                    PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
-            if (PredictionRuntimeDetail::prediction_track_should_mark_invalidated_while_pending(lifecycle))
-            {
-                track.invalidated_while_pending = true;
-                continue;
-            }
-
-            track.dirty = true;
-        }
+        PredictionInvalidationController::mark_visible_tracks_dirty(_prediction.tracks, visible_subjects);
         sync_prediction_dirty_flag();
     }
 
@@ -324,91 +297,41 @@ namespace Game
                       _maneuver_state.selected_node_id,
                       _maneuver_state.nodes.size());
 
-        for (PredictionTrackState &track : _prediction_tracks)
-        {
-            if (!track.supports_maneuvers)
-            {
-                continue;
-            }
-
-            const uint64_t track_id = track.key.track_id();
-            _prediction_service.invalidate_maneuver_plan_revision(track_id, _maneuver_plan_revision);
-            _prediction_derived_service.invalidate_maneuver_plan_revision(track_id, _maneuver_plan_revision);
-
-            if (track.request_pending || track.derived_request_pending)
-            {
-                track.request_pending = false;
-                track.derived_request_pending = false;
-                track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
-                track.pending_solver_has_maneuver_plan = false;
-                track.pending_solver_plan_signature = 0u;
-                track.pending_derived_has_maneuver_plan = false;
-                track.pending_derived_plan_signature = 0u;
-                track.invalidated_while_pending = false;
-                track.dirty = true;
-            }
-        }
+        PredictionInvalidationController::invalidate_maneuver_plan_revision(_prediction.tracks,
+                                                                           _prediction.service,
+                                                                           _prediction.derived_service,
+                                                                           _maneuver_plan_revision);
 
         mark_prediction_dirty();
     }
 
     void GameplayState::clear_maneuver_prediction_artifacts()
     {
-        for (PredictionTrackState &track : _prediction_tracks)
-        {
-            if (!track.supports_maneuvers)
-            {
-                continue;
-            }
-
-            clear_prediction_cache_planned_data(track.cache);
-            clear_prediction_cache_planned_data(track.authoritative_cache);
-            track.preview_state = PredictionPreviewRuntimeState::Idle;
-            track.preview_anchor = {};
-            track.preview_overlay.clear();
-            track.full_stream_overlay.clear();
-            track.pick_cache.clear();
-
-            if (track.request_pending && track.pending_solver_has_maneuver_plan)
-            {
-                track.request_pending = false;
-                track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
-            }
-            if (track.derived_request_pending && track.pending_derived_has_maneuver_plan)
-            {
-                track.derived_request_pending = false;
-            }
-
-            track.pending_solver_has_maneuver_plan = false;
-            track.pending_solver_plan_signature = 0u;
-            track.pending_derived_has_maneuver_plan = false;
-            track.pending_derived_plan_signature = 0u;
-            track.invalidated_while_pending = false;
-        }
+        PredictionInvalidationController::clear_maneuver_prediction_artifacts(_prediction.tracks);
     }
 
     void GameplayState::clear_prediction_runtime()
     {
         // Drop every cached artifact when the feature is disabled.
-        for (PredictionTrackState &track : _prediction_tracks)
+        for (PredictionTrackState &track : _prediction.tracks)
         {
             track.clear_runtime();
             track.dirty = false;
         }
-        _prediction_service.reset();
-        _prediction_derived_service.reset();
-        _prediction_dirty = false;
+        _prediction.service.reset();
+        _prediction.derived_service.reset();
+        _prediction.dirty = false;
     }
 
     void GameplayState::clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects)
     {
         // A service reset invalidates every track, even ones that are currently hidden.
         (void) visible_subjects;
-        for (PredictionTrackState &track : _prediction_tracks)
+        for (PredictionTrackState &track : _prediction.tracks)
         {
             track.clear_runtime();
         }
-        _prediction_derived_service.reset();
+        _prediction.derived_service.reset();
     }
 
     double GameplayState::prediction_display_window_s(const PredictionSubjectKey key,
@@ -573,7 +496,7 @@ namespace Game
 
         PredictionWindowPolicyResult out{};
         out.request_window_s =
-                std::max(0.0, _prediction_draw_future_segment ? prediction_future_window_s(key) : 0.0);
+                std::max(0.0, _prediction.draw_future_segment ? prediction_future_window_s(key) : 0.0);
         const double solve_margin_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
         const double post_node_coverage_s = OrbitPredictionTuning::kPostNodeCoverageMinS;
         const bool supports_maneuver_windows = with_maneuvers && time_ctx.has_plan;
@@ -680,7 +603,7 @@ namespace Game
                 out.visual_window_s = std::max(out.visual_window_s, authored_plan_span_s);
             }
 
-            if (_prediction_draw_full_orbit)
+            if (_prediction.draw_full_orbit)
             {
                 double orbit_visual_span_s = 0.0;
                 if (track &&
@@ -740,13 +663,13 @@ namespace Game
         if (!rebuild && thrusting)
         {
             const double dt_since_build_s = now_s - track.cache.identity.build_time_s;
-            rebuild = dt_since_build_s >= _prediction_thrust_refresh_s;
+            rebuild = dt_since_build_s >= _prediction.thrust_refresh_s;
         }
 
-        if (!rebuild && _prediction_periodic_refresh_s > 0.0)
+        if (!rebuild && _prediction.periodic_refresh_s > 0.0)
         {
             const double dt_since_build_s = now_s - track.cache.identity.build_time_s;
-            rebuild = dt_since_build_s >= _prediction_periodic_refresh_s;
+            rebuild = dt_since_build_s >= _prediction.periodic_refresh_s;
         }
 
         if (!rebuild && PredictionRuntimeDetail::prediction_track_should_rebuild_from_await_full_refine(lifecycle))
@@ -800,7 +723,7 @@ namespace Game
     {
         (void) ctx;
 
-        if (!_prediction_enabled)
+        if (!_prediction.enabled)
         {
             // Fully disable runtime state when the overlay is turned off.
             clear_prediction_runtime();
@@ -818,7 +741,7 @@ namespace Game
         {
             // Without orbit-sim there is no stable frame to predict against.
             clear_visible_prediction_runtime(visible_subjects);
-            _prediction_service.reset();
+            _prediction.service.reset();
             sync_prediction_dirty_flag();
             return;
         }
@@ -828,13 +751,13 @@ namespace Game
         {
             // Bail out when the reference body is not ready for a stable inertial frame.
             clear_visible_prediction_runtime(visible_subjects);
-            _prediction_service.reset();
+            _prediction.service.reset();
             sync_prediction_dirty_flag();
             return;
         }
 
         // Rebuild or refresh only the subjects that are actually visible.
-        for (PredictionTrackState &track : _prediction_tracks)
+        for (PredictionTrackState &track : _prediction.tracks)
         {
             if (!PredictionRuntimeDetail::contains_key(visible_subjects, track.key))
             {
@@ -865,7 +788,7 @@ namespace Game
 
         // Mirror the active track's last solver time into the shared debug HUD stats.
         PredictionTrackState *active_track = active_prediction_track();
-        _orbit_plot_perf.solver_ms_last = active_track ? active_track->solver_ms_last : 0.0;
+        _prediction.orbit_plot_perf.solver_ms_last = active_track ? active_track->solver_ms_last : 0.0;
         sync_prediction_dirty_flag();
     }
 } // namespace Game

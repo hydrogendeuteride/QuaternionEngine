@@ -51,14 +51,14 @@ namespace Game
         _scenario_io_status_ok = true;
         _settings_io_status.clear();
         _settings_io_status_ok = true;
-        _prediction_service.reset();
-        _prediction_derived_service.reset();
-        _prediction_tracks.clear();
-        _prediction_groups.clear();
-        _prediction_selection.clear();
-        _prediction_frame_selection.clear();
-        _prediction_analysis_selection.clear();
-        _orbit_plot_perf = {};
+        _prediction.service.reset();
+        _prediction.derived_service.reset();
+        _prediction.tracks.clear();
+        _prediction.groups.clear();
+        _prediction.selection.clear();
+        _prediction.frame_selection.clear();
+        _prediction.analysis_selection.clear();
+        _prediction.orbit_plot_perf = {};
 
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
         {
@@ -138,15 +138,15 @@ namespace Game
         _orbitsim.reset();
         _orbiters.clear();
         _contact_log.clear();
-        _prediction_tracks.clear();
-        _prediction_groups.clear();
-        _prediction_selection.clear();
-        _prediction_frame_selection.clear();
-        _prediction_analysis_selection.clear();
-        _prediction_dirty = true;
-        _prediction_service.reset();
-        _prediction_derived_service.reset();
-        _orbit_plot_perf = {};
+        _prediction.tracks.clear();
+        _prediction.groups.clear();
+        _prediction.selection.clear();
+        _prediction.frame_selection.clear();
+        _prediction.analysis_selection.clear();
+        _prediction.dirty = true;
+        _prediction.service.reset();
+        _prediction.derived_service.reset();
+        _prediction.orbit_plot_perf = {};
         _renderer = nullptr;
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
         {

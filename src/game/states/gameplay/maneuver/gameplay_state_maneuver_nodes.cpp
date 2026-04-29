@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
+#include "game/states/gameplay/prediction/runtime/prediction_invalidation_controller.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,6 +11,11 @@ namespace Game
     namespace
     {
         using namespace ManeuverUtil;
+
+        bool contains_node_id(const std::vector<int> &ids, const int node_id)
+        {
+            return std::find(ids.begin(), ids.end(), node_id) != ids.end();
+        }
     } // namespace
 
     double GameplayState::current_sim_time_s() const
@@ -88,8 +94,7 @@ namespace Game
         _maneuver_node_edit_preview.changed = true;
         if (PredictionTrackState *track = active_prediction_track())
         {
-            track->dirty = true;
-            track->invalidated_while_pending = track->request_pending || track->derived_request_pending;
+            PredictionInvalidationController::mark_track_dirty_for_preview(*track);
             sync_prediction_dirty_flag();
         }
     }
@@ -114,7 +119,7 @@ namespace Game
         {
             track->preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
         }
-        mark_maneuver_plan_dirty();
+        (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
     }
 
     void GameplayState::begin_maneuver_node_time_edit_preview(const int node_id,
@@ -154,8 +159,7 @@ namespace Game
         _maneuver_node_edit_preview.changed = true;
         if (PredictionTrackState *track = active_prediction_track())
         {
-            track->dirty = true;
-            track->invalidated_while_pending = track->request_pending || track->derived_request_pending;
+            PredictionInvalidationController::mark_track_dirty_for_preview(*track);
             sync_prediction_dirty_flag();
         }
     }
@@ -180,7 +184,7 @@ namespace Game
         {
             track->preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
         }
-        mark_maneuver_plan_dirty();
+        (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
     }
 
     void GameplayState::cancel_maneuver_node_edit_preview()
@@ -194,7 +198,7 @@ namespace Game
     }
 
     orbitsim::BodyId GameplayState::resolve_maneuver_node_primary_body_id(const ManeuverNode &node,
-                                                                          const double query_time_s) const
+                                                                           const double query_time_s) const
     {
         if (!node.primary_body_auto && node.primary_body_id != orbitsim::kInvalidBodyId)
         {
@@ -254,92 +258,51 @@ namespace Game
         return orbitsim::kInvalidBodyId;
     }
 
-    void GameplayState::finalize_maneuver_node_removal(const bool removed_selected,
-                                                        const bool removed_gizmo,
-                                                        const bool removed_execute,
-                                                        const int hint_index)
+    ManeuverCommandResult GameplayState::apply_maneuver_command(const ManeuverCommand &command)
     {
-        if (removed_selected)
+        ManeuverCommandResult result = ManeuverPlanController::apply(_maneuver_state, command);
+        if (!result.applied)
         {
-            if (_maneuver_state.nodes.empty())
+            return result;
+        }
+
+        if (result.nodes_removed)
+        {
+            if (contains_node_id(result.removed_node_ids, _maneuver_gizmo_interaction.node_id))
             {
-                _maneuver_state.selected_node_id = -1;
+                _maneuver_gizmo_interaction = {};
             }
-            else if (hint_index >= 0)
+            if (_execute_node_armed && contains_node_id(result.removed_node_ids, _execute_node_id))
             {
-                const int new_idx = std::clamp(hint_index, 0, static_cast<int>(_maneuver_state.nodes.size()) - 1);
-                _maneuver_state.selected_node_id = _maneuver_state.nodes[static_cast<size_t>(new_idx)].id;
+                _execute_node_armed = false;
+                _execute_node_id = -1;
             }
-            else
+            if (contains_node_id(result.removed_node_ids, _maneuver_node_edit_preview.node_id))
             {
-                _maneuver_state.selected_node_id = _maneuver_state.nodes.front().id;
+                cancel_maneuver_node_dv_edit_preview();
             }
         }
 
-        if (removed_gizmo)
-        {
-            _maneuver_gizmo_interaction = {};
-        }
-        if (removed_execute)
-        {
-            _execute_node_armed = false;
-            _execute_node_id = -1;
-        }
-        if (_maneuver_state.nodes.empty())
+        if (result.clear_prediction_artifacts)
         {
             clear_maneuver_prediction_artifacts();
         }
+        if (result.prediction_dirty)
+        {
+            mark_maneuver_plan_dirty();
+        }
 
-        mark_maneuver_plan_dirty();
+        return result;
     }
 
     void GameplayState::remove_maneuver_node(const int node_id, const int hint_index)
     {
-        const bool removed_selected = (_maneuver_state.selected_node_id == node_id);
-        const bool removed_gizmo = (_maneuver_gizmo_interaction.node_id == node_id);
-        const bool removed_execute = _execute_node_armed && (_execute_node_id == node_id);
-        const bool removed_node_edit_preview = _maneuver_node_edit_preview.node_id == node_id;
-
-        _maneuver_state.nodes.erase(
-            std::remove_if(_maneuver_state.nodes.begin(),
-                           _maneuver_state.nodes.end(),
-                           [&](const ManeuverNode &n) { return n.id == node_id; }),
-            _maneuver_state.nodes.end());
-
-        if (removed_node_edit_preview)
-        {
-            cancel_maneuver_node_dv_edit_preview();
-        }
-        finalize_maneuver_node_removal(removed_selected, removed_gizmo, removed_execute, hint_index);
+        (void) apply_maneuver_command(ManeuverCommand::remove_node(node_id, hint_index));
     }
 
     void GameplayState::remove_maneuver_node_suffix(const int node_id, const int hint_index)
     {
-        const auto erase_begin = std::find_if(_maneuver_state.nodes.begin(),
-                                              _maneuver_state.nodes.end(),
-                                              [node_id](const ManeuverNode &n) { return n.id == node_id; });
-        if (erase_begin == _maneuver_state.nodes.end())
-        {
-            return;
-        }
-
-        const auto removes_node_id = [erase_begin, this](const int candidate_id) {
-            return std::any_of(erase_begin,
-                               _maneuver_state.nodes.end(),
-                               [candidate_id](const ManeuverNode &n) { return n.id == candidate_id; });
-        };
-
-        const bool removed_selected = removes_node_id(_maneuver_state.selected_node_id);
-        const bool removed_gizmo = removes_node_id(_maneuver_gizmo_interaction.node_id);
-        const bool removed_execute = _execute_node_armed && removes_node_id(_execute_node_id);
-        const bool removed_node_edit_preview = removes_node_id(_maneuver_node_edit_preview.node_id);
-        _maneuver_state.nodes.erase(erase_begin, _maneuver_state.nodes.end());
-
-        if (removed_node_edit_preview)
-        {
-            cancel_maneuver_node_dv_edit_preview();
-        }
-        finalize_maneuver_node_removal(removed_selected, removed_gizmo, removed_execute, hint_index);
+        (void) apply_maneuver_command(ManeuverCommand::remove_node_suffix(node_id, hint_index));
     }
 
     WorldVec3 GameplayState::compute_maneuver_align_delta(GameStateContext &ctx,

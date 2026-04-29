@@ -256,14 +256,14 @@ namespace Game
             if (hovered_handle_idx >= 0)
             {
                 _show_maneuver_nodes_panel = true;
-                _maneuver_state.selected_node_id = handles[hovered_handle_idx].node_id;
+                (void) apply_maneuver_command(ManeuverCommand::select_node(handles[hovered_handle_idx].node_id));
                 refresh_after_interaction =
                         begin_maneuver_axis_drag(ctx, handles[hovered_handle_idx].node_id, handles[hovered_handle_idx].axis);
             }
             else if (hovered_hub_idx >= 0)
             {
                 _show_maneuver_nodes_panel = true;
-                _maneuver_state.selected_node_id = hubs[hovered_hub_idx].node_id;
+                (void) apply_maneuver_command(ManeuverCommand::select_node(hubs[hovered_hub_idx].node_id));
                 refresh_after_interaction = true;
             }
         }
@@ -313,7 +313,7 @@ namespace Game
                     {
                         track->preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
                     }
-                    mark_maneuver_plan_dirty();
+                    (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
                 }
                 refresh_after_interaction = true;
             }

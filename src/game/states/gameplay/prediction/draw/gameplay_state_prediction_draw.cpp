@@ -13,9 +13,9 @@ namespace Game
     {
         out.picking = (ctx.renderer != nullptr) ? ctx.renderer->picking() : nullptr;
         out.orbit_plot = (ctx.renderer && ctx.renderer->_context) ? ctx.renderer->_context->orbit_plot : nullptr;
-        Draw::reset_orbit_plot_state(out.picking, out.orbit_plot, _orbit_plot_perf, _prediction_enabled);
+        Draw::reset_orbit_plot_state(out.picking, out.orbit_plot, _prediction.orbit_plot_perf, _prediction.enabled);
 
-        if (!_prediction_enabled || !ctx.api || !_orbitsim)
+        if (!_prediction.enabled || !ctx.api || !_orbitsim)
         {
             return false;
         }
@@ -38,9 +38,9 @@ namespace Game
         // DebugDrawSystem prunes commands during begin_frame, so keep velocity rays
         // alive slightly longer than the current dt.
         out.ttl_s = std::clamp(ctx.delta_time(), 0.0f, 0.1f) + 0.002f;
-        out.line_alpha_scale = std::clamp(_prediction_line_alpha_scale, 0.1f, 8.0f);
+        out.line_alpha_scale = std::clamp(_prediction.line_alpha_scale, 0.1f, 8.0f);
         out.color_orbit_plan =
-                Draw::scale_line_color(_prediction_draw_config.palette.orbit_planned, out.line_alpha_scale);
+                Draw::scale_line_color(_prediction.draw_config.palette.orbit_planned, out.line_alpha_scale);
 
         out.camera_world = ctx.api->get_camera_position_d();
         float camera_fov_deg = 70.0f;
@@ -90,7 +90,7 @@ namespace Game
         }
 
         std::vector<PredictionTrackState *> visible_tracks;
-        visible_tracks.reserve(1 + _prediction_selection.overlay_subjects.size());
+        visible_tracks.reserve(1 + _prediction.selection.overlay_subjects.size());
         for (PredictionSubjectKey key : collect_visible_prediction_subjects())
         {
             if (PredictionTrackState *track = find_prediction_track(key))
@@ -124,7 +124,7 @@ namespace Game
             }
 
             if (track_ctx.is_active &&
-                _prediction_draw_velocity_ray &&
+                _prediction.draw_velocity_ray &&
                 _debug_draw_enabled &&
                 track_ctx.track->key.kind == PredictionSubjectKind::Orbiter)
             {
@@ -132,7 +132,7 @@ namespace Game
                                         track_ctx.subject_pos_world,
                                         track_ctx.subject_vel_world,
                                         global_ctx.ttl_s,
-                                        _prediction_draw_config.palette.velocity_ray);
+                                        _prediction.draw_config.palette.velocity_ray);
             }
         }
     }

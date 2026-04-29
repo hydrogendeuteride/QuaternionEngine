@@ -223,8 +223,8 @@ namespace Game
             }
         }
 
-        if (!_orbitsim || !_prediction_selection.active_subject.valid() ||
-            !prediction_subject_is_player(_prediction_selection.active_subject))
+        if (!_orbitsim || !_prediction.selection.active_subject.valid() ||
+            !prediction_subject_is_player(_prediction.selection.active_subject))
         {
             return;
         }

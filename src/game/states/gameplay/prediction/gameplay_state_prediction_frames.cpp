@@ -1,14 +1,10 @@
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/prediction/prediction_frame_controller.h"
+#include "game/states/gameplay/prediction/prediction_frame_resolver.h"
 #include "game/states/gameplay/prediction/prediction_trajectory_sampler.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
-#include "game/orbit/orbit_prediction_math.h"
-#include "game/orbit/orbit_prediction_tuning.h"
-
-#include "orbitsim/coordinate_frames.hpp"
 #include "orbitsim/frame_utils.hpp"
-#include "orbitsim/math.hpp"
-#include "orbitsim/trajectory_transforms.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -20,46 +16,6 @@ namespace Game
 {
     namespace
     {
-        OrbitPredictionService::Result build_prediction_solver_result_from_cache(
-                const uint64_t track_id,
-                const OrbitPredictionCache &cache)
-        {
-            OrbitPredictionService::Result result{};
-            const auto &base_samples = cache.solver.resolved_trajectory_inertial();
-            const auto &base_segments = cache.solver.resolved_trajectory_segments_inertial();
-            result.track_id = track_id;
-            result.generation_id = cache.identity.generation_id;
-            result.maneuver_plan_revision = cache.identity.maneuver_plan_revision;
-            result.maneuver_plan_signature_valid = cache.identity.maneuver_plan_signature_valid;
-            result.maneuver_plan_signature = cache.identity.maneuver_plan_signature;
-            result.valid = base_samples.size() >= 2 && !base_segments.empty();
-            result.solve_quality = OrbitPredictionService::SolveQuality::Full;
-            result.build_time_s = cache.identity.build_time_s;
-            if (cache.solver.shared_solver_core_data)
-            {
-                result.set_shared_core_data(cache.solver.shared_solver_core_data);
-            }
-            else
-            {
-                result.shared_ephemeris = cache.solver.shared_ephemeris;
-                result.massive_bodies = cache.solver.massive_bodies;
-                result.trajectory_inertial = cache.solver.trajectory_inertial;
-                result.trajectory_segments_inertial = cache.solver.trajectory_segments_inertial;
-            }
-            result.trajectory_inertial_planned = cache.solver.trajectory_inertial_planned;
-            result.trajectory_segments_inertial_planned = cache.solver.trajectory_segments_inertial_planned;
-            result.maneuver_previews = cache.solver.maneuver_previews;
-            return result;
-        }
-
-        bool same_frame_spec(const orbitsim::TrajectoryFrameSpec &a, const orbitsim::TrajectoryFrameSpec &b)
-        {
-            return a.type == b.type &&
-                   a.primary_body_id == b.primary_body_id &&
-                   a.secondary_body_id == b.secondary_body_id &&
-                   a.target_spacecraft_id == b.target_spacecraft_id;
-        }
-
         bool same_analysis_spec(const PredictionAnalysisSpec &a, const PredictionAnalysisSpec &b)
         {
             return a.mode == b.mode && a.fixed_body_id == b.fixed_body_id;
@@ -87,55 +43,21 @@ namespace Game
     const orbitsim::MassiveBody *GameplayState::find_massive_body(const std::vector<orbitsim::MassiveBody> &bodies,
                                                                   const orbitsim::BodyId body_id) const
     {
-        if (body_id == orbitsim::kInvalidBodyId)
-        {
-            return nullptr;
-        }
-
-        for (const orbitsim::MassiveBody &body : bodies)
-        {
-            if (body.id == body_id)
-            {
-                return &body;
-            }
-        }
-
-        return nullptr;
+        return PredictionFrameResolver::find_massive_body(bodies, body_id);
     }
 
     bool GameplayState::prediction_frame_is_lagrange_sensitive(const orbitsim::TrajectoryFrameSpec &spec) const
     {
-        return spec.type == orbitsim::TrajectoryFrameType::Synodic;
+        return PredictionFrameResolver::is_lagrange_sensitive(spec);
     }
 
     double GameplayState::resolve_prediction_display_reference_time_s(const OrbitPredictionCache &cache,
                                                                       const double display_time_s) const
     {
-        double reference_time_s = display_time_s;
-        if (!std::isfinite(reference_time_s))
-        {
-            reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : cache.identity.build_time_s;
-        }
-
-        const orbitsim::TrajectoryFrameSpec frame_spec =
-                cache.display.resolved_frame_spec_valid
-                    ? cache.display.resolved_frame_spec
-                    : resolve_prediction_display_frame_spec(cache, reference_time_s);
-        const bool dragging_maneuver_axis =
-                _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
-        if (dragging_maneuver_axis &&
-            prediction_frame_is_lagrange_sensitive(frame_spec) &&
-            std::isfinite(_maneuver_gizmo_interaction.drag_display_reference_time_s))
-        {
-            return _maneuver_gizmo_interaction.drag_display_reference_time_s;
-        }
-        const bool freeze_planned_synodic =
-                prediction_frame_is_lagrange_sensitive(frame_spec) &&
-                _maneuver_nodes_enabled &&
-                !_maneuver_state.nodes.empty() &&
-                !dragging_maneuver_axis &&
-                std::isfinite(cache.identity.build_time_s);
-        return freeze_planned_synodic ? cache.identity.build_time_s : reference_time_s;
+        return PredictionFrameResolver::resolve_display_reference_time_s(
+                build_prediction_frame_resolver_context(),
+                cache,
+                display_time_s);
     }
 
     orbitsim::BodyId GameplayState::select_prediction_primary_body_id(const std::vector<orbitsim::MassiveBody> &bodies,
@@ -144,71 +66,13 @@ namespace Game
                                                                       const double query_time_s,
                                                                       const orbitsim::BodyId preferred_body_id) const
     {
-        if (bodies.empty())
-        {
-            return orbitsim::kInvalidBodyId;
-        }
-
-        const double softening_length_m = _orbitsim ? _orbitsim->sim.config().softening_length_m : 0.0;
-        const double eps2 = softening_length_m * softening_length_m;
-        std::size_t best_index = 0;
-        double best_metric = -1.0;
-        std::optional<std::size_t> preferred_index;
-        double preferred_metric = -1.0;
-
-        const auto body_position_at = [&](const std::size_t i) -> orbitsim::Vec3 {
-            const orbitsim::MassiveBody &body = bodies[i];
-            const auto &ephemeris = cache ? cache->resolved_shared_ephemeris()
-                                          : OrbitPredictionService::SharedCelestialEphemeris{};
-            if (ephemeris && !ephemeris->empty())
-            {
-                return ephemeris->body_state_at_by_id(body.id, query_time_s).position_m;
-            }
-            return body.state.position_m;
-        };
-
-        for (std::size_t i = 0; i < bodies.size(); ++i)
-        {
-            const double mass_kg = std::isfinite(bodies[i].mass_kg) ? bodies[i].mass_kg : 0.0;
-            if (!(mass_kg >= 0.0))
-            {
-                continue;
-            }
-
-            const orbitsim::Vec3 dr = body_position_at(i) - query_pos_m;
-            const double r2 = glm::dot(dr, dr) + eps2;
-            if (!(r2 > 0.0) || !std::isfinite(r2))
-            {
-                continue;
-            }
-
-            const double metric = mass_kg / r2;
-            if (metric > best_metric)
-            {
-                best_metric = metric;
-                best_index = i;
-            }
-
-            if (bodies[i].id == preferred_body_id)
-            {
-                preferred_index = i;
-                preferred_metric = metric;
-            }
-        }
-
-        if (best_metric <= 0.0)
-        {
-            return orbitsim::kInvalidBodyId;
-        }
-
-        if (preferred_index.has_value() &&
-            preferred_metric > 0.0 &&
-            preferred_metric >= (best_metric * OrbitPredictionTuning::kPrimaryBodyHysteresisKeepRatio))
-        {
-            return bodies[*preferred_index].id;
-        }
-
-        return bodies[best_index].id;
+        return PredictionFrameResolver::select_primary_body_id(
+                build_prediction_frame_resolver_context(),
+                bodies,
+                cache,
+                query_pos_m,
+                query_time_s,
+                preferred_body_id);
     }
 
     WorldVec3 GameplayState::prediction_body_world_position(const orbitsim::BodyId body_id,
@@ -328,54 +192,76 @@ namespace Game
         return PredictionTrajectorySampler::build_player_lookup(*trajectory_segments);
     }
 
+    PredictionFrameResolverContext GameplayState::build_prediction_frame_resolver_context() const
+    {
+        PredictionFrameResolverContext context{};
+        context.frame_selection = _prediction.frame_selection;
+        context.system_center = _scenario_config.system_center;
+        context.world_reference_body_world = prediction_world_reference_body_world();
+        context.current_sim_time_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+        context.softening_length_m = _orbitsim ? _orbitsim->sim.config().softening_length_m : 0.0;
+        context.maneuver_nodes_enabled = _maneuver_nodes_enabled;
+        context.maneuver_plan_has_nodes = !_maneuver_state.nodes.empty();
+        context.maneuver_axis_drag_active =
+                _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
+        context.maneuver_drag_display_reference_time_s =
+                _maneuver_gizmo_interaction.drag_display_reference_time_s;
+        if (_orbitsim)
+        {
+            if (const CelestialBodyInfo *world_ref = _orbitsim->world_reference_body())
+            {
+                context.world_reference_body_id = world_ref->sim_id;
+            }
+            context.world_reference_sim_body = _orbitsim->world_reference_sim_body();
+        }
+        context.player_lookup = build_prediction_player_lookup();
+        return context;
+    }
+
+    PredictionFrameControllerContext GameplayState::build_prediction_frame_controller_context() const
+    {
+        PredictionFrameControllerContext context{};
+        context.derived_service = const_cast<OrbitPredictionDerivedService *>(&_prediction.derived_service);
+        context.selection = _prediction.selection;
+        context.display_frame_revision = _prediction.display_frame_revision;
+        context.sim_config = _orbitsim ? _orbitsim->sim.config() : orbitsim::GameSimulation::Config{};
+        context.resolve_display_frame_spec = [this](const OrbitPredictionCache &cache, const double display_time_s) {
+            return resolve_prediction_display_frame_spec(cache, display_time_s);
+        };
+        context.resolve_analysis_body_id = [this](const OrbitPredictionCache &cache,
+                                                  const PredictionSubjectKey key,
+                                                  const double query_time_s,
+                                                  const orbitsim::BodyId preferred_body_id) {
+            return resolve_prediction_analysis_body_id(cache, key, query_time_s, preferred_body_id);
+        };
+        context.get_subject_world_state = [this](const PredictionSubjectKey key,
+                                                 WorldVec3 &out_pos_world,
+                                                 glm::dvec3 &out_vel_world,
+                                                 glm::vec3 &out_vel_local) {
+            return get_prediction_subject_world_state(key, out_pos_world, out_vel_world, out_vel_local);
+        };
+        context.subject_is_player = [this](const PredictionSubjectKey key) {
+            return prediction_subject_is_player(key);
+        };
+        context.player_track = [this]() -> const PredictionTrackState * {
+            return player_prediction_track();
+        };
+        context.effective_cache = [this](const PredictionTrackState *track) -> const OrbitPredictionCache * {
+            return effective_prediction_cache(track);
+        };
+        context.current_sim_time_s = [this]() {
+            return current_sim_time_s();
+        };
+        return context;
+    }
+
     orbitsim::TrajectoryFrameSpec GameplayState::resolve_prediction_display_frame_spec(const OrbitPredictionCache &cache,
                                                                                        double display_time_s) const
     {
-        orbitsim::TrajectoryFrameSpec resolved = _prediction_frame_selection.spec;
-        const auto &bodies = cache.resolved_massive_bodies();
-        if (resolved.type != orbitsim::TrajectoryFrameType::LVLH ||
-            resolved.primary_body_id != orbitsim::kInvalidBodyId ||
-            bodies.empty())
-        {
-            return resolved;
-        }
-
-        double reference_time_s = display_time_s;
-        if (!std::isfinite(reference_time_s))
-        {
-            reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : cache.identity.build_time_s;
-        }
-
-        const auto player_lookup = build_prediction_player_lookup();
-        if (!player_lookup)
-        {
-            return resolved;
-        }
-
-        const std::optional<orbitsim::State> target_state =
-                player_lookup(resolved.target_spacecraft_id, reference_time_s);
-        if (!target_state.has_value())
-        {
-            return resolved;
-        }
-
-        const orbitsim::BodyId preferred_body_id =
-                cache.display.resolved_frame_spec_valid &&
-                                cache.display.resolved_frame_spec.primary_body_id != orbitsim::kInvalidBodyId
-                        ? cache.display.resolved_frame_spec.primary_body_id
-                        : _prediction_frame_selection.spec.primary_body_id;
-        const orbitsim::BodyId primary_body_id = select_prediction_primary_body_id(
-                bodies,
-                &cache,
-                target_state->position_m,
-                reference_time_s,
-                preferred_body_id);
-        if (primary_body_id != orbitsim::kInvalidBodyId)
-        {
-            resolved.primary_body_id = primary_body_id;
-        }
-
-        return resolved;
+        return PredictionFrameResolver::resolve_display_frame_spec(
+                build_prediction_frame_resolver_context(),
+                cache,
+                display_time_s);
     }
 
     orbitsim::TrajectoryFrameSpec GameplayState::default_prediction_frame_spec() const
@@ -413,16 +299,16 @@ namespace Game
             }
         }
 
-        _prediction_analysis_selection.options = std::move(options);
-        if (_prediction_analysis_selection.selected_index < 0)
+        _prediction.analysis_selection.options = std::move(options);
+        if (_prediction.analysis_selection.selected_index < 0)
         {
-            _prediction_analysis_selection.spec = {};
+            _prediction.analysis_selection.spec = {};
         }
 
         int selected_index = -1;
-        for (std::size_t i = 0; i < _prediction_analysis_selection.options.size(); ++i)
+        for (std::size_t i = 0; i < _prediction.analysis_selection.options.size(); ++i)
         {
-            if (same_analysis_spec(_prediction_analysis_selection.options[i].spec, _prediction_analysis_selection.spec))
+            if (same_analysis_spec(_prediction.analysis_selection.options[i].spec, _prediction.analysis_selection.spec))
             {
                 selected_index = static_cast<int>(i);
                 break;
@@ -431,21 +317,21 @@ namespace Game
 
         if (selected_index < 0)
         {
-            _prediction_analysis_selection.spec = {};
+            _prediction.analysis_selection.spec = {};
             selected_index = 0;
         }
 
-        _prediction_analysis_selection.selected_index = selected_index;
+        _prediction.analysis_selection.selected_index = selected_index;
     }
 
     bool GameplayState::set_prediction_analysis_spec(const PredictionAnalysisSpec &spec)
     {
-        if (same_analysis_spec(_prediction_analysis_selection.spec, spec))
+        if (same_analysis_spec(_prediction.analysis_selection.spec, spec))
         {
             return false;
         }
 
-        _prediction_analysis_selection.spec = spec;
+        _prediction.analysis_selection.spec = spec;
         refresh_all_prediction_derived_caches();
         sync_prediction_dirty_flag();
         return true;
@@ -453,13 +339,13 @@ namespace Game
 
     bool GameplayState::set_prediction_frame_spec(const orbitsim::TrajectoryFrameSpec &spec)
     {
-        if (same_frame_spec(_prediction_frame_selection.spec, spec))
+        if (PredictionFrameResolver::same_frame_spec(_prediction.frame_selection.spec, spec))
         {
             return false;
         }
 
-        _prediction_frame_selection.spec = spec;
-        ++_prediction_display_frame_revision;
+        _prediction.frame_selection.spec = spec;
+        ++_prediction.display_frame_revision;
         refresh_all_prediction_derived_caches();
         sync_prediction_dirty_flag();
         return true;
@@ -526,17 +412,18 @@ namespace Game
             }
         }
 
-        _prediction_frame_selection.options = std::move(options);
+        _prediction.frame_selection.options = std::move(options);
 
-        if (_prediction_frame_selection.selected_index < 0)
+        if (_prediction.frame_selection.selected_index < 0)
         {
-            _prediction_frame_selection.spec = default_prediction_frame_spec();
+            _prediction.frame_selection.spec = default_prediction_frame_spec();
         }
 
         int selected_index = -1;
-        for (std::size_t i = 0; i < _prediction_frame_selection.options.size(); ++i)
+        for (std::size_t i = 0; i < _prediction.frame_selection.options.size(); ++i)
         {
-            if (same_frame_spec(_prediction_frame_selection.options[i].spec, _prediction_frame_selection.spec))
+            if (PredictionFrameResolver::same_frame_spec(_prediction.frame_selection.options[i].spec,
+                                                         _prediction.frame_selection.spec))
             {
                 selected_index = static_cast<int>(i);
                 break;
@@ -545,10 +432,11 @@ namespace Game
 
         if (selected_index < 0)
         {
-            _prediction_frame_selection.spec = default_prediction_frame_spec();
-            for (std::size_t i = 0; i < _prediction_frame_selection.options.size(); ++i)
+            _prediction.frame_selection.spec = default_prediction_frame_spec();
+            for (std::size_t i = 0; i < _prediction.frame_selection.options.size(); ++i)
             {
-                if (same_frame_spec(_prediction_frame_selection.options[i].spec, _prediction_frame_selection.spec))
+                if (PredictionFrameResolver::same_frame_spec(_prediction.frame_selection.options[i].spec,
+                                                             _prediction.frame_selection.spec))
                 {
                     selected_index = static_cast<int>(i);
                     break;
@@ -556,7 +444,7 @@ namespace Game
             }
         }
 
-        _prediction_frame_selection.selected_index = selected_index;
+        _prediction.frame_selection.selected_index = selected_index;
     }
 
     orbitsim::BodyId GameplayState::resolve_prediction_analysis_body_id(const OrbitPredictionCache &cache,
@@ -564,10 +452,10 @@ namespace Game
                                                                         const double query_time_s,
                                                                         const orbitsim::BodyId preferred_body_id) const
     {
-        if (_prediction_analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
-            _prediction_analysis_selection.spec.fixed_body_id != orbitsim::kInvalidBodyId)
+        if (_prediction.analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
+            _prediction.analysis_selection.spec.fixed_body_id != orbitsim::kInvalidBodyId)
         {
-            return _prediction_analysis_selection.spec.fixed_body_id;
+            return _prediction.analysis_selection.spec.fixed_body_id;
         }
 
         const auto &bodies = cache.solver.resolved_massive_bodies();
@@ -619,9 +507,9 @@ namespace Game
             effective_preferred_body_id = cache.display.resolved_frame_spec.primary_body_id;
         }
         if (effective_preferred_body_id == orbitsim::kInvalidBodyId &&
-            _prediction_frame_selection.spec.primary_body_id != orbitsim::kInvalidBodyId)
+            _prediction.frame_selection.spec.primary_body_id != orbitsim::kInvalidBodyId)
         {
-            effective_preferred_body_id = _prediction_frame_selection.spec.primary_body_id;
+            effective_preferred_body_id = _prediction.frame_selection.spec.primary_body_id;
         }
 
         return select_prediction_primary_body_id(
@@ -636,115 +524,11 @@ namespace Game
                                                        orbitsim::RotatingFrame &out_frame,
                                                        double display_time_s) const
     {
-        out_frame = {};
-        const double reference_time_s = resolve_prediction_display_reference_time_s(cache, display_time_s);
-        const orbitsim::TrajectoryFrameSpec frame_spec =
-                cache.display.resolved_frame_spec_valid
-                    ? cache.display.resolved_frame_spec
-                    : resolve_prediction_display_frame_spec(cache, reference_time_s);
-        const auto &ephemeris = cache.resolved_shared_ephemeris();
-        const auto &bodies = cache.resolved_massive_bodies();
-        const auto state_at = [&](const orbitsim::MassiveBody &body) -> orbitsim::State {
-            if (ephemeris && !ephemeris->empty())
-            {
-                return ephemeris->body_state_at_by_id(body.id, reference_time_s);
-            }
-            return body.state;
-        };
-        switch (frame_spec.type)
-        {
-            case orbitsim::TrajectoryFrameType::Inertial:
-                break;
-
-            case orbitsim::TrajectoryFrameType::BodyCenteredInertial:
-            {
-                const orbitsim::MassiveBody *body =
-                        find_massive_body(bodies, frame_spec.primary_body_id);
-                if (!body)
-                {
-                    return false;
-                }
-                out_frame = orbitsim::make_body_centered_inertial_frame(state_at(*body));
-                break;
-            }
-
-            case orbitsim::TrajectoryFrameType::BodyFixed:
-            {
-                const orbitsim::MassiveBody *body =
-                        find_massive_body(bodies, frame_spec.primary_body_id);
-                if (!body)
-                {
-                    return false;
-                }
-                const std::optional<orbitsim::RotatingFrame> body_fixed = orbitsim::make_body_fixed_frame(state_at(*body));
-                if (!body_fixed.has_value())
-                {
-                    return false;
-                }
-                out_frame = *body_fixed;
-                break;
-            }
-
-            case orbitsim::TrajectoryFrameType::Synodic:
-            {
-                const orbitsim::MassiveBody *body_a =
-                        find_massive_body(bodies, frame_spec.primary_body_id);
-                const orbitsim::MassiveBody *body_b =
-                        find_massive_body(bodies, frame_spec.secondary_body_id);
-                if (!body_a || !body_b)
-                {
-                    return false;
-                }
-
-                const std::optional<orbitsim::SynodicFrame> synodic =
-                        orbitsim::make_synodic_frame(state_at(*body_a), body_a->mass_kg, state_at(*body_b), body_b->mass_kg);
-                if (!synodic.has_value())
-                {
-                    return false;
-                }
-                out_frame = *synodic;
-                break;
-            }
-
-            case orbitsim::TrajectoryFrameType::LVLH:
-            {
-                if (bodies.empty())
-                {
-                    return false;
-                }
-
-                const auto player_lookup = build_prediction_player_lookup();
-                if (!player_lookup)
-                {
-                    return false;
-                }
-
-                const std::optional<orbitsim::State> target_state =
-                        player_lookup(frame_spec.target_spacecraft_id, reference_time_s);
-                if (!target_state.has_value())
-                {
-                    return false;
-                }
-
-                const orbitsim::MassiveBody *primary =
-                        find_massive_body(bodies, frame_spec.primary_body_id);
-                if (!primary)
-                {
-                    return false;
-                }
-
-                const std::optional<orbitsim::RotatingFrame> lvlh =
-                        orbitsim::make_lvlh_frame(state_at(*primary), *target_state);
-                if (!lvlh.has_value())
-                {
-                    return false;
-                }
-                out_frame = *lvlh;
-                break;
-            }
-        }
-
-        return true;
+        return PredictionFrameResolver::build_display_frame(
+                build_prediction_frame_resolver_context(),
+                cache,
+                out_frame,
+                display_time_s);
     }
 
     bool GameplayState::build_prediction_display_transform(const OrbitPredictionCache &cache,
@@ -752,54 +536,12 @@ namespace Game
                                                            glm::dmat3 &out_frame_to_world,
                                                            double display_time_s) const
     {
-        out_origin_world = _scenario_config.system_center;
-        out_frame_to_world = glm::dmat3(1.0);
-        const double reference_time_s = resolve_prediction_display_reference_time_s(cache, display_time_s);
-        const WorldVec3 world_ref_world = prediction_world_reference_body_world();
-        const auto &ephemeris = cache.resolved_shared_ephemeris();
-        const auto &bodies = cache.resolved_massive_bodies();
-
-        const auto state_at = [&](const orbitsim::MassiveBody &body) -> orbitsim::State {
-            if (ephemeris && !ephemeris->empty())
-            {
-                return ephemeris->body_state_at_by_id(body.id, reference_time_s);
-            }
-            return body.state;
-        };
-
-        orbitsim::State world_ref_state{};
-        bool have_world_ref_state = false;
-        if (_orbitsim)
-        {
-            if (const CelestialBodyInfo *world_ref_info = _orbitsim->world_reference_body())
-            {
-                if (const orbitsim::MassiveBody *world_ref_body = find_massive_body(bodies, world_ref_info->sim_id))
-                {
-                    world_ref_state = state_at(*world_ref_body);
-                    have_world_ref_state = true;
-                }
-                else if (const orbitsim::MassiveBody *world_ref_sim = _orbitsim->world_reference_sim_body())
-                {
-                    world_ref_state = world_ref_sim->state;
-                    have_world_ref_state = true;
-                }
-            }
-        }
-
-        orbitsim::RotatingFrame frame{};
-        if (!build_prediction_display_frame(cache, frame, reference_time_s))
-        {
-            return false;
-        }
-
-        out_frame_to_world = glm::dmat3(glm::dvec3(frame.ex_i.x, frame.ex_i.y, frame.ex_i.z),
-                                        glm::dvec3(frame.ey_i.x, frame.ey_i.y, frame.ey_i.z),
-                                        glm::dvec3(frame.ez_i.x, frame.ez_i.y, frame.ez_i.z));
-
-        const glm::dvec3 world_ref_position_m =
-                have_world_ref_state ? glm::dvec3(world_ref_state.position_m) : glm::dvec3(0.0);
-        out_origin_world = world_ref_world + WorldVec3(glm::dvec3(frame.origin_position_m) - world_ref_position_m);
-        return true;
+        return PredictionFrameResolver::build_display_transform(
+                build_prediction_frame_resolver_context(),
+                cache,
+                out_origin_world,
+                out_frame_to_world,
+                display_time_s);
     }
 
     WorldVec3 GameplayState::prediction_world_reference_body_world() const
@@ -825,14 +567,11 @@ namespace Game
                                                               const orbitsim::TrajectorySample &sample,
                                                               double display_time_s) const
     {
-        WorldVec3 origin_world{0.0};
-        glm::dmat3 frame_to_world(1.0);
-        if (!build_prediction_display_transform(cache, origin_world, frame_to_world, display_time_s))
-        {
-            return _scenario_config.system_center + WorldVec3(glm::dvec3(sample.position_m));
-        }
-
-        return origin_world + WorldVec3(frame_to_world * glm::dvec3(sample.position_m));
+        return PredictionFrameResolver::sample_position_world(
+                build_prediction_frame_resolver_context(),
+                cache,
+                sample,
+                display_time_s);
     }
 
     WorldVec3 GameplayState::prediction_sample_hermite_world(const OrbitPredictionCache &cache,
@@ -841,212 +580,65 @@ namespace Game
                                                              const double t_s,
                                                              double display_time_s) const
     {
-        const glm::dvec3 local = OrbitPredictionMath::sample_pair_position_m(a, b, t_s);
-
-        WorldVec3 origin_world{0.0};
-        glm::dmat3 frame_to_world(1.0);
-        if (!build_prediction_display_transform(cache, origin_world, frame_to_world, display_time_s))
-        {
-            return _scenario_config.system_center + WorldVec3(local);
-        }
-
-        return origin_world + WorldVec3(frame_to_world * local);
+        return PredictionFrameResolver::sample_hermite_world(
+                build_prediction_frame_resolver_context(),
+                cache,
+                a,
+                b,
+                t_s,
+                display_time_s);
     }
 
     WorldVec3 GameplayState::prediction_frame_origin_world(const OrbitPredictionCache &cache,
                                                            double display_time_s) const
     {
-        WorldVec3 origin_world{0.0};
-        glm::dmat3 frame_to_world(1.0);
-        if (build_prediction_display_transform(cache, origin_world, frame_to_world, display_time_s))
-        {
-            return origin_world;
-        }
-
-        return _scenario_config.system_center;
+        return PredictionFrameResolver::frame_origin_world(
+                build_prediction_frame_resolver_context(),
+                cache,
+                display_time_s);
     }
 
     void GameplayState::mark_prediction_derived_request_submitted(
             PredictionTrackState &track,
             const OrbitPredictionDerivedService::Request &request)
     {
-        track.derived_request_pending = true;
-        track.latest_requested_derived_generation_id = request.generation_id;
-        track.latest_requested_derived_display_frame_key = request.display_frame_key;
-        track.latest_requested_derived_display_frame_revision = request.display_frame_revision;
-        track.latest_requested_derived_analysis_body_id = request.analysis_body_id;
-        track.latest_requested_derived_publish_stage = request.solver_result.publish_stage;
-        track.pending_derived_has_maneuver_plan = request.maneuver_plan_signature_valid;
-        track.pending_derived_plan_signature =
-                request.maneuver_plan_signature_valid ? request.maneuver_plan_signature : 0u;
+        PredictionFrameController::mark_derived_request_submitted(track, request);
     }
 
     bool GameplayState::request_prediction_derived_refresh(PredictionTrackState &track, double display_time_s)
     {
-        if (track.cache.solver.resolved_trajectory_inertial().size() < 2 ||
-            track.cache.solver.resolved_trajectory_segments_inertial().empty())
-        {
-            return false;
-        }
-
-        if (!PredictionRuntimeDetail::latest_solver_generation_published(track))
-        {
-            return false;
-        }
-
-        const orbitsim::TrajectoryFrameSpec resolved_frame_spec =
-                resolve_prediction_display_frame_spec(track.cache, display_time_s);
-        const uint64_t display_frame_key = prediction_display_frame_key(resolved_frame_spec);
-        const uint64_t display_frame_revision = _prediction_display_frame_revision;
-        double analysis_time_s = display_time_s;
-        if (!std::isfinite(analysis_time_s))
-        {
-            analysis_time_s = _orbitsim ? _orbitsim->sim.time_s() : track.cache.identity.build_time_s;
-        }
-
-        const orbitsim::BodyId analysis_body_id =
-                resolve_prediction_analysis_body_id(track.cache, track.key, analysis_time_s, track.auto_primary_body_id);
-        if (track.derived_request_pending &&
-            track.latest_requested_derived_generation_id == track.cache.identity.generation_id &&
-            track.latest_requested_derived_display_frame_key == display_frame_key &&
-            track.latest_requested_derived_display_frame_revision == display_frame_revision &&
-            track.latest_requested_derived_analysis_body_id == analysis_body_id)
-        {
-            return false;
-        }
-
-        WorldVec3 build_pos_world = track.cache.identity.build_pos_world;
-        glm::dvec3 build_vel_world = track.cache.identity.build_vel_world;
-        glm::vec3 build_vel_local{0.0f};
-        (void) get_prediction_subject_world_state(track.key, build_pos_world, build_vel_world, build_vel_local);
-
-        std::vector<orbitsim::TrajectorySegment> player_lookup_segments;
-        if (prediction_subject_is_player(track.key))
-        {
-            if (!track.cache.solver.trajectory_segments_inertial_planned.empty())
-            {
-                player_lookup_segments = track.cache.solver.trajectory_segments_inertial_planned;
-            }
-            else
-            {
-                player_lookup_segments = track.cache.solver.resolved_trajectory_segments_inertial();
-            }
-        }
-        else if (const PredictionTrackState *player_track = player_prediction_track())
-        {
-            if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track))
-            {
-                if (!player_cache->solver.trajectory_segments_inertial_planned.empty())
-                {
-                    player_lookup_segments = player_cache->solver.trajectory_segments_inertial_planned;
-                }
-                else if (!player_cache->solver.resolved_trajectory_segments_inertial().empty())
-                {
-                    player_lookup_segments = player_cache->solver.resolved_trajectory_segments_inertial();
-                }
-            }
-        }
-
-        OrbitPredictionDerivedService::Request derived_request{};
-        derived_request.track_id = track.key.track_id();
-        derived_request.generation_id = track.cache.identity.generation_id;
-        derived_request.maneuver_plan_revision = track.cache.identity.maneuver_plan_revision;
-        derived_request.maneuver_plan_signature_valid = track.cache.identity.maneuver_plan_signature_valid;
-        derived_request.maneuver_plan_signature = track.cache.identity.maneuver_plan_signature;
-        derived_request.priority = PredictionRuntimeDetail::classify_prediction_subject_priority(
-                _prediction_selection,
-                track.key,
-                track.is_celestial);
-        derived_request.solver_result = build_prediction_solver_result_from_cache(track.key.track_id(), track.cache);
-        derived_request.build_pos_world = build_pos_world;
-        derived_request.build_vel_world = build_vel_world;
-        derived_request.sim_config = _orbitsim ? _orbitsim->sim.config() : orbitsim::GameSimulation::Config{};
-        derived_request.resolved_frame_spec = resolved_frame_spec;
-        derived_request.display_frame_key = display_frame_key;
-        derived_request.display_frame_revision = display_frame_revision;
-        derived_request.analysis_body_id = analysis_body_id;
-        derived_request.player_lookup_segments_inertial = std::move(player_lookup_segments);
-        _prediction_derived_service.request(derived_request);
-        mark_prediction_derived_request_submitted(track, derived_request);
-        return true;
+        return PredictionFrameController::request_derived_refresh(
+                build_prediction_frame_controller_context(),
+                track,
+                display_time_s);
     }
 
     bool GameplayState::prediction_track_has_current_derived_cache(const PredictionTrackState &track,
                                                                    double display_time_s) const
     {
-        if (!track.cache.identity.valid ||
-            track.cache.display.trajectory_frame.size() < 2 ||
-            track.cache.display.trajectory_segments_frame.empty())
-        {
-            return false;
-        }
-
-        const orbitsim::TrajectoryFrameSpec resolved_frame_spec =
-                resolve_prediction_display_frame_spec(track.cache, display_time_s);
-        const uint64_t display_frame_key = prediction_display_frame_key(resolved_frame_spec);
-        const uint64_t display_frame_revision = _prediction_display_frame_revision;
-        return track.cache.display.resolved_frame_spec_valid &&
-               track.cache.display.display_frame_key == display_frame_key &&
-               track.cache.display.display_frame_revision == display_frame_revision;
+        return PredictionFrameController::has_current_derived_cache(
+                build_prediction_frame_controller_context(),
+                track,
+                display_time_s);
     }
 
     void GameplayState::refresh_prediction_derived_cache(PredictionTrackState &track,
                                                          double display_time_s)
     {
-        if (track.cache.solver.resolved_trajectory_inertial().size() < 2)
-        {
-            return;
-        }
-
-        const orbitsim::TrajectoryFrameSpec resolved_frame_spec =
-                resolve_prediction_display_frame_spec(track.cache, display_time_s);
-        const uint64_t display_frame_key = prediction_display_frame_key(resolved_frame_spec);
-        const uint64_t display_frame_revision = _prediction_display_frame_revision;
-        const auto cache_frame_matches = [&](const OrbitPredictionCache &cache) {
-            return cache.display.display_frame_key == display_frame_key &&
-                   cache.display.display_frame_revision == display_frame_revision;
-        };
-        if ((track.pick_cache.generation_id != 0u || track.pick_cache.base_valid || track.pick_cache.planned_valid) &&
-            !cache_frame_matches(track.cache))
-        {
-            track.pick_cache.clear();
-        }
-        if (prediction_track_has_current_derived_cache(track, display_time_s))
-        {
-            return;
-        }
-
-        const double analysis_time_s =
-                std::isfinite(display_time_s)
-                        ? display_time_s
-                        : (_orbitsim ? _orbitsim->sim.time_s() : track.cache.identity.build_time_s);
-        const orbitsim::BodyId analysis_body_id =
-                resolve_prediction_analysis_body_id(track.cache, track.key, analysis_time_s, track.auto_primary_body_id);
-        if (analysis_body_id != orbitsim::kInvalidBodyId)
-        {
-            track.auto_primary_body_id = analysis_body_id;
-        }
-        (void) resolved_frame_spec;
-        (void) request_prediction_derived_refresh(track, display_time_s);
+        PredictionFrameController::refresh_derived_cache(
+                build_prediction_frame_controller_context(),
+                track,
+                display_time_s);
     }
 
     void GameplayState::refresh_all_prediction_derived_caches()
     {
         rebuild_prediction_frame_options();
         rebuild_prediction_analysis_options();
-        _prediction_derived_service.reset();
-        for (PredictionTrackState &track : _prediction_tracks)
+        _prediction.derived_service.reset();
+        for (PredictionTrackState &track : _prediction.tracks)
         {
-            track.derived_request_pending = false;
-            track.latest_requested_derived_generation_id = 0;
-            track.latest_requested_derived_display_frame_key = 0;
-            track.latest_requested_derived_display_frame_revision = 0;
-            track.latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
-            track.latest_requested_derived_publish_stage = OrbitPredictionService::PublishStage::Final;
-            // Display-frame artifacts are no longer trustworthy after a global derived reset.
-            track.preview_overlay.clear();
-            track.full_stream_overlay.clear();
-            track.pick_cache.clear();
+            PredictionFrameController::reset_track_derived_state(track);
             (void) request_prediction_derived_refresh(track);
         }
     }
