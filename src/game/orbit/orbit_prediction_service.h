@@ -524,6 +524,8 @@ namespace Game
             Request request{};
         };
 
+        struct PredictionRouteServiceAdapter;
+        struct PredictionJobResultPublisher;
         struct PredictionJobRunner;
 
         // Execute a single queued prediction request on the worker and publish zero or more staged results.

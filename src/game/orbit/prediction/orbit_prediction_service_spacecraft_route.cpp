@@ -64,7 +64,7 @@ namespace Game
             }
 
             const std::optional<ReusableSpacecraftBaseline> reusable_baseline =
-                    env.services.find_reusable_baseline(env.request.track_id, env.request_epoch);
+                    env.services.find_reusable_baseline(env.request.track_id, env.job.request_epoch);
             const double reusable_window_s =
                     std::isfinite(env.request.future_window_s)
                             ? std::max(0.0, env.request.future_window_s)
@@ -79,16 +79,16 @@ namespace Game
                 return false;
             }
 
-            env.out.diagnostics.trajectory_base =
+            env.state.out.diagnostics.trajectory_base =
                     make_stage_diagnostics_from_segments(reusable_baseline->trajectory_segments_inertial,
                                                          horizon_s,
                                                          true);
-            env.out.diagnostics.trajectory_sample_count = reusable_baseline->trajectory_inertial.size();
-            sync_prediction_stage_counts(env.out);
-            env.out.shared_ephemeris = std::move(shared_ephemeris);
-            env.out.trajectory_segments_inertial = reusable_baseline->trajectory_segments_inertial;
-            env.out.trajectory_inertial = reusable_baseline->trajectory_inertial;
-            env.out.baseline_reused = true;
+            env.state.out.diagnostics.trajectory_sample_count = reusable_baseline->trajectory_inertial.size();
+            sync_prediction_stage_counts(env.state.out);
+            env.state.out.shared_ephemeris = std::move(shared_ephemeris);
+            env.state.out.trajectory_segments_inertial = reusable_baseline->trajectory_segments_inertial;
+            env.state.out.trajectory_inertial = reusable_baseline->trajectory_inertial;
+            env.state.out.baseline_reused = true;
             return true;
         }
     } // namespace
@@ -98,7 +98,7 @@ namespace Game
     {
         SpacecraftPredictionRouteOutcome outcome{};
 
-        TransientSpacecraftSetup spacecraft_setup = create_transient_spacecraft(env.sim, env.request);
+        TransientSpacecraftSetup spacecraft_setup = create_transient_spacecraft(env.state.sim, env.request);
         if (spacecraft_setup.status != Status::Success)
         {
             outcome.status = spacecraft_setup.status;
@@ -109,13 +109,13 @@ namespace Game
         const orbitsim::AdaptiveSegmentOptions segment_opt =
                 build_spacecraft_adaptive_segment_options(env.request,
                                                           env.sampling_spec,
-                                                          env.cancel_requested);
+                                                          env.callbacks.cancel_requested);
 
         EphemerisResolveOutcome spacecraft_ephemeris =
                 resolve_ephemeris_for_request(env.request,
                                               env.sampling_spec,
                                               horizon_s,
-                                              env.cancel_requested,
+                                              env.callbacks.cancel_requested,
                                               env.resolve_ephemeris);
         if (spacecraft_ephemeris.status != Status::Success)
         {
@@ -125,10 +125,10 @@ namespace Game
 
         OrbitPredictionService::SharedCelestialEphemeris shared_ephemeris =
                 std::move(spacecraft_ephemeris.ephemeris);
-        env.out.diagnostics.ephemeris = spacecraft_ephemeris.diagnostics;
-        sync_prediction_stage_counts(env.out);
+        env.state.out.diagnostics.ephemeris = spacecraft_ephemeris.diagnostics;
+        sync_prediction_stage_counts(env.state.out);
 
-        if (env.cancel_requested())
+        if (env.callbacks.cancel_requested())
         {
             outcome.status = Status::Cancelled;
             return outcome;
@@ -140,34 +140,32 @@ namespace Game
         if (!reused_baseline)
         {
             const Status baseline_status = solve_spacecraft_baseline_trajectory(env.request,
-                                                                                 env.sim,
+                                                                                 env.state.sim,
                                                                                  eph,
                                                                                  *spacecraft_setup.handle,
                                                                                  segment_opt,
                                                                                  horizon_s,
-                                                                                 env.cancel_requested,
-                                                                                 env.out);
+                                                                                 env.callbacks.cancel_requested,
+                                                                                 env.state.out);
             if (baseline_status != Status::Success)
             {
                 outcome.status = baseline_status;
                 return outcome;
             }
 
-            env.out.shared_ephemeris = shared_ephemeris;
+            env.state.out.shared_ephemeris = shared_ephemeris;
         }
 
         if (!env.request.maneuver_impulses.empty())
         {
             PlannedPredictionRouteOutcome planned_outcome =
                     solve_planned_prediction_route(PlannedPredictionRouteEnvironment{
-                            env.request,
-                            env.cancel_requested,
-                            env.out,
-                            eph,
-                            spacecraft_setup.spacecraft.state,
-                            env.publish,
-                            env.compute_start,
-                            env.services,
+                            .request = env.request,
+                            .callbacks = env.callbacks,
+                            .out = env.state.out,
+                            .ephemeris = eph,
+                            .ship_state = spacecraft_setup.spacecraft.state,
+                            .services = env.services,
                     });
             outcome.published_staged_preview = planned_outcome.published_staged_preview;
             if (planned_outcome.status != Status::Success)
@@ -178,11 +176,11 @@ namespace Game
         }
 
         env.services.store_reusable_baseline(env.request.track_id,
-                                             env.generation_id,
-                                             env.request_epoch,
-                                             env.out.shared_ephemeris,
-                                             env.out.trajectory_inertial,
-                                             env.out.trajectory_segments_inertial);
+                                             env.job.generation_id,
+                                             env.job.request_epoch,
+                                             env.state.out.shared_ephemeris,
+                                             env.state.out.trajectory_inertial,
+                                             env.state.out.trajectory_segments_inertial);
 
         outcome.status = Status::Success;
         return outcome;

@@ -405,10 +405,10 @@ namespace Game
                   planned_request_(make_planned_request(env.request)),
                   ctx_{
                           planned_request_,
-                          env.cancel_requested,
+                          env.callbacks.cancel_requested,
                           env.out,
                           env.ephemeris,
-                          env.publish,
+                          env.callbacks.publish,
                           env.services,
                   },
                   solve_plan_(build_prediction_solve_plan(planned_request_)),
@@ -512,9 +512,10 @@ namespace Game
                         return true;
                     }
 
-                    return runner.env_.publish(runner.make_stage_result(stage_output,
-                                                                        stage_published_chunks,
-                                                                        publish_stage));
+                    return runner.env_.callbacks.publish(
+                            runner.make_stage_result(stage_output,
+                                                     stage_published_chunks,
+                                                     publish_stage));
                 }
             };
 
@@ -770,9 +771,9 @@ namespace Game
                 append_published_chunks_as_final(final_stage_chunks, prefix_stage_chunks);
                 append_published_chunks_as_final(final_stage_chunks, *final_preview_chunks);
                 append_published_chunks_as_final(final_stage_chunks, suffix_stage_chunks);
-                env_.publish(make_stage_result(final_stage_output,
-                                               final_stage_chunks,
-                                               PublishStage::Final));
+                env_.callbacks.publish(make_stage_result(final_stage_output,
+                                                         final_stage_chunks,
+                                                         PublishStage::Final));
                 return route_outcome;
             }
 
@@ -794,7 +795,7 @@ namespace Game
                         planned_request_,
                         solve_plan_,
                         ctx_,
-                        env_.publish,
+                        env_.callbacks.publish,
                         [this](const PlannedSolveOutput &stage_output,
                                const std::vector<PublishedChunk> &published_chunks,
                                const PublishStage publish_stage,
@@ -806,7 +807,7 @@ namespace Game
                                                      std::move(streamed_planned_chunks),
                                                      include_cumulative_planned);
                         },
-                        env_.compute_start,
+                        env_.callbacks.compute_start,
                 };
 
                 bool planned_path_solved = false;

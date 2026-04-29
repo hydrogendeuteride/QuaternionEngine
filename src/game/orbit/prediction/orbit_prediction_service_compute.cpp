@@ -125,101 +125,71 @@ namespace Game
             }
             return Status::Success;
         }
-    } // namespace
 
-    struct OrbitPredictionService::PredictionJobRunner final : SpacecraftPredictionRouteServices
-    {
-        OrbitPredictionService &service;
-        const PendingJob &job;
-        const uint64_t generation_id{0};
-        const uint64_t request_epoch{0};
-        const Request &request;
-        PredictionClock::time_point compute_start{};
-        Result out{};
-        CancelCheck cancel_requested{};
-        EphemerisResolverFn resolve_ephemeris{};
-        PublishFn publish_result{};
-
-        PredictionJobRunner(OrbitPredictionService &service_, const PendingJob &job_)
-            : service(service_),
-              job(job_),
-              generation_id(job.generation_id),
-              request_epoch(job.request_epoch),
-              request(job.request),
-              compute_start(PredictionClock::now()),
-              out(make_initial_prediction_result(generation_id, request))
+        struct PreparedPredictionJob
         {
-            cancel_requested = [this]() {
-                return !service.should_continue_job(request.track_id,
-                                                    generation_id,
-                                                    request_epoch,
-                                                    request.maneuver_plan_revision,
-                                                    request.solve_quality);
-            };
-            resolve_ephemeris =
-                    [this](const EphemerisBuildRequest &req,
-                           const CancelCheck &cancel_check,
-                           AdaptiveStageDiagnostics *diagnostics) {
-                        return service.get_or_build_ephemeris(req, cancel_check, diagnostics);
-                    };
-            publish_result = [this](Result result) {
-                return publish(std::move(result));
-            };
-        }
+            Status status{Status::Success};
+            std::optional<OrbitPredictionService::EphemerisSamplingSpec> spacecraft_sampling_spec{};
+            orbitsim::GameSimulation sim{};
+        };
 
-        void run()
+        PreparedPredictionJob prepare_prediction_job(
+                const Request &request,
+                const CancelCheck &cancel_requested)
         {
-            // Invalid inputs produce an invalid result rather than throwing on the worker thread.
+            PreparedPredictionJob prepared{};
+
             if (!std::isfinite(request.sim_time_s))
             {
-                fail(Status::InvalidInput);
-                return;
+                prepared.status = Status::InvalidInput;
+                return prepared;
             }
 
             Status sampling_status = Status::Success;
-            const std::optional<EphemerisSamplingSpec> spacecraft_sampling_spec =
-                    resolve_spacecraft_sampling_spec(request, sampling_status);
+            prepared.spacecraft_sampling_spec = resolve_spacecraft_sampling_spec(request, sampling_status);
             if (sampling_status != Status::Success)
             {
-                fail(sampling_status);
-                return;
+                prepared.status = sampling_status;
+                return prepared;
             }
 
-            orbitsim::GameSimulation sim(build_prediction_sim_config(request, spacecraft_sampling_spec));
-            if (!sim.set_time_s(request.sim_time_s))
+            prepared.sim = orbitsim::GameSimulation(build_prediction_sim_config(request,
+                                                                                prepared.spacecraft_sampling_spec));
+            if (!prepared.sim.set_time_s(request.sim_time_s))
             {
-                fail(Status::InvalidInput);
-                return;
+                prepared.status = Status::InvalidInput;
+                return prepared;
             }
 
             if (cancel_requested())
             {
-                cancel();
-                return;
+                prepared.status = Status::Cancelled;
+                return prepared;
             }
 
-            const Status body_status = populate_prediction_bodies(sim, request);
-            if (body_status != Status::Success)
+            prepared.status = populate_prediction_bodies(prepared.sim, request);
+            if (prepared.status != Status::Success)
             {
-                fail(body_status);
-                return;
+                return prepared;
             }
 
             if (cancel_requested())
             {
-                cancel();
-                return;
+                prepared.status = Status::Cancelled;
+                return prepared;
             }
 
-            out.massive_bodies = sim.massive_bodies();
+            return prepared;
+        }
+    } // namespace
 
-            if (request.kind == RequestKind::Celestial)
-            {
-                run_celestial_route(sim);
-                return;
-            }
+    struct OrbitPredictionService::PredictionRouteServiceAdapter final : SpacecraftPredictionRouteServices
+    {
+        OrbitPredictionService &service;
 
-            run_spacecraft_route(sim, *spacecraft_sampling_spec);
+        explicit PredictionRouteServiceAdapter(OrbitPredictionService &service_)
+            : service(service_)
+        {
         }
 
         std::optional<ReusableSpacecraftBaseline> find_reusable_baseline(
@@ -268,38 +238,153 @@ namespace Game
         }
 
         SharedCelestialEphemeris get_or_build_ephemeris(
-                const EphemerisBuildRequest &request_,
-                const CancelCheck &cancel_requested_) override
+                const EphemerisBuildRequest &request,
+                const CancelCheck &cancel_requested) override
         {
-            return service.get_or_build_ephemeris(request_, cancel_requested_);
+            return service.get_or_build_ephemeris(request, cancel_requested);
         }
 
-    private:
+        SharedCelestialEphemeris resolve_ephemeris(
+                const EphemerisBuildRequest &request,
+                const CancelCheck &cancel_requested,
+                AdaptiveStageDiagnostics *diagnostics)
+        {
+            return service.get_or_build_ephemeris(request, cancel_requested, diagnostics);
+        }
+    };
+
+    struct OrbitPredictionService::PredictionJobResultPublisher final
+    {
+        OrbitPredictionService &service;
+        const PendingJob &job;
+        PredictionClock::time_point compute_start{};
+
+        PredictionJobResultPublisher(
+                OrbitPredictionService &service_,
+                const PendingJob &job_,
+                const PredictionClock::time_point compute_start_)
+            : service(service_),
+              job(job_),
+              compute_start(compute_start_)
+        {
+        }
+
         bool publish(Result result)
         {
             result.compute_time_ms = elapsed_prediction_compute_ms(compute_start);
             return service.publish_completed_result(job, std::move(result));
         }
 
+        void publish_failure(Result result, const Status status)
+        {
+            result.diagnostics.status = status;
+            publish(std::move(result));
+        }
+
+        void publish_cancelled(Result result)
+        {
+            result.diagnostics.cancelled = true;
+            result.diagnostics.status = Status::Cancelled;
+            publish(std::move(result));
+        }
+
+        void publish_success(Result result)
+        {
+            ensure_single_publish_chunk_metadata(result);
+            result.valid = true;
+            result.diagnostics.status = Status::Success;
+            publish(std::move(result));
+        }
+    };
+
+    struct OrbitPredictionService::PredictionJobRunner final
+    {
+        OrbitPredictionService &service;
+        PredictionRouteServiceAdapter route_services;
+        const PendingJob &job;
+        const uint64_t generation_id{0};
+        const uint64_t request_epoch{0};
+        const Request &request;
+        PredictionClock::time_point compute_start{};
+        PredictionJobResultPublisher result_publisher;
+        Result out{};
+        CancelCheck cancel_requested{};
+        EphemerisResolverFn resolve_ephemeris{};
+        PublishFn publish_result{};
+
+        PredictionJobRunner(OrbitPredictionService &service_, const PendingJob &job_)
+            : service(service_),
+              route_services(service_),
+              job(job_),
+              generation_id(job.generation_id),
+              request_epoch(job.request_epoch),
+              request(job.request),
+              compute_start(PredictionClock::now()),
+              result_publisher(service_, job_, compute_start),
+              out(make_initial_prediction_result(generation_id, request))
+        {
+            cancel_requested = [this]() {
+                return !service.should_continue_job(request.track_id,
+                                                    generation_id,
+                                                    request_epoch,
+                                                    request.maneuver_plan_revision,
+                                                    request.solve_quality);
+            };
+            resolve_ephemeris =
+                    [this](const EphemerisBuildRequest &req,
+                           const CancelCheck &cancel_check,
+                           AdaptiveStageDiagnostics *diagnostics) {
+                        return route_services.resolve_ephemeris(req, cancel_check, diagnostics);
+                    };
+            publish_result = [this](Result result) {
+                return result_publisher.publish(std::move(result));
+            };
+        }
+
+        void run()
+        {
+            PreparedPredictionJob prepared = prepare_prediction_job(request, cancel_requested);
+            if (prepared.status == Status::Cancelled)
+            {
+                cancel();
+                return;
+            }
+            if (prepared.status != Status::Success)
+            {
+                fail(prepared.status);
+                return;
+            }
+
+            out.massive_bodies = prepared.sim.massive_bodies();
+
+            if (request.kind == RequestKind::Celestial)
+            {
+                run_celestial_route(prepared.sim);
+                return;
+            }
+
+            if (!prepared.spacecraft_sampling_spec.has_value())
+            {
+                fail(Status::InvalidSamplingSpec);
+                return;
+            }
+            run_spacecraft_route(prepared.sim, *prepared.spacecraft_sampling_spec);
+        }
+
+    private:
         void fail(const Status status)
         {
-            out.diagnostics.status = status;
-            publish(out);
+            result_publisher.publish_failure(out, status);
         }
 
         void cancel()
         {
-            out.diagnostics.cancelled = true;
-            out.diagnostics.status = Status::Cancelled;
-            publish(out);
+            result_publisher.publish_cancelled(out);
         }
 
         void publish_success()
         {
-            ensure_single_publish_chunk_metadata(out);
-            out.valid = true;
-            out.diagnostics.status = Status::Success;
-            publish(std::move(out));
+            result_publisher.publish_success(std::move(out));
         }
 
         void run_celestial_route(orbitsim::GameSimulation &sim)
@@ -329,17 +414,23 @@ namespace Game
         {
             const SpacecraftPredictionRouteOutcome spacecraft_outcome =
                     solve_spacecraft_prediction_route(SpacecraftPredictionRouteEnvironment{
-                            request,
-                            generation_id,
-                            request_epoch,
-                            sim,
-                            spacecraft_sampling_spec,
-                            cancel_requested,
-                            resolve_ephemeris,
-                            out,
-                            publish_result,
-                            compute_start,
-                            *this,
+                            .request = request,
+                            .job = PredictionRouteJobIdentity{
+                                    .generation_id = generation_id,
+                                    .request_epoch = request_epoch,
+                            },
+                            .state = PredictionRouteMutableState{
+                                    .sim = sim,
+                                    .out = out,
+                            },
+                            .sampling_spec = spacecraft_sampling_spec,
+                            .resolve_ephemeris = resolve_ephemeris,
+                            .callbacks = PredictionRouteCallbacks{
+                                    .cancel_requested = cancel_requested,
+                                    .publish = publish_result,
+                                    .compute_start = compute_start,
+                            },
+                            .services = route_services,
                     });
             if (spacecraft_outcome.status == Status::Cancelled)
             {

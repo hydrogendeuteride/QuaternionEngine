@@ -16,7 +16,7 @@ orbit/
   prediction/
     prediction_diagnostics_util.h                   # shared diagnostics builders
     orbit_prediction_service_internal.h              # shared types, context, declarations
-    orbit_prediction_service_compute.cpp             # compute_prediction entry + route dispatch
+    orbit_prediction_service_compute.cpp             # compute_prediction entry, job setup, route dispatch
     orbit_prediction_service_route_solvers.cpp       # ephemeris/celestial/baseline route solvers
     orbit_prediction_service_spacecraft_route.cpp    # spacecraft route orchestration
     orbit_prediction_service_planned_route.cpp       # planned route orchestration + staged publishing
@@ -68,7 +68,7 @@ Internal helpers split out from `orbit_prediction_service.cpp`.
   Diagnostics builders shared by orbit prediction and gameplay-derived cache code.
 
 - `orbit_prediction_service_compute.cpp`
-  `compute_prediction()` entry point and job orchestration helpers. Owns worker-job cancellation/publish handling, simulation and transient spacecraft setup, route dispatch, reusable baseline selection, planned route dispatch, and final result publishing.
+  `compute_prediction()` entry point and job orchestration helpers. Owns worker-job setup, cancellation/publish handling, route service adapter wiring, route dispatch, and final result publishing.
 
 - `orbit_prediction_service_route_solvers.cpp`
   Route-level solver helpers for ephemeris resolution, celestial body prediction, and spacecraft baseline trajectory prediction.

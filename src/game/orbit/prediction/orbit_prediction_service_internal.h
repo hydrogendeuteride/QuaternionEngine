@@ -337,18 +337,33 @@ namespace Game
                 std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial) = 0;
     };
 
+    struct PredictionRouteJobIdentity
+    {
+        uint64_t generation_id{0};
+        uint64_t request_epoch{0};
+    };
+
+    struct PredictionRouteCallbacks
+    {
+        const CancelCheck &cancel_requested;
+        PublishFn publish;
+        std::chrono::steady_clock::time_point compute_start;
+    };
+
+    struct PredictionRouteMutableState
+    {
+        orbitsim::GameSimulation &sim;
+        OrbitPredictionService::Result &out;
+    };
+
     struct SpacecraftPredictionRouteEnvironment
     {
         const OrbitPredictionService::Request &request;
-        uint64_t generation_id{0};
-        uint64_t request_epoch{0};
-        orbitsim::GameSimulation &sim;
+        PredictionRouteJobIdentity job;
+        PredictionRouteMutableState state;
         const OrbitPredictionService::EphemerisSamplingSpec &sampling_spec;
-        const CancelCheck &cancel_requested;
         const EphemerisResolverFn &resolve_ephemeris;
-        OrbitPredictionService::Result &out;
-        PublishFn publish;
-        std::chrono::steady_clock::time_point compute_start;
+        PredictionRouteCallbacks callbacks;
         SpacecraftPredictionRouteServices &services;
     };
 
@@ -366,12 +381,10 @@ namespace Game
     struct PlannedPredictionRouteEnvironment
     {
         const OrbitPredictionService::Request &request;
-        const CancelCheck &cancel_requested;
+        PredictionRouteCallbacks callbacks;
         OrbitPredictionService::Result &out;
         const orbitsim::CelestialEphemeris &ephemeris;
         const orbitsim::State &ship_state;
-        PublishFn publish;
-        std::chrono::steady_clock::time_point compute_start;
         PlannedTrajectoryServices &services;
     };
 
