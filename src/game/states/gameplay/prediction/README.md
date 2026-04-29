@@ -66,7 +66,7 @@ prediction/
   World-state resolution: `get_player_world_state`, `get_orbiter_world_state`, `get_prediction_subject_world_state`. Resolves live entity positions/velocities from either the orbit sim (on-rails) or the physics body (off-rails).
 
 - `gameplay_state_prediction_frames.cpp`
-  Display-frame management: frame-spec selection, display-frame option building, frame rebuild triggers, analysis body resolution, and helper functions like `find_celestial_body_info` and `find_massive_body`. Drives `rebuild_prediction_frame_cache` when the user switches display frames.
+  Display-frame management: frame-spec selection, display-frame option building, frame rebuild triggers, analysis body resolution, and helper functions like `find_celestial_body_info` and `find_massive_body`. Drives `PredictionFrameCacheBuilder` when the user switches display frames.
 
 - `gameplay_prediction_derived_service.cpp`
   `OrbitPredictionDerivedService` lifecycle (constructor spawns 1-2 worker threads, destructor joins), `request()` with per-track coalescing, `poll_completed()`, `reset()`, `build_cache()` orchestration, and `worker_loop`. Actual frame, metrics, and chunk cache work is delegated to the named builder entry points.
