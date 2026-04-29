@@ -406,7 +406,7 @@ namespace Game
         {
             return nullptr;
         }
-        return track->cache.valid ? &track->cache : nullptr;
+        return track->cache.identity.valid ? &track->cache : nullptr;
     }
 
     const OrbitPredictionCache *GameplayState::effective_prediction_cache(const PredictionTrackState *track) const
@@ -415,7 +415,7 @@ namespace Game
         {
             return nullptr;
         }
-        return track->cache.valid ? &track->cache : nullptr;
+        return track->cache.identity.valid ? &track->cache : nullptr;
     }
 
     OrbitPredictionCache *GameplayState::player_prediction_cache()

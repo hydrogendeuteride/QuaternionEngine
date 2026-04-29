@@ -236,9 +236,9 @@ TEST(GameplayPredictionManeuverTests, LifecycleHelperDescribesVisibleOverlayLaye
     track.preview_anchor.valid = true;
     track.dirty = true;
     track.full_stream_overlay.chunk_assembly.valid = true;
-    track.full_stream_overlay.chunk_assembly.generation_id = track.cache.generation_id;
+    track.full_stream_overlay.chunk_assembly.generation_id = track.cache.identity.generation_id;
     track.full_stream_overlay.chunk_assembly.chunks = {
-            make_chunk(0u, track.cache.generation_id, 10.0, 20.0, 7'100'000.0, 7'200'000.0),
+            make_chunk(0u, track.cache.identity.generation_id, 10.0, 20.0, 7'100'000.0, 7'200'000.0),
     };
 
     const auto snapshot = Game::PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
@@ -252,7 +252,8 @@ TEST(GameplayPredictionManeuverTests, LifecycleHelperDescribesVisibleOverlayLaye
     const Game::PredictionChunkAssembly full_stream_snapshot =
             Game::PredictionRuntimeDetail::prediction_full_stream_overlay_snapshot_for_draw(
                     track,
-                    track.cache,
+                    track.cache.identity,
+                    track.cache.display,
                     layers);
 
     EXPECT_TRUE(Game::PredictionRuntimeDetail::prediction_track_planned_preview_like(snapshot));

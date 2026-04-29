@@ -1,7 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 
 #include "core/util/logger.h"
-#include "game/states/gameplay/prediction/gameplay_prediction_cache_internal.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include <algorithm>
@@ -26,48 +25,49 @@ namespace Game
                                          const uint64_t display_frame_key,
                                          const uint64_t display_frame_revision)
         {
-            return cache.display_frame_key == display_frame_key &&
-                   cache.display_frame_revision == display_frame_revision;
+            return cache.display.display_frame_key == display_frame_key &&
+                   cache.display.display_frame_revision == display_frame_revision;
         }
 
         bool cache_frame_version_matches(const OrbitPredictionCache &a,
                                          const OrbitPredictionCache &b)
         {
-            return cache_frame_version_matches(a, b.display_frame_key, b.display_frame_revision);
+            return cache_frame_version_matches(a, b.display.display_frame_key, b.display.display_frame_revision);
         }
 
         OrbitPredictionCache merge_reused_base_frame_cache(const OrbitPredictionCache &base_cache,
                                                            OrbitPredictionCache reused_cache)
         {
-            reused_cache.trajectory_frame = base_cache.trajectory_frame;
-            reused_cache.trajectory_segments_frame = base_cache.trajectory_segments_frame;
-            reused_cache.render_curve_frame = base_cache.render_curve_frame;
-            if (base_cache.analysis_cache_valid &&
-                base_cache.analysis_cache_body_id != orbitsim::kInvalidBodyId &&
-                reused_cache.analysis_cache_body_id == base_cache.analysis_cache_body_id)
+            reused_cache.display.trajectory_frame = base_cache.display.trajectory_frame;
+            reused_cache.display.trajectory_segments_frame = base_cache.display.trajectory_segments_frame;
+            reused_cache.display.render_curve_frame = base_cache.display.render_curve_frame;
+            if (base_cache.analysis.analysis_cache_valid &&
+                base_cache.analysis.analysis_cache_body_id != orbitsim::kInvalidBodyId &&
+                reused_cache.analysis.analysis_cache_body_id == base_cache.analysis.analysis_cache_body_id)
             {
-                reused_cache.trajectory_analysis_bci = base_cache.trajectory_analysis_bci;
-                reused_cache.trajectory_segments_analysis_bci = base_cache.trajectory_segments_analysis_bci;
-                reused_cache.analysis_cache_body_id = base_cache.analysis_cache_body_id;
-                reused_cache.analysis_cache_valid = base_cache.analysis_cache_valid;
+                reused_cache.analysis.trajectory_analysis_bci = base_cache.analysis.trajectory_analysis_bci;
+                reused_cache.analysis.trajectory_segments_analysis_bci =
+                        base_cache.analysis.trajectory_segments_analysis_bci;
+                reused_cache.analysis.analysis_cache_body_id = base_cache.analysis.analysis_cache_body_id;
+                reused_cache.analysis.analysis_cache_valid = base_cache.analysis.analysis_cache_valid;
             }
-            if (base_cache.metrics_valid &&
-                base_cache.metrics_body_id != orbitsim::kInvalidBodyId &&
-                reused_cache.metrics_body_id == base_cache.metrics_body_id)
+            if (base_cache.analysis.metrics_valid &&
+                base_cache.analysis.metrics_body_id != orbitsim::kInvalidBodyId &&
+                reused_cache.analysis.metrics_body_id == base_cache.analysis.metrics_body_id)
             {
-                reused_cache.altitude_km = base_cache.altitude_km;
-                reused_cache.speed_kmps = base_cache.speed_kmps;
-                reused_cache.semi_major_axis_m = base_cache.semi_major_axis_m;
-                reused_cache.eccentricity = base_cache.eccentricity;
-                reused_cache.orbital_period_s = base_cache.orbital_period_s;
-                reused_cache.periapsis_alt_km = base_cache.periapsis_alt_km;
-                reused_cache.apoapsis_alt_km = base_cache.apoapsis_alt_km;
-                reused_cache.metrics_body_id = base_cache.metrics_body_id;
-                reused_cache.metrics_valid = base_cache.metrics_valid;
+                reused_cache.analysis.altitude_km = base_cache.analysis.altitude_km;
+                reused_cache.analysis.speed_kmps = base_cache.analysis.speed_kmps;
+                reused_cache.analysis.semi_major_axis_m = base_cache.analysis.semi_major_axis_m;
+                reused_cache.analysis.eccentricity = base_cache.analysis.eccentricity;
+                reused_cache.analysis.orbital_period_s = base_cache.analysis.orbital_period_s;
+                reused_cache.analysis.periapsis_alt_km = base_cache.analysis.periapsis_alt_km;
+                reused_cache.analysis.apoapsis_alt_km = base_cache.analysis.apoapsis_alt_km;
+                reused_cache.analysis.metrics_body_id = base_cache.analysis.metrics_body_id;
+                reused_cache.analysis.metrics_valid = base_cache.analysis.metrics_valid;
             }
-            reused_cache.valid = reused_cache.resolved_trajectory_inertial().size() >= 2 &&
-                                 reused_cache.trajectory_frame.size() >= 2 &&
-                                 !reused_cache.trajectory_segments_frame.empty();
+            reused_cache.identity.valid = reused_cache.solver.resolved_trajectory_inertial().size() >= 2 &&
+                                          reused_cache.display.trajectory_frame.size() >= 2 &&
+                                          !reused_cache.display.trajectory_segments_frame.empty();
             return reused_cache;
         }
 
@@ -167,11 +167,11 @@ namespace Game
 
         bool cache_has_planned_data(const OrbitPredictionCache &cache)
         {
-            return !cache.trajectory_inertial_planned.empty() ||
-                   !cache.trajectory_segments_inertial_planned.empty() ||
-                   !cache.trajectory_frame_planned.empty() ||
-                   !cache.trajectory_segments_frame_planned.empty() ||
-                   !cache.maneuver_previews.empty();
+            return !cache.solver.trajectory_inertial_planned.empty() ||
+                   !cache.solver.trajectory_segments_inertial_planned.empty() ||
+                   !cache.display.trajectory_frame_planned.empty() ||
+                   !cache.display.trajectory_segments_frame_planned.empty() ||
+                   !cache.solver.maneuver_previews.empty();
         }
 
         bool planned_cache_matches_current_plan(const OrbitPredictionCache &cache,
@@ -179,8 +179,8 @@ namespace Game
         {
             return cache_has_planned_data(cache) &&
                    current_plan_signature != 0u &&
-                   cache.maneuver_plan_signature_valid &&
-                   cache.maneuver_plan_signature == current_plan_signature;
+                   cache.identity.maneuver_plan_signature_valid &&
+                   cache.identity.maneuver_plan_signature == current_plan_signature;
         }
 
         bool full_stream_result_is_obsolete_after_final_publish(
@@ -189,22 +189,22 @@ namespace Game
         {
             return result.solve_quality == OrbitPredictionService::SolveQuality::Full &&
                    result.publish_stage == OrbitPredictionService::PublishStage::FullStreaming &&
-                   track.authoritative_cache.valid &&
-                   track.authoritative_cache.generation_id >= result.generation_id;
+                   track.authoritative_cache.identity.valid &&
+                   track.authoritative_cache.identity.generation_id >= result.generation_id;
         }
 
         void restore_authoritative_planned_data(const PredictionTrackState &track,
                                                 OrbitPredictionCache &cache,
                                                 const uint64_t current_plan_signature)
         {
-            if (track.authoritative_cache.valid &&
+            if (track.authoritative_cache.identity.valid &&
                 planned_cache_matches_current_plan(track.authoritative_cache, current_plan_signature))
             {
                 copy_prediction_cache_planned_data(cache, track.authoritative_cache);
                 return;
             }
 
-            if (track.cache.valid &&
+            if (track.cache.identity.valid &&
                 planned_cache_matches_current_plan(track.cache, current_plan_signature))
             {
                 copy_prediction_cache_planned_data(cache, track.cache);
@@ -298,8 +298,8 @@ namespace Game
                 result.timings.total_ms);
         debug.derived_frame_build_ms_last = std::max(0.0, result.timings.frame_build_ms);
         debug.derived_flatten_ms_last = std::max(0.0, result.timings.flatten_ms);
-        debug.flattened_planned_segments_last = result.cache.trajectory_segments_frame_planned.size();
-        debug.flattened_planned_samples_last = result.cache.trajectory_frame_planned.size();
+        debug.flattened_planned_segments_last = result.cache.display.trajectory_segments_frame_planned.size();
+        debug.flattened_planned_samples_last = result.cache.display.trajectory_frame_planned.size();
 
         if (completes_latest_derived_request)
         {
@@ -315,31 +315,34 @@ namespace Game
         OrbitPredictionCache cache_to_publish{};
         OrbitPredictionDerivedDiagnostics diagnostics_to_publish = result.diagnostics;
         bool have_cache_to_publish = false;
-        if (result.valid && result.cache.valid)
+        if (result.valid && result.cache.identity.valid)
         {
             if (result.base_frame_reused)
             {
                 const bool reusable_base_still_available =
-                        track->cache.valid &&
-                        track->cache.resolved_frame_spec_valid &&
-                        result.cache.resolved_frame_spec_valid &&
-                        frame_specs_match(track->cache.resolved_frame_spec, result.cache.resolved_frame_spec) &&
-                        track->cache.resolved_shared_ephemeris() == result.cache.resolved_shared_ephemeris() &&
-                        track->cache.trajectory_frame.size() >= 2 &&
-                        !track->cache.trajectory_segments_frame.empty();
+                        track->cache.identity.valid &&
+                        track->cache.display.resolved_frame_spec_valid &&
+                        result.cache.display.resolved_frame_spec_valid &&
+                        frame_specs_match(track->cache.display.resolved_frame_spec,
+                                          result.cache.display.resolved_frame_spec) &&
+                        track->cache.solver.resolved_shared_ephemeris() ==
+                                result.cache.solver.resolved_shared_ephemeris() &&
+                        track->cache.display.trajectory_frame.size() >= 2 &&
+                        !track->cache.display.trajectory_segments_frame.empty();
                 if (reusable_base_still_available)
                 {
                     cache_to_publish = merge_reused_base_frame_cache(track->cache, std::move(result.cache));
-                    diagnostics_to_publish.frame_segment_count = cache_to_publish.trajectory_segments_frame.size();
-                    diagnostics_to_publish.frame_sample_count = cache_to_publish.trajectory_frame.size();
+                    diagnostics_to_publish.frame_segment_count =
+                            cache_to_publish.display.trajectory_segments_frame.size();
+                    diagnostics_to_publish.frame_sample_count = cache_to_publish.display.trajectory_frame.size();
                     diagnostics_to_publish.status = PredictionDerivedStatus::Success;
-                    have_cache_to_publish = cache_to_publish.valid;
+                    have_cache_to_publish = cache_to_publish.identity.valid;
                 }
             }
-            else if (result.cache.trajectory_frame.size() >= 2)
+            else if (result.cache.display.trajectory_frame.size() >= 2)
             {
                 cache_to_publish = std::move(result.cache);
-                have_cache_to_publish = cache_to_publish.valid;
+                have_cache_to_publish = cache_to_publish.identity.valid;
             }
 
         }
@@ -364,11 +367,11 @@ namespace Game
                 current_plan_active ? current_maneuver_plan_signature() : 0u;
         const bool solved_plan_signature_valid =
                 result.maneuver_plan_signature_valid ||
-                cache_to_publish.maneuver_plan_signature_valid;
+                cache_to_publish.identity.maneuver_plan_signature_valid;
         const uint64_t solved_plan_signature =
                 result.maneuver_plan_signature_valid
                         ? result.maneuver_plan_signature
-                        : cache_to_publish.maneuver_plan_signature;
+                        : cache_to_publish.identity.maneuver_plan_signature;
         const bool result_plan_signature_mismatch =
                 current_plan_active &&
                 solved_plan_signature_valid &&
@@ -403,8 +406,8 @@ namespace Game
                     solved_plan_signature == current_plan_signature;
             if (solved_plan_signature_valid && (solved_plan_matches_current || stale_fast_preview_during_edit))
             {
-                cache_to_publish.maneuver_plan_signature_valid = true;
-                cache_to_publish.maneuver_plan_signature = solved_plan_signature;
+                cache_to_publish.identity.maneuver_plan_signature_valid = true;
+                cache_to_publish.identity.maneuver_plan_signature = solved_plan_signature;
             }
             else if (!solved_plan_matches_current)
             {
@@ -442,7 +445,9 @@ namespace Game
             {
                 track->full_stream_overlay.clear();
             }
-            if (!track->authoritative_cache.valid && track->cache.valid && cache_has_planned_data(track->cache))
+            if (!track->authoritative_cache.identity.valid &&
+                track->cache.identity.valid &&
+                cache_has_planned_data(track->cache))
             {
                 track->authoritative_cache = track->cache;
             }

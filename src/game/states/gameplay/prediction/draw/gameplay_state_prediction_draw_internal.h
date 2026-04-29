@@ -110,7 +110,7 @@ namespace Game::PredictionDrawDetail
         PickWindow planned_draw_window{};
         PickWindow planned_pick_window{};
         std::vector<orbitsim::TrajectorySegment> traj_base_segments_world_basis{};
-        OrbitPredictionCache *traj_planned_segments_world_basis_source{nullptr};
+        const PredictionDisplayFrameCache *traj_planned_segments_world_basis_source{nullptr};
         std::vector<orbitsim::TrajectorySegment> traj_stable_planned_segments_world_basis{};
     };
 
@@ -133,7 +133,7 @@ namespace Game::PredictionDrawDetail
     bool frame_transform_is_identity(const glm::dmat3 &frame_to_world);
     const std::vector<orbitsim::TrajectorySegment> &base_segments_world_basis(PredictionTrackDrawContext &track_ctx);
     const std::vector<orbitsim::TrajectorySegment> &planned_segments_world_basis(PredictionTrackDrawContext &track_ctx,
-                                                                                 OrbitPredictionCache &cache);
+                                                                                 const PredictionDisplayFrameCache &display);
     std::vector<orbitsim::TrajectorySegment> transform_segments_to_world_basis(
             const std::vector<orbitsim::TrajectorySegment> &traj_segments,
             const glm::dmat3 &frame_to_world);

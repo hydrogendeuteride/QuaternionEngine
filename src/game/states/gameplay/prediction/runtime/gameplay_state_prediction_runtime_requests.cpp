@@ -2,7 +2,7 @@
 
 #include "core/util/logger.h"
 #include "game/orbit/orbit_prediction_tuning.h"
-#include "game/states/gameplay/prediction/gameplay_prediction_cache_internal.h"
+#include "game/states/gameplay/prediction/prediction_trajectory_sampler.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include <algorithm>
@@ -116,12 +116,12 @@ namespace Game
         }
 
         std::vector<OrbitPredictionService::ManeuverNodePreview> collect_prefix_maneuver_previews(
-                const OrbitPredictionCache &cache,
+                const PredictionSolverTrajectoryCache &solver,
                 const double anchor_time_s)
         {
             std::vector<OrbitPredictionService::ManeuverNodePreview> out;
-            out.reserve(cache.maneuver_previews.size());
-            for (const OrbitPredictionService::ManeuverNodePreview &preview : cache.maneuver_previews)
+            out.reserve(solver.maneuver_previews.size());
+            for (const OrbitPredictionService::ManeuverNodePreview &preview : solver.maneuver_previews)
             {
                 if (preview.valid &&
                     std::isfinite(preview.t_s) &&
@@ -133,11 +133,11 @@ namespace Game
             return out;
         }
 
-        bool cache_has_planned_prediction_data(const OrbitPredictionCache &cache)
+        bool cache_has_planned_prediction_data(const PredictionSolverTrajectoryCache &solver)
         {
-            return !cache.trajectory_segments_inertial_planned.empty() ||
-                   !cache.trajectory_inertial_planned.empty() ||
-                   !cache.maneuver_previews.empty();
+            return !solver.trajectory_segments_inertial_planned.empty() ||
+                   !solver.trajectory_inertial_planned.empty() ||
+                   !solver.maneuver_previews.empty();
         }
 
         bool current_plan_has_prior_future_maneuver(const std::vector<GameplayState::ManeuverNode> &nodes,
@@ -160,22 +160,23 @@ namespace Game
                                });
         }
 
-        bool sample_unplanned_anchor_state(const OrbitPredictionCache &cache,
+        bool sample_unplanned_anchor_state(const PredictionSolverTrajectoryCache &solver,
                                            const double anchor_time_s,
                                            orbitsim::State &out_state)
         {
-            return PredictionCacheInternal::sample_prediction_inertial_state(
-                           cache.resolved_trajectory_segments_inertial(),
+            return PredictionTrajectorySampler::sample_inertial_state(
+                           solver.resolved_trajectory_segments_inertial(),
                            anchor_time_s,
                            out_state,
                            TrajectoryBoundarySide::Before) ||
-                   PredictionCacheInternal::sample_prediction_inertial_state(cache.resolved_trajectory_inertial(),
-                                                                             anchor_time_s,
-                                                                             out_state);
+                   PredictionTrajectorySampler::sample_inertial_state(solver.resolved_trajectory_inertial(),
+                                                                      anchor_time_s,
+                                                                      out_state);
         }
 
         bool try_build_suffix_refine_prefix_from_cache(
-                const OrbitPredictionCache &cache,
+                const PredictionCacheIdentity &identity,
+                const PredictionSolverTrajectoryCache &solver,
                 const double now_s,
                 const double anchor_time_s,
                 std::vector<orbitsim::TrajectorySegment> &out_prefix_segments,
@@ -184,18 +185,18 @@ namespace Game
             out_prefix_segments.clear();
             out_prefix_previews.clear();
 
-            if (!cache.valid ||
+            if (!identity.valid ||
                 !std::isfinite(now_s) ||
                 !std::isfinite(anchor_time_s) ||
                 anchor_time_s <= (now_s + kSuffixRefineAnchorTimeMatchEpsilonS) ||
-                cache.trajectory_segments_inertial_planned.empty() ||
-                !validate_trajectory_segment_continuity(cache.trajectory_segments_inertial_planned))
+                solver.trajectory_segments_inertial_planned.empty() ||
+                !validate_trajectory_segment_continuity(solver.trajectory_segments_inertial_planned))
             {
                 return false;
             }
 
             const double required_duration_s = anchor_time_s - now_s;
-            if (!trajectory_segments_cover_window(cache.trajectory_segments_inertial_planned,
+            if (!trajectory_segments_cover_window(solver.trajectory_segments_inertial_planned,
                                                   now_s,
                                                   required_duration_s))
             {
@@ -203,11 +204,11 @@ namespace Game
             }
 
             std::size_t cursor = 0u;
-            if (!PredictionCacheInternal::slice_trajectory_segments_from_cursor(cache.trajectory_segments_inertial_planned,
-                                                                                now_s,
-                                                                                anchor_time_s,
-                                                                                cursor,
-                                                                                out_prefix_segments))
+            if (!PredictionTrajectorySampler::slice_segments_from_cursor(solver.trajectory_segments_inertial_planned,
+                                                                         now_s,
+                                                                         anchor_time_s,
+                                                                         cursor,
+                                                                         out_prefix_segments))
             {
                 out_prefix_segments.clear();
                 return false;
@@ -229,7 +230,7 @@ namespace Game
                 return false;
             }
 
-            out_prefix_previews = collect_prefix_maneuver_previews(cache, anchor_time_s);
+            out_prefix_previews = collect_prefix_maneuver_previews(solver, anchor_time_s);
             return true;
         }
 
@@ -240,8 +241,9 @@ namespace Game
                 std::vector<orbitsim::TrajectorySegment> &out_prefix_segments,
                 std::vector<OrbitPredictionService::ManeuverNodePreview> &out_prefix_previews)
         {
-            if (track.authoritative_cache.valid &&
-                try_build_suffix_refine_prefix_from_cache(track.authoritative_cache,
+            if (track.authoritative_cache.identity.valid &&
+                try_build_suffix_refine_prefix_from_cache(track.authoritative_cache.identity,
+                                                          track.authoritative_cache.solver,
                                                           now_s,
                                                           anchor_time_s,
                                                           out_prefix_segments,
@@ -250,7 +252,8 @@ namespace Game
                 return true;
             }
 
-            return try_build_suffix_refine_prefix_from_cache(track.cache,
+            return try_build_suffix_refine_prefix_from_cache(track.cache.identity,
+                                                            track.cache.solver,
                                                             now_s,
                                                             anchor_time_s,
                                                             out_prefix_segments,
@@ -278,7 +281,8 @@ namespace Game
         }
 
         const OrbitPredictionCache &anchor_cache =
-                track.authoritative_cache.valid ? track.authoritative_cache : track.cache;
+                track.authoritative_cache.identity.valid ? track.authoritative_cache : track.cache;
+        const PredictionSolverTrajectoryCache &anchor_solver = anchor_cache.solver;
 
         const bool editing_anchor_time =
                 _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime &&
@@ -299,21 +303,21 @@ namespace Game
                 return false;
             }
 
-            out_trusted = sample_unplanned_anchor_state(anchor_cache, track.preview_anchor.anchor_time_s, out_state);
+            out_trusted = sample_unplanned_anchor_state(anchor_solver, track.preview_anchor.anchor_time_s, out_state);
             return out_trusted;
         }
 
         if (anchor_node_is_current &&
             !has_prior_future_maneuver &&
-            sample_unplanned_anchor_state(anchor_cache, track.preview_anchor.anchor_time_s, out_state))
+            sample_unplanned_anchor_state(anchor_solver, track.preview_anchor.anchor_time_s, out_state))
         {
             out_trusted = true;
             return true;
         }
 
         const auto preview_it =
-                std::find_if(anchor_cache.maneuver_previews.begin(),
-                             anchor_cache.maneuver_previews.end(),
+                std::find_if(anchor_solver.maneuver_previews.begin(),
+                             anchor_solver.maneuver_previews.end(),
                              [&track](const OrbitPredictionService::ManeuverNodePreview &preview) {
                                  return preview.valid &&
                                         preview.node_id == track.preview_anchor.anchor_node_id &&
@@ -323,7 +327,7 @@ namespace Game
                                         detail::finite_vec3(preview.inertial_position_m) &&
                                         detail::finite_vec3(preview.inertial_velocity_mps);
                              });
-        if (preview_it != anchor_cache.maneuver_previews.end())
+        if (preview_it != anchor_solver.maneuver_previews.end())
         {
             out_state.position_m = preview_it->inertial_position_m;
             out_state.velocity_mps = preview_it->inertial_velocity_mps;
@@ -334,30 +338,30 @@ namespace Game
             return true;
         }
 
-        if (anchor_node_is_current && cache_has_planned_prediction_data(anchor_cache))
+        if (anchor_node_is_current && cache_has_planned_prediction_data(anchor_solver))
         {
             if (has_prior_future_maneuver)
             {
                 return false;
             }
 
-            out_trusted = sample_unplanned_anchor_state(anchor_cache, track.preview_anchor.anchor_time_s, out_state);
+            out_trusted = sample_unplanned_anchor_state(anchor_solver, track.preview_anchor.anchor_time_s, out_state);
             return out_trusted;
         }
 
         const bool resolved =
-                PredictionCacheInternal::sample_prediction_inertial_state(anchor_cache.trajectory_segments_inertial_planned,
-                                                                          track.preview_anchor.anchor_time_s,
-                                                                          out_state,
-                                                                          TrajectoryBoundarySide::Before) ||
-                sample_prediction_inertial_state(anchor_cache.trajectory_inertial_planned,
+                PredictionTrajectorySampler::sample_inertial_state(anchor_solver.trajectory_segments_inertial_planned,
+                                                                   track.preview_anchor.anchor_time_s,
+                                                                   out_state,
+                                                                   TrajectoryBoundarySide::Before) ||
+                sample_prediction_inertial_state(anchor_solver.trajectory_inertial_planned,
                                                   track.preview_anchor.anchor_time_s,
                                                   out_state) ||
-                PredictionCacheInternal::sample_prediction_inertial_state(track.cache.resolved_trajectory_segments_inertial(),
-                                                                          track.preview_anchor.anchor_time_s,
-                                                                          out_state,
-                                                                          TrajectoryBoundarySide::Before) ||
-                sample_prediction_inertial_state(track.cache.resolved_trajectory_inertial(),
+                PredictionTrajectorySampler::sample_inertial_state(track.cache.solver.resolved_trajectory_segments_inertial(),
+                                                                   track.preview_anchor.anchor_time_s,
+                                                                   out_state,
+                                                                   TrajectoryBoundarySide::Before) ||
+                sample_prediction_inertial_state(track.cache.solver.resolved_trajectory_inertial(),
                                                   track.preview_anchor.anchor_time_s,
                                                   out_state);
         out_trusted = false;
@@ -481,7 +485,9 @@ namespace Game
         }
 
         const orbitsim::TrajectoryFrameSpec display_frame_spec =
-                track.cache.resolved_frame_spec_valid ? track.cache.resolved_frame_spec : _prediction_frame_selection.spec;
+                track.cache.display.resolved_frame_spec_valid
+                        ? track.cache.display.resolved_frame_spec
+                        : _prediction_frame_selection.spec;
         request.lagrange_sensitive = prediction_frame_is_lagrange_sensitive(display_frame_spec);
         const bool auto_primary_may_shift_across_plan =
                 with_maneuvers && prediction_subject_is_player(track.key);
@@ -768,7 +774,7 @@ namespace Game
         track.dirty = !requested;
         if (!requested && !throttled)
         {
-            const bool has_cache_to_keep = track.cache.valid || track.authoritative_cache.valid;
+            const bool has_cache_to_keep = track.cache.identity.valid || track.authoritative_cache.identity.valid;
             if (!has_cache_to_keep)
             {
                 track.clear_runtime();

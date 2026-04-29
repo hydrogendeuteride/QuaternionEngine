@@ -6,6 +6,7 @@
 #include "game/orbit/prediction/prediction_diagnostics_util.h"
 #include "game/orbit/trajectory/trajectory_utils.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
+#include "game/states/gameplay/prediction/prediction_trajectory_sampler.h"
 
 #include "orbitsim/math.hpp"
 #include "orbitsim/trajectory_transforms.hpp"
@@ -23,7 +24,7 @@ namespace Game::PredictionCacheInternal
     using CancelCheck = std::function<bool()>;
 
     inline constexpr orbitsim::SpacecraftId kPlayerDisplayTargetSpacecraftId =
-            static_cast<orbitsim::SpacecraftId>(0x7000'0001u);
+            PredictionTrajectorySampler::kPlayerDisplayTargetSpacecraftId;
 
     inline bool sample_prediction_inertial_state(const std::vector<orbitsim::TrajectorySample> &trajectory,
                                                  const double query_time_s,
@@ -122,11 +123,11 @@ namespace Game::PredictionCacheInternal
         };
     }
 
-    inline std::vector<double> collect_maneuver_node_times(const OrbitPredictionCache &cache)
+    inline std::vector<double> collect_maneuver_node_times(const PredictionSolverTrajectoryCache &solver)
     {
         std::vector<double> out;
-        out.reserve(cache.maneuver_previews.size());
-        for (const auto &preview : cache.maneuver_previews)
+        out.reserve(solver.maneuver_previews.size());
+        for (const auto &preview : solver.maneuver_previews)
         {
             if (std::isfinite(preview.t_s))
             {
@@ -134,6 +135,11 @@ namespace Game::PredictionCacheInternal
             }
         }
         return out;
+    }
+
+    inline std::vector<double> collect_maneuver_node_times(const OrbitPredictionCache &cache)
+    {
+        return collect_maneuver_node_times(cache.solver);
     }
 
     inline std::vector<orbitsim::TrajectorySample> sample_prediction_segments(
@@ -287,7 +293,7 @@ namespace Game::PredictionCacheInternal
     }
 
     inline void update_derived_diagnostics(OrbitPredictionDerivedDiagnostics *diagnostics,
-                                           const OrbitPredictionCache &cache,
+                                           const PredictionDisplayFrameCache &display,
                                            const PredictionDerivedStatus status)
     {
         if (!diagnostics)
@@ -298,12 +304,19 @@ namespace Game::PredictionCacheInternal
         diagnostics->status = status;
         diagnostics->frame_segment_count =
                 diagnostics->frame_base.accepted_segments > 0 ? diagnostics->frame_base.accepted_segments
-                                                              : cache.trajectory_segments_frame.size();
+                                                              : display.trajectory_segments_frame.size();
         diagnostics->frame_segment_count_planned =
                 diagnostics->frame_planned.accepted_segments > 0 ? diagnostics->frame_planned.accepted_segments
-                                                                 : cache.trajectory_segments_frame_planned.size();
-        diagnostics->frame_sample_count = cache.trajectory_frame.size();
-        diagnostics->frame_sample_count_planned = cache.trajectory_frame_planned.size();
+                                                                 : display.trajectory_segments_frame_planned.size();
+        diagnostics->frame_sample_count = display.trajectory_frame.size();
+        diagnostics->frame_sample_count_planned = display.trajectory_frame_planned.size();
+    }
+
+    inline void update_derived_diagnostics(OrbitPredictionDerivedDiagnostics *diagnostics,
+                                           const OrbitPredictionCache &cache,
+                                           const PredictionDerivedStatus status)
+    {
+        update_derived_diagnostics(diagnostics, cache.display, status);
     }
 
     inline void accumulate_stage_diagnostics(OrbitPredictionService::AdaptiveStageDiagnostics &dst,
@@ -350,7 +363,26 @@ namespace Game::PredictionCacheInternal
             const CancelCheck &cancel_requested = {});
 
     bool rebuild_prediction_frame_cache(
+            const PredictionSolverTrajectoryCache &solver,
+            PredictionDisplayFrameCache &display,
+            PredictionAnalysisCache &analysis,
+            const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
+            const std::vector<orbitsim::TrajectorySegment> &player_lookup_segments_inertial,
+            const CancelCheck &cancel_requested = {},
+            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr,
+            bool build_planned_render_curve = true);
+
+    bool rebuild_prediction_frame_cache(
             OrbitPredictionCache &cache,
+            const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
+            const std::vector<orbitsim::TrajectorySegment> &player_lookup_segments_inertial,
+            const CancelCheck &cancel_requested = {},
+            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr,
+            bool build_planned_render_curve = true);
+
+    bool rebuild_prediction_planned_frame_cache(
+            const PredictionSolverTrajectoryCache &solver,
+            PredictionDisplayFrameCache &display,
             const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
             const std::vector<orbitsim::TrajectorySegment> &player_lookup_segments_inertial,
             const CancelCheck &cancel_requested = {},
@@ -367,6 +399,19 @@ namespace Game::PredictionCacheInternal
 
     bool rebuild_prediction_streamed_chunk_assembly(
             PredictionChunkAssembly &out_assembly,
+            const PredictionSolverTrajectoryCache &solver,
+            const PredictionDisplayFrameCache &display,
+            const std::vector<OrbitPredictionService::StreamedPlannedChunk> &streamed_chunks,
+            uint64_t generation_id,
+            const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
+            const std::vector<orbitsim::TrajectorySegment> &player_lookup_segments_inertial,
+            const CancelCheck &cancel_requested = {},
+            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr,
+            bool build_chunk_render_curves = false,
+            bool use_dense_chunk_samples = true);
+
+    bool rebuild_prediction_streamed_chunk_assembly(
+            PredictionChunkAssembly &out_assembly,
             const OrbitPredictionCache &cache,
             const std::vector<OrbitPredictionService::StreamedPlannedChunk> &streamed_chunks,
             uint64_t generation_id,
@@ -380,10 +425,32 @@ namespace Game::PredictionCacheInternal
     void clear_prediction_metrics(OrbitPredictionCache &cache, orbitsim::BodyId analysis_body_id);
 
     void rebuild_prediction_metrics(
+            const PredictionSolverTrajectoryCache &solver,
+            const PredictionDisplayFrameCache &display,
+            PredictionAnalysisCache &analysis,
+            const orbitsim::GameSimulation::Config &sim_config,
+            orbitsim::BodyId analysis_body_id,
+            const CancelCheck &cancel_requested = {});
+
+    void rebuild_prediction_metrics(
             OrbitPredictionCache &cache,
             const orbitsim::GameSimulation::Config &sim_config,
             orbitsim::BodyId analysis_body_id,
             const CancelCheck &cancel_requested = {});
+
+    bool rebuild_prediction_patch_chunks(
+            PredictionChunkAssembly &out_assembly,
+            const PredictionDisplayFrameCache &display,
+            const std::vector<OrbitPredictionService::PublishedChunk> &published_chunks,
+            uint64_t generation_id,
+            const orbitsim::TrajectoryFrameSpec &resolved_frame_spec,
+            uint64_t display_frame_key,
+            uint64_t display_frame_revision,
+            const CancelCheck &cancel_requested = {},
+            const std::vector<double> &node_times_s = {},
+            OrbitPredictionDerivedDiagnostics *diagnostics = nullptr,
+            bool build_chunk_render_curves = false,
+            bool use_dense_chunk_samples = true);
 
     bool rebuild_prediction_patch_chunks(
             PredictionChunkAssembly &out_assembly,
@@ -398,6 +465,10 @@ namespace Game::PredictionCacheInternal
             OrbitPredictionDerivedDiagnostics *diagnostics = nullptr,
             bool build_chunk_render_curves = false,
             bool use_dense_chunk_samples = true);
+
+    void flatten_chunk_assembly_to_cache(PredictionDisplayFrameCache &display,
+                                         const PredictionChunkAssembly &assembly,
+                                         bool build_render_curve = true);
 
     void flatten_chunk_assembly_to_cache(OrbitPredictionCache &cache,
                                          const PredictionChunkAssembly &assembly,

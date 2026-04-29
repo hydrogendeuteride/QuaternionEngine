@@ -105,18 +105,18 @@ namespace
                                                      const double x1_m)
     {
         Game::OrbitPredictionCache cache{};
-        cache.valid = true;
-        cache.generation_id = generation_id;
-        cache.build_time_s = t0_s;
-        cache.trajectory_inertial = {
+        cache.identity.valid = true;
+        cache.identity.generation_id = generation_id;
+        cache.identity.build_time_s = t0_s;
+        cache.solver.trajectory_inertial = {
                 make_sample(t0_s, x0_m),
                 make_sample(t1_s, x1_m),
         };
-        cache.trajectory_segments_inertial = {
+        cache.solver.trajectory_segments_inertial = {
                 make_segment(t0_s, t1_s, x0_m, x1_m),
         };
-        cache.trajectory_frame = cache.trajectory_inertial;
-        cache.trajectory_segments_frame = cache.trajectory_segments_inertial;
+        cache.display.trajectory_frame = cache.solver.trajectory_inertial;
+        cache.display.trajectory_segments_frame = cache.solver.trajectory_segments_inertial;
         return cache;
     }
 

@@ -136,9 +136,9 @@ namespace Game
                 bool rebuilt_pick_cache = false;
                 if (base_pick_budget > 0 &&
                     Draw::should_rebuild_pick_cache(track.pick_cache,
-                                                    stable_cache.generation_id,
-                                                    stable_cache.display_frame_key,
-                                                    stable_cache.display_frame_revision,
+                                                    stable_cache.identity.generation_id,
+                                                    stable_cache.display.display_frame_key,
+                                                    stable_cache.display.display_frame_revision,
                                                     track_ctx.ref_body_world,
                                                     track_ctx.frame_to_world,
                                                     track_ctx.align_delta,
@@ -159,7 +159,7 @@ namespace Game
                     emitted = 0;
                     if (track_ctx.use_base_adaptive_curve)
                     {
-                        emitted = build_pick_curve_cache(stable_cache.render_curve_frame,
+                        emitted = build_pick_curve_cache(stable_cache.display.render_curve_frame,
                                                          track_ctx.base_pick_window.t0_s,
                                                          track_ctx.base_pick_window.t1_s,
                                                          track.pick_cache.base_segments,
@@ -188,9 +188,9 @@ namespace Game
                     if (emitted > 0)
                     {
                         Draw::mark_pick_cache_valid(track.pick_cache,
-                                                    stable_cache.generation_id,
-                                                    stable_cache.display_frame_key,
-                                                    stable_cache.display_frame_revision,
+                                                    stable_cache.identity.generation_id,
+                                                    stable_cache.display.display_frame_key,
+                                                    stable_cache.display.display_frame_revision,
                                                     track_ctx.ref_body_world,
                                                     track_ctx.frame_to_world,
                                                     track_ctx.align_delta,
@@ -250,7 +250,8 @@ namespace Game
             const PredictionChunkAssembly full_stream_assembly_snapshot =
                     PredictionRuntimeDetail::prediction_full_stream_overlay_snapshot_for_draw(
                             track,
-                            planned_cache,
+                            planned_cache.identity,
+                            planned_cache.display,
                             overlay_layers);
             const PredictionChunkAssembly *full_stream_assembly =
                     full_stream_assembly_snapshot.valid && !full_stream_assembly_snapshot.chunks.empty()
@@ -260,7 +261,7 @@ namespace Game
             const bool full_stream_overlay_active = full_stream_assembly && !full_stream_assembly->chunks.empty();
             const bool planned_cache_pickable =
                     track_ctx.planned_cache_current &&
-                    planned_cache.has_planned_frame_draw_data();
+                    planned_cache.display.has_planned_draw_data();
             const auto assembly_has_pick_curve = [](const PredictionChunkAssembly &assembly) {
                 return std::any_of(assembly.chunks.begin(),
                                    assembly.chunks.end(),
@@ -273,9 +274,9 @@ namespace Game
                                (full_stream_overlay_active && assembly_has_pick_curve(*full_stream_assembly)))
                             : track_ctx.use_planned_adaptive_curve;
             const bool rebuild_cache = Draw::should_rebuild_pick_cache(track.pick_cache,
-                                                                       planned_cache.generation_id,
-                                                                       planned_cache.display_frame_key,
-                                                                       planned_cache.display_frame_revision,
+                                                                       planned_cache.identity.generation_id,
+                                                                       planned_cache.display.display_frame_key,
+                                                                       planned_cache.display.display_frame_revision,
                                                                        track_ctx.ref_body_world,
                                                                        track_ctx.frame_to_world,
                                                                        track_ctx.align_delta,
@@ -486,10 +487,11 @@ namespace Game
                                 break;
                             }
 
-                            if (track_ctx.direct_world_polyline && !planned_cache.trajectory_frame_planned.empty())
+                            if (track_ctx.direct_world_polyline &&
+                                !planned_cache.display.trajectory_frame_planned.empty())
                             {
                                 std::vector<PickingSystem::LinePickSegmentData> fallback_segments;
-                                build_pick_polyline_segments(planned_cache.trajectory_frame_planned,
+                                build_pick_polyline_segments(planned_cache.display.trajectory_frame_planned,
                                                              range_t0_s,
                                                              range_t1_s,
                                                              budget_left,
@@ -505,8 +507,8 @@ namespace Game
                                 pick_settings.max_segments = std::max<std::size_t>(1, budget_left);
                                 const std::vector<orbitsim::TrajectorySegment> &pick_planned_segments =
                                         track_ctx.identity_frame_transform
-                                                ? planned_cache.trajectory_segments_frame_planned
-                                                : Draw::planned_segments_world_basis(track_ctx, planned_cache);
+                                                ? planned_cache.display.trajectory_segments_frame_planned
+                                                : Draw::planned_segments_world_basis(track_ctx, planned_cache.display);
                                 Draw::build_pick_segment_cache(pick_planned_segments,
                                                                track_ctx.ref_body_world,
                                                                track_ctx.frame_to_world,
@@ -528,10 +530,10 @@ namespace Game
                     }
                 }
                 else if (planned_cache_pickable &&
-                         track_ctx.direct_world_polyline &&
-                         !planned_cache.trajectory_frame_planned.empty())
+                          track_ctx.direct_world_polyline &&
+                          !planned_cache.display.trajectory_frame_planned.empty())
                 {
-                    build_pick_polyline_segments(planned_cache.trajectory_frame_planned,
+                    build_pick_polyline_segments(planned_cache.display.trajectory_frame_planned,
                                                  track_ctx.planned_pick_window.t0_s,
                                                  track_ctx.planned_pick_window.t1_s,
                                                  remaining_pick_budget,
@@ -540,7 +542,7 @@ namespace Game
                 else if (planned_cache_pickable && planned_pick_uses_adaptive_curve)
                 {
                     bool cap_hit = false;
-                    build_pick_curve_cache(planned_cache.render_curve_frame_planned,
+                    build_pick_curve_cache(planned_cache.display.render_curve_frame_planned,
                                            track_ctx.planned_pick_window.t0_s,
                                            track_ctx.planned_pick_window.t1_s,
                                            track.pick_cache.planned_segments,
@@ -552,8 +554,8 @@ namespace Game
                     pick_settings.max_segments = std::max<std::size_t>(1, remaining_pick_budget);
                     const std::vector<orbitsim::TrajectorySegment> &pick_planned_segments =
                             track_ctx.identity_frame_transform
-                                    ? planned_cache.trajectory_segments_frame_planned
-                                    : Draw::planned_segments_world_basis(track_ctx, planned_cache);
+                                    ? planned_cache.display.trajectory_segments_frame_planned
+                                    : Draw::planned_segments_world_basis(track_ctx, planned_cache.display);
                     Draw::build_pick_segment_cache(pick_planned_segments,
                                                    track_ctx.ref_body_world,
                                                    track_ctx.frame_to_world,
@@ -572,9 +574,9 @@ namespace Game
                 if (!track.pick_cache.planned_segments.empty())
                 {
                     Draw::mark_pick_cache_valid(track.pick_cache,
-                                                planned_cache.generation_id,
-                                                planned_cache.display_frame_key,
-                                                planned_cache.display_frame_revision,
+                                                planned_cache.identity.generation_id,
+                                                planned_cache.display.display_frame_key,
+                                                planned_cache.display.display_frame_revision,
                                                 track_ctx.ref_body_world,
                                                 track_ctx.frame_to_world,
                                                 track_ctx.align_delta,

@@ -95,12 +95,12 @@ namespace Game::PredictionRuntimeDetail
 
     inline uint64_t visible_generation_id(const PredictionTrackState &track)
     {
-        return track.cache.valid ? track.cache.generation_id : 0u;
+        return track.cache.identity.valid ? track.cache.identity.generation_id : 0u;
     }
 
     inline uint64_t authoritative_generation_id(const PredictionTrackState &track)
     {
-        return track.authoritative_cache.valid ? track.authoritative_cache.generation_id : 0u;
+        return track.authoritative_cache.identity.valid ? track.authoritative_cache.identity.generation_id : 0u;
     }
 
     inline bool latest_solver_generation_published(const PredictionTrackState &track)
@@ -117,8 +117,8 @@ namespace Game::PredictionRuntimeDetail
     {
         PredictionTrackLifecycleSnapshot out{};
         out.preview_state = track.preview_state;
-        out.visible_cache_valid = track.cache.valid;
-        out.authoritative_cache_valid = track.authoritative_cache.valid;
+        out.visible_cache_valid = track.cache.identity.valid;
+        out.authoritative_cache_valid = track.authoritative_cache.identity.valid;
         out.preview_overlay_active = prediction_chunk_assembly_active(track.preview_overlay.chunk_assembly);
         out.full_stream_overlay_active = prediction_chunk_assembly_active(track.full_stream_overlay.chunk_assembly);
         out.dirty = track.dirty;
@@ -323,13 +323,14 @@ namespace Game::PredictionRuntimeDetail
 
     inline PredictionChunkAssembly prediction_full_stream_overlay_snapshot_for_draw(
             const PredictionTrackState &track,
-            const OrbitPredictionCache &planned_cache,
+            const PredictionCacheIdentity &planned_identity,
+            const PredictionDisplayFrameCache &planned_display,
             const PredictionOverlayLayerState &layers)
     {
         return layers.full_stream_overlay_draw_active &&
-                       track.full_stream_overlay.ready_for_draw(planned_cache.generation_id,
-                                                                planned_cache.display_frame_key,
-                                                                planned_cache.display_frame_revision)
+                       track.full_stream_overlay.ready_for_draw(planned_identity.generation_id,
+                                                                 planned_display.display_frame_key,
+                                                                 planned_display.display_frame_revision)
                        ? track.full_stream_overlay.chunk_assembly
                        : PredictionChunkAssembly{};
     }

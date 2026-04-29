@@ -138,11 +138,8 @@ namespace Game
         OrbitPredictionService::AdaptiveStageDiagnostics frame_planned{};
     };
 
-    struct OrbitPredictionCache
+    struct PredictionCacheIdentity
     {
-        using ManeuverNodePreview = OrbitPredictionService::ManeuverNodePreview;
-        using SharedSolverCoreData = OrbitPredictionService::Result::SharedCoreData;
-
         bool valid{false};
         uint64_t generation_id{0};
         uint64_t maneuver_plan_revision{0};
@@ -151,6 +148,30 @@ namespace Game
         double build_time_s{0.0};
         WorldVec3 build_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 build_vel_world{0.0, 0.0, 0.0};
+
+        void clear()
+        {
+            valid = false;
+            generation_id = 0;
+            maneuver_plan_revision = 0;
+            clear_maneuver_plan_signature();
+            build_time_s = 0.0;
+            build_pos_world = WorldVec3(0.0, 0.0, 0.0);
+            build_vel_world = glm::dvec3(0.0, 0.0, 0.0);
+        }
+
+        void clear_maneuver_plan_signature()
+        {
+            maneuver_plan_signature_valid = false;
+            maneuver_plan_signature = 0;
+        }
+    };
+
+    struct PredictionSolverTrajectoryCache
+    {
+        using ManeuverNodePreview = OrbitPredictionService::ManeuverNodePreview;
+        using SharedSolverCoreData = OrbitPredictionService::Result::SharedCoreData;
+
         SharedSolverCoreData shared_solver_core_data{};
         OrbitPredictionService::SharedCelestialEphemeris shared_ephemeris{};
         std::vector<orbitsim::MassiveBody> massive_bodies;
@@ -160,35 +181,31 @@ namespace Game
         std::vector<orbitsim::TrajectorySample> trajectory_inertial_planned;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial;
         std::vector<orbitsim::TrajectorySegment> trajectory_segments_inertial_planned;
-
-        // Derived display-frame data rebuilt locally when the selected display frame changes.
-        std::vector<orbitsim::TrajectorySample> trajectory_frame;
-        std::vector<orbitsim::TrajectorySample> trajectory_frame_planned;
-        std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame;
-        std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame_planned;
-        std::vector<orbitsim::TrajectorySample> trajectory_analysis_bci;
-        std::vector<orbitsim::TrajectorySegment> trajectory_segments_analysis_bci;
-        OrbitRenderCurve render_curve_frame;
-        OrbitRenderCurve render_curve_frame_planned;
-        orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
-        uint64_t display_frame_key{0};
-        uint64_t display_frame_revision{0};
-        bool resolved_frame_spec_valid{false};
-        orbitsim::BodyId analysis_cache_body_id{orbitsim::kInvalidBodyId};
-        bool analysis_cache_valid{false};
         std::vector<ManeuverNodePreview> maneuver_previews;
 
-        std::vector<float> altitude_km;
-        std::vector<float> speed_kmps;
+        void clear()
+        {
+            shared_solver_core_data.reset();
+            shared_ephemeris.reset();
+            massive_bodies.clear();
+            trajectory_inertial.clear();
+            trajectory_segments_inertial.clear();
+            clear_planned();
+        }
 
-        // Classical orbital-element-like values for HUD.
-        double semi_major_axis_m{0.0};
-        double eccentricity{0.0};
-        double orbital_period_s{0.0};
-        double periapsis_alt_km{0.0};
-        double apoapsis_alt_km{std::numeric_limits<double>::infinity()};
-        orbitsim::BodyId metrics_body_id{orbitsim::kInvalidBodyId};
-        bool metrics_valid{false};
+        void clear_planned()
+        {
+            trajectory_inertial_planned.clear();
+            trajectory_segments_inertial_planned.clear();
+            maneuver_previews.clear();
+        }
+
+        void copy_planned_from(const PredictionSolverTrajectoryCache &src)
+        {
+            trajectory_inertial_planned = src.trajectory_inertial_planned;
+            trajectory_segments_inertial_planned = src.trajectory_segments_inertial_planned;
+            maneuver_previews = src.maneuver_previews;
+        }
 
         void set_shared_solver_core_data(SharedSolverCoreData core_data)
         {
@@ -219,47 +236,85 @@ namespace Game
             return shared_solver_core_data ? shared_solver_core_data->trajectory_segments_inertial
                                            : trajectory_segments_inertial;
         }
+    };
 
-        [[nodiscard]] bool has_planned_frame_draw_data() const
+    struct PredictionDisplayFrameCache
+    {
+        std::vector<orbitsim::TrajectorySample> trajectory_frame;
+        std::vector<orbitsim::TrajectorySample> trajectory_frame_planned;
+        std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame;
+        std::vector<orbitsim::TrajectorySegment> trajectory_segments_frame_planned;
+        OrbitRenderCurve render_curve_frame;
+        OrbitRenderCurve render_curve_frame_planned;
+        orbitsim::TrajectoryFrameSpec resolved_frame_spec{};
+        uint64_t display_frame_key{0};
+        uint64_t display_frame_revision{0};
+        bool resolved_frame_spec_valid{false};
+
+        void clear()
+        {
+            trajectory_frame.clear();
+            trajectory_segments_frame.clear();
+            render_curve_frame.clear();
+            clear_planned();
+            resolved_frame_spec = {};
+            display_frame_key = 0;
+            display_frame_revision = 0;
+            resolved_frame_spec_valid = false;
+        }
+
+        void clear_planned()
+        {
+            trajectory_frame_planned.clear();
+            trajectory_segments_frame_planned.clear();
+            render_curve_frame_planned.clear();
+        }
+
+        void copy_planned_from(const PredictionDisplayFrameCache &src)
+        {
+            trajectory_frame_planned = src.trajectory_frame_planned;
+            trajectory_segments_frame_planned = src.trajectory_segments_frame_planned;
+            render_curve_frame_planned = src.render_curve_frame_planned;
+        }
+
+        [[nodiscard]] bool has_planned_draw_data() const
         {
             return trajectory_frame_planned.size() >= 2 ||
                    !trajectory_segments_frame_planned.empty() ||
                    !render_curve_frame_planned.empty();
         }
+    };
 
-        // Reset every cached prediction artifact so the next update rebuilds from scratch.
+    struct PredictionAnalysisCache
+    {
+        std::vector<orbitsim::TrajectorySample> trajectory_analysis_bci;
+        std::vector<orbitsim::TrajectorySegment> trajectory_segments_analysis_bci;
+        orbitsim::BodyId analysis_cache_body_id{orbitsim::kInvalidBodyId};
+        bool analysis_cache_valid{false};
+
+        std::vector<float> altitude_km;
+        std::vector<float> speed_kmps;
+
+        // Classical orbital-element-like values for HUD.
+        double semi_major_axis_m{0.0};
+        double eccentricity{0.0};
+        double orbital_period_s{0.0};
+        double periapsis_alt_km{0.0};
+        double apoapsis_alt_km{std::numeric_limits<double>::infinity()};
+        orbitsim::BodyId metrics_body_id{orbitsim::kInvalidBodyId};
+        bool metrics_valid{false};
+
         void clear()
         {
-            valid = false;
-            generation_id = 0;
-            maneuver_plan_revision = 0;
-            maneuver_plan_signature_valid = false;
-            maneuver_plan_signature = 0;
-            build_time_s = 0.0;
-            build_pos_world = WorldVec3(0.0, 0.0, 0.0);
-            build_vel_world = glm::dvec3(0.0, 0.0, 0.0);
-            shared_solver_core_data.reset();
-            shared_ephemeris.reset();
-            massive_bodies.clear();
-            trajectory_inertial.clear();
-            trajectory_inertial_planned.clear();
-            trajectory_segments_inertial.clear();
-            trajectory_segments_inertial_planned.clear();
-            trajectory_frame.clear();
-            trajectory_frame_planned.clear();
-            trajectory_segments_frame.clear();
-            trajectory_segments_frame_planned.clear();
             trajectory_analysis_bci.clear();
             trajectory_segments_analysis_bci.clear();
-            render_curve_frame.clear();
-            render_curve_frame_planned.clear();
-            resolved_frame_spec = {};
-            display_frame_key = 0;
-            display_frame_revision = 0;
-            resolved_frame_spec_valid = false;
             analysis_cache_body_id = orbitsim::kInvalidBodyId;
             analysis_cache_valid = false;
-            maneuver_previews.clear();
+            clear_metrics(orbitsim::kInvalidBodyId, false);
+        }
+
+        void clear_metrics(const orbitsim::BodyId body_id, const bool valid_after_clear = true)
+        {
             altitude_km.clear();
             speed_kmps.clear();
             semi_major_axis_m = 0.0;
@@ -267,33 +322,113 @@ namespace Game
             orbital_period_s = 0.0;
             periapsis_alt_km = 0.0;
             apoapsis_alt_km = std::numeric_limits<double>::infinity();
-            metrics_body_id = orbitsim::kInvalidBodyId;
-            metrics_valid = false;
+            metrics_body_id = body_id;
+            metrics_valid = valid_after_clear;
+        }
+    };
+
+    struct OrbitPredictionCache
+    {
+        PredictionCacheIdentity identity{};
+        PredictionSolverTrajectoryCache solver{};
+        PredictionDisplayFrameCache display{};
+        PredictionAnalysisCache analysis{};
+
+        OrbitPredictionCache() = default;
+
+        OrbitPredictionCache(const OrbitPredictionCache &other)
+            : identity(other.identity),
+              solver(other.solver),
+              display(other.display),
+              analysis(other.analysis)
+        {
+        }
+
+        OrbitPredictionCache(OrbitPredictionCache &&other) noexcept
+            : identity(std::move(other.identity)),
+              solver(std::move(other.solver)),
+              display(std::move(other.display)),
+              analysis(std::move(other.analysis))
+        {
+        }
+
+        OrbitPredictionCache &operator=(const OrbitPredictionCache &other)
+        {
+            if (this != &other)
+            {
+                identity = other.identity;
+                solver = other.solver;
+                display = other.display;
+                analysis = other.analysis;
+            }
+            return *this;
+        }
+
+        OrbitPredictionCache &operator=(OrbitPredictionCache &&other) noexcept
+        {
+            if (this != &other)
+            {
+                identity = std::move(other.identity);
+                solver = std::move(other.solver);
+                display = std::move(other.display);
+                analysis = std::move(other.analysis);
+            }
+            return *this;
+        }
+
+        void set_shared_solver_core_data(PredictionSolverTrajectoryCache::SharedSolverCoreData core_data)
+        {
+            solver.set_shared_solver_core_data(std::move(core_data));
+        }
+
+        [[nodiscard]] const OrbitPredictionService::SharedCelestialEphemeris &resolved_shared_ephemeris() const
+        {
+            return solver.resolved_shared_ephemeris();
+        }
+
+        [[nodiscard]] const std::vector<orbitsim::MassiveBody> &resolved_massive_bodies() const
+        {
+            return solver.resolved_massive_bodies();
+        }
+
+        [[nodiscard]] const std::vector<orbitsim::TrajectorySample> &resolved_trajectory_inertial() const
+        {
+            return solver.resolved_trajectory_inertial();
+        }
+
+        [[nodiscard]] const std::vector<orbitsim::TrajectorySegment> &resolved_trajectory_segments_inertial() const
+        {
+            return solver.resolved_trajectory_segments_inertial();
+        }
+
+        [[nodiscard]] bool has_planned_frame_draw_data() const
+        {
+            return display.has_planned_draw_data();
+        }
+
+        // Reset every cached prediction artifact so the next update rebuilds from scratch.
+        void clear()
+        {
+            identity.clear();
+            solver.clear();
+            display.clear();
+            analysis.clear();
         }
     };
 
     inline void clear_prediction_cache_planned_data(OrbitPredictionCache &cache)
     {
-        cache.trajectory_inertial_planned.clear();
-        cache.trajectory_segments_inertial_planned.clear();
-        cache.trajectory_frame_planned.clear();
-        cache.trajectory_segments_frame_planned.clear();
-        cache.render_curve_frame_planned.clear();
-        cache.maneuver_previews.clear();
-        cache.maneuver_plan_signature_valid = false;
-        cache.maneuver_plan_signature = 0;
+        cache.solver.clear_planned();
+        cache.display.clear_planned();
+        cache.identity.clear_maneuver_plan_signature();
     }
 
     inline void copy_prediction_cache_planned_data(OrbitPredictionCache &dst, const OrbitPredictionCache &src)
     {
-        dst.trajectory_inertial_planned = src.trajectory_inertial_planned;
-        dst.trajectory_segments_inertial_planned = src.trajectory_segments_inertial_planned;
-        dst.trajectory_frame_planned = src.trajectory_frame_planned;
-        dst.trajectory_segments_frame_planned = src.trajectory_segments_frame_planned;
-        dst.render_curve_frame_planned = src.render_curve_frame_planned;
-        dst.maneuver_previews = src.maneuver_previews;
-        dst.maneuver_plan_signature_valid = src.maneuver_plan_signature_valid;
-        dst.maneuver_plan_signature = src.maneuver_plan_signature;
+        dst.solver.copy_planned_from(src.solver);
+        dst.display.copy_planned_from(src.display);
+        dst.identity.maneuver_plan_signature_valid = src.identity.maneuver_plan_signature_valid;
+        dst.identity.maneuver_plan_signature = src.identity.maneuver_plan_signature;
     }
 
     struct OrbitChunk

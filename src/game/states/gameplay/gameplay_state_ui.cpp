@@ -639,33 +639,39 @@ namespace Game
                     }
                     else
                     {
-                        if (active_prediction && active_prediction->cache.valid)
+                        if (active_prediction && active_prediction->cache.identity.valid)
                         {
-                            if (!active_prediction->cache.altitude_km.empty())
+                            if (!active_prediction->cache.analysis.altitude_km.empty())
                             {
-                                ImGui::Text("Altitude: %.0f m", static_cast<double>(active_prediction->cache.altitude_km.front()) * 1000.0);
+                                ImGui::Text("Altitude: %.0f m",
+                                            static_cast<double>(active_prediction->cache.analysis.altitude_km.front()) *
+                                                    1000.0);
                             }
-                            if (!active_prediction->cache.speed_kmps.empty())
+                            if (!active_prediction->cache.analysis.speed_kmps.empty())
                             {
-                                ImGui::Text("Speed:    %.3f km/s", static_cast<double>(active_prediction->cache.speed_kmps.front()));
+                                ImGui::Text("Speed:    %.3f km/s",
+                                            static_cast<double>(active_prediction->cache.analysis.speed_kmps.front()));
                             }
 
                             if (!active_prediction->is_celestial)
                             {
-                                ImGui::Text("Predicted Pe: %.1f km", active_prediction->cache.periapsis_alt_km);
-                                if (std::isfinite(active_prediction->cache.apoapsis_alt_km))
+                                ImGui::Text("Predicted Pe: %.1f km",
+                                            active_prediction->cache.analysis.periapsis_alt_km);
+                                if (std::isfinite(active_prediction->cache.analysis.apoapsis_alt_km))
                                 {
-                                    ImGui::Text("Predicted Ap: %.1f km", active_prediction->cache.apoapsis_alt_km);
+                                    ImGui::Text("Predicted Ap: %.1f km",
+                                                active_prediction->cache.analysis.apoapsis_alt_km);
                                 }
                                 else
                                 {
                                     ImGui::TextUnformatted("Predicted Ap: escape");
                                 }
 
-                                if (active_prediction->cache.orbital_period_s > 0.0 &&
-                                    std::isfinite(active_prediction->cache.orbital_period_s))
+                                if (active_prediction->cache.analysis.orbital_period_s > 0.0 &&
+                                    std::isfinite(active_prediction->cache.analysis.orbital_period_s))
                                 {
-                                    ImGui::Text("Predicted Period: %.2f min", active_prediction->cache.orbital_period_s / 60.0);
+                                    ImGui::Text("Predicted Period: %.2f min",
+                                                active_prediction->cache.analysis.orbital_period_s / 60.0);
                                 }
                             }
                         }
@@ -1093,16 +1099,17 @@ namespace Game
         const OrbitPlotSystem::Stats *plot_stats = orbit_plot ? &orbit_plot->stats() : nullptr;
 
         const orbitsim::TrajectoryFrameSpec frame_spec =
-                active_track->cache.resolved_frame_spec_valid
-                        ? active_track->cache.resolved_frame_spec
+                active_track->cache.display.resolved_frame_spec_valid
+                        ? active_track->cache.display.resolved_frame_spec
                         : _prediction_frame_selection.spec;
         const bool live_chunk_path_supported =
                 frame_spec.type != orbitsim::TrajectoryFrameType::Inertial &&
                 frame_spec.type != orbitsim::TrajectoryFrameType::LVLH;
         const bool have_sim_now = _orbitsim != nullptr;
         const double sim_now_s = have_sim_now ? _orbitsim->sim.time_s() : 0.0;
-        const bool have_build_time = active_track->cache.valid && have_sim_now;
-        const double sim_since_build_s = have_build_time ? std::max(0.0, sim_now_s - active_track->cache.build_time_s) : 0.0;
+        const bool have_build_time = active_track->cache.identity.valid && have_sim_now;
+        const double sim_since_build_s =
+                have_build_time ? std::max(0.0, sim_now_s - active_track->cache.identity.build_time_s) : 0.0;
         const double drag_gate_remaining_ms =
                 PredictionDragDebugTelemetry::has_time(debug.last_request_tp)
                         ? std::max(0.0,

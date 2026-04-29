@@ -206,9 +206,10 @@ namespace Game
         {
             const OrbitPredictionCache &cache = *player_cache;
             const auto &traj =
-                    cache.trajectory_inertial_planned.size() >= 2 ? cache.trajectory_inertial_planned
-                                                                  : cache.resolved_trajectory_inertial();
-            const auto &bodies = cache.resolved_massive_bodies();
+                    cache.solver.trajectory_inertial_planned.size() >= 2
+                            ? cache.solver.trajectory_inertial_planned
+                            : cache.solver.resolved_trajectory_inertial();
+            const auto &bodies = cache.solver.resolved_massive_bodies();
 
             orbitsim::State sc_state{};
             if (!traj.empty() &&
@@ -229,7 +230,7 @@ namespace Game
                 }
             }
 
-            if (!cache.resolved_trajectory_inertial().empty())
+            if (!cache.solver.resolved_trajectory_inertial().empty())
             {
                 const orbitsim::BodyId analysis_body_id =
                         resolve_prediction_analysis_body_id(cache, player_track->key, query_time_s, node.primary_body_id);

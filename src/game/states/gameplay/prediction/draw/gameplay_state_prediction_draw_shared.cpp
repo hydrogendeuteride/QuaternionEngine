@@ -34,24 +34,24 @@ namespace Game::PredictionDrawDetail
     }
 
     const std::vector<orbitsim::TrajectorySegment> &planned_segments_world_basis(PredictionTrackDrawContext &track_ctx,
-                                                                                 OrbitPredictionCache &cache)
+                                                                                 const PredictionDisplayFrameCache &display)
     {
         if (track_ctx.identity_frame_transform)
         {
-            return cache.trajectory_segments_frame_planned;
+            return display.trajectory_segments_frame_planned;
         }
 
         std::vector<orbitsim::TrajectorySegment> &world_basis_segments =
                 track_ctx.traj_stable_planned_segments_world_basis;
-        if (track_ctx.traj_planned_segments_world_basis_source != &cache)
+        if (track_ctx.traj_planned_segments_world_basis_source != &display)
         {
             world_basis_segments.clear();
-            track_ctx.traj_planned_segments_world_basis_source = &cache;
+            track_ctx.traj_planned_segments_world_basis_source = &display;
         }
-        if (world_basis_segments.empty() && !cache.trajectory_segments_frame_planned.empty())
+        if (world_basis_segments.empty() && !display.trajectory_segments_frame_planned.empty())
         {
             world_basis_segments =
-                    transform_segments_to_world_basis(cache.trajectory_segments_frame_planned, track_ctx.frame_to_world);
+                    transform_segments_to_world_basis(display.trajectory_segments_frame_planned, track_ctx.frame_to_world);
         }
         return world_basis_segments;
     }

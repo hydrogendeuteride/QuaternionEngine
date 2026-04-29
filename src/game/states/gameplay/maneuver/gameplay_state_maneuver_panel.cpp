@@ -125,7 +125,7 @@ namespace Game
 
             if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track))
             {
-                if (!player_cache->resolved_trajectory_inertial().empty())
+                if (!player_cache->solver.resolved_trajectory_inertial().empty())
                 {
                     return resolve_prediction_analysis_body_id(*player_cache,
                                                                player_track->key,
@@ -250,10 +250,10 @@ namespace Game
             const uint64_t current_plan_signature = has_plan ? current_maneuver_plan_signature() : 0u;
             const auto cache_has_ready_current_plan = [&](const OrbitPredictionCache &cache) {
                 return has_plan &&
-                       cache.valid &&
+                       cache.identity.valid &&
                        cache.has_planned_frame_draw_data() &&
-                       cache.maneuver_plan_signature_valid &&
-                       cache.maneuver_plan_signature == current_plan_signature;
+                       cache.identity.maneuver_plan_signature_valid &&
+                       cache.identity.maneuver_plan_signature == current_plan_signature;
             };
             const bool has_ready_plan =
                     cache_has_ready_current_plan(player_track->cache) ||
@@ -481,22 +481,22 @@ namespace Game
             }
 
             const OrbitPredictionCache *cache = player_prediction_cache();
-            if (!cache || !cache->valid)
+            if (!cache || !cache->identity.valid)
             {
                 return pick.worldPos;
             }
             const OrbitPredictionCache *stable_cache =
-                    (player_track && player_track->cache.valid) ? &player_track->cache : cache;
+                    (player_track && player_track->cache.identity.valid) ? &player_track->cache : cache;
 
             const bool is_planned = (pick.ownerName == "OrbitPlot/Planned");
             const double display_time_s = current_sim_time_s();
             const auto &traj = is_planned
-                                   ? (cache->trajectory_frame_planned.size() >= 2
-                                              ? cache->trajectory_frame_planned
-                                              : (stable_cache && stable_cache->trajectory_frame_planned.size() >= 2
-                                                         ? stable_cache->trajectory_frame_planned
-                                                         : cache->trajectory_frame))
-                                   : cache->trajectory_frame;
+                                   ? (cache->display.trajectory_frame_planned.size() >= 2
+                                              ? cache->display.trajectory_frame_planned
+                                              : (stable_cache && stable_cache->display.trajectory_frame_planned.size() >= 2
+                                                         ? stable_cache->display.trajectory_frame_planned
+                                                         : cache->display.trajectory_frame))
+                                   : cache->display.trajectory_frame;
             if (traj.size() < 2)
             {
                 return pick.worldPos;
@@ -523,7 +523,7 @@ namespace Game
                                 : prediction_sample_position_world(*cache, traj.front(), display_time_s);
 
             // Apply the same ship-to-prediction alignment delta used by the gizmo runtime cache.
-            pos += compute_maneuver_align_delta(ctx, *cache, cache->trajectory_frame);
+            pos += compute_maneuver_align_delta(ctx, *cache, cache->display.trajectory_frame);
 
             return pos;
         };

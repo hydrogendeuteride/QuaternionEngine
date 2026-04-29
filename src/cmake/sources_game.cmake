@@ -84,6 +84,14 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/prediction/gameplay_state_prediction_types.h
   game/states/gameplay/prediction/gameplay_prediction_cache_internal.h
   game/states/gameplay/prediction/gameplay_prediction_cache_internal.cpp
+  game/states/gameplay/prediction/prediction_trajectory_sampler.h
+  game/states/gameplay/prediction/prediction_trajectory_sampler.cpp
+  game/states/gameplay/prediction/prediction_frame_cache_builder.h
+  game/states/gameplay/prediction/prediction_frame_cache_builder.cpp
+  game/states/gameplay/prediction/prediction_metrics_builder.h
+  game/states/gameplay/prediction/prediction_metrics_builder.cpp
+  game/states/gameplay/prediction/streamed_chunk_assembly_builder.h
+  game/states/gameplay/prediction/streamed_chunk_assembly_builder.cpp
   game/states/gameplay/prediction/gameplay_prediction_derived_service.h
   game/states/gameplay/prediction/gameplay_prediction_derived_service.cpp
   game/states/gameplay/prediction/gameplay_state_prediction.cpp

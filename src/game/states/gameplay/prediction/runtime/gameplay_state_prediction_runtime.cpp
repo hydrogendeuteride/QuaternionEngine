@@ -264,10 +264,10 @@ namespace Game
                 }
             };
 
-            accumulate_samples_end(cache.resolved_trajectory_inertial());
-            accumulate_segments_end(cache.resolved_trajectory_segments_inertial());
-            accumulate_samples_end(cache.trajectory_inertial_planned);
-            accumulate_segments_end(cache.trajectory_segments_inertial_planned);
+            accumulate_samples_end(cache.solver.resolved_trajectory_inertial());
+            accumulate_segments_end(cache.solver.resolved_trajectory_segments_inertial());
+            accumulate_samples_end(cache.solver.trajectory_inertial_planned);
+            accumulate_segments_end(cache.solver.trajectory_segments_inertial_planned);
             return cache_end_s;
         }
     } // namespace
@@ -683,10 +683,12 @@ namespace Game
             if (_prediction_draw_full_orbit)
             {
                 double orbit_visual_span_s = 0.0;
-                if (track && std::isfinite(track->cache.orbital_period_s) && track->cache.orbital_period_s > 0.0)
+                if (track &&
+                    std::isfinite(track->cache.analysis.orbital_period_s) &&
+                    track->cache.analysis.orbital_period_s > 0.0)
                 {
                     orbit_visual_span_s =
-                            track->cache.orbital_period_s * OrbitPredictionTuning::kFullOrbitDrawPeriodScale;
+                            track->cache.analysis.orbital_period_s * OrbitPredictionTuning::kFullOrbitDrawPeriodScale;
                 }
                 else if (std::isfinite(time_ctx.trajectory_t1_s) && time_ctx.trajectory_t1_s > visual_anchor.time_s)
                 {
@@ -737,13 +739,13 @@ namespace Game
 
         if (!rebuild && thrusting)
         {
-            const double dt_since_build_s = now_s - track.cache.build_time_s;
+            const double dt_since_build_s = now_s - track.cache.identity.build_time_s;
             rebuild = dt_since_build_s >= _prediction_thrust_refresh_s;
         }
 
         if (!rebuild && _prediction_periodic_refresh_s > 0.0)
         {
-            const double dt_since_build_s = now_s - track.cache.build_time_s;
+            const double dt_since_build_s = now_s - track.cache.identity.build_time_s;
             rebuild = dt_since_build_s >= _prediction_periodic_refresh_s;
         }
 
@@ -752,7 +754,7 @@ namespace Game
             rebuild = true;
         }
 
-        if (rebuild || !track.cache.valid || track.cache.resolved_trajectory_inertial().empty())
+        if (rebuild || !track.cache.identity.valid || track.cache.solver.resolved_trajectory_inertial().empty())
         {
             return rebuild;
         }

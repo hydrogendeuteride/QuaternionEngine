@@ -37,9 +37,9 @@ namespace Game
                                               const OrbitPredictionService::Result &result)
         {
             const std::vector<orbitsim::TrajectorySegment> &cache_segments =
-                    cache.resolved_trajectory_segments_inertial();
+                    cache.solver.resolved_trajectory_segments_inertial();
             const std::vector<orbitsim::TrajectorySample> &cache_samples =
-                    cache.resolved_trajectory_inertial();
+                    cache.solver.resolved_trajectory_inertial();
             const std::vector<orbitsim::TrajectorySegment> &result_segments =
                     result.resolved_trajectory_segments_inertial();
             const std::vector<orbitsim::TrajectorySample> &result_samples =
@@ -81,13 +81,13 @@ namespace Game
                                                  const orbitsim::TrajectoryFrameSpec &resolved_frame_spec)
         {
             return result.baseline_reused &&
-                   track.cache.valid &&
-                   track.cache.resolved_frame_spec_valid &&
+                   track.cache.identity.valid &&
+                   track.cache.display.resolved_frame_spec_valid &&
                    frame_supports_live_base_frame_reuse(resolved_frame_spec) &&
-                   frame_specs_match(track.cache.resolved_frame_spec, resolved_frame_spec) &&
-                   track.cache.resolved_shared_ephemeris() == result.resolved_shared_ephemeris() &&
-                   track.cache.trajectory_frame.size() >= 2 &&
-                   !track.cache.trajectory_segments_frame.empty() &&
+                   frame_specs_match(track.cache.display.resolved_frame_spec, resolved_frame_spec) &&
+                   track.cache.solver.resolved_shared_ephemeris() == result.resolved_shared_ephemeris() &&
+                   track.cache.display.trajectory_frame.size() >= 2 &&
+                   !track.cache.display.trajectory_segments_frame.empty() &&
                    base_trajectory_signature_matches(track.cache, result);
         }
 
@@ -255,17 +255,17 @@ namespace Game
         (void) get_prediction_subject_world_state(track->key, build_pos_world, build_vel_world, build_vel_local);
 
         OrbitPredictionCache resolve_cache{};
-        resolve_cache.build_time_s = result.build_time_s;
+        resolve_cache.identity.build_time_s = result.build_time_s;
         if (result.has_shared_core_data())
         {
             resolve_cache.set_shared_solver_core_data(result.shared_core_data());
         }
         else
         {
-            resolve_cache.shared_ephemeris = result.resolved_shared_ephemeris();
-            resolve_cache.massive_bodies = result.resolved_massive_bodies();
-            resolve_cache.trajectory_segments_inertial = result.resolved_trajectory_segments_inertial();
-            resolve_cache.trajectory_inertial = result.resolved_trajectory_inertial();
+            resolve_cache.solver.shared_ephemeris = result.resolved_shared_ephemeris();
+            resolve_cache.solver.massive_bodies = result.resolved_massive_bodies();
+            resolve_cache.solver.trajectory_segments_inertial = result.resolved_trajectory_segments_inertial();
+            resolve_cache.solver.trajectory_inertial = result.resolved_trajectory_inertial();
         }
         const double reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : result.build_time_s;
         const orbitsim::TrajectoryFrameSpec resolved_frame_spec =
@@ -297,13 +297,13 @@ namespace Game
         {
             if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track))
             {
-                if (!player_cache->trajectory_segments_inertial_planned.empty())
+                if (!player_cache->solver.trajectory_segments_inertial_planned.empty())
                 {
-                    player_lookup_segments = player_cache->trajectory_segments_inertial_planned;
+                    player_lookup_segments = player_cache->solver.trajectory_segments_inertial_planned;
                 }
-                else if (!player_cache->resolved_trajectory_segments_inertial().empty())
+                else if (!player_cache->solver.resolved_trajectory_segments_inertial().empty())
                 {
-                    player_lookup_segments = player_cache->resolved_trajectory_segments_inertial();
+                    player_lookup_segments = player_cache->solver.resolved_trajectory_segments_inertial();
                 }
             }
         }

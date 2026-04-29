@@ -60,28 +60,29 @@ namespace Game
         [[nodiscard]] bool planned_cache_frame_compatible(const OrbitPredictionCache &candidate,
                                                           const OrbitPredictionCache &reference)
         {
-            if (candidate.display_frame_key != reference.display_frame_key ||
-                candidate.display_frame_revision != reference.display_frame_revision)
+            if (candidate.display.display_frame_key != reference.display.display_frame_key ||
+                candidate.display.display_frame_revision != reference.display.display_frame_revision)
             {
                 return false;
             }
 
-            return !candidate.resolved_frame_spec_valid ||
-                   !reference.resolved_frame_spec_valid ||
-                   draw_frame_specs_compatible(candidate.resolved_frame_spec, reference.resolved_frame_spec);
+            return !candidate.display.resolved_frame_spec_valid ||
+                   !reference.display.resolved_frame_spec_valid ||
+                   draw_frame_specs_compatible(candidate.display.resolved_frame_spec,
+                                              reference.display.resolved_frame_spec);
         }
 
         [[nodiscard]] const OrbitPredictionCache *planned_window_source_cache(
                 const Draw::PredictionTrackDrawContext &ctx)
         {
             if (ctx.stale_planned_cache &&
-                ctx.planned_window_segments == &ctx.stale_planned_cache->trajectory_segments_frame_planned)
+                ctx.planned_window_segments == &ctx.stale_planned_cache->display.trajectory_segments_frame_planned)
             {
                 return ctx.stale_planned_cache;
             }
 
             if (ctx.stable_cache &&
-                ctx.planned_window_segments == &ctx.stable_cache->trajectory_segments_frame_planned)
+                ctx.planned_window_segments == &ctx.stable_cache->display.trajectory_segments_frame_planned)
             {
                 return ctx.stable_cache;
             }
@@ -107,9 +108,9 @@ namespace Game
         out.stable_cache = &track.cache;
         out.planned_cache = out.stable_cache;
 
-        out.traj_base = &out.stable_cache->trajectory_frame;
-        out.traj_planned = &out.planned_cache->trajectory_frame_planned;
-        out.display_cache = out.planned_cache->resolved_frame_spec_valid ? out.planned_cache : out.stable_cache;
+        out.traj_base = &out.stable_cache->display.trajectory_frame;
+        out.traj_planned = &out.planned_cache->display.trajectory_frame_planned;
+        out.display_cache = out.planned_cache->display.resolved_frame_spec_valid ? out.planned_cache : out.stable_cache;
 
         if (!build_prediction_display_transform(
                     *out.display_cache,
@@ -152,18 +153,18 @@ namespace Game
             }
         }
 
-        out.traj_base_segments = &out.stable_cache->trajectory_segments_frame;
+        out.traj_base_segments = &out.stable_cache->display.trajectory_segments_frame;
         if (out.traj_base_segments->empty())
         {
             return false;
         }
 
-        out.traj_planned_segments = &out.planned_cache->trajectory_segments_frame_planned;
+        out.traj_planned_segments = &out.planned_cache->display.trajectory_segments_frame_planned;
         out.planned_window_segments =
-                !out.stable_cache->trajectory_segments_frame_planned.empty()
-                        ? &out.stable_cache->trajectory_segments_frame_planned
-                        : (!out.planned_cache->trajectory_segments_frame_planned.empty()
-                                   ? &out.planned_cache->trajectory_segments_frame_planned
+                !out.stable_cache->display.trajectory_segments_frame_planned.empty()
+                        ? &out.stable_cache->display.trajectory_segments_frame_planned
+                        : (!out.planned_cache->display.trajectory_segments_frame_planned.empty()
+                                   ? &out.planned_cache->display.trajectory_segments_frame_planned
                                    : out.traj_planned_segments);
 
         out.is_active = track.key == _prediction_selection.active_subject;
@@ -188,12 +189,12 @@ namespace Game
         const bool planned_cache_current =
                 with_maneuver_live_preview &&
                 out.planned_cache &&
-                out.planned_cache->maneuver_plan_signature_valid &&
-                out.planned_cache->maneuver_plan_signature == current_maneuver_plan_signature();
+                out.planned_cache->identity.maneuver_plan_signature_valid &&
+                out.planned_cache->identity.maneuver_plan_signature == current_maneuver_plan_signature();
         out.planned_cache_current = planned_cache_current;
         out.planned_cache_drawable = planned_cache_current &&
-                                     out.planned_cache &&
-                                     out.planned_cache->has_planned_frame_draw_data();
+                                      out.planned_cache &&
+                                      out.planned_cache->display.has_planned_draw_data();
         if (!planned_cache_current || !out.planned_cache_drawable)
         {
             const auto resolve_stale_prefix_cutoff_s = [&]() {
@@ -237,29 +238,30 @@ namespace Game
             };
 
             const auto planned_cache_end_time_s = [](const OrbitPredictionCache &candidate) {
-                if (!candidate.trajectory_segments_frame_planned.empty())
+                if (!candidate.display.trajectory_segments_frame_planned.empty())
                 {
-                    const orbitsim::TrajectorySegment &last = candidate.trajectory_segments_frame_planned.back();
+                    const orbitsim::TrajectorySegment &last =
+                            candidate.display.trajectory_segments_frame_planned.back();
                     return last.t0_s + last.dt_s;
                 }
-                if (candidate.trajectory_frame_planned.size() >= 2)
+                if (candidate.display.trajectory_frame_planned.size() >= 2)
                 {
-                    return candidate.trajectory_frame_planned.back().t_s;
+                    return candidate.display.trajectory_frame_planned.back().t_s;
                 }
                 return std::numeric_limits<double>::quiet_NaN();
             };
 
             double stale_prefix_cutoff_s = resolve_stale_prefix_cutoff_s();
             const auto stale_candidate_drawable = [&](const OrbitPredictionCache &candidate) {
-                return candidate.valid &&
-                       candidate.has_planned_frame_draw_data() &&
+                return candidate.identity.valid &&
+                       candidate.display.has_planned_draw_data() &&
                        out.planned_cache &&
                        planned_cache_frame_compatible(candidate, *out.planned_cache);
             };
 
             OrbitPredictionCache *stale_candidate = nullptr;
             if (out.active_player_track &&
-                track.authoritative_cache.valid &&
+                track.authoritative_cache.identity.valid &&
                 stale_candidate_drawable(track.authoritative_cache))
             {
                 stale_candidate = &track.authoritative_cache;
@@ -288,9 +290,10 @@ namespace Game
                 out.stale_planned_cache = stale_candidate;
                 out.stale_planned_cache_drawable = keep_stale_planned_visible;
                 out.stale_planned_cache_prefix_cutoff_s = stale_prefix_cutoff_s;
-                if (!out.stale_planned_cache->trajectory_segments_frame_planned.empty())
+                if (!out.stale_planned_cache->display.trajectory_segments_frame_planned.empty())
                 {
-                    out.planned_window_segments = &out.stale_planned_cache->trajectory_segments_frame_planned;
+                    out.planned_window_segments =
+                            &out.stale_planned_cache->display.trajectory_segments_frame_planned;
                 }
             }
             else
@@ -324,8 +327,8 @@ namespace Game
                                                     out.ref_body_world,
                                                     out.frame_to_world);
         out.direct_world_polyline = Draw::frame_spec_uses_direct_world_polyline(
-                out.display_cache->resolved_frame_spec_valid ? out.display_cache->resolved_frame_spec
-                                                             : _prediction_frame_selection.spec);
+                out.display_cache->display.resolved_frame_spec_valid ? out.display_cache->display.resolved_frame_spec
+                                                                     : _prediction_frame_selection.spec);
 
         out.draw_ctx.orbit_plot = global_ctx.orbit_plot;
         out.draw_ctx.ref_body_world = out.ref_body_world;
@@ -344,16 +347,16 @@ namespace Game
                                                   : std::clamp(_prediction_line_overlay_boost, 0.0f, 1.0f);
 
         out.identity_frame_transform = Draw::frame_transform_is_identity(out.frame_to_world);
-        out.use_base_adaptive_curve = !out.stable_cache->render_curve_frame.empty();
+        out.use_base_adaptive_curve = !out.stable_cache->display.render_curve_frame.empty();
         const bool planned_preview_like = PredictionRuntimeDetail::prediction_track_planned_preview_like(lifecycle);
         const bool stale_planned_curve_drawable =
                 out.stale_planned_cache_drawable &&
                 out.stale_planned_cache &&
-                !out.stale_planned_cache->render_curve_frame_planned.empty();
+                !out.stale_planned_cache->display.render_curve_frame_planned.empty();
         const bool current_planned_curve_drawable =
                 out.planned_cache_drawable &&
                 out.planned_cache &&
-                !out.planned_cache->render_curve_frame_planned.empty();
+                !out.planned_cache->display.render_curve_frame_planned.empty();
         out.use_planned_adaptive_curve =
                 !out.maneuver_drag_active &&
                 (!planned_preview_like || stale_planned_curve_drawable) &&
