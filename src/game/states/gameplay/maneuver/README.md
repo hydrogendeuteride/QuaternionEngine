@@ -28,8 +28,11 @@ This folder contains the maneuver-node editor used by `GameplayState`.
 - `maneuver_plan_model.*`, `maneuver_commands.*`, `maneuver_controller.*`
   Plan mutation boundary. UI and gizmo code create commands, the controller applies them to `ManeuverPlanState`, and the returned result drives prediction dirty/artifact cleanup from `GameplayState`.
 
+- `maneuver_runtime_cache_builder.*`
+  Per-frame runtime cache builder. Rebuilds all derived node state (world positions, RTN/PON bases, burn direction, gizmo validity) from prediction data without including `GameplayState`.
+
 - `gameplay_state_maneuver_nodes_cache.cpp`
-  Per-frame runtime cache rebuild: `refresh_maneuver_node_runtime_cache()` and its internal helpers. Rebuilds all derived node state (world positions, RTN/PON bases, burn direction, gizmo validity) from prediction data. Contains shared sampling helpers as templates (`sample_traj_world_at`, `sample_chunk_world_at`, `sample_tangent_world_from`).
+  Thin adapter for `refresh_maneuver_node_runtime_cache()`. Gathers the active prediction cache, stable fallback cache, display time, frame resolver context, alignment delta, and primary-body callback before delegating to `ManeuverRuntimeCacheBuilder`.
 
 - `gameplay_state_maneuver_panel.cpp`
   ImGui panel UI -- the "Maneuver Nodes" window, timeline bar, node list, node detail editor, and buttons like `+Node`, `Warp to Node`, and `Execute`.
@@ -102,8 +105,8 @@ Relevant call sites are currently in:
 - Core node logic like primary-body resolution or node removal:
   Start in `gameplay_state_maneuver_nodes.cpp`.
 
-- Runtime cache rebuild, trajectory/chunk sampling, or per-frame derived state:
-  Start in `gameplay_state_maneuver_nodes_cache.cpp`.
+- Runtime cache rebuild, trajectory sampling, or per-frame derived state:
+  Start in `maneuver_runtime_cache_builder.*`.
 
 ## Notes About Structure
 

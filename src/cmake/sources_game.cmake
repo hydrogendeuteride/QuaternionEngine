@@ -101,6 +101,7 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/prediction/gameplay_state_prediction.cpp
   game/states/gameplay/prediction/gameplay_state_prediction_frames.cpp
   game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h
+  game/states/gameplay/prediction/runtime/prediction_track_lifecycle.h
   game/states/gameplay/prediction/runtime/prediction_runtime_context.h
   game/states/gameplay/prediction/runtime/prediction_request_factory.h
   game/states/gameplay/prediction/runtime/prediction_request_factory.cpp
@@ -133,6 +134,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/maneuver/maneuver_commands.cpp
   game/states/gameplay/maneuver/maneuver_controller.h
   game/states/gameplay/maneuver/maneuver_controller.cpp
+  game/states/gameplay/maneuver/maneuver_runtime_cache_builder.h
+  game/states/gameplay/maneuver/maneuver_runtime_cache_builder.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_nodes.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_nodes_cache.cpp

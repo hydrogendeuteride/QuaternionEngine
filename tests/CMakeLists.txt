@@ -259,6 +259,7 @@ add_executable(gameplay_prediction_maneuver_tests
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/maneuver_plan_model.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/maneuver_commands.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/maneuver_controller.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/maneuver_runtime_cache_builder.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/gameplay_state_maneuver_nodes.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/gameplay_state_maneuver_nodes_cache.cpp"
   "${PROJECT_SOURCE_DIR}/src/core/util/logger.cpp"
