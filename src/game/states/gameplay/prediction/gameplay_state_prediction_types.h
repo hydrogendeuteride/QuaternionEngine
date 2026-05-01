@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/picking/picking_system.h"
+#include "core/picking/line_pick_segment.h"
 #include "core/world.h"
 #include "game/orbit/orbit_prediction_service.h"
 #include "game/orbit/orbit_render_curve.h"
@@ -537,8 +537,8 @@ namespace Game
         std::size_t planned_max_segments{0};
         bool base_use_adaptive_curve{false};
         bool planned_use_adaptive_curve{false};
-        std::vector<PickingSystem::LinePickSegmentData> base_segments;
-        std::vector<PickingSystem::LinePickSegmentData> planned_segments;
+        std::vector<Picking::LinePickSegmentData> base_segments;
+        std::vector<Picking::LinePickSegmentData> planned_segments;
 
         void clear()
         {

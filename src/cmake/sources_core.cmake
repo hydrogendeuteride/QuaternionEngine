@@ -21,6 +21,7 @@ list(APPEND VULKAN_ENGINE_SOURCES
   core/ui/imgui_system.cpp
 
   # core/picking
+  core/picking/line_pick_segment.h
   core/picking/picking_system.h
   core/picking/picking_system.cpp
 

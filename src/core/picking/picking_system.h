@@ -2,6 +2,7 @@
 
 #include <core/types.h>
 #include <core/input/input_system.h>
+#include <core/picking/line_pick_segment.h>
 #include <core/world.h>
 #include <core/device/resource.h>
 
@@ -170,13 +171,7 @@ public:
     OwnerBindingView resolve_owner_binding(RenderObject::OwnerType owner_type,
                                            const std::string &owner_name) const;
 
-    struct LinePickSegmentData
-    {
-        WorldVec3 a_world{0.0, 0.0, 0.0};
-        WorldVec3 b_world{0.0, 0.0, 0.0};
-        double a_time_s = std::numeric_limits<double>::quiet_NaN();
-        double b_time_s = std::numeric_limits<double>::quiet_NaN();
-    };
+    using LinePickSegmentData = Picking::LinePickSegmentData;
 
     // --------------------------------------------------------------------
     // Custom line/polyline pick registration (CPU-only)

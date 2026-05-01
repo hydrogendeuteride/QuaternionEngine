@@ -239,7 +239,12 @@ namespace Game
         const Camera &cam = ctx.renderer->_sceneManager->getMainCamera();
         out_view.camera_world = cam.position_world;
         out_view.world_to_cam = glm::transpose(glm::dmat3(cam.getRotationMatrix()));
-        out_view.letterbox_rect = letterbox_rect;
+        out_view.letterbox_rect = ManeuverViewportRect{
+            .x = letterbox_rect.offset.x,
+            .y = letterbox_rect.offset.y,
+            .width = letterbox_rect.extent.width,
+            .height = letterbox_rect.extent.height,
+        };
 
         out_view.logical_w = static_cast<double>(logical_extent.width);
         out_view.logical_h = static_cast<double>(logical_extent.height);
@@ -361,9 +366,9 @@ namespace Game
         }
 
         const double swap_x =
-                static_cast<double>(view.letterbox_rect.offset.x) + u * static_cast<double>(view.letterbox_rect.extent.width);
+                static_cast<double>(view.letterbox_rect.x) + u * static_cast<double>(view.letterbox_rect.width);
         const double swap_y =
-                static_cast<double>(view.letterbox_rect.offset.y) + v * static_cast<double>(view.letterbox_rect.extent.height);
+                static_cast<double>(view.letterbox_rect.y) + v * static_cast<double>(view.letterbox_rect.height);
 
         const double draw_x = swap_x * view.draw_from_swap_x;
         const double draw_y = swap_y * view.draw_from_swap_y;

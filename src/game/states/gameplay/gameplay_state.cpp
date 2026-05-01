@@ -51,8 +51,7 @@ namespace Game
         _scenario_io_status_ok = true;
         _settings_io_status.clear();
         _settings_io_status_ok = true;
-        _prediction.service.reset();
-        _prediction.derived_service.reset();
+        _prediction_system.reset_services();
         _prediction.tracks.clear();
         _prediction.groups.clear();
         _prediction.selection.clear();
@@ -144,8 +143,7 @@ namespace Game
         _prediction.frame_selection.clear();
         _prediction.analysis_selection.clear();
         _prediction.dirty = true;
-        _prediction.service.reset();
-        _prediction.derived_service.reset();
+        _prediction_system.reset_services();
         _prediction.orbit_plot_perf = {};
         _renderer = nullptr;
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)

@@ -6,6 +6,7 @@
 #include "game/states/gameplay/maneuver/maneuver_controller.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_types.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_state.h"
+#include "game/states/gameplay/prediction/prediction_system.h"
 #include "game/states/gameplay/prediction/prediction_frame_controller.h"
 #include "game/states/gameplay/prediction/prediction_frame_resolver.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
@@ -403,6 +404,7 @@ namespace Game
 
         // Orbit prediction (UI + debug draw)
         GameplayPredictionState _prediction{};
+        PredictionSystem _prediction_system{_prediction};
         ManeuverPlanHorizonSettings _maneuver_plan_horizon{};
         ManeuverPlanWindowSettings _maneuver_plan_windows{};
         OrbitPlotBudgetSettings _orbit_plot_budget{};

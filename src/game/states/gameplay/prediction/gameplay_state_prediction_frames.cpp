@@ -221,7 +221,7 @@ namespace Game
     PredictionFrameControllerContext GameplayState::build_prediction_frame_controller_context() const
     {
         PredictionFrameControllerContext context{};
-        context.derived_service = const_cast<OrbitPredictionDerivedService *>(&_prediction.derived_service);
+        context.derived_service = const_cast<OrbitPredictionDerivedService *>(&_prediction_system.derived_service());
         context.selection = _prediction.selection;
         context.display_frame_revision = _prediction.display_frame_revision;
         context.sim_config = _orbitsim ? _orbitsim->sim.config() : orbitsim::GameSimulation::Config{};
@@ -635,7 +635,7 @@ namespace Game
     {
         rebuild_prediction_frame_options();
         rebuild_prediction_analysis_options();
-        _prediction.derived_service.reset();
+        _prediction_system.reset_derived_service();
         for (PredictionTrackState &track : _prediction.tracks)
         {
             PredictionFrameController::reset_track_derived_state(track);

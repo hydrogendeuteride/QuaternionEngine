@@ -1,8 +1,9 @@
 #pragma once
 
-#include <core/types.h>
+#include <glm/vec2.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>

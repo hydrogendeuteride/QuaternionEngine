@@ -13,6 +13,7 @@ prediction/
   prediction_metrics_builder.h / .cpp            # orbital metrics/analysis cache rebuild entry point
   streamed_chunk_assembly_builder.h / .cpp       # streamed/published chunk assembly entry point
   gameplay_prediction_derived_service.h / .cpp   # background-threaded derived cache builder
+  prediction_system.h / .cpp                     # facade over runtime, invalidation, solver, and derived services
   gameplay_state_prediction.cpp                  # world-state resolution for prediction subjects
   gameplay_state_prediction_frames.cpp           # display-frame selection, frame rebuild, analysis spec
   draw/
@@ -59,6 +60,9 @@ prediction/
 
 - `gameplay_prediction_derived_service.h`
   `OrbitPredictionDerivedService` -- a background-threaded worker that takes solver results from `OrbitPredictionService` and builds display-frame caches (frame transforms, resampling, render curves, orbital metrics). Supports per-track generation-based staleness detection and request coalescing, similar to the solver service.
+
+- `prediction_system.h`
+  `PredictionSystem` -- a thin facade owned by `GameplayState` that keeps prediction runtime orchestration, invalidation, and solver/derived service access behind one boundary while `GameplayPredictionState` remains the compatibility state container.
 
 ### Implementation Files
 

@@ -1,7 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
-#include "game/states/gameplay/prediction/runtime/prediction_runtime_controller.h"
 
 namespace Game
 {
@@ -83,23 +82,21 @@ namespace Game
                                                          const bool with_maneuvers,
                                                          bool *out_throttled)
     {
-        return PredictionRuntimeController::request_orbiter_prediction_async(_prediction,
-                                                                            build_prediction_runtime_context(),
-                                                                            track,
-                                                                            subject_pos_world,
-                                                                            subject_vel_world,
-                                                                            now_s,
-                                                                            thrusting,
-                                                                            with_maneuvers,
-                                                                            out_throttled);
+        return _prediction_system.request_orbiter_prediction_async(build_prediction_runtime_context(),
+                                                                   track,
+                                                                   subject_pos_world,
+                                                                   subject_vel_world,
+                                                                   now_s,
+                                                                   thrusting,
+                                                                   with_maneuvers,
+                                                                   out_throttled);
     }
 
     bool GameplayState::request_celestial_prediction_async(PredictionTrackState &track, const double now_s)
     {
-        return PredictionRuntimeController::request_celestial_prediction_async(_prediction,
-                                                                              build_prediction_runtime_context(),
-                                                                              track,
-                                                                              now_s);
+        return _prediction_system.request_celestial_prediction_async(build_prediction_runtime_context(),
+                                                                     track,
+                                                                     now_s);
     }
 
     void GameplayState::update_orbiter_prediction_track(PredictionTrackState &track,
@@ -107,19 +104,17 @@ namespace Game
                                                         const bool thrusting,
                                                         const bool with_maneuvers)
     {
-        PredictionRuntimeController::update_orbiter_prediction_track(_prediction,
-                                                                    build_prediction_runtime_context(),
-                                                                    track,
-                                                                    now_s,
-                                                                    thrusting,
-                                                                    with_maneuvers);
+        _prediction_system.update_orbiter_prediction_track(build_prediction_runtime_context(),
+                                                           track,
+                                                           now_s,
+                                                           thrusting,
+                                                           with_maneuvers);
     }
 
     void GameplayState::update_celestial_prediction_track(PredictionTrackState &track, const double now_s)
     {
-        PredictionRuntimeController::update_celestial_prediction_track(_prediction,
-                                                                      build_prediction_runtime_context(),
-                                                                      track,
-                                                                      now_s);
+        _prediction_system.update_celestial_prediction_track(build_prediction_runtime_context(),
+                                                            track,
+                                                            now_s);
     }
 } // namespace Game

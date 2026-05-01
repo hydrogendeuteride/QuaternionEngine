@@ -1,12 +1,10 @@
 // gameplay_state_test_stubs.cpp
 //
 // Minimal stub implementations of GameplayState lifecycle methods, GameAPI::Engine
-// debug-draw overloads, and PickingSystem that are not compiled into this test target
-// but are required for linkage.
+// debug-draw overloads that are not compiled into this test target but are required for linkage.
 
 #include "game/states/gameplay/gameplay_state.h"
 #include "core/game_api.h"
-#include "core/picking/picking_system.h"
 #include "core/input/input_system.h"
 #include "game/component/ship_controller.h"
 #include "game/entity_manager.h"
@@ -20,6 +18,9 @@ namespace Game
 
     GameplayState::GameplayState()  = default;
     GameplayState::~GameplayState() = default;
+
+    OrbitPredictionDerivedService::OrbitPredictionDerivedService() = default;
+    OrbitPredictionDerivedService::~OrbitPredictionDerivedService() = default;
 
     void GameplayState::on_enter(GameStateContext &ctx) { (void) ctx; }
     void GameplayState::on_exit(GameStateContext &ctx) { (void) ctx; }
@@ -44,6 +45,32 @@ namespace Game
 
     void GameplayState::handle_time_warp_input(GameStateContext &ctx) { (void) ctx; }
 
+    Physics::BodyId GameplayState::create_orbiter_physics_body(const bool render_is_gltf,
+                                                               Entity &entity,
+                                                               const Physics::BodySettings &settings,
+                                                               const WorldVec3 &position_world,
+                                                               const glm::quat &rotation,
+                                                               glm::vec3 *out_origin_offset_local)
+    {
+        (void) render_is_gltf;
+        (void) entity;
+        (void) settings;
+        (void) position_world;
+        (void) rotation;
+        if (out_origin_offset_local)
+        {
+            *out_origin_offset_local = glm::vec3(0.0f);
+        }
+        return {};
+    }
+
+    bool GameplayState::destroy_orbiter_physics_body(const bool render_is_gltf, Entity &entity)
+    {
+        (void) render_is_gltf;
+        (void) entity;
+        return false;
+    }
+
     ComponentContext GameplayState::build_component_context(GameStateContext &ctx, float alpha)
     {
         ComponentContext comp_ctx{};
@@ -54,6 +81,18 @@ namespace Game
         comp_ctx.ui_capture_keyboard = false;
         comp_ctx.interpolation_alpha = alpha;
         return comp_ctx;
+    }
+
+    OrbiterInfo *GameplayState::find_player_orbiter()
+    {
+        for (auto &o : _orbiters)
+        {
+            if (o.is_player)
+            {
+                return &o;
+            }
+        }
+        return nullptr;
     }
 
     const OrbiterInfo *GameplayState::find_player_orbiter() const
@@ -72,6 +111,90 @@ namespace Game
     {
         const OrbiterInfo *p = find_player_orbiter();
         return p ? p->entity : EntityId{};
+    }
+
+    OrbiterInfo *GameplayState::find_orbiter(const EntityId entity)
+    {
+        if (!entity.is_valid())
+        {
+            return nullptr;
+        }
+
+        for (auto &orbiter : _orbiters)
+        {
+            if (orbiter.entity == entity)
+            {
+                return &orbiter;
+            }
+        }
+
+        return nullptr;
+    }
+
+    const OrbiterInfo *GameplayState::find_orbiter(const EntityId entity) const
+    {
+        if (!entity.is_valid())
+        {
+            return nullptr;
+        }
+
+        for (const auto &orbiter : _orbiters)
+        {
+            if (orbiter.entity == entity)
+            {
+                return &orbiter;
+            }
+        }
+
+        return nullptr;
+    }
+
+    OrbiterInfo *GameplayState::find_orbiter(const std::string_view name)
+    {
+        if (name.empty())
+        {
+            return nullptr;
+        }
+
+        for (auto &orbiter : _orbiters)
+        {
+            if (orbiter.name == name)
+            {
+                return &orbiter;
+            }
+        }
+
+        return nullptr;
+    }
+
+    const OrbiterInfo *GameplayState::find_orbiter(const std::string_view name) const
+    {
+        if (name.empty())
+        {
+            return nullptr;
+        }
+
+        for (const auto &orbiter : _orbiters)
+        {
+            if (orbiter.name == name)
+            {
+                return &orbiter;
+            }
+        }
+
+        return nullptr;
+    }
+
+    bool GameplayState::get_orbiter_world_state(const OrbiterInfo &orbiter,
+                                                WorldVec3 &out_pos_world,
+                                                glm::dvec3 &out_vel_world,
+                                                glm::vec3 &out_vel_local) const
+    {
+        (void) orbiter;
+        out_pos_world = WorldVec3(0.0, 0.0, 0.0);
+        out_vel_world = glm::dvec3(0.0, 0.0, 0.0);
+        out_vel_local = glm::vec3(0.0f, 0.0f, 0.0f);
+        return false;
     }
 
     EntityId GameplayState::select_rebase_anchor_entity() const
@@ -132,6 +255,20 @@ namespace Game
     {
         (void) id;
         return nullptr;
+    }
+
+    bool GameWorld::bind_physics(EntityId id,
+                                 uint32_t body_value,
+                                 bool use_interpolation,
+                                 bool override_user_data,
+                                 const glm::vec3 &origin_offset_local)
+    {
+        (void) id;
+        (void) body_value;
+        (void) use_interpolation;
+        (void) override_user_data;
+        (void) origin_offset_local;
+        return true;
     }
 } // namespace Game
 
@@ -230,20 +367,3 @@ namespace GameAPI
     }
 
 } // namespace GameAPI
-
-void PickingSystem::clear_line_picks() {}
-
-uint32_t PickingSystem::add_line_pick_group(std::string owner_name)
-{
-    (void) owner_name;
-    return 0;
-}
-
-void PickingSystem::add_line_pick_segment(const uint32_t group_id,
-                                          const WorldVec3 &a_world,
-                                          const WorldVec3 &b_world,
-                                          const double a_time_s,
-                                          const double b_time_s)
-{
-    (void) group_id; (void) a_world; (void) b_world; (void) a_time_s; (void) b_time_s;
-}

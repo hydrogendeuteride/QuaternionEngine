@@ -3,7 +3,6 @@
 #include "core/world.h"
 
 #include <glm/glm.hpp>
-#include <vulkan/vulkan.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -179,6 +178,14 @@ namespace Game
         double start_time_s{0.0};
     };
 
+    struct ManeuverViewportRect
+    {
+        int32_t x{0};
+        int32_t y{0};
+        uint32_t width{0};
+        uint32_t height{0};
+    };
+
     struct ManeuverGizmoViewContext
     {
         // Cached projection state shared by screen-space marker generation, hit-testing, and picking.
@@ -188,7 +195,7 @@ namespace Game
         double logical_h{0.0};
         double aspect{1.0};
         double tan_half_fov{0.0};
-        VkRect2D letterbox_rect{};
+        ManeuverViewportRect letterbox_rect{};
         double draw_from_swap_x{1.0};
         double draw_from_swap_y{1.0};
         double window_from_draw_x{1.0};

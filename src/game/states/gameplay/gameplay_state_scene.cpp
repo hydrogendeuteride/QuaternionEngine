@@ -275,8 +275,7 @@ namespace Game
         _prediction.selection.clear();
         _prediction.frame_selection.clear();
         _prediction.dirty = true;
-        _prediction.service.reset();
-        _prediction.derived_service.reset();
+        _prediction_system.reset_services();
 
         _world.clear_rebase_anchor();
         _world.clear();

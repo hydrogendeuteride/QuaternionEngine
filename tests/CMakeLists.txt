@@ -199,6 +199,7 @@ set_property(TARGET gameplay_time_warp_transition_tests PROPERTY CXX_STANDARD 20
 
 target_compile_definitions(gameplay_time_warp_transition_tests PRIVATE
   VULKAN_ENGINE_USE_JOLT=0
+  VULKAN_ENGINE_GAMEPLAY_TEST_ACCESS=1
 )
 
 target_include_directories(gameplay_time_warp_transition_tests PRIVATE
@@ -241,6 +242,7 @@ add_executable(gameplay_prediction_maneuver_tests
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/prediction_result_applier.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/prediction_solver_result_applier.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/prediction_runtime_controller.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/prediction_system.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_requests.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_results.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/gameplay_state_prediction_frames.cpp"
