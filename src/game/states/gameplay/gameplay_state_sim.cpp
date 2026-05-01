@@ -5,6 +5,8 @@
 #include "game/component/ship_controller.h"
 #include "orbitsim/coordinate_frames.hpp"
 #include "orbitsim/frame_utils.hpp"
+#include "physics/physics_context.h"
+#include "physics/physics_world.h"
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
 #include "physics/jolt/jolt_physics_world.h"

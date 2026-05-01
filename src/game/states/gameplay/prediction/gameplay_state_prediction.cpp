@@ -2,6 +2,8 @@
 
 #include "game/component/ship_controller.h"
 #include "game/orbit/orbit_prediction_tuning.h"
+#include "physics/physics_context.h"
+#include "physics/physics_world.h"
 
 #include <algorithm>
 #include <cmath>
@@ -265,7 +267,7 @@ namespace Game
         sync_prediction_dirty_flag();
     }
 
-    std::vector<GameplayState::PredictionSubjectKey> GameplayState::collect_visible_prediction_subjects() const
+    std::vector<PredictionSubjectKey> GameplayState::collect_visible_prediction_subjects() const
     {
         // Visible prediction work is centered on the focused subject plus any explicit overlays.
         std::vector<PredictionSubjectKey> out;
@@ -348,7 +350,7 @@ namespace Game
         return seed;
     }
 
-    GameplayState::PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key)
+    PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key)
     {
         // Resolve mutable track state by stable subject key.
         auto it = std::find_if(_prediction.tracks.begin(),
@@ -357,7 +359,7 @@ namespace Game
         return (it != _prediction.tracks.end()) ? &(*it) : nullptr;
     }
 
-    const GameplayState::PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key) const
+    const PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key) const
     {
         // Resolve immutable track state by stable subject key.
         auto it = std::find_if(_prediction.tracks.begin(),
@@ -366,19 +368,19 @@ namespace Game
         return (it != _prediction.tracks.end()) ? &(*it) : nullptr;
     }
 
-    GameplayState::PredictionTrackState *GameplayState::active_prediction_track()
+    PredictionTrackState *GameplayState::active_prediction_track()
     {
         // Return the track currently focused by the prediction UI.
         return find_prediction_track(_prediction.selection.active_subject);
     }
 
-    const GameplayState::PredictionTrackState *GameplayState::active_prediction_track() const
+    const PredictionTrackState *GameplayState::active_prediction_track() const
     {
         // Return the track currently focused by the prediction UI.
         return find_prediction_track(_prediction.selection.active_subject);
     }
 
-    GameplayState::PredictionTrackState *GameplayState::player_prediction_track()
+    PredictionTrackState *GameplayState::player_prediction_track()
     {
         // Resolve the local player's prediction track if one exists.
         const EntityId player_eid = player_entity();
@@ -389,7 +391,7 @@ namespace Game
         return find_prediction_track(PredictionSubjectKey{PredictionSubjectKind::Orbiter, player_eid.value});
     }
 
-    const GameplayState::PredictionTrackState *GameplayState::player_prediction_track() const
+    const PredictionTrackState *GameplayState::player_prediction_track() const
     {
         // Resolve the local player's prediction track if one exists.
         const EntityId player_eid = player_entity();

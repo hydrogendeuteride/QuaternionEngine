@@ -13,7 +13,10 @@ namespace Game
     class PredictionSystem
     {
     public:
-        explicit PredictionSystem(GameplayPredictionState &prediction);
+        explicit PredictionSystem(GameplayPredictionState &prediction)
+            : _prediction(prediction)
+        {
+        }
 
         OrbitPredictionDerivedService &derived_service();
         const OrbitPredictionDerivedService &derived_service() const;

@@ -2,12 +2,15 @@
 #include "orbit_helpers.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/gameplay_settings.h"
+#include "game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo_helpers.h"
 #include "game/states/gameplay/scenario/scenario_loader.h"
 #include "game/component/ship_controller.h"
 #include "core/engine.h"
 #include "core/game_api.h"
 #include "core/orbit_plot/orbit_plot.h"
 #include "core/util/logger.h"
+#include "physics/physics_context.h"
+#include "physics/physics_world.h"
 
 #include "imgui.h"
 
@@ -19,6 +22,8 @@
 
 namespace Game
 {
+    namespace Gizmo = ManeuverGizmoHelpers;
+
     using detail::contact_event_type_name;
 
     namespace
@@ -1007,7 +1012,7 @@ namespace Game
             glm::vec2 pick_screen{0.0f, 0.0f};
             double pick_depth_m = 0.0;
             if (!build_maneuver_gizmo_view_context(ctx, view) ||
-                !project_maneuver_gizmo_point(view, pick.worldPos, pick_screen, pick_depth_m))
+                !Gizmo::project_maneuver_gizmo_point(view, pick.worldPos, pick_screen, pick_depth_m))
             {
                 return false;
             }
@@ -1130,7 +1135,7 @@ namespace Game
         {
             ImGui::Text("Gizmo node/axis: %d / %s",
                         _maneuver_gizmo_interaction.node_id,
-                        maneuver_axis_label(_maneuver_gizmo_interaction.axis));
+                        Gizmo::maneuver_axis_label(_maneuver_gizmo_basis_mode, _maneuver_gizmo_interaction.axis));
         }
 
         ImGui::SeparatorText("Cadence");

@@ -1,6 +1,8 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_colors.h"
+#include "game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo_helpers.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
+#include "game/states/gameplay/maneuver/maneuver_commands.h"
 
 #include "core/engine.h"
 
@@ -14,6 +16,8 @@
 
 namespace Game
 {
+    namespace Gizmo = ManeuverGizmoHelpers;
+
     namespace
     {
         using namespace ManeuverUtil;
@@ -523,7 +527,7 @@ namespace Game
             glm::vec2 overlay_screen{0.0f, 0.0f};
             double overlay_depth_m = 0.0;
             if (!build_maneuver_gizmo_view_context(ctx, overlay_view) ||
-                !project_maneuver_gizmo_point(overlay_view, overlay_world, overlay_screen, overlay_depth_m))
+                !Gizmo::project_maneuver_gizmo_point(overlay_view, overlay_world, overlay_screen, overlay_depth_m))
             {
                 return;
             }

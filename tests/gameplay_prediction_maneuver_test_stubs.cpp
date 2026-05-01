@@ -5,6 +5,8 @@
 #include "core/picking/picking_system.h"
 #include "game/component/ship_controller.h"
 #include "game/entity_manager.h"
+#include "physics/physics_context.h"
+#include "physics/physics_world.h"
 
 #include <glm/gtc/quaternion.hpp>
 

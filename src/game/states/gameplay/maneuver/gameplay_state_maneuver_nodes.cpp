@@ -1,4 +1,5 @@
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/maneuver/maneuver_controller.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 
 #include <algorithm>

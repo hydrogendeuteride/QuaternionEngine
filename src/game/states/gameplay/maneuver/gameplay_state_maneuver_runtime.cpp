@@ -1,5 +1,7 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
+#include "physics/physics_context.h"
+#include "physics/physics_world.h"
 
 #include <cmath>
 

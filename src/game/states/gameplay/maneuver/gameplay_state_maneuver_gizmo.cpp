@@ -1,5 +1,7 @@
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo_helpers.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
+#include "game/states/gameplay/maneuver/maneuver_commands.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include "core/device/images.h"
@@ -18,6 +20,8 @@
 
 namespace Game
 {
+    namespace Gizmo = ManeuverGizmoHelpers;
+
     namespace
     {
         using namespace ManeuverUtil;
@@ -187,6 +191,7 @@ namespace Game
             out_line_t = t;
             return std::isfinite(out_line_t);
         }
+
     } // namespace
 
     void GameplayState::clear_maneuver_gizmo_instances(GameStateContext &ctx)
@@ -291,111 +296,6 @@ namespace Game
         return true;
     }
 
-    bool GameplayState::maneuver_gizmo_is_occluded(const ManeuverGizmoViewContext &view, const WorldVec3 &point_world) const
-    {
-        // Approximate occlusion against the current reference body as a sphere so hidden markers do not bleed through.
-        if (!view.depth_occluder_valid)
-        {
-            return false;
-        }
-
-        const glm::dvec3 center_to_cam = view.camera_world - glm::dvec3(view.depth_occluder_center);
-        const double center_to_cam_len2 = glm::dot(center_to_cam, center_to_cam);
-        const double radius2 = view.depth_occluder_radius * view.depth_occluder_radius;
-        if (!std::isfinite(center_to_cam_len2) || center_to_cam_len2 <= radius2)
-        {
-            return false;
-        }
-
-        const glm::dvec3 cam_to_point = glm::dvec3(point_world) - view.camera_world;
-        const double point_dist = safe_length(cam_to_point);
-        if (!std::isfinite(point_dist) || point_dist <= 1.0e-3)
-        {
-            return false;
-        }
-
-        const glm::dvec3 ray_dir = cam_to_point / point_dist;
-        const glm::dvec3 oc = view.camera_world - glm::dvec3(view.depth_occluder_center);
-        const double b = glm::dot(oc, ray_dir);
-        const double c = glm::dot(oc, oc) - radius2;
-        const double disc = b * b - c;
-        if (!std::isfinite(disc) || disc <= 0.0)
-        {
-            return false;
-        }
-
-        const double t_near = -b - std::sqrt(disc);
-        const double eps = std::max(1.0, view.depth_occluder_radius * 1.0e-6);
-        return std::isfinite(t_near) && t_near > eps && t_near < (point_dist - eps);
-    }
-
-    bool GameplayState::project_maneuver_gizmo_point(const ManeuverGizmoViewContext &view,
-                                                     const WorldVec3 &point_world,
-                                                     glm::vec2 &out_screen,
-                                                     double &out_depth_m) const
-    {
-        // Project through camera space into logical render space, then map back out to the actual window pixel location.
-        out_screen = glm::vec2(0.0f, 0.0f);
-        out_depth_m = 0.0;
-
-        const glm::dvec3 rel_world = glm::dvec3(point_world) - view.camera_world;
-        const glm::dvec3 cam_space = view.world_to_cam * rel_world;
-        const double depth_m = -cam_space.z;
-        if (!std::isfinite(depth_m) || depth_m <= 1.0e-4)
-        {
-            return false;
-        }
-
-        const double ndc_x = cam_space.x / (depth_m * view.aspect * view.tan_half_fov);
-        const double ndc_y = cam_space.y / (depth_m * view.tan_half_fov);
-        if (!std::isfinite(ndc_x) || !std::isfinite(ndc_y))
-        {
-            return false;
-        }
-        if (ndc_x < -1.2 || ndc_x > 1.2 || ndc_y < -1.2 || ndc_y > 1.2)
-        {
-            return false;
-        }
-
-        const double u = (ndc_x + 1.0) * 0.5;
-        const double v = (1.0 - ndc_y) * 0.5;
-        if (!std::isfinite(u) || !std::isfinite(v))
-        {
-            return false;
-        }
-
-        const double swap_x =
-                static_cast<double>(view.letterbox_rect.x) + u * static_cast<double>(view.letterbox_rect.width);
-        const double swap_y =
-                static_cast<double>(view.letterbox_rect.y) + v * static_cast<double>(view.letterbox_rect.height);
-
-        const double draw_x = swap_x * view.draw_from_swap_x;
-        const double draw_y = swap_y * view.draw_from_swap_y;
-        const double win_x = draw_x * view.window_from_draw_x;
-        const double win_y = draw_y * view.window_from_draw_y;
-        if (!std::isfinite(win_x) || !std::isfinite(win_y))
-        {
-            return false;
-        }
-
-        out_screen = glm::vec2(static_cast<float>(win_x), static_cast<float>(win_y));
-        out_depth_m = depth_m;
-        return true;
-    }
-
-    bool GameplayState::resolve_maneuver_axis(const ManeuverNode &node,
-                                              const ManeuverHandleAxis axis,
-                                              glm::dvec3 &out_axis_dir_world,
-                                              int &out_component,
-                                              double &out_sign) const
-    {
-        const AxisResolveResult r = resolve_axis(axis, node.basis_r_world, node.basis_t_world, node.basis_n_world);
-        out_axis_dir_world = r.axis_dir_world;
-        out_component = r.component;
-        out_sign = r.sign;
-        return r.valid;
-    }
-
     bool GameplayState::begin_maneuver_axis_drag(GameStateContext &ctx,
                                                  const int node_id,
                                                  const ManeuverHandleAxis axis)
@@ -415,7 +315,7 @@ namespace Game
         glm::dvec3 axis_dir_world(0.0, 1.0, 0.0);
         int component = 1;
         double sign = 1.0;
-        if (!resolve_maneuver_axis(*node, axis, axis_dir_world, component, sign))
+        if (!Gizmo::resolve_maneuver_axis(*node, axis, axis_dir_world, component, sign))
         {
             return false;
         }
@@ -637,14 +537,14 @@ namespace Game
             {
                 continue;
             }
-            if (maneuver_gizmo_is_occluded(view, node.position_world))
+            if (Gizmo::maneuver_gizmo_is_occluded(view, node.position_world))
             {
                 continue;
             }
 
             ManeuverHubMarker hub{};
             hub.node_id = node.id;
-            if (!project_maneuver_gizmo_point(view, node.position_world, hub.screen, hub.depth_m))
+            if (!Gizmo::project_maneuver_gizmo_point(view, node.position_world, hub.screen, hub.depth_m))
             {
                 continue;
             }
@@ -654,14 +554,14 @@ namespace Game
 
         out_handles.reserve(6);
         const ManeuverNode *selected = _maneuver_state.find_node(_maneuver_state.selected_node_id);
-        if (!selected || !selected->gizmo_valid || maneuver_gizmo_is_occluded(view, selected->position_world))
+        if (!selected || !selected->gizmo_valid || Gizmo::maneuver_gizmo_is_occluded(view, selected->position_world))
         {
             return;
         }
 
         glm::vec2 hub_screen{};
         double hub_depth_m = 0.0;
-        if (!project_maneuver_gizmo_point(view, selected->position_world, hub_screen, hub_depth_m))
+        if (!Gizmo::project_maneuver_gizmo_point(view, selected->position_world, hub_screen, hub_depth_m))
         {
             return;
         }
@@ -700,7 +600,7 @@ namespace Game
                     (_maneuver_gizmo_interaction.axis == desc.axis);
             const double axis_offset_active_m = axis_offset_m * (is_active_axis ? 1.14 : 1.0);
             const WorldVec3 handle_world = selected->position_world + dir * axis_offset_active_m;
-            if (maneuver_gizmo_is_occluded(view, handle_world))
+            if (Gizmo::maneuver_gizmo_is_occluded(view, handle_world))
             {
                 continue;
             }
@@ -709,56 +609,14 @@ namespace Game
             marker.node_id = selected->id;
             marker.axis = desc.axis;
             marker.hub_screen = hub_screen;
-            marker.base_color = maneuver_axis_color(desc.axis);
-            marker.label = maneuver_axis_label(desc.axis);
-            if (!project_maneuver_gizmo_point(view, handle_world, marker.handle_screen, marker.depth_m))
+            marker.base_color = Gizmo::maneuver_axis_color(desc.axis);
+            marker.label = Gizmo::maneuver_axis_label(_maneuver_gizmo_basis_mode, desc.axis);
+            if (!Gizmo::project_maneuver_gizmo_point(view, handle_world, marker.handle_screen, marker.depth_m))
             {
                 continue;
             }
 
             out_handles.push_back(marker);
-        }
-    }
-
-    void GameplayState::find_maneuver_gizmo_hover(const std::vector<ManeuverHubMarker> &hubs,
-                                                  const std::vector<ManeuverAxisMarker> &handles,
-                                                  const glm::vec2 &mouse_pos,
-                                                  const float hub_hit_px2,
-                                                  const float axis_hit_px2,
-                                                  int &out_hovered_hub_idx,
-                                                  int &out_hovered_handle_idx) const
-    {
-        // Axis handles win over hubs so editing takes priority over node selection when both overlap on screen.
-        out_hovered_hub_idx = -1;
-        out_hovered_handle_idx = -1;
-
-        float best_handle_d2 = std::numeric_limits<float>::max();
-        for (size_t i = 0; i < handles.size(); ++i)
-        {
-            const glm::vec2 d = handles[i].handle_screen - mouse_pos;
-            const float d2 = glm::dot(d, d);
-            if (d2 <= axis_hit_px2 && d2 < best_handle_d2)
-            {
-                best_handle_d2 = d2;
-                out_hovered_handle_idx = static_cast<int>(i);
-            }
-        }
-
-        if (out_hovered_handle_idx >= 0)
-        {
-            return;
-        }
-
-        float best_hub_d2 = std::numeric_limits<float>::max();
-        for (size_t i = 0; i < hubs.size(); ++i)
-        {
-            const glm::vec2 d = hubs[i].screen - mouse_pos;
-            const float d2 = glm::dot(d, d);
-            if (d2 <= hub_hit_px2 && d2 < best_hub_d2)
-            {
-                best_hub_d2 = d2;
-                out_hovered_hub_idx = static_cast<int>(i);
-            }
         }
     }
 } // namespace Game

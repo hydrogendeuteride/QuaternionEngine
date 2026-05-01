@@ -368,7 +368,7 @@ TEST(GameplayPredictionManeuverTests, PreviewDerivedResultRestoresExistingPlanne
 {
     Game::GameplayState state{};
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 1;
     node.time_s = 10.0;
     state._maneuver_state.nodes.push_back(node);
@@ -463,7 +463,7 @@ TEST(GameplayPredictionManeuverTests, PreviewDerivedResultDoesNotRestorePlannedC
 {
     Game::GameplayState state{};
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 1;
     node.time_s = 10.0;
     state._maneuver_state.nodes.push_back(node);
@@ -554,7 +554,7 @@ TEST(GameplayPredictionManeuverTests, PreviewDerivedResultDoesNotRestorePlannedC
 {
     Game::GameplayState state{};
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 1;
     node.time_s = 10.0;
     node.dv_rtn_mps = glm::dvec3(0.0, 5.0, 0.0);
@@ -646,7 +646,7 @@ TEST(GameplayPredictionManeuverTests, LateFastPreviewDerivedResultAfterPreviewEn
 {
     Game::GameplayState state{};
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 1;
     node.time_s = 10.0;
     state._maneuver_state.nodes.push_back(node);

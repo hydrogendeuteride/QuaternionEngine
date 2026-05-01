@@ -4,6 +4,8 @@
 #include "core/engine.h"
 #include "core/game_api.h"
 #include "core/util/logger.h"
+#include "physics/physics_context.h"
+#include "physics/physics_world.h"
 #include "render/passes/auto_exposure.h"
 #include "render/passes/tonemap.h"
 

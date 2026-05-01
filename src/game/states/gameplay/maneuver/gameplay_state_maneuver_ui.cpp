@@ -1,6 +1,8 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_colors.h"
+#include "game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo_helpers.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
+#include "game/states/gameplay/maneuver/maneuver_commands.h"
 
 #include "core/game_api.h"
 #include "core/engine.h"
@@ -16,6 +18,8 @@
 
 namespace Game
 {
+    namespace Gizmo = ManeuverGizmoHelpers;
+
     namespace
     {
         using namespace ManeuverUtil;
@@ -52,29 +56,6 @@ namespace Game
 
         _maneuver_ui_config.effective_scale = _maneuver_ui_config.ui_scale * std::max(dpi_scale, display_dpi / _maneuver_ui_config.base_dpi);
         _maneuver_ui_config.effective_scale = std::clamp(_maneuver_ui_config.effective_scale, 0.5f, 4.0f);
-    }
-
-    const char *GameplayState::maneuver_axis_label(const ManeuverHandleAxis axis) const
-    {
-        return ManeuverUtil::axis_short_label(_maneuver_gizmo_basis_mode, axis);
-    }
-
-    uint32_t GameplayState::maneuver_axis_color(const ManeuverHandleAxis axis) const
-    {
-        switch (axis)
-        {
-            case ManeuverHandleAxis::TangentialPos:
-            case ManeuverHandleAxis::TangentialNeg:
-                return ManeuverColors::kAxisTangential;
-            case ManeuverHandleAxis::RadialPos:
-            case ManeuverHandleAxis::RadialNeg:
-                return ManeuverColors::kAxisRadial;
-            case ManeuverHandleAxis::NormalPos:
-            case ManeuverHandleAxis::NormalNeg:
-                return ManeuverColors::kAxisNormal;
-            default:
-                return ManeuverColors::kAxisDefault;
-        }
     }
 
     void GameplayState::draw_maneuver_gizmo_markers(ImDrawList *draw_list,
@@ -216,7 +197,7 @@ namespace Game
 
         int hovered_handle_idx = -1;
         int hovered_hub_idx = -1;
-        find_maneuver_gizmo_hover(hubs, handles, mouse_pos, hub_hit_px2, axis_hit_px2, hovered_hub_idx, hovered_handle_idx);
+        Gizmo::find_maneuver_gizmo_hover(hubs, handles, mouse_pos, hub_hit_px2, axis_hit_px2, hovered_hub_idx, hovered_handle_idx);
         bool refresh_after_interaction = false;
 
         const bool ui_item_active = ImGui::IsAnyItemActive();
@@ -316,7 +297,7 @@ namespace Game
             build_maneuver_gizmo_markers(view, overlay_size_px, hubs, handles);
             hovered_handle_idx = -1;
             hovered_hub_idx = -1;
-            find_maneuver_gizmo_hover(hubs, handles, mouse_pos, hub_hit_px2, axis_hit_px2, hovered_hub_idx, hovered_handle_idx);
+            Gizmo::find_maneuver_gizmo_hover(hubs, handles, mouse_pos, hub_hit_px2, axis_hit_px2, hovered_hub_idx, hovered_handle_idx);
         }
 
         ImDrawList *dl = ImGui::GetForegroundDrawList();

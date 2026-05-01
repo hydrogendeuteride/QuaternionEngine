@@ -128,12 +128,12 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowAnchorsPlanHorizon
     state._prediction.sampling_policy.orbiter_min_window_s = 120.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
 
-    Game::GameplayState::ManeuverNode first{};
+    Game::ManeuverNode first{};
     first.id = 1;
     first.time_s = 150.0;
     state._maneuver_state.nodes.push_back(first);
 
-    Game::GameplayState::ManeuverNode second{};
+    Game::ManeuverNode second{};
     second.id = 2;
     second.time_s = 240.0;
     state._maneuver_state.nodes.push_back(second);
@@ -152,7 +152,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowDoesNotAddLargeSol
     state._maneuver_plan_horizon.horizon_s = 600.0;
     state._maneuver_plan_windows.solve_margin_s = 600.0;
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 1;
     node.time_s = 150.0;
     state._maneuver_state.nodes.push_back(node);
@@ -173,7 +173,7 @@ TEST(GameplayPredictionManeuverTests, FullRequestAnchorsPlanHorizonAfterNearbyNo
     state._maneuver_plan_horizon.horizon_s = 600.0;
     state._maneuver_plan_windows.solve_margin_s = 600.0;
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 1;
     node.time_s = 150.0;
     state._maneuver_state.selected_node_id = node.id;
@@ -211,7 +211,7 @@ TEST(GameplayPredictionManeuverTests, FullRequestKeepsFarFutureNodeWhenPlanHoriz
     state._maneuver_plan_horizon.horizon_s = 600.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 1;
     node.time_s = 50'000.0;
     state._maneuver_state.selected_node_id = node.id;
@@ -245,7 +245,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowExtendsPastFarFutu
     state._prediction.sampling_policy.orbiter_min_window_s = 120.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
 
-    Game::GameplayState::ManeuverNode far_node{};
+    Game::ManeuverNode far_node{};
     far_node.id = 1;
     far_node.time_s = 50'000.0;
     state._maneuver_state.nodes.push_back(far_node);
@@ -263,7 +263,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowUsesNodeAnchoredPl
     state._maneuver_plan_horizon.horizon_s = 120'000.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 1;
     node.time_s = 1'000.0;
     state._maneuver_state.nodes.push_back(node);
@@ -282,7 +282,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowKeepsDisplayedHori
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
 
-    Game::GameplayState::ManeuverNode selected{};
+    Game::ManeuverNode selected{};
     selected.id = 7;
     selected.time_s = 240.0;
     state._maneuver_state.selected_node_id = selected.id;
@@ -302,9 +302,9 @@ TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheSeparatesPatchWindowFrom
     state._maneuver_plan_windows.preview_window_s = 180.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
-    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+    state._maneuver_gizmo_interaction.state = Game::ManeuverGizmoInteraction::State::DragAxis;
 
-    Game::GameplayState::ManeuverNode far_node{};
+    Game::ManeuverNode far_node{};
     far_node.id = 7;
     far_node.time_s = 50'000.0;
     state._maneuver_state.selected_node_id = far_node.id;
@@ -338,9 +338,9 @@ TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheClampsVisualWindowToPrev
     state._maneuver_plan_windows.preview_window_s = 180.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
-    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+    state._maneuver_gizmo_interaction.state = Game::ManeuverGizmoInteraction::State::DragAxis;
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 9;
     node.time_s = 240.0;
     state._maneuver_state.selected_node_id = node.id;
@@ -367,9 +367,9 @@ TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheCanReenterDragFromStable
     state._maneuver_plan_windows.preview_window_s = 180.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
-    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+    state._maneuver_gizmo_interaction.state = Game::ManeuverGizmoInteraction::State::DragAxis;
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 11;
     node.time_s = 240.0;
     state._maneuver_state.selected_node_id = node.id;
@@ -396,9 +396,9 @@ TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheTransitionsToAwaitFullRe
     state._maneuver_plan_windows.preview_window_s = 180.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
-    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+    state._maneuver_gizmo_interaction.state = Game::ManeuverGizmoInteraction::State::DragAxis;
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 3;
     node.time_s = 240.0;
     state._maneuver_state.selected_node_id = node.id;
@@ -413,7 +413,7 @@ TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheTransitionsToAwaitFullRe
 
     track.preview_state = Game::PredictionPreviewRuntimeState::PreviewStreaming;
     state._maneuver_plan_live_preview_active = false;
-    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::Idle;
+    state._maneuver_gizmo_interaction.state = Game::ManeuverGizmoInteraction::State::Idle;
     state.refresh_prediction_preview_anchor(track, 101.0, true);
 
     EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::AwaitFullRefine);
@@ -430,9 +430,9 @@ TEST(GameplayPredictionManeuverTests, RequestOrbiterPredictionTracksPreviewReque
     state._maneuver_plan_windows.preview_window_s = 180.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
-    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+    state._maneuver_gizmo_interaction.state = Game::ManeuverGizmoInteraction::State::DragAxis;
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 9;
     node.time_s = 240.0;
     state._maneuver_state.selected_node_id = node.id;
@@ -467,14 +467,14 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestKeepsUpstreamManeuversBe
     state._maneuver_plan_windows.preview_window_s = 180.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
-    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+    state._maneuver_gizmo_interaction.state = Game::ManeuverGizmoInteraction::State::DragAxis;
 
-    Game::GameplayState::ManeuverNode first{};
+    Game::ManeuverNode first{};
     first.id = 1;
     first.time_s = 150.0;
     state._maneuver_state.nodes.push_back(first);
 
-    Game::GameplayState::ManeuverNode second{};
+    Game::ManeuverNode second{};
     second.id = 2;
     second.time_s = 240.0;
     state._maneuver_state.selected_node_id = second.id;
@@ -511,15 +511,15 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestKeepsDownstreamManeuvers
     state._maneuver_plan_windows.preview_window_s = 180.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
-    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+    state._maneuver_gizmo_interaction.state = Game::ManeuverGizmoInteraction::State::DragAxis;
 
-    Game::GameplayState::ManeuverNode anchor{};
+    Game::ManeuverNode anchor{};
     anchor.id = 1;
     anchor.time_s = 240.0;
     state._maneuver_state.selected_node_id = anchor.id;
     state._maneuver_state.nodes.push_back(anchor);
 
-    Game::GameplayState::ManeuverNode downstream{};
+    Game::ManeuverNode downstream{};
     downstream.id = 2;
     downstream.time_s = 700.0; // Outside the local patch window, still inside the full request horizon.
     state._maneuver_state.nodes.push_back(downstream);
@@ -556,9 +556,9 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestCapsHorizonToExactPatchW
     state._maneuver_plan_windows.preview_window_s = 180.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
-    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+    state._maneuver_gizmo_interaction.state = Game::ManeuverGizmoInteraction::State::DragAxis;
 
-    Game::GameplayState::ManeuverNode selected{};
+    Game::ManeuverNode selected{};
     selected.id = 4;
     selected.time_s = 240.0;
     state._maneuver_state.selected_node_id = selected.id;
@@ -597,14 +597,14 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestUsesSelectedNodePreviewF
     state._maneuver_plan_windows.preview_window_s = 180.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
-    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+    state._maneuver_gizmo_interaction.state = Game::ManeuverGizmoInteraction::State::DragAxis;
 
-    Game::GameplayState::ManeuverNode upstream{};
+    Game::ManeuverNode upstream{};
     upstream.id = 1;
     upstream.time_s = 150.0;
     state._maneuver_state.nodes.push_back(upstream);
 
-    Game::GameplayState::ManeuverNode selected{};
+    Game::ManeuverNode selected{};
     selected.id = 2;
     selected.time_s = 240.0;
     state._maneuver_state.selected_node_id = selected.id;
@@ -653,12 +653,12 @@ TEST(GameplayPredictionManeuverTests, FullRequestEnablesPlannedSuffixRefineForPo
     ASSERT_TRUE(state._orbitsim);
     state._prediction.selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
 
-    Game::GameplayState::ManeuverNode upstream{};
+    Game::ManeuverNode upstream{};
     upstream.id = 1;
     upstream.time_s = 150.0;
     state._maneuver_state.nodes.push_back(upstream);
 
-    Game::GameplayState::ManeuverNode selected{};
+    Game::ManeuverNode selected{};
     selected.id = 2;
     selected.time_s = 240.0;
     state._maneuver_state.selected_node_id = selected.id;
@@ -730,9 +730,9 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestFallsBackToInertialCache
     state._maneuver_plan_windows.preview_window_s = 180.0;
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
-    state._maneuver_gizmo_interaction.state = Game::GameplayState::ManeuverGizmoInteraction::State::DragAxis;
+    state._maneuver_gizmo_interaction.state = Game::ManeuverGizmoInteraction::State::DragAxis;
 
-    Game::GameplayState::ManeuverNode selected{};
+    Game::ManeuverNode selected{};
     selected.id = 5;
     selected.time_s = 240.0;
     state._maneuver_state.selected_node_id = selected.id;
@@ -774,13 +774,13 @@ TEST(GameplayPredictionManeuverTests, TimeEditActivatesFastPreviewRequest)
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
 
-    Game::GameplayState::ManeuverNode selected{};
+    Game::ManeuverNode selected{};
     selected.id = 5;
     selected.time_s = 360.0;
     selected.dv_rtn_mps = glm::dvec3(0.0, 10.0, 0.0);
     state._maneuver_state.selected_node_id = selected.id;
     state._maneuver_state.nodes.push_back(selected);
-    state._maneuver_node_edit_preview.state = Game::GameplayState::ManeuverNodeEditPreview::State::EditingTime;
+    state._maneuver_node_edit_preview.state = Game::ManeuverNodeEditPreview::State::EditingTime;
     state._maneuver_node_edit_preview.node_id = selected.id;
     state._maneuver_node_edit_preview.changed = true;
     state._maneuver_node_edit_preview.start_time_s = 240.0;
@@ -820,13 +820,13 @@ TEST(GameplayPredictionManeuverTests, TimeEditUsesBaselineAnchorStateForMovedFir
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
 
-    Game::GameplayState::ManeuverNode selected{};
+    Game::ManeuverNode selected{};
     selected.id = 5;
     selected.time_s = 300.0;
     selected.dv_rtn_mps = glm::dvec3(0.0, 10.0, 0.0);
     state._maneuver_state.selected_node_id = selected.id;
     state._maneuver_state.nodes.push_back(selected);
-    state._maneuver_node_edit_preview.state = Game::GameplayState::ManeuverNodeEditPreview::State::EditingTime;
+    state._maneuver_node_edit_preview.state = Game::ManeuverNodeEditPreview::State::EditingTime;
     state._maneuver_node_edit_preview.node_id = selected.id;
     state._maneuver_node_edit_preview.changed = true;
     state._maneuver_node_edit_preview.start_time_s = 240.0;
@@ -878,19 +878,19 @@ TEST(GameplayPredictionManeuverTests, TimeEditLeavesAnchorStateUnseededWhenPrior
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = true;
 
-    Game::GameplayState::ManeuverNode upstream{};
+    Game::ManeuverNode upstream{};
     upstream.id = 4;
     upstream.time_s = 180.0;
     upstream.dv_rtn_mps = glm::dvec3(0.0, 5.0, 0.0);
 
-    Game::GameplayState::ManeuverNode selected{};
+    Game::ManeuverNode selected{};
     selected.id = 5;
     selected.time_s = 300.0;
     selected.dv_rtn_mps = glm::dvec3(0.0, 10.0, 0.0);
     state._maneuver_state.selected_node_id = selected.id;
     state._maneuver_state.nodes.push_back(upstream);
     state._maneuver_state.nodes.push_back(selected);
-    state._maneuver_node_edit_preview.state = Game::GameplayState::ManeuverNodeEditPreview::State::EditingTime;
+    state._maneuver_node_edit_preview.state = Game::ManeuverNodeEditPreview::State::EditingTime;
     state._maneuver_node_edit_preview.node_id = selected.id;
     state._maneuver_node_edit_preview.changed = true;
     state._maneuver_node_edit_preview.start_time_s = 240.0;
@@ -930,7 +930,7 @@ TEST(GameplayPredictionManeuverTests, TimeEditFinishRequestsFullRefine)
     track.preview_state = Game::PredictionPreviewRuntimeState::PreviewStreaming;
     state._prediction.tracks.push_back(track);
 
-    state._maneuver_node_edit_preview.state = Game::GameplayState::ManeuverNodeEditPreview::State::EditingTime;
+    state._maneuver_node_edit_preview.state = Game::ManeuverNodeEditPreview::State::EditingTime;
     state._maneuver_node_edit_preview.node_id = 5;
     state._maneuver_node_edit_preview.changed = true;
     state._maneuver_node_edit_preview.start_time_s = 240.0;
@@ -939,7 +939,7 @@ TEST(GameplayPredictionManeuverTests, TimeEditFinishRequestsFullRefine)
 
     ASSERT_EQ(state._prediction.tracks.size(), 1u);
     EXPECT_EQ(state._prediction.tracks.front().preview_state, Game::PredictionPreviewRuntimeState::AwaitFullRefine);
-    EXPECT_EQ(state._maneuver_node_edit_preview.state, Game::GameplayState::ManeuverNodeEditPreview::State::Idle);
+    EXPECT_EQ(state._maneuver_node_edit_preview.state, Game::ManeuverNodeEditPreview::State::Idle);
     EXPECT_TRUE(state._prediction.dirty);
 }
 
@@ -950,7 +950,7 @@ TEST(GameplayPredictionManeuverTests, FinishedTimeEditDoesNotSeedAnchorFromStale
     ASSERT_TRUE(state._orbitsim);
     state._prediction.selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
 
-    Game::GameplayState::ManeuverNode selected{};
+    Game::ManeuverNode selected{};
     selected.id = 5;
     selected.time_s = 300.0;
     selected.dv_rtn_mps = glm::dvec3(0.0, 10.0, 0.0);
@@ -1016,7 +1016,7 @@ TEST(GameplayPredictionManeuverTests, DrawContextUsesAuthoritativePlannedPrefixD
     Game::Entity player_entity{Game::EntityId{1}, "player"};
     register_player_draw_subject(state, player_entity);
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 7;
     node.time_s = 240.0;
     node.dv_rtn_mps = glm::dvec3(0.0, 5.0, 0.0);
@@ -1072,7 +1072,7 @@ TEST(GameplayPredictionManeuverTests, DrawContextLimitsTimeEditStalePrefixToEarl
     Game::Entity player_entity{Game::EntityId{1}, "player"};
     register_player_draw_subject(state, player_entity);
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 9;
     node.time_s = 240.0;
     state._maneuver_state.selected_node_id = node.id;
@@ -1125,7 +1125,7 @@ TEST(GameplayPredictionManeuverTests, DrawContextKeepsAuthoritativePlannedPrefix
     Game::Entity player_entity{Game::EntityId{1}, "player"};
     register_player_draw_subject(state, player_entity);
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 7;
     node.time_s = 240.0;
     node.dv_rtn_mps = glm::dvec3(0.0, 5.0, 0.0);
@@ -1180,7 +1180,7 @@ TEST(GameplayPredictionManeuverTests, DrawTrackUsesFullStreamOverlayForActiveMan
     Game::Entity player_entity{Game::EntityId{1}, "player"};
     register_player_draw_subject(state, player_entity);
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 7;
     node.time_s = 240.0;
     node.dv_rtn_mps = glm::dvec3(0.0, 5.0, 0.0);
@@ -1239,7 +1239,7 @@ TEST(GameplayPredictionManeuverTests, DrawTrackUsesStalePrefixWhenAwaitingFullRe
     Game::Entity player_entity{Game::EntityId{1}, "player"};
     register_player_draw_subject(state, player_entity);
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 7;
     node.time_s = 240.0;
     node.dv_rtn_mps = glm::dvec3(0.0, 5.0, 0.0);
@@ -1290,7 +1290,7 @@ TEST(GameplayPredictionManeuverTests, RuntimeCacheKeepsCachedNodeGizmoAfterEditR
     Game::Entity player_entity{Game::EntityId{1}, "player"};
     register_player_draw_subject(state, player_entity);
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 7;
     node.time_s = 240.0;
     node.dv_rtn_mps = glm::dvec3(0.0, 12.0, 0.0);
@@ -1305,7 +1305,7 @@ TEST(GameplayPredictionManeuverTests, RuntimeCacheKeepsCachedNodeGizmoAfterEditR
     state._maneuver_state.selected_node_id = node.id;
     state._maneuver_state.nodes.push_back(node);
 
-    Game::GameplayState::ManeuverNode downstream{};
+    Game::ManeuverNode downstream{};
     downstream.id = 8;
     downstream.time_s = 300.0;
     downstream.dv_rtn_mps = glm::dvec3(0.0, 1.0, 0.0);
@@ -1345,7 +1345,7 @@ TEST(GameplayPredictionManeuverTests, FullRequestKeepsFullStreamPublishDisabledF
     state._orbiters.push_back(player);
     state._prediction.selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 7;
     node.time_s = 240.0;
     state._maneuver_state.nodes.push_back(node);
@@ -1381,7 +1381,7 @@ TEST(GameplayPredictionManeuverTests, FullRequestEnablesFullStreamPublishForPost
     state._orbiters.push_back(player);
     state._prediction.selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 7;
     node.time_s = 240.0;
     state._maneuver_state.nodes.push_back(node);
@@ -1426,7 +1426,7 @@ TEST(GameplayPredictionManeuverTests, FullRequestKeepsFullStreamPublishDisabledO
     state._orbiters.push_back(player);
     state._prediction.selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 9;
     node.time_s = 240.0;
     state._maneuver_state.nodes.push_back(node);
@@ -1486,7 +1486,7 @@ TEST(GameplayPredictionManeuverTests, ShouldRebuildPredictionTrackWhenManeuverCo
     state._maneuver_plan_windows.solve_margin_s = 300.0;
     state._maneuver_plan_live_preview_active = false;
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 1;
     node.time_s = 400.0;
     state._maneuver_state.nodes.push_back(node);

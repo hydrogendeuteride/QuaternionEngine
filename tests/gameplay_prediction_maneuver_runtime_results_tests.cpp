@@ -239,7 +239,7 @@ TEST(GameplayPredictionManeuverTests, RemovingLastManeuverNodeClearsPlannedArtif
 {
     Game::GameplayState state{};
 
-    Game::GameplayState::ManeuverNode node{};
+    Game::ManeuverNode node{};
     node.id = 7;
     node.time_s = 120.0;
     state._maneuver_state.nodes.push_back(node);

@@ -10,6 +10,8 @@
 #include "core/input/input_system.h"
 #include "core/orbit_plot/orbit_plot.h"
 #include "core/util/logger.h"
+#include "physics/physics_context.h"
+#include "physics/physics_world.h"
 
 #include <cmath>
 

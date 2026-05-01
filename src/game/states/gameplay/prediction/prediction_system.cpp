@@ -6,11 +6,6 @@
 
 namespace Game
 {
-    PredictionSystem::PredictionSystem(GameplayPredictionState &prediction)
-        : _prediction(prediction)
-    {
-    }
-
     OrbitPredictionDerivedService &PredictionSystem::derived_service()
     {
         return _prediction.derived_service;
