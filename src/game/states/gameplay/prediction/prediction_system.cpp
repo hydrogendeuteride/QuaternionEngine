@@ -1,30 +1,14 @@
 #include "game/states/gameplay/prediction/prediction_system.h"
 
+#include "game/states/gameplay/prediction/gameplay_prediction_state.h"
 #include "game/states/gameplay/prediction/runtime/prediction_invalidation_controller.h"
-#include "game/states/gameplay/prediction/runtime/prediction_runtime_controller.h"
-
-#include <utility>
+#include "game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.h"
 
 namespace Game
 {
-    GameplayPredictionState &PredictionSystem::state()
+    PredictionSystem::PredictionSystem(GameplayPredictionState &prediction)
+        : _prediction(prediction)
     {
-        return _prediction;
-    }
-
-    const GameplayPredictionState &PredictionSystem::state() const
-    {
-        return _prediction;
-    }
-
-    OrbitPredictionService &PredictionSystem::service()
-    {
-        return _prediction.service;
-    }
-
-    const OrbitPredictionService &PredictionSystem::service() const
-    {
-        return _prediction.service;
     }
 
     OrbitPredictionDerivedService &PredictionSystem::derived_service()
@@ -81,110 +65,42 @@ namespace Game
         PredictionInvalidationController::clear_maneuver_prediction_artifacts(_prediction.tracks);
     }
 
-    void PredictionSystem::clear_runtime()
+    void PredictionSystem::mark_maneuver_preview_dirty(PredictionTrackState &track)
     {
-        PredictionRuntimeController::clear_runtime(_prediction);
+        PredictionLifecycleReducer::mark_dirty_for_preview(track);
     }
 
-    void PredictionSystem::clear_visible_runtime(const std::vector<PredictionSubjectKey> &visible_subjects)
-    {
-        PredictionRuntimeController::clear_visible_runtime(_prediction, visible_subjects);
-    }
-
-    bool PredictionSystem::poll_completed_results(const PredictionRuntimeContext &context)
-    {
-        return PredictionRuntimeController::poll_completed_results(_prediction, context);
-    }
-
-    bool PredictionSystem::apply_completed_solver_result(const PredictionRuntimeContext &context,
-                                                         OrbitPredictionService::Result result)
-    {
-        return PredictionRuntimeController::apply_completed_solver_result(_prediction,
-                                                                         context,
-                                                                         std::move(result));
-    }
-
-    bool PredictionSystem::apply_completed_derived_result(const PredictionRuntimeContext &context,
-                                                          OrbitPredictionDerivedService::Result result)
-    {
-        return PredictionRuntimeController::apply_completed_derived_result(_prediction,
-                                                                          context,
-                                                                          std::move(result));
-    }
-
-    bool PredictionSystem::should_rebuild_track(const PredictionRuntimeContext &context,
-                                                const PredictionTrackState &track,
-                                                const double now_s,
-                                                const float fixed_dt,
-                                                const bool thrusting,
-                                                const bool with_maneuvers) const
-    {
-        return PredictionRuntimeController::should_rebuild_track(_prediction,
-                                                                 context,
-                                                                 track,
-                                                                 now_s,
-                                                                 fixed_dt,
-                                                                 thrusting,
-                                                                 with_maneuvers);
-    }
-
-    bool PredictionSystem::request_orbiter_prediction_async(const PredictionRuntimeContext &context,
-                                                            PredictionTrackState &track,
-                                                            const WorldVec3 &subject_pos_world,
-                                                            const glm::dvec3 &subject_vel_world,
-                                                            const double now_s,
-                                                            const bool thrusting,
-                                                            const bool with_maneuvers,
-                                                            bool *out_throttled)
-    {
-        return PredictionRuntimeController::request_orbiter_prediction_async(_prediction,
-                                                                             context,
-                                                                             track,
-                                                                             subject_pos_world,
-                                                                             subject_vel_world,
-                                                                             now_s,
-                                                                             thrusting,
-                                                                             with_maneuvers,
-                                                                             out_throttled);
-    }
-
-    bool PredictionSystem::request_celestial_prediction_async(const PredictionRuntimeContext &context,
-                                                              PredictionTrackState &track,
+    void PredictionSystem::await_maneuver_preview_full_refine(PredictionTrackState &track,
                                                               const double now_s)
     {
-        return PredictionRuntimeController::request_celestial_prediction_async(_prediction, context, track, now_s);
+        PredictionLifecycleReducer::await_full_refine(track, now_s);
     }
 
-    void PredictionSystem::update_orbiter_prediction_track(const PredictionRuntimeContext &context,
-                                                           PredictionTrackState &track,
-                                                           const double now_s,
-                                                           const bool thrusting,
-                                                           const bool with_maneuvers)
+    void PredictionSystem::clear_unapplied_maneuver_drag_preview(PredictionTrackState &track)
     {
-        PredictionRuntimeController::update_orbiter_prediction_track(_prediction,
-                                                                    context,
-                                                                    track,
-                                                                    now_s,
-                                                                    thrusting,
-                                                                    with_maneuvers);
+        if (track.preview_state != PredictionPreviewRuntimeState::EnterDrag &&
+            track.preview_state != PredictionPreviewRuntimeState::DragPreviewPending)
+        {
+            return;
+        }
+
+        PredictionLifecycleReducer::reset_preview(track);
+        track.preview_overlay.clear();
+        track.pick_cache.clear();
     }
 
-    void PredictionSystem::update_celestial_prediction_track(const PredictionRuntimeContext &context,
-                                                             PredictionTrackState &track,
-                                                             const double now_s)
+    void PredictionSystem::clear_maneuver_live_preview_state()
     {
-        PredictionRuntimeController::update_celestial_prediction_track(_prediction, context, track, now_s);
-    }
+        for (PredictionTrackState &track : _prediction.tracks)
+        {
+            if (!track.supports_maneuvers)
+            {
+                continue;
+            }
 
-    void PredictionSystem::update_visible_tracks(const PredictionRuntimeContext &context,
-                                                 const std::vector<PredictionSubjectKey> &visible_subjects,
-                                                 const double now_s,
-                                                 const float fixed_dt)
-    {
-        PredictionRuntimeController::update_visible_tracks(_prediction,
-                                                           context,
-                                                           visible_subjects,
-                                                           now_s,
-                                                           fixed_dt);
+            PredictionLifecycleReducer::reset_preview(track);
+            track.preview_overlay.clear();
+            track.pick_cache.clear();
+        }
     }
 } // namespace Game

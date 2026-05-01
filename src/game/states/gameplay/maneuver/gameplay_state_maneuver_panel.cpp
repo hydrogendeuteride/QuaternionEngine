@@ -221,18 +221,7 @@ namespace Game
         {
             if (!_maneuver_plan_live_preview_active)
             {
-                for (PredictionTrackState &track : _prediction.tracks)
-                {
-                    if (!track.supports_maneuvers)
-                    {
-                        continue;
-                    }
-
-                    track.preview_state = PredictionPreviewRuntimeState::Idle;
-                    track.preview_anchor = {};
-                    track.preview_overlay.clear();
-                    track.pick_cache.clear();
-                }
+                _prediction_system.clear_maneuver_live_preview_state();
                 cancel_maneuver_node_dv_edit_preview();
             }
             (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());

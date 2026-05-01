@@ -45,11 +45,6 @@ namespace Game
         }
     }
 
-    void PredictionInvalidationController::mark_track_dirty_for_preview(PredictionTrackState &track)
-    {
-        PredictionLifecycleReducer::mark_dirty_for_preview(track);
-    }
-
     void PredictionInvalidationController::invalidate_maneuver_plan_revision(
             std::vector<PredictionTrackState> &tracks,
             OrbitPredictionService &prediction_service,

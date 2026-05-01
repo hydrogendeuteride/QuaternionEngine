@@ -1,6 +1,5 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
-#include "game/states/gameplay/prediction/runtime/prediction_invalidation_controller.h"
 
 #include <algorithm>
 #include <cmath>
@@ -94,7 +93,7 @@ namespace Game
         _maneuver_node_edit_preview.changed = true;
         if (PredictionTrackState *track = active_prediction_track())
         {
-            PredictionInvalidationController::mark_track_dirty_for_preview(*track);
+            _prediction_system.mark_maneuver_preview_dirty(*track);
             sync_prediction_dirty_flag();
         }
     }
@@ -117,7 +116,7 @@ namespace Game
 
         if (PredictionTrackState *track = active_prediction_track())
         {
-            track->preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
+            _prediction_system.await_maneuver_preview_full_refine(*track, current_sim_time_s());
         }
         (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
     }
@@ -159,7 +158,7 @@ namespace Game
         _maneuver_node_edit_preview.changed = true;
         if (PredictionTrackState *track = active_prediction_track())
         {
-            PredictionInvalidationController::mark_track_dirty_for_preview(*track);
+            _prediction_system.mark_maneuver_preview_dirty(*track);
             sync_prediction_dirty_flag();
         }
     }
@@ -182,7 +181,7 @@ namespace Game
 
         if (PredictionTrackState *track = active_prediction_track())
         {
-            track->preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
+            _prediction_system.await_maneuver_preview_full_refine(*track, current_sim_time_s());
         }
         (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
     }

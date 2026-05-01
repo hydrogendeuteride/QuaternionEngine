@@ -4,6 +4,7 @@
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 #include "game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.h"
+#include "game/states/gameplay/prediction/runtime/prediction_runtime_controller.h"
 
 #include <cmath>
 #include <limits>
@@ -222,12 +223,12 @@ namespace Game
 
     void GameplayState::clear_prediction_runtime()
     {
-        _prediction_system.clear_runtime();
+        PredictionRuntimeController::clear_runtime(_prediction);
     }
 
     void GameplayState::clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects)
     {
-        _prediction_system.clear_visible_runtime(visible_subjects);
+        PredictionRuntimeController::clear_visible_runtime(_prediction, visible_subjects);
     }
 
     double GameplayState::prediction_display_window_s(const PredictionSubjectKey key,
@@ -549,12 +550,13 @@ namespace Game
                                                         const bool thrusting,
                                                         const bool with_maneuvers) const
     {
-        return _prediction_system.should_rebuild_track(build_prediction_runtime_context(),
-                                                       track,
-                                                       now_s,
-                                                       fixed_dt,
-                                                       thrusting,
-                                                       with_maneuvers);
+        return PredictionRuntimeController::should_rebuild_track(_prediction,
+                                                                 build_prediction_runtime_context(),
+                                                                 track,
+                                                                 now_s,
+                                                                 fixed_dt,
+                                                                 thrusting,
+                                                                 with_maneuvers);
     }
 
     void GameplayState::update_prediction(GameStateContext &ctx, float fixed_dt)
@@ -594,10 +596,11 @@ namespace Game
             return;
         }
 
-        _prediction_system.update_visible_tracks(build_prediction_runtime_context(),
-                                                 visible_subjects,
-                                                 now_s,
-                                                 fixed_dt);
+        PredictionRuntimeController::update_visible_tracks(_prediction,
+                                                           build_prediction_runtime_context(),
+                                                           visible_subjects,
+                                                           now_s,
+                                                           fixed_dt);
 
         // Mirror the active track's last solver time into the shared debug HUD stats.
         PredictionTrackState *active_track = active_prediction_track();

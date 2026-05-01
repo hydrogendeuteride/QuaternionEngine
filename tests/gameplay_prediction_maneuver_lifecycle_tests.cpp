@@ -561,3 +561,114 @@ TEST(GameplayPredictionManeuverTests, LifecycleReducerTransitionsPreviewStates)
     EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::Idle);
     EXPECT_FALSE(track.preview_anchor.valid);
 }
+
+TEST(GameplayPredictionManeuverTests, PredictionSystemMarksManeuverPreviewDirty)
+{
+    Game::GameplayPredictionState prediction{};
+    Game::PredictionSystem system(prediction);
+    Game::PredictionTrackState track{};
+    track.dirty = false;
+    track.request_pending = true;
+    track.invalidated_while_pending = false;
+
+    system.mark_maneuver_preview_dirty(track);
+
+    EXPECT_TRUE(track.dirty);
+    EXPECT_TRUE(track.invalidated_while_pending);
+}
+
+TEST(GameplayPredictionManeuverTests, PredictionSystemClearsOnlyUnappliedDragPreview)
+{
+    Game::GameplayPredictionState prediction{};
+    Game::PredictionSystem system(prediction);
+    Game::PredictionTrackState track{};
+    track.preview_state = Game::PredictionPreviewRuntimeState::DragPreviewPending;
+    track.preview_anchor.valid = true;
+    track.preview_overlay.chunk_assembly.valid = true;
+    track.preview_overlay.chunk_assembly.chunks.push_back(Game::OrbitChunk{});
+    track.pick_cache.base_valid = true;
+    track.pick_cache.planned_valid = true;
+
+    system.clear_unapplied_maneuver_drag_preview(track);
+
+    EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::Idle);
+    EXPECT_FALSE(track.preview_anchor.valid);
+    EXPECT_FALSE(track.preview_overlay.chunk_assembly.valid);
+    EXPECT_TRUE(track.preview_overlay.chunk_assembly.chunks.empty());
+    EXPECT_FALSE(track.pick_cache.base_valid);
+    EXPECT_FALSE(track.pick_cache.planned_valid);
+
+    track.preview_state = Game::PredictionPreviewRuntimeState::PreviewStreaming;
+    track.preview_anchor.valid = true;
+    track.preview_overlay.chunk_assembly.valid = true;
+    track.preview_overlay.chunk_assembly.chunks.push_back(Game::OrbitChunk{});
+    track.pick_cache.base_valid = true;
+    track.pick_cache.planned_valid = true;
+
+    system.clear_unapplied_maneuver_drag_preview(track);
+
+    EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::PreviewStreaming);
+    EXPECT_TRUE(track.preview_anchor.valid);
+    EXPECT_TRUE(track.preview_overlay.chunk_assembly.valid);
+    EXPECT_FALSE(track.preview_overlay.chunk_assembly.chunks.empty());
+    EXPECT_TRUE(track.pick_cache.base_valid);
+    EXPECT_TRUE(track.pick_cache.planned_valid);
+}
+
+TEST(GameplayPredictionManeuverTests, PredictionSystemClearsLivePreviewStateWithoutDroppingPlannedCaches)
+{
+    Game::GameplayPredictionState prediction{};
+    Game::PredictionSystem system(prediction);
+
+    Game::PredictionTrackState track{};
+    track.key = {Game::PredictionSubjectKind::Orbiter, 1};
+    track.supports_maneuvers = true;
+    track.cache.identity.valid = true;
+    track.cache.identity.maneuver_plan_signature_valid = true;
+    track.cache.identity.maneuver_plan_signature = 42u;
+    track.cache.solver.trajectory_inertial_planned = {make_sample(0.0, 7'000'000.0)};
+    track.cache.solver.trajectory_segments_inertial_planned = {make_segment(0.0, 10.0, 7'000'000.0, 7'100'000.0)};
+    track.cache.display.trajectory_frame_planned = track.cache.solver.trajectory_inertial_planned;
+    track.cache.display.trajectory_segments_frame_planned = track.cache.solver.trajectory_segments_inertial_planned;
+    track.authoritative_cache = track.cache;
+    track.preview_state = Game::PredictionPreviewRuntimeState::PreviewStreaming;
+    track.preview_anchor.valid = true;
+    track.preview_overlay.chunk_assembly.valid = true;
+    track.preview_overlay.chunk_assembly.chunks.push_back(Game::OrbitChunk{});
+    track.full_stream_overlay.chunk_assembly.valid = true;
+    track.full_stream_overlay.chunk_assembly.chunks.push_back(Game::OrbitChunk{});
+    track.pick_cache.base_valid = true;
+    track.pick_cache.planned_valid = true;
+    prediction.tracks.push_back(track);
+
+    system.clear_maneuver_live_preview_state();
+
+    ASSERT_EQ(prediction.tracks.size(), 1u);
+    const Game::PredictionTrackState &cleared = prediction.tracks.front();
+    EXPECT_EQ(cleared.preview_state, Game::PredictionPreviewRuntimeState::Idle);
+    EXPECT_FALSE(cleared.preview_anchor.valid);
+    EXPECT_FALSE(cleared.preview_overlay.chunk_assembly.valid);
+    EXPECT_TRUE(cleared.preview_overlay.chunk_assembly.chunks.empty());
+    EXPECT_FALSE(cleared.pick_cache.base_valid);
+    EXPECT_FALSE(cleared.pick_cache.planned_valid);
+    EXPECT_FALSE(cleared.cache.solver.trajectory_inertial_planned.empty());
+    EXPECT_FALSE(cleared.cache.solver.trajectory_segments_inertial_planned.empty());
+    EXPECT_TRUE(cleared.cache.identity.maneuver_plan_signature_valid);
+    EXPECT_FALSE(cleared.authoritative_cache.solver.trajectory_inertial_planned.empty());
+    EXPECT_TRUE(cleared.authoritative_cache.identity.maneuver_plan_signature_valid);
+    EXPECT_TRUE(cleared.full_stream_overlay.chunk_assembly.valid);
+    EXPECT_FALSE(cleared.full_stream_overlay.chunk_assembly.chunks.empty());
+}
+
+TEST(GameplayPredictionManeuverTests, PredictionSystemTransitionsManeuverPreviewToFullRefine)
+{
+    Game::GameplayPredictionState prediction{};
+    Game::PredictionSystem system(prediction);
+    Game::PredictionTrackState track{};
+    track.preview_state = Game::PredictionPreviewRuntimeState::PreviewStreaming;
+
+    system.await_maneuver_preview_full_refine(track, 123.0);
+
+    EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::AwaitFullRefine);
+    EXPECT_DOUBLE_EQ(track.preview_last_anchor_refresh_at_s, 123.0);
+}

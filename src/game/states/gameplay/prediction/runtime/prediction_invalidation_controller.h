@@ -18,8 +18,6 @@ namespace Game
         static void mark_visible_tracks_dirty(std::vector<PredictionTrackState> &tracks,
                                               const std::vector<PredictionSubjectKey> &visible_subjects);
 
-        static void mark_track_dirty_for_preview(PredictionTrackState &track);
-
         static void invalidate_maneuver_plan_revision(std::vector<PredictionTrackState> &tracks,
                                                       OrbitPredictionService &prediction_service,
                                                       OrbitPredictionDerivedService &derived_service,

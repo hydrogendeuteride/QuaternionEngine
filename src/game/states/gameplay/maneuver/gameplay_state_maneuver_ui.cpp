@@ -19,20 +19,6 @@ namespace Game
     namespace
     {
         using namespace ManeuverUtil;
-
-        void clear_unapplied_drag_preview(PredictionTrackState &track)
-        {
-            if (track.preview_state != PredictionPreviewRuntimeState::EnterDrag &&
-                track.preview_state != PredictionPreviewRuntimeState::DragPreviewPending)
-            {
-                return;
-            }
-
-            track.preview_state = PredictionPreviewRuntimeState::Idle;
-            track.preview_anchor = {};
-            track.preview_overlay.clear();
-            track.pick_cache.clear();
-        }
     } // namespace
 
     void GameplayState::update_maneuver_ui_config(GameStateContext &ctx)
@@ -278,7 +264,7 @@ namespace Game
                     PredictionDragDebugTelemetry &debug = track->drag_debug;
                     debug.drag_active = false;
                     debug.last_drag_end_tp = PredictionDragDebugTelemetry::Clock::now();
-                    clear_unapplied_drag_preview(*track);
+                    _prediction_system.clear_unapplied_maneuver_drag_preview(*track);
                 }
                 _maneuver_gizmo_interaction = {};
             }
@@ -292,7 +278,7 @@ namespace Game
                     debug.last_drag_end_tp = PredictionDragDebugTelemetry::Clock::now();
                     if (!changed)
                     {
-                        clear_unapplied_drag_preview(*track);
+                        _prediction_system.clear_unapplied_maneuver_drag_preview(*track);
                     }
                 }
                 if (hovered_handle_idx >= 0)
@@ -311,7 +297,7 @@ namespace Game
                 {
                     if (PredictionTrackState *track = active_prediction_track())
                     {
-                        track->preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
+                        _prediction_system.await_maneuver_preview_full_refine(*track, current_sim_time_s());
                     }
                     (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
                 }

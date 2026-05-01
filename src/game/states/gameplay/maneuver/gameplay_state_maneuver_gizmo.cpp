@@ -1,7 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
-#include "game/states/gameplay/prediction/runtime/prediction_invalidation_controller.h"
 
 #include "core/device/images.h"
 #include "core/engine.h"
@@ -604,7 +603,7 @@ namespace Game
 
             if (PredictionTrackState *track = active_prediction_track())
             {
-                PredictionInvalidationController::mark_track_dirty_for_preview(*track);
+                _prediction_system.mark_maneuver_preview_dirty(*track);
                 sync_prediction_dirty_flag();
             }
         }
