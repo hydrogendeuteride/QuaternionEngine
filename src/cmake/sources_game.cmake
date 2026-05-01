@@ -96,6 +96,7 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/prediction/prediction_metrics_builder.cpp
   game/states/gameplay/prediction/streamed_chunk_assembly_builder.h
   game/states/gameplay/prediction/streamed_chunk_assembly_builder.cpp
+  game/states/gameplay/prediction/gameplay_prediction_state.h
   game/states/gameplay/prediction/gameplay_prediction_derived_service.h
   game/states/gameplay/prediction/gameplay_prediction_derived_service.cpp
   game/states/gameplay/prediction/gameplay_state_prediction.cpp
@@ -113,6 +114,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/prediction/runtime/prediction_result_applier.cpp
   game/states/gameplay/prediction/runtime/prediction_solver_result_applier.h
   game/states/gameplay/prediction/runtime/prediction_solver_result_applier.cpp
+  game/states/gameplay/prediction/runtime/prediction_runtime_controller.h
+  game/states/gameplay/prediction/runtime/prediction_runtime_controller.cpp
   game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime.cpp
   game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_solver.cpp
   game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_requests.cpp

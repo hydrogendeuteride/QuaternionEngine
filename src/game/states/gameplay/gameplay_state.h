@@ -5,7 +5,7 @@
 #include "core/game_api.h"
 #include "game/states/gameplay/maneuver/maneuver_controller.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_types.h"
-#include "game/states/gameplay/prediction/gameplay_prediction_derived_service.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_state.h"
 #include "game/states/gameplay/prediction/prediction_frame_controller.h"
 #include "game/states/gameplay/prediction/prediction_frame_resolver.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
@@ -41,31 +41,6 @@ namespace Game
         struct PredictionGlobalDrawContext;
         struct PredictionTrackDrawContext;
     }
-
-    struct GameplayPredictionState
-    {
-        bool enabled{true};
-        bool dirty{true};
-        bool draw_full_orbit{true};
-        bool draw_future_segment{true};
-        bool draw_velocity_ray{false};
-        float line_alpha_scale{1.0f};
-        float line_overlay_boost{0.0f};
-        double periodic_refresh_s{0.0};
-        double thrust_refresh_s{0.1};
-        PredictionSamplingPolicy sampling_policy{};
-
-        OrbitPlotPerfStats orbit_plot_perf{};
-        OrbitPredictionDrawConfig draw_config{};
-        OrbitPredictionService service{};
-        OrbitPredictionDerivedService derived_service{};
-        std::vector<PredictionTrackState> tracks{};
-        std::vector<PredictionGroup> groups{};
-        PredictionSelectionState selection{};
-        PredictionFrameSelectionState frame_selection{};
-        uint64_t display_frame_revision{1};
-        PredictionAnalysisSelectionState analysis_selection{};
-    };
 
     // ============================================================================
     // GameplayState: Main gameplay — orbital mechanics, combat, ship control
@@ -159,7 +134,7 @@ namespace Game
         void clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects);
         void apply_completed_prediction_result(OrbitPredictionService::Result result);
         void apply_completed_prediction_derived_result(OrbitPredictionDerivedService::Result result);
-        PredictionRuntimeContext build_prediction_runtime_context();
+        PredictionRuntimeContext build_prediction_runtime_context() const;
         bool should_rebuild_prediction_track(const PredictionTrackState &track,
                                              double now_s,
                                              float fixed_dt,
@@ -205,7 +180,7 @@ namespace Game
         double prediction_display_window_s(PredictionSubjectKey key,
                                            double now_s,
                                            bool with_maneuvers) const;
-        void refresh_prediction_preview_anchor(PredictionTrackState &track, double now_s, bool with_maneuvers);
+        void refresh_prediction_preview_anchor(PredictionTrackState &track, double now_s, bool with_maneuvers) const;
         double prediction_preview_exact_window_s(const PredictionTrackState &track,
                                                  double now_s,
                                                  bool with_maneuvers) const;

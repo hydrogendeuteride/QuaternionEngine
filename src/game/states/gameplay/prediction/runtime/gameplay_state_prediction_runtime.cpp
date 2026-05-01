@@ -4,10 +4,10 @@
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 #include "game/states/gameplay/prediction/runtime/prediction_invalidation_controller.h"
+#include "game/states/gameplay/prediction/runtime/prediction_runtime_controller.h"
 
 #include <cmath>
 #include <limits>
-#include <utility>
 
 namespace Game
 {
@@ -186,91 +186,6 @@ namespace Game
             return std::min(available_window_s, preview_window_s);
         }
 
-        [[nodiscard]] bool solve_already_reported_horizon_shortfall(
-                const OrbitPredictionService::AdaptiveStageDiagnostics &diag,
-                const double required_ahead_s,
-                const double coverage_epsilon_s)
-        {
-            if (!(required_ahead_s > 0.0) ||
-                !std::isfinite(required_ahead_s) ||
-                !(diag.requested_duration_s > 0.0) ||
-                !std::isfinite(diag.requested_duration_s))
-            {
-                return false;
-            }
-
-            const double requested_duration_s = std::max(0.0, diag.requested_duration_s);
-            const double covered_duration_s = std::max(0.0, diag.covered_duration_s);
-            if (required_ahead_s > (requested_duration_s + coverage_epsilon_s))
-            {
-                return false;
-            }
-
-            if ((covered_duration_s + coverage_epsilon_s) >= required_ahead_s)
-            {
-                return false;
-            }
-
-            return diag.hard_cap_hit ||
-                   (covered_duration_s + coverage_epsilon_s) < (requested_duration_s - coverage_epsilon_s);
-        }
-
-        [[nodiscard]] double prediction_coverage_refresh_lead_s(const double required_ahead_s, const float fixed_dt)
-        {
-            const double fixed_dt_lead_s =
-                    std::max(0.0, static_cast<double>(fixed_dt)) *
-                    OrbitPredictionTuning::kPredictionCoverageRefreshLeadFixedDtScale;
-            const double lead_s =
-                    std::max(OrbitPredictionTuning::kPredictionCoverageRefreshLeadS, fixed_dt_lead_s);
-            if (!(required_ahead_s > 0.0) || !std::isfinite(required_ahead_s))
-            {
-                return lead_s;
-            }
-
-            return std::min(required_ahead_s, lead_s);
-        }
-
-        [[nodiscard]] double prediction_cache_end_time_s(const OrbitPredictionCache &cache)
-        {
-            double cache_end_s = std::numeric_limits<double>::quiet_NaN();
-
-            const auto accumulate_samples_end = [&cache_end_s](const std::vector<orbitsim::TrajectorySample> &samples) {
-                if (samples.empty())
-                {
-                    return;
-                }
-
-                const double sample_end_s = samples.back().t_s;
-                if (std::isfinite(sample_end_s))
-                {
-                    cache_end_s = std::isfinite(cache_end_s)
-                                          ? std::max(cache_end_s, sample_end_s)
-                                          : sample_end_s;
-                }
-            };
-
-            const auto accumulate_segments_end = [&cache_end_s](const std::vector<orbitsim::TrajectorySegment> &segments) {
-                if (segments.empty())
-                {
-                    return;
-                }
-
-                const orbitsim::TrajectorySegment &last_segment = segments.back();
-                const double segment_end_s = last_segment.t0_s + last_segment.dt_s;
-                if (std::isfinite(segment_end_s))
-                {
-                    cache_end_s = std::isfinite(cache_end_s)
-                                          ? std::max(cache_end_s, segment_end_s)
-                                          : segment_end_s;
-                }
-            };
-
-            accumulate_samples_end(cache.solver.resolved_trajectory_inertial());
-            accumulate_segments_end(cache.solver.resolved_trajectory_segments_inertial());
-            accumulate_samples_end(cache.solver.trajectory_inertial_planned);
-            accumulate_segments_end(cache.solver.trajectory_segments_inertial_planned);
-            return cache_end_s;
-        }
     } // namespace
 
     void GameplayState::sync_prediction_dirty_flag()
@@ -312,26 +227,12 @@ namespace Game
 
     void GameplayState::clear_prediction_runtime()
     {
-        // Drop every cached artifact when the feature is disabled.
-        for (PredictionTrackState &track : _prediction.tracks)
-        {
-            track.clear_runtime();
-            track.dirty = false;
-        }
-        _prediction.service.reset();
-        _prediction.derived_service.reset();
-        _prediction.dirty = false;
+        PredictionRuntimeController::clear_runtime(_prediction);
     }
 
     void GameplayState::clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects)
     {
-        // A service reset invalidates every track, even ones that are currently hidden.
-        (void) visible_subjects;
-        for (PredictionTrackState &track : _prediction.tracks)
-        {
-            track.clear_runtime();
-        }
-        _prediction.derived_service.reset();
+        PredictionRuntimeController::clear_visible_runtime(_prediction, visible_subjects);
     }
 
     double GameplayState::prediction_display_window_s(const PredictionSubjectKey key,
@@ -345,7 +246,7 @@ namespace Game
 
     void GameplayState::refresh_prediction_preview_anchor(PredictionTrackState &track,
                                                           const double now_s,
-                                                          const bool with_maneuvers)
+                                                          const bool with_maneuvers) const
     {
         const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
                 PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
@@ -655,68 +556,13 @@ namespace Game
                                                         const bool thrusting,
                                                         const bool with_maneuvers) const
     {
-        const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
-                PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
-        // Rebuild when cache state, thrusting, timing, or horizon coverage says we must.
-        bool rebuild = lifecycle.dirty || !lifecycle.visible_cache_valid;
-
-        if (!rebuild && thrusting)
-        {
-            const double dt_since_build_s = now_s - track.cache.identity.build_time_s;
-            rebuild = dt_since_build_s >= _prediction.thrust_refresh_s;
-        }
-
-        if (!rebuild && _prediction.periodic_refresh_s > 0.0)
-        {
-            const double dt_since_build_s = now_s - track.cache.identity.build_time_s;
-            rebuild = dt_since_build_s >= _prediction.periodic_refresh_s;
-        }
-
-        if (!rebuild && PredictionRuntimeDetail::prediction_track_should_rebuild_from_await_full_refine(lifecycle))
-        {
-            rebuild = true;
-        }
-
-        if (rebuild || !track.cache.identity.valid || track.cache.solver.resolved_trajectory_inertial().empty())
-        {
-            return rebuild;
-        }
-
-        const double cache_end_s = prediction_cache_end_time_s(track.cache);
-        if (!std::isfinite(cache_end_s))
-        {
-            return true;
-        }
-
-        const double required_ahead_s = prediction_required_window_s(track, now_s, with_maneuvers);
-
-        // Add a small epsilon so tiny fixed-step jitter does not trigger rebuild churn.
-        const double coverage_epsilon_s =
-                std::max(1.0e-3, std::min(0.25, std::max(0.0, static_cast<double>(fixed_dt)) * 0.5));
-        if ((cache_end_s - now_s + coverage_epsilon_s) >= required_ahead_s)
-        {
-            return false;
-        }
-
-        const double coverage_refresh_lead_s = prediction_coverage_refresh_lead_s(required_ahead_s, fixed_dt);
-        if ((cache_end_s - now_s + coverage_epsilon_s) > coverage_refresh_lead_s)
-        {
-            return false;
-        }
-
-        // A completed solve can still under-cover the requested horizon (for example when
-        // the adaptive integrator hits a cap). Re-requesting the same horizon immediately
-        // just spins the solver without changing the visible result.
-        if (track.solver_diagnostics.status == OrbitPredictionService::Status::Success &&
-            solve_already_reported_horizon_shortfall(
-                    track.solver_diagnostics.trajectory_base,
-                    required_ahead_s,
-                    coverage_epsilon_s))
-        {
-            return false;
-        }
-
-        return true;
+        return PredictionRuntimeController::should_rebuild_track(_prediction,
+                                                                 build_prediction_runtime_context(),
+                                                                 track,
+                                                                 now_s,
+                                                                 fixed_dt,
+                                                                 thrusting,
+                                                                 with_maneuvers);
     }
 
     void GameplayState::update_prediction(GameStateContext &ctx, float fixed_dt)
@@ -756,35 +602,11 @@ namespace Game
             return;
         }
 
-        // Rebuild or refresh only the subjects that are actually visible.
-        for (PredictionTrackState &track : _prediction.tracks)
-        {
-            if (!PredictionRuntimeDetail::contains_key(visible_subjects, track.key))
-            {
-                continue;
-            }
-
-            const bool with_maneuvers =
-                    prediction_subject_supports_maneuvers(track.key) &&
-                    _maneuver_nodes_enabled &&
-                    !_maneuver_state.nodes.empty();
-            const bool thrusting = prediction_subject_thrust_applied_this_tick(track.key);
-            const double track_reference_time_s = now_s;
-            const bool rebuild =
-                    should_rebuild_prediction_track(track, track_reference_time_s, fixed_dt, thrusting, with_maneuvers);
-            if (!rebuild)
-            {
-                continue;
-            }
-
-            if (track.key.kind == PredictionSubjectKind::Celestial)
-            {
-                update_celestial_prediction_track(track, now_s);
-                continue;
-            }
-
-            update_orbiter_prediction_track(track, track_reference_time_s, thrusting, with_maneuvers);
-        }
+        PredictionRuntimeController::update_visible_tracks(_prediction,
+                                                          build_prediction_runtime_context(),
+                                                          visible_subjects,
+                                                          now_s,
+                                                          fixed_dt);
 
         // Mirror the active track's last solver time into the shared debug HUD stats.
         PredictionTrackState *active_track = active_prediction_track();

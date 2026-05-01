@@ -36,6 +36,7 @@ namespace Game
         std::function<double(const PredictionTrackState &, double, bool)> preview_exact_window_s;
         std::function<void(PredictionTrackState &, double, bool)> refresh_preview_anchor;
         std::function<bool(PredictionSubjectKey)> subject_is_player;
+        std::function<bool(PredictionSubjectKey)> subject_thrust_applied_this_tick;
         std::function<orbitsim::BodyId(const ManeuverNode &, double)> resolve_maneuver_node_primary_body_id;
         std::function<orbitsim::TrajectoryFrameSpec(const OrbitPredictionCache &, double)> resolve_display_frame_spec;
         std::function<orbitsim::BodyId(const OrbitPredictionCache &,
