@@ -105,6 +105,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/prediction/gameplay_state_prediction_frames.cpp
   game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h
   game/states/gameplay/prediction/runtime/prediction_track_lifecycle.h
+  game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.h
+  game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.cpp
   game/states/gameplay/prediction/runtime/prediction_runtime_context.h
   game/states/gameplay/prediction/runtime/prediction_request_factory.h
   game/states/gameplay/prediction/runtime/prediction_request_factory.cpp

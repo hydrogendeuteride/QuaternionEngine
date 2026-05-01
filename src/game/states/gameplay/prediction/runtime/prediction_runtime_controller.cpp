@@ -4,6 +4,7 @@
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/prediction/prediction_frame_controller.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
+#include "game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.h"
 #include "game/states/gameplay/prediction/runtime/prediction_request_factory.h"
 #include "game/states/gameplay/prediction/runtime/prediction_result_applier.h"
 #include "game/states/gameplay/prediction/runtime/prediction_solver_result_applier.h"
@@ -54,22 +55,19 @@ namespace Game
                                                const double now_s,
                                                const OrbitPredictionService::SolveQuality solve_quality,
                                                const bool request_has_maneuver_plan,
-                                               const uint64_t plan_signature)
+                                               const uint64_t plan_signature,
+                                               const bool preview_request_active = false)
         {
-            track.latest_requested_generation_id = generation_id;
-            if (solve_quality == OrbitPredictionService::SolveQuality::Full)
-            {
-                track.latest_requested_authoritative_generation_id = generation_id;
-            }
-            track.request_pending = true;
-            track.derived_request_pending = false;
-            track.pending_solve_quality = solve_quality;
-            track.pending_solver_has_maneuver_plan = request_has_maneuver_plan;
-            track.pending_solver_plan_signature = request_has_maneuver_plan ? plan_signature : 0u;
-            track.pending_derived_has_maneuver_plan = false;
-            track.pending_derived_plan_signature = 0u;
-            track.invalidated_while_pending = false;
-            (void) now_s;
+            PredictionLifecycleReducer::mark_solver_request_submitted(
+                    track,
+                    PredictionSolverRequestSubmittedEvent{
+                            generation_id,
+                            solve_quality,
+                            request_has_maneuver_plan,
+                            plan_signature,
+                            preview_request_active,
+                            now_s,
+                    });
 
             PredictionDragDebugTelemetry &debug = track.drag_debug;
             const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
@@ -213,8 +211,7 @@ namespace Game
     {
         for (PredictionTrackState &track : prediction.tracks)
         {
-            track.clear_runtime();
-            track.dirty = false;
+            PredictionLifecycleReducer::reset_runtime(track, PredictionRuntimeResetMode::Clean);
         }
         prediction.service.reset();
         prediction.derived_service.reset();
@@ -228,7 +225,7 @@ namespace Game
         (void) visible_subjects;
         for (PredictionTrackState &track : prediction.tracks)
         {
-            track.clear_runtime();
+            PredictionLifecycleReducer::reset_runtime(track, PredictionRuntimeResetMode::Dirty);
         }
         prediction.derived_service.reset();
     }
@@ -435,7 +432,8 @@ namespace Game
                                           now_s,
                                           submitted_quality,
                                           submitted_plan_signature_valid,
-                                          submitted_plan_signature);
+                                          submitted_plan_signature,
+                                          build.preview_request_active);
         if (track.supports_maneuvers)
         {
             Logger::debug("Maneuver prediction request: track={} gen={} plan_rev={} plan_sig={} plan_sig_valid={} "
@@ -459,11 +457,6 @@ namespace Game
                           track.request_pending,
                           track.derived_request_pending,
                           track.dirty);
-        }
-        if (build.preview_request_active)
-        {
-            track.preview_state = PredictionPreviewRuntimeState::DragPreviewPending;
-            track.preview_last_request_at_s = now_s;
         }
         return true;
     }
@@ -505,7 +498,7 @@ namespace Game
         if (!context.get_subject_world_state ||
             !context.get_subject_world_state(track.key, subject_pos_world, subject_vel_world, subject_vel_local))
         {
-            track.clear_runtime();
+            PredictionLifecycleReducer::reset_runtime(track, PredictionRuntimeResetMode::Dirty);
             return;
         }
 
@@ -534,13 +527,13 @@ namespace Game
                 thrusting,
                 with_maneuvers,
                 &throttled);
-        track.dirty = !requested;
+        PredictionLifecycleReducer::mark_rebuild_attempt_finished(track, requested);
         if (!requested && !throttled)
         {
             const bool has_cache_to_keep = track.cache.identity.valid || track.authoritative_cache.identity.valid;
             if (!has_cache_to_keep)
             {
-                track.clear_runtime();
+                PredictionLifecycleReducer::reset_runtime(track, PredictionRuntimeResetMode::Dirty);
             }
         }
     }
@@ -553,7 +546,7 @@ namespace Game
     {
         if (!context.orbital_scenario)
         {
-            track.clear_runtime();
+            PredictionLifecycleReducer::reset_runtime(track, PredictionRuntimeResetMode::Dirty);
             return;
         }
 
@@ -563,10 +556,10 @@ namespace Game
         }
 
         const bool requested = request_celestial_prediction_async(prediction, context, track, now_s);
-        track.dirty = !requested;
+        PredictionLifecycleReducer::mark_rebuild_attempt_finished(track, requested);
         if (!requested)
         {
-            track.clear_runtime();
+            PredictionLifecycleReducer::reset_runtime(track, PredictionRuntimeResetMode::Dirty);
         }
     }
 

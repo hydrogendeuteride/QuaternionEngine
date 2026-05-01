@@ -2,6 +2,7 @@
 
 #include "core/util/logger.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
+#include "game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -202,10 +203,7 @@ namespace Game
                          track.dirty);
             if (result.generation_id == track.latest_requested_generation_id)
             {
-                track.request_pending = false;
-                track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
-                track.invalidated_while_pending = false;
-                track.dirty = true;
+                PredictionLifecycleReducer::mark_solver_result_rejected_for_rebuild(track);
             }
             return out;
         }
@@ -227,31 +225,14 @@ namespace Game
             result.maneuver_plan_signature != current_plan_signature &&
             result.solve_quality != OrbitPredictionService::SolveQuality::FastPreview)
         {
-            track.request_pending = false;
-            track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
-            track.invalidated_while_pending = false;
-            track.dirty = true;
+            PredictionLifecycleReducer::mark_solver_result_rejected_for_rebuild(track);
             return out;
         }
 
         if (!result.valid || result.resolved_trajectory_inertial().size() < 2)
         {
-            track.request_pending = false;
-            track.derived_request_pending = false;
-            track.latest_requested_derived_generation_id = 0;
-            track.latest_requested_derived_display_frame_key = 0;
-            track.latest_requested_derived_display_frame_revision = 0;
-            track.latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
-            track.latest_requested_derived_publish_stage = OrbitPredictionService::PublishStage::Final;
-            track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
-            track.dirty = true;
+            PredictionLifecycleReducer::mark_solver_result_rejected_for_rebuild(track, true, false);
             return out;
-        }
-
-        if (PredictionRuntimeDetail::prediction_track_is_preview_streaming_publish(result.solve_quality,
-                                                                                   result.publish_stage))
-        {
-            track.preview_state = PredictionPreviewRuntimeState::PreviewStreaming;
         }
 
         WorldVec3 build_pos_world{0.0, 0.0, 0.0};
@@ -324,15 +305,11 @@ namespace Game
         derived_request.analysis_body_id = analysis_body_id;
         derived_request.player_lookup_segments_inertial = std::move(player_lookup_segments);
 
-        track.request_pending = PredictionRuntimeDetail::prediction_track_should_keep_request_pending_after_solver_publish(
+        PredictionLifecycleReducer::mark_solver_result_accepted(
+                track,
                 derived_request.solver_result.solve_quality,
-                derived_request.solver_result.publish_stage);
-        if (PredictionRuntimeDetail::prediction_track_should_promote_dirty_after_solver_publish(lifecycle_before_apply))
-        {
-            track.dirty = true;
-            track.invalidated_while_pending = false;
-        }
-        track.pending_solve_quality = OrbitPredictionService::SolveQuality::Full;
+                derived_request.solver_result.publish_stage,
+                lifecycle_before_apply);
 
         out.derived_request = std::move(derived_request);
         return out;

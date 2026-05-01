@@ -1,5 +1,7 @@
 #include "gameplay_prediction_maneuver_test_common.h"
 
+#include "game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.h"
+
 TEST(GameplayPredictionManeuverTests, LifecycleSnapshotClassifiesIdleTrack)
 {
     Game::PredictionTrackState track{};
@@ -347,4 +349,215 @@ TEST(GameplayPredictionManeuverTests, LifecycleHelperCoversPublishPoliciesAndNam
     EXPECT_STREQ(Game::PredictionRuntimeDetail::prediction_track_lifecycle_name(
                          Game::PredictionTrackLifecycleState::FullStreaming),
                  "FullStreaming");
+}
+
+TEST(GameplayPredictionManeuverTests, LifecycleReducerMarksCleanAndPendingTracksDirty)
+{
+    Game::PredictionTrackState track{};
+    track.dirty = false;
+
+    Game::PredictionLifecycleReducer::mark_dirty(track);
+
+    EXPECT_TRUE(track.dirty);
+    EXPECT_FALSE(track.invalidated_while_pending);
+
+    track.dirty = false;
+    track.request_pending = true;
+
+    Game::PredictionLifecycleReducer::mark_dirty(track);
+
+    EXPECT_FALSE(track.dirty);
+    EXPECT_TRUE(track.invalidated_while_pending);
+}
+
+TEST(GameplayPredictionManeuverTests, LifecycleReducerRecordsSolverRequestMetadata)
+{
+    Game::PredictionTrackState track{};
+    track.derived_request_pending = true;
+    track.pending_derived_has_maneuver_plan = true;
+    track.pending_derived_plan_signature = 11u;
+
+    Game::PredictionLifecycleReducer::mark_solver_request_submitted(
+            track,
+            Game::PredictionSolverRequestSubmittedEvent{
+                    42u,
+                    Game::OrbitPredictionService::SolveQuality::FastPreview,
+                    true,
+                    99u,
+                    true,
+                    123.0,
+            });
+
+    EXPECT_EQ(track.latest_requested_generation_id, 42u);
+    EXPECT_EQ(track.latest_requested_authoritative_generation_id, 0u);
+    EXPECT_TRUE(track.request_pending);
+    EXPECT_FALSE(track.derived_request_pending);
+    EXPECT_EQ(track.pending_solve_quality, Game::OrbitPredictionService::SolveQuality::FastPreview);
+    EXPECT_TRUE(track.pending_solver_has_maneuver_plan);
+    EXPECT_EQ(track.pending_solver_plan_signature, 99u);
+    EXPECT_FALSE(track.pending_derived_has_maneuver_plan);
+    EXPECT_EQ(track.pending_derived_plan_signature, 0u);
+    EXPECT_FALSE(track.invalidated_while_pending);
+    EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::DragPreviewPending);
+    EXPECT_DOUBLE_EQ(track.preview_last_request_at_s, 123.0);
+}
+
+TEST(GameplayPredictionManeuverTests, LifecycleReducerRecordsAndResetsDerivedRequestMetadata)
+{
+    Game::PredictionTrackState track{};
+    Game::OrbitPredictionDerivedService::Request request{};
+    request.generation_id = 7u;
+    request.display_frame_key = 3u;
+    request.display_frame_revision = 5u;
+    request.analysis_body_id = 13;
+    request.maneuver_plan_signature_valid = true;
+    request.maneuver_plan_signature = 77u;
+    request.solver_result.publish_stage = Game::OrbitPredictionService::PublishStage::FullStreaming;
+
+    Game::PredictionLifecycleReducer::mark_derived_request_submitted(track, request);
+
+    EXPECT_TRUE(track.derived_request_pending);
+    EXPECT_EQ(track.latest_requested_derived_generation_id, 7u);
+    EXPECT_EQ(track.latest_requested_derived_display_frame_key, 3u);
+    EXPECT_EQ(track.latest_requested_derived_display_frame_revision, 5u);
+    EXPECT_EQ(track.latest_requested_derived_analysis_body_id, 13);
+    EXPECT_EQ(track.latest_requested_derived_publish_stage,
+              Game::OrbitPredictionService::PublishStage::FullStreaming);
+    EXPECT_TRUE(track.pending_derived_has_maneuver_plan);
+    EXPECT_EQ(track.pending_derived_plan_signature, 77u);
+
+    Game::PredictionLifecycleReducer::reset_derived_request_state(track);
+
+    EXPECT_FALSE(track.derived_request_pending);
+    EXPECT_EQ(track.latest_requested_derived_generation_id, 0u);
+    EXPECT_EQ(track.latest_requested_derived_display_frame_key, 0u);
+    EXPECT_EQ(track.latest_requested_derived_display_frame_revision, 0u);
+    EXPECT_EQ(track.latest_requested_derived_analysis_body_id, orbitsim::kInvalidBodyId);
+    EXPECT_EQ(track.latest_requested_derived_publish_stage,
+              Game::OrbitPredictionService::PublishStage::Final);
+}
+
+TEST(GameplayPredictionManeuverTests, LifecycleReducerClearsPendingManeuverRequestsWithoutResettingDerivedIdentity)
+{
+    Game::PredictionTrackState track{};
+    track.request_pending = true;
+    track.derived_request_pending = true;
+    track.pending_solve_quality = Game::OrbitPredictionService::SolveQuality::FastPreview;
+    track.pending_solver_has_maneuver_plan = true;
+    track.pending_solver_plan_signature = 17u;
+    track.pending_derived_has_maneuver_plan = true;
+    track.pending_derived_plan_signature = 19u;
+    track.invalidated_while_pending = true;
+    track.latest_requested_derived_generation_id = 31u;
+    track.latest_requested_derived_display_frame_key = 37u;
+    track.latest_requested_derived_display_frame_revision = 41u;
+
+    Game::PredictionLifecycleReducer::clear_pending_maneuver_requests(track, true);
+
+    EXPECT_FALSE(track.request_pending);
+    EXPECT_FALSE(track.derived_request_pending);
+    EXPECT_EQ(track.pending_solve_quality, Game::OrbitPredictionService::SolveQuality::Full);
+    EXPECT_FALSE(track.pending_solver_has_maneuver_plan);
+    EXPECT_EQ(track.pending_solver_plan_signature, 0u);
+    EXPECT_FALSE(track.pending_derived_has_maneuver_plan);
+    EXPECT_EQ(track.pending_derived_plan_signature, 0u);
+    EXPECT_FALSE(track.invalidated_while_pending);
+    EXPECT_TRUE(track.dirty);
+    EXPECT_EQ(track.latest_requested_derived_generation_id, 31u);
+    EXPECT_EQ(track.latest_requested_derived_display_frame_key, 37u);
+    EXPECT_EQ(track.latest_requested_derived_display_frame_revision, 41u);
+}
+
+TEST(GameplayPredictionManeuverTests, LifecycleReducerAppliesSolverPublishPendingPolicy)
+{
+    Game::PredictionTrackState track{};
+    track.request_pending = true;
+    track.pending_solve_quality = Game::OrbitPredictionService::SolveQuality::FastPreview;
+    track.dirty = false;
+    const auto lifecycle = Game::PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
+
+    Game::PredictionLifecycleReducer::mark_solver_result_accepted(
+            track,
+            Game::OrbitPredictionService::SolveQuality::Full,
+            Game::OrbitPredictionService::PublishStage::FullStreaming,
+            lifecycle);
+
+    EXPECT_TRUE(track.request_pending);
+    EXPECT_EQ(track.pending_solve_quality, Game::OrbitPredictionService::SolveQuality::Full);
+
+    Game::PredictionLifecycleReducer::mark_solver_result_accepted(
+            track,
+            Game::OrbitPredictionService::SolveQuality::Full,
+            Game::OrbitPredictionService::PublishStage::Final,
+            lifecycle);
+
+    EXPECT_FALSE(track.request_pending);
+    EXPECT_EQ(track.pending_solve_quality, Game::OrbitPredictionService::SolveQuality::Full);
+}
+
+TEST(GameplayPredictionManeuverTests, LifecycleReducerRequeuesDirtyAfterRejectedResults)
+{
+    Game::PredictionTrackState track{};
+    track.request_pending = true;
+    track.derived_request_pending = true;
+    track.invalidated_while_pending = true;
+    track.dirty = false;
+
+    Game::PredictionLifecycleReducer::mark_solver_result_rejected_for_rebuild(track, true);
+
+    EXPECT_FALSE(track.request_pending);
+    EXPECT_FALSE(track.derived_request_pending);
+    EXPECT_FALSE(track.invalidated_while_pending);
+    EXPECT_TRUE(track.dirty);
+    EXPECT_EQ(track.pending_solve_quality, Game::OrbitPredictionService::SolveQuality::Full);
+
+    track.dirty = false;
+    track.derived_request_pending = true;
+
+    Game::PredictionLifecycleReducer::mark_derived_result_rejected_for_rebuild(track, true);
+
+    EXPECT_FALSE(track.derived_request_pending);
+    EXPECT_FALSE(track.invalidated_while_pending);
+    EXPECT_TRUE(track.dirty);
+}
+
+TEST(GameplayPredictionManeuverTests, LifecycleReducerCompletesDerivedResultWithFollowupDirty)
+{
+    Game::PredictionTrackState track{};
+    track.dirty = false;
+    track.invalidated_while_pending = true;
+    track.derived_request_pending = true;
+    const auto lifecycle = Game::PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
+
+    Game::PredictionLifecycleReducer::mark_derived_result_completed(track, true, lifecycle);
+
+    EXPECT_FALSE(track.derived_request_pending);
+    EXPECT_FALSE(track.invalidated_while_pending);
+    EXPECT_TRUE(track.dirty);
+}
+
+TEST(GameplayPredictionManeuverTests, LifecycleReducerTransitionsPreviewStates)
+{
+    Game::PredictionTrackState track{};
+
+    Game::PredictionLifecycleReducer::enter_preview_drag(track, 10.0);
+
+    EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::EnterDrag);
+    EXPECT_DOUBLE_EQ(track.preview_entered_at_s, 10.0);
+
+    Game::PredictionLifecycleReducer::mark_preview_request_submitted(track, 11.0);
+
+    EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::DragPreviewPending);
+    EXPECT_DOUBLE_EQ(track.preview_last_request_at_s, 11.0);
+
+    Game::PredictionLifecycleReducer::await_full_refine(track, 12.0);
+
+    EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::AwaitFullRefine);
+    EXPECT_DOUBLE_EQ(track.preview_last_anchor_refresh_at_s, 12.0);
+
+    track.preview_anchor.valid = true;
+    Game::PredictionLifecycleReducer::reset_preview(track);
+
+    EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::Idle);
+    EXPECT_FALSE(track.preview_anchor.valid);
 }

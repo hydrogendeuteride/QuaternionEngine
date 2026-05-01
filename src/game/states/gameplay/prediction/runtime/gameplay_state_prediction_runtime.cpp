@@ -3,6 +3,7 @@
 #include "core/util/logger.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
+#include "game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.h"
 
 #include <cmath>
 #include <limits>
@@ -267,8 +268,7 @@ namespace Game
             track.preview_last_anchor_refresh_at_s = now_s;
             if (PredictionRuntimeDetail::prediction_track_can_enter_preview_drag(lifecycle))
             {
-                track.preview_state = PredictionPreviewRuntimeState::EnterDrag;
-                track.preview_entered_at_s = now_s;
+                PredictionLifecycleReducer::enter_preview_drag(track, now_s);
             }
             return;
         }
@@ -276,8 +276,7 @@ namespace Game
         if (track.preview_anchor.valid &&
             PredictionRuntimeDetail::prediction_track_can_transition_to_await_full_refine(lifecycle))
         {
-            track.preview_state = PredictionPreviewRuntimeState::AwaitFullRefine;
-            track.preview_last_anchor_refresh_at_s = now_s;
+            PredictionLifecycleReducer::await_full_refine(track, now_s);
             return;
         }
 

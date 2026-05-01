@@ -2,6 +2,7 @@
 
 #include "core/util/logger.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
+#include "game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -242,9 +243,7 @@ namespace Game
                 result.display_frame_revision == track.latest_requested_derived_display_frame_revision &&
                 result.analysis_body_id == track.latest_requested_derived_analysis_body_id)
             {
-                track.derived_request_pending = false;
-                track.invalidated_while_pending = false;
-                track.dirty = true;
+                PredictionLifecycleReducer::mark_derived_result_rejected_for_rebuild(track, true);
             }
             return;
         }
@@ -270,13 +269,10 @@ namespace Game
         debug.flattened_planned_segments_last = result.cache.display.trajectory_segments_frame_planned.size();
         debug.flattened_planned_samples_last = result.cache.display.trajectory_frame_planned.size();
 
-        if (completes_latest_derived_request)
-        {
-            track.derived_request_pending = false;
-        }
-        const bool keep_dirty_for_followup =
-                PredictionRuntimeDetail::prediction_track_should_keep_dirty_for_followup(lifecycle_before_apply);
-        track.invalidated_while_pending = false;
+        PredictionLifecycleReducer::mark_derived_result_completed(
+                track,
+                completes_latest_derived_request,
+                lifecycle_before_apply);
 
         OrbitPredictionCache cache_to_publish{};
         OrbitPredictionDerivedDiagnostics diagnostics_to_publish = result.diagnostics;
@@ -316,7 +312,7 @@ namespace Game
         if (!have_cache_to_publish)
         {
             track.derived_diagnostics.status = PredictionDerivedStatus::MissingSolverData;
-            track.dirty = true;
+            PredictionLifecycleReducer::mark_derived_result_rejected_for_rebuild(track);
             const auto derived_apply_end_tp = PredictionDragDebugTelemetry::Clock::now();
             record_derived_apply_debug(debug, result.generation_id, derived_apply_start_tp, derived_apply_end_tp);
             return;
@@ -339,7 +335,7 @@ namespace Game
                 result_plan_signature_mismatch;
         if (context.active_maneuver_edit && result_plan_signature_mismatch && !stale_fast_preview_during_edit)
         {
-            track.dirty = true;
+            PredictionLifecycleReducer::mark_derived_result_rejected_for_rebuild(track);
 
             const auto derived_apply_end_tp = PredictionDragDebugTelemetry::Clock::now();
             record_derived_apply_debug(debug, result.generation_id, derived_apply_start_tp, derived_apply_end_tp);
@@ -378,12 +374,7 @@ namespace Game
             {
                 track.preview_overlay.clear();
                 track.pick_cache.clear();
-                if (track.preview_state != PredictionPreviewRuntimeState::AwaitFullRefine)
-                {
-                    track.preview_state = PredictionPreviewRuntimeState::Idle;
-                    track.preview_anchor = {};
-                }
-                track.dirty = keep_dirty_for_followup;
+                PredictionLifecycleReducer::mark_preview_publish_rejected(track);
 
                 const auto derived_apply_end_tp = PredictionDragDebugTelemetry::Clock::now();
                 record_derived_apply_debug(debug, result.generation_id, derived_apply_start_tp, derived_apply_end_tp);
@@ -406,7 +397,8 @@ namespace Game
             merge_chunk_assembly(track.preview_overlay.chunk_assembly, result.chunk_assembly);
             restore_authoritative_planned_data(track, cache_to_publish, context.current_plan_signature);
 
-            track.preview_state = PredictionRuntimeDetail::prediction_track_preview_state_after_preview_publish(
+            PredictionLifecycleReducer::mark_preview_publish_accepted(
+                    track,
                     lifecycle_before_apply,
                     result.publish_stage,
                     context.live_preview_active);
@@ -420,7 +412,7 @@ namespace Game
             {
                 track.full_stream_overlay.clear();
                 track.pick_cache.clear();
-                track.dirty = true;
+                PredictionLifecycleReducer::mark_derived_result_rejected_for_rebuild(track);
 
                 const auto derived_apply_end_tp = PredictionDragDebugTelemetry::Clock::now();
                 record_derived_apply_debug(debug, result.generation_id, derived_apply_start_tp, derived_apply_end_tp);
@@ -450,17 +442,10 @@ namespace Game
             track.authoritative_cache = cache_to_publish;
             track.preview_overlay.clear();
             track.full_stream_overlay.clear();
-            track.preview_state = PredictionPreviewRuntimeState::Idle;
-            if (PredictionRuntimeDetail::prediction_track_should_clear_preview_anchor_after_final_publish(
-                        context.live_preview_active))
-            {
-                track.preview_anchor = {};
-            }
+            PredictionLifecycleReducer::mark_final_publish_completed(track, context.live_preview_active);
             track.cache = std::move(cache_to_publish);
             track.pick_cache.clear();
         }
-
-        track.dirty = keep_dirty_for_followup;
 
         const auto derived_apply_end_tp = PredictionDragDebugTelemetry::Clock::now();
         record_derived_apply_debug(debug, result.generation_id, derived_apply_start_tp, derived_apply_end_tp);

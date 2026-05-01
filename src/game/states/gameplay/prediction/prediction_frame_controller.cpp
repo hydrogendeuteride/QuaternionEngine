@@ -1,6 +1,7 @@
 #include "game/states/gameplay/prediction/prediction_frame_controller.h"
 
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
+#include "game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.h"
 
 #include <cmath>
 #include <utility>
@@ -46,15 +47,7 @@ namespace Game
             PredictionTrackState &track,
             const OrbitPredictionDerivedService::Request &request)
     {
-        track.derived_request_pending = true;
-        track.latest_requested_derived_generation_id = request.generation_id;
-        track.latest_requested_derived_display_frame_key = request.display_frame_key;
-        track.latest_requested_derived_display_frame_revision = request.display_frame_revision;
-        track.latest_requested_derived_analysis_body_id = request.analysis_body_id;
-        track.latest_requested_derived_publish_stage = request.solver_result.publish_stage;
-        track.pending_derived_has_maneuver_plan = request.maneuver_plan_signature_valid;
-        track.pending_derived_plan_signature =
-                request.maneuver_plan_signature_valid ? request.maneuver_plan_signature : 0u;
+        PredictionLifecycleReducer::mark_derived_request_submitted(track, request);
     }
 
     bool PredictionFrameController::request_derived_refresh(
@@ -237,12 +230,7 @@ namespace Game
 
     void PredictionFrameController::reset_track_derived_state(PredictionTrackState &track)
     {
-        track.derived_request_pending = false;
-        track.latest_requested_derived_generation_id = 0;
-        track.latest_requested_derived_display_frame_key = 0;
-        track.latest_requested_derived_display_frame_revision = 0;
-        track.latest_requested_derived_analysis_body_id = orbitsim::kInvalidBodyId;
-        track.latest_requested_derived_publish_stage = OrbitPredictionService::PublishStage::Final;
+        PredictionLifecycleReducer::reset_derived_request_state(track);
         track.preview_overlay.clear();
         track.full_stream_overlay.clear();
         track.pick_cache.clear();

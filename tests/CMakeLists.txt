@@ -236,6 +236,7 @@ add_executable(gameplay_prediction_maneuver_tests
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/gameplay_state_prediction.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_solver.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/prediction_request_factory.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/prediction_invalidation_controller.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/prediction_maneuver_invalidation.cpp"
