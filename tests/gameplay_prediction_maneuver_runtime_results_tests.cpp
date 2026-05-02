@@ -111,7 +111,7 @@ TEST(GameplayPredictionManeuverTests, PreviewStreamingSolverResultMarksPreviewSt
 TEST(GameplayPredictionManeuverTests, StaleManeuverPlanSolverResultIsDroppedAndRebuildQueued)
 {
     Game::GameplayState state{};
-    state._maneuver_plan_revision = 2u;
+    state._maneuver.revision() = 2u;
 
     Game::PredictionTrackState track{};
     track.key = {Game::PredictionSubjectKind::Orbiter, 1};
@@ -158,7 +158,7 @@ TEST(GameplayPredictionManeuverTests, MarkManeuverPlanDirtyUnblocksPendingManeuv
 
     ASSERT_EQ(state._prediction.tracks.size(), 1u);
     const Game::PredictionTrackState &updated_track = state._prediction.tracks.front();
-    EXPECT_EQ(state._maneuver_plan_revision, 1u);
+    EXPECT_EQ(state._maneuver.revision(), 1u);
     EXPECT_FALSE(updated_track.request_pending);
     EXPECT_FALSE(updated_track.derived_request_pending);
     EXPECT_FALSE(updated_track.invalidated_while_pending);
@@ -242,8 +242,8 @@ TEST(GameplayPredictionManeuverTests, RemovingLastManeuverNodeClearsPlannedArtif
     Game::ManeuverNode node{};
     node.id = 7;
     node.time_s = 120.0;
-    state._maneuver_state.nodes.push_back(node);
-    state._maneuver_state.selected_node_id = node.id;
+    state._maneuver.plan().nodes.push_back(node);
+    state._maneuver.plan().selected_node_id = node.id;
 
     Game::PredictionTrackState track{};
     track.key = {Game::PredictionSubjectKind::Orbiter, 1};
@@ -259,7 +259,7 @@ TEST(GameplayPredictionManeuverTests, RemovingLastManeuverNodeClearsPlannedArtif
 
     state.remove_maneuver_node(node.id);
 
-    ASSERT_TRUE(state._maneuver_state.nodes.empty());
+    ASSERT_TRUE(state._maneuver.plan().nodes.empty());
     ASSERT_EQ(state._prediction.tracks.size(), 1u);
     const Game::PredictionTrackState &cleared = state._prediction.tracks.front();
     EXPECT_TRUE(cleared.cache.identity.valid);
@@ -267,7 +267,7 @@ TEST(GameplayPredictionManeuverTests, RemovingLastManeuverNodeClearsPlannedArtif
     EXPECT_TRUE(cleared.cache.solver.trajectory_inertial_planned.empty());
     EXPECT_FALSE(cleared.cache.identity.maneuver_plan_signature_valid);
     EXPECT_FALSE(cleared.preview_overlay.chunk_assembly.valid);
-    EXPECT_EQ(state._maneuver_plan_revision, 1u);
+    EXPECT_EQ(state._maneuver.revision(), 1u);
 }
 
 TEST(GameplayPredictionManeuverTests, DerivedPreviewStreamingBuildSkipsPlannedRenderCurve)
@@ -420,6 +420,6 @@ TEST(GameplayPredictionManeuverTests, GameplayDefaultsEnableLivePreview)
     Game::GameplayState state{};
     const Game::GameplaySettings settings{};
 
-    EXPECT_TRUE(state._maneuver_plan_live_preview_active);
+    EXPECT_TRUE(state._maneuver.settings().live_preview_active);
     EXPECT_TRUE(settings.maneuver_plan_live_preview_active);
 }

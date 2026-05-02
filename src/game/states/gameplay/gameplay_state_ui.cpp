@@ -189,9 +189,9 @@ namespace Game
         s.prediction_periodic_refresh_s = _prediction.periodic_refresh_s;
         s.prediction_thrust_refresh_s = _prediction.thrust_refresh_s;
         s.prediction_sampling_policy = _prediction.sampling_policy;
-        s.maneuver_plan_horizon = _maneuver_plan_horizon;
-        s.maneuver_plan_windows = _maneuver_plan_windows;
-        s.maneuver_plan_live_preview_active = _maneuver_plan_live_preview_active;
+        s.maneuver_plan_horizon = _maneuver.settings().plan_horizon;
+        s.maneuver_plan_windows = _maneuver.settings().plan_windows;
+        s.maneuver_plan_live_preview_active = _maneuver.settings().live_preview_active;
         s.orbit_plot_budget = _orbit_plot_budget;
         s.debug_draw_enabled = _debug_draw_enabled;
         s.runtime_orbiter_rails_enabled = _runtime_orbiter_rails_enabled;
@@ -211,9 +211,9 @@ namespace Game
         _prediction.periodic_refresh_s = s.prediction_periodic_refresh_s;
         _prediction.thrust_refresh_s = s.prediction_thrust_refresh_s;
         _prediction.sampling_policy = s.prediction_sampling_policy;
-        _maneuver_plan_horizon = s.maneuver_plan_horizon;
-        _maneuver_plan_windows = s.maneuver_plan_windows;
-        _maneuver_plan_live_preview_active = s.maneuver_plan_live_preview_active;
+        _maneuver.settings().plan_horizon = s.maneuver_plan_horizon;
+        _maneuver.settings().plan_windows = s.maneuver_plan_windows;
+        _maneuver.settings().live_preview_active = s.maneuver_plan_live_preview_active;
         _orbit_plot_budget = s.orbit_plot_budget;
         _debug_draw_enabled = s.debug_draw_enabled;
         _runtime_orbiter_rails_enabled = s.runtime_orbiter_rails_enabled;
@@ -792,7 +792,7 @@ namespace Game
                                 static_cast<double>(std::max(0.0f, celestial_min_window_s));
                     }
 
-                    ImGui::Text("Plan horizon: %.0f s", _maneuver_plan_horizon.horizon_s);
+                    ImGui::Text("Plan horizon: %.0f s", _maneuver.settings().plan_horizon.horizon_s);
 
                     ImGui::SeparatorText("Orbit Budget");
 
@@ -922,7 +922,7 @@ namespace Game
                                 peak_mib,
                                 plot_stats.upload_ms_peak);
 
-                    if (_prediction.orbit_plot_perf.planned_window_valid || !_maneuver_state.nodes.empty())
+                    if (_prediction.orbit_plot_perf.planned_window_valid || !_maneuver.plan().nodes.empty())
                     {
                         ImGui::Separator();
                         ImGui::Text("Planned window: %s", _prediction.orbit_plot_perf.planned_window_valid ? "VALID" : "INVALID");
@@ -994,8 +994,8 @@ namespace Game
         }
 
         const auto is_maneuver_orbit_pick = [&](const PickingSystem::PickInfo &pick) -> bool {
-            const bool allow_base_pick = _maneuver_state.nodes.empty();
-            const bool allow_planned_pick = !_maneuver_state.nodes.empty();
+            const bool allow_base_pick = _maneuver.plan().nodes.empty();
+            const bool allow_planned_pick = !_maneuver.plan().nodes.empty();
             return pick.valid &&
                    pick.kind == PickingSystem::PickInfo::Kind::Line &&
                    ((allow_base_pick && pick.ownerName == "OrbitPlot/Base") ||
@@ -1057,7 +1057,7 @@ namespace Game
 
     void GameplayState::draw_orbit_drag_debug_window(GameStateContext &ctx)
     {
-        if (!_maneuver_nodes_enabled)
+        if (!_maneuver.settings().nodes_enabled)
         {
             return;
         }
@@ -1086,7 +1086,7 @@ namespace Game
         const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
         const std::string subject_label = prediction_subject_label(active_track->key);
         const char *gizmo_state = "Idle";
-        switch (_maneuver_gizmo_interaction.state)
+        switch (_maneuver.gizmo_interaction().state)
         {
             case ManeuverGizmoInteraction::State::Idle:
                 gizmo_state = "Idle";
@@ -1131,11 +1131,11 @@ namespace Game
                     active_track->derived_request_pending ? "yes" : "no",
                     active_track->dirty ? "yes" : "no");
         ImGui::Text("Gizmo state: %s", gizmo_state);
-        if (_maneuver_gizmo_interaction.node_id >= 0)
+        if (_maneuver.gizmo_interaction().node_id >= 0)
         {
             ImGui::Text("Gizmo node/axis: %d / %s",
-                        _maneuver_gizmo_interaction.node_id,
-                        Gizmo::maneuver_axis_label(_maneuver_gizmo_basis_mode, _maneuver_gizmo_interaction.axis));
+                        _maneuver.gizmo_interaction().node_id,
+                        Gizmo::maneuver_axis_label(_maneuver.settings().gizmo_basis_mode, _maneuver.gizmo_interaction().axis));
         }
 
         ImGui::SeparatorText("Cadence");

@@ -200,12 +200,12 @@ namespace Game
         context.world_reference_body_world = prediction_world_reference_body_world();
         context.current_sim_time_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
         context.softening_length_m = _orbitsim ? _orbitsim->sim.config().softening_length_m : 0.0;
-        context.maneuver_nodes_enabled = _maneuver_nodes_enabled;
-        context.maneuver_plan_has_nodes = !_maneuver_state.nodes.empty();
+        context.maneuver_nodes_enabled = _maneuver.settings().nodes_enabled;
+        context.maneuver_plan_has_nodes = !_maneuver.plan().nodes.empty();
         context.maneuver_axis_drag_active =
-                _maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis;
+                _maneuver.gizmo_interaction().state == ManeuverGizmoInteraction::State::DragAxis;
         context.maneuver_drag_display_reference_time_s =
-                _maneuver_gizmo_interaction.drag_display_reference_time_s;
+                _maneuver.gizmo_interaction().drag_display_reference_time_s;
         if (_orbitsim)
         {
             if (const CelestialBodyInfo *world_ref = _orbitsim->world_reference_body())

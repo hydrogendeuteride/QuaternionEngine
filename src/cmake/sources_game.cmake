@@ -141,6 +141,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/maneuver/maneuver_commands.cpp
   game/states/gameplay/maneuver/maneuver_controller.h
   game/states/gameplay/maneuver/maneuver_controller.cpp
+  game/states/gameplay/maneuver/maneuver_system.h
+  game/states/gameplay/maneuver/maneuver_system.cpp
   game/states/gameplay/maneuver/maneuver_runtime_cache_builder.h
   game/states/gameplay/maneuver/maneuver_runtime_cache_builder.cpp
   game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo.cpp

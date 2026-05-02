@@ -15,24 +15,24 @@ namespace Game
     void GameplayState::update_maneuver_nodes_time_warp(GameStateContext &ctx, const float fixed_dt)
     {
         // Drive warp-to-node by selecting the fastest rails warp step that still lands on or before the target time.
-        if (!_warp_to_time_active)
+        if (!_maneuver.runtime().warp_to_time_active)
         {
             return;
         }
 
         if (!_orbitsim)
         {
-            _warp_to_time_active = false;
-            set_time_warp_level(ctx, _warp_to_time_restore_level);
+            _maneuver.runtime().warp_to_time_active = false;
+            set_time_warp_level(ctx, _maneuver.runtime().warp_to_time_restore_level);
             return;
         }
 
         const double now_s = _orbitsim->sim.time_s();
-        const double remaining_s = _warp_to_time_target_s - now_s;
+        const double remaining_s = _maneuver.runtime().warp_to_time_target_s - now_s;
         if (!std::isfinite(remaining_s) || remaining_s <= 0.0)
         {
-            _warp_to_time_active = false;
-            set_time_warp_level(ctx, _warp_to_time_restore_level);
+            _maneuver.runtime().warp_to_time_active = false;
+            set_time_warp_level(ctx, _maneuver.runtime().warp_to_time_restore_level);
             return;
         }
 
@@ -66,16 +66,16 @@ namespace Game
         (void) ctx;
 
         // Burns execute as one-shot impulses once the armed node's scheduled time has arrived.
-        if (!_execute_node_armed || _execute_node_id < 0)
+        if (!_maneuver.runtime().execute_node_armed || _maneuver.runtime().execute_node_id < 0)
         {
             return;
         }
 
-        ManeuverNode *node = _maneuver_state.find_node(_execute_node_id);
+        ManeuverNode *node = _maneuver.plan().find_node(_maneuver.runtime().execute_node_id);
         if (!node)
         {
-            _execute_node_armed = false;
-            _execute_node_id = -1;
+            _maneuver.runtime().execute_node_armed = false;
+            _maneuver.runtime().execute_node_id = -1;
             return;
         }
 

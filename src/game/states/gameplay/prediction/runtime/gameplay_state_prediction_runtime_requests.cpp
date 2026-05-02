@@ -13,15 +13,15 @@ namespace Game
         context.frame_selection = _prediction.frame_selection;
         context.analysis_selection = _prediction.analysis_selection;
         context.sampling_policy = _prediction.sampling_policy;
-        context.maneuver_plan_windows = _maneuver_plan_windows;
-        context.maneuver_plan = &_maneuver_state;
-        context.maneuver_edit_preview = &_maneuver_node_edit_preview;
-        context.maneuver_nodes_enabled = _maneuver_nodes_enabled;
+        context.maneuver_plan_windows = _maneuver.settings().plan_windows;
+        context.maneuver_plan = &_maneuver.plan();
+        context.maneuver_edit_preview = &_maneuver.edit_preview();
+        context.maneuver_nodes_enabled = _maneuver.settings().nodes_enabled;
         context.maneuver_edit_in_progress =
-                PredictionRuntimeDetail::maneuver_drag_active(_maneuver_gizmo_interaction.state) ||
-                _maneuver_node_edit_preview.state != ManeuverNodeEditPreview::State::Idle;
+                PredictionRuntimeDetail::maneuver_drag_active(_maneuver.gizmo_interaction().state) ||
+                _maneuver.edit_preview().state != ManeuverNodeEditPreview::State::Idle;
         context.maneuver_live_preview_available = maneuver_live_preview_active(true);
-        context.maneuver_plan_revision = _maneuver_plan_revision;
+        context.maneuver_plan_revision = _maneuver.revision();
         context.maneuver_plan_signature = current_maneuver_plan_signature();
         context.display_frame_revision = _prediction.display_frame_revision;
         context.active_maneuver_preview_anchor_node_id = active_maneuver_preview_anchor_node_id();

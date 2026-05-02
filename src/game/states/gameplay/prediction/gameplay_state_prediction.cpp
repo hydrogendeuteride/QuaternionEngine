@@ -313,41 +313,13 @@ namespace Game
     double GameplayState::maneuver_plan_horizon_s() const
     {
         return std::max(OrbitPredictionTuning::kPostNodeCoverageMinS,
-                        std::max(0.0, _maneuver_plan_horizon.horizon_s));
+                        std::max(0.0, _maneuver.settings().plan_horizon.horizon_s));
     }
 
     uint64_t GameplayState::current_maneuver_plan_signature() const
     {
-        uint64_t seed = 0xcbf29ce484222325ULL;
-        const auto mix = [&seed](const uint64_t value) {
-            seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6u) + (seed >> 2u);
-        };
-        const auto quantized = [](const double value, const double scale) -> uint64_t {
-            if (!std::isfinite(value))
-            {
-                return 0u;
-            }
-            return static_cast<uint64_t>(static_cast<int64_t>(std::llround(value * scale)));
-        };
-
-        mix(_maneuver_nodes_enabled ? 1u : 0u);
-        mix(static_cast<uint64_t>(_maneuver_state.nodes.size()));
-        mix(quantized(maneuver_plan_horizon_s(), 1000.0));
-        mix(quantized(_maneuver_plan_windows.solve_margin_s, 1000.0));
-        mix(quantized(_maneuver_plan_windows.preview_window_s, 1000.0));
-
-        for (const ManeuverNode &node : _maneuver_state.nodes)
-        {
-            mix(static_cast<uint64_t>(node.id));
-            mix(quantized(node.time_s, 1000.0));
-            mix(quantized(node.dv_rtn_mps.x, 1000.0));
-            mix(quantized(node.dv_rtn_mps.y, 1000.0));
-            mix(quantized(node.dv_rtn_mps.z, 1000.0));
-            mix(node.primary_body_auto ? 1u : 0u);
-            mix(static_cast<uint64_t>(node.primary_body_auto ? orbitsim::kInvalidBodyId : node.primary_body_id));
-        }
-
-        return seed;
+        const double plan_horizon_s = maneuver_plan_horizon_s();
+        return _maneuver.plan_signature(plan_horizon_s);
     }
 
     PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key)

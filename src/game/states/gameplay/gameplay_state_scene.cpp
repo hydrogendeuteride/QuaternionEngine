@@ -261,15 +261,7 @@ namespace Game
         _elapsed = 0.0f;
         _fixed_time_s = 0.0;
         reset_time_warp_state();
-        _warp_to_time_active = false;
-        _warp_to_time_target_s = 0.0;
-        _warp_to_time_restore_level = 0;
-        _execute_node_armed = false;
-        _execute_node_id = -1;
-        _maneuver_state.nodes.clear();
-        _maneuver_state.selected_node_id = -1;
-        _maneuver_state.next_node_id = 0;
-        _maneuver_gizmo_interaction = {};
+        _maneuver.reset_session();
         _reset_requested = false;
         _contact_log.clear();
         _prediction.tracks.clear();
@@ -1203,12 +1195,7 @@ namespace Game
         _prediction.selection.active_subject = PredictionSubjectKey{PredictionSubjectKind::Orbiter, target->entity.value};
         _prediction.selection.overlay_subjects.clear();
         _prediction.selection.selected_group_index = -1;
-        _execute_node_armed = false;
-        _execute_node_id = -1;
-        _maneuver_state.nodes.clear();
-        _maneuver_state.selected_node_id = -1;
-        _maneuver_state.next_node_id = 0;
-        _maneuver_gizmo_interaction = {};
+        _maneuver.reset_session();
         mark_prediction_dirty();
         return true;
     }

@@ -12,7 +12,7 @@ namespace Game
     {
         const PredictionTrackState *player_track = player_prediction_track();
         const bool interaction_idle =
-                _maneuver_gizmo_interaction.state != ManeuverGizmoInteraction::State::DragAxis;
+                _maneuver.gizmo_interaction().state != ManeuverGizmoInteraction::State::DragAxis;
         const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
                 player_track
                     ? PredictionRuntimeDetail::describe_prediction_track_lifecycle(*player_track)
@@ -72,15 +72,15 @@ namespace Game
         }
 
         const ManeuverRuntimeCacheInput input{
-                .plan = _maneuver_state,
+                .plan = _maneuver.plan(),
                 .player_track = player_track,
                 .active_cache = active_cache,
                 .stable_cache = stable_cache,
                 .frame_context = frame_context,
                 .lifecycle = lifecycle,
-                .gizmo_interaction = _maneuver_gizmo_interaction,
-                .edit_preview = _maneuver_node_edit_preview,
-                .basis_mode = _maneuver_gizmo_basis_mode,
+                .gizmo_interaction = _maneuver.gizmo_interaction(),
+                .edit_preview = _maneuver.edit_preview(),
+                .basis_mode = _maneuver.settings().gizmo_basis_mode,
                 .display_time_s = display_time_s,
                 .current_sim_time_s = current_sim_time_s(),
                 .align_delta = align_delta,

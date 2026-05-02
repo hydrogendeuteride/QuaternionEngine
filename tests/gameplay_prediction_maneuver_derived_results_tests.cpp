@@ -15,8 +15,8 @@ namespace
         track.preview_anchor.visual_window_s = 60.0;
         track.preview_anchor.exact_window_s = 60.0;
 
-        state._maneuver_node_edit_preview.state = Game::ManeuverNodeEditPreview::State::EditingDv;
-        state._maneuver_node_edit_preview.node_id = node_id;
+        state._maneuver.edit_preview().state = Game::ManeuverNodeEditPreview::State::EditingDv;
+        state._maneuver.edit_preview().node_id = node_id;
     }
 } // namespace
 
@@ -58,7 +58,7 @@ TEST(GameplayPredictionManeuverTests, StaleDerivedResultDoesNotReplaceNewerDispl
 TEST(GameplayPredictionManeuverTests, StaleManeuverPlanDerivedResultIsDroppedAndRebuildQueued)
 {
     Game::GameplayState state{};
-    state._maneuver_plan_revision = 3u;
+    state._maneuver.revision() = 3u;
 
     Game::PredictionTrackState track{};
     track.key = {Game::PredictionSubjectKind::Orbiter, 1};
@@ -371,7 +371,7 @@ TEST(GameplayPredictionManeuverTests, PreviewDerivedResultRestoresExistingPlanne
     Game::ManeuverNode node{};
     node.id = 1;
     node.time_s = 10.0;
-    state._maneuver_state.nodes.push_back(node);
+    state._maneuver.plan().nodes.push_back(node);
     const uint64_t plan_signature = state.current_maneuver_plan_signature();
 
     Game::PredictionTrackState track{};
@@ -466,9 +466,9 @@ TEST(GameplayPredictionManeuverTests, PreviewDerivedResultDoesNotRestorePlannedC
     Game::ManeuverNode node{};
     node.id = 1;
     node.time_s = 10.0;
-    state._maneuver_state.nodes.push_back(node);
+    state._maneuver.plan().nodes.push_back(node);
     const uint64_t old_plan_signature = state.current_maneuver_plan_signature();
-    state._maneuver_state.nodes.front().time_s = 20.0;
+    state._maneuver.plan().nodes.front().time_s = 20.0;
     node.time_s = 20.0;
 
     Game::PredictionTrackState track{};
@@ -558,9 +558,9 @@ TEST(GameplayPredictionManeuverTests, PreviewDerivedResultDoesNotRestorePlannedC
     node.id = 1;
     node.time_s = 10.0;
     node.dv_rtn_mps = glm::dvec3(0.0, 5.0, 0.0);
-    state._maneuver_state.nodes.push_back(node);
+    state._maneuver.plan().nodes.push_back(node);
     const uint64_t old_plan_signature = state.current_maneuver_plan_signature();
-    state._maneuver_state.nodes.front().dv_rtn_mps = glm::dvec3(0.0, 10.0, 0.0);
+    state._maneuver.plan().nodes.front().dv_rtn_mps = glm::dvec3(0.0, 10.0, 0.0);
 
     Game::PredictionTrackState track{};
     track.key = {Game::PredictionSubjectKind::Orbiter, 1};
@@ -649,7 +649,7 @@ TEST(GameplayPredictionManeuverTests, LateFastPreviewDerivedResultAfterPreviewEn
     Game::ManeuverNode node{};
     node.id = 1;
     node.time_s = 10.0;
-    state._maneuver_state.nodes.push_back(node);
+    state._maneuver.plan().nodes.push_back(node);
 
     Game::PredictionTrackState track{};
     track.key = {Game::PredictionSubjectKind::Orbiter, 1};

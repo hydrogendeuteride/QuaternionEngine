@@ -197,7 +197,7 @@ namespace Game
     void GameplayState::clear_maneuver_gizmo_instances(GameStateContext &ctx)
     {
         (void) ctx;
-        _maneuver_gizmo_interaction = {};
+        _maneuver.gizmo_interaction() = {};
     }
 
     bool GameplayState::build_maneuver_gizmo_view_context(const GameStateContext &ctx,
@@ -306,7 +306,7 @@ namespace Game
             return false;
         }
 
-        ManeuverNode *node = _maneuver_state.find_node(node_id);
+        ManeuverNode *node = _maneuver.plan().find_node(node_id);
         if (!node || !node->gizmo_valid)
         {
             return false;
@@ -337,12 +337,12 @@ namespace Game
             return false;
         }
 
-        _maneuver_gizmo_interaction.state = ManeuverGizmoInteraction::State::DragAxis;
-        _maneuver_gizmo_interaction.node_id = node_id;
-        _maneuver_gizmo_interaction.axis = axis;
-        _maneuver_gizmo_interaction.start_dv_rtn_mps = node->dv_rtn_mps;
-        _maneuver_gizmo_interaction.start_dv_display_mps = dv_rtn_to_display_basis(*node);
-        _maneuver_gizmo_interaction.start_axis_t_m = start_t;
+        _maneuver.gizmo_interaction().state = ManeuverGizmoInteraction::State::DragAxis;
+        _maneuver.gizmo_interaction().node_id = node_id;
+        _maneuver.gizmo_interaction().axis = axis;
+        _maneuver.gizmo_interaction().start_dv_rtn_mps = node->dv_rtn_mps;
+        _maneuver.gizmo_interaction().start_dv_display_mps = dv_rtn_to_display_basis(*node);
+        _maneuver.gizmo_interaction().start_axis_t_m = start_t;
         const float alpha_f = std::clamp(ctx.interpolation_alpha(), 0.0f, 1.0f);
         const double interp_dt_s =
                 (_last_sim_step_dt_s > 0.0) ? _last_sim_step_dt_s : static_cast<double>(ctx.fixed_delta_time());
@@ -351,27 +351,27 @@ namespace Game
         {
             drag_display_reference_time_s -= (1.0 - static_cast<double>(alpha_f)) * interp_dt_s;
         }
-        _maneuver_gizmo_interaction.drag_display_reference_time_s = drag_display_reference_time_s;
-        _maneuver_gizmo_interaction.drag_basis_r_world = node->basis_r_world;
-        _maneuver_gizmo_interaction.drag_basis_t_world = node->basis_t_world;
-        _maneuver_gizmo_interaction.drag_basis_n_world = node->basis_n_world;
+        _maneuver.gizmo_interaction().drag_display_reference_time_s = drag_display_reference_time_s;
+        _maneuver.gizmo_interaction().drag_basis_r_world = node->basis_r_world;
+        _maneuver.gizmo_interaction().drag_basis_t_world = node->basis_t_world;
+        _maneuver.gizmo_interaction().drag_basis_n_world = node->basis_n_world;
         // Keep both the visible handle basis and the authored RTN basis fixed for the whole drag session.
-        _maneuver_gizmo_interaction.drag_maneuver_basis_r_world = node->maneuver_basis_r_world;
-        _maneuver_gizmo_interaction.drag_maneuver_basis_t_world = node->maneuver_basis_t_world;
-        _maneuver_gizmo_interaction.drag_maneuver_basis_n_world = node->maneuver_basis_n_world;
-        _maneuver_gizmo_interaction.drag_start_mouse_window_pos = mouse_pos_window;
-        _maneuver_gizmo_interaction.drag_last_sample_mouse_window_pos = mouse_pos_window;
-        _maneuver_gizmo_interaction.drag_threshold_passed = false;
-        _maneuver_gizmo_interaction.drag_display_snapshots.clear();
-        _maneuver_gizmo_interaction.drag_display_snapshots.reserve(_maneuver_state.nodes.size());
-        for (const ManeuverNode &candidate : _maneuver_state.nodes)
+        _maneuver.gizmo_interaction().drag_maneuver_basis_r_world = node->maneuver_basis_r_world;
+        _maneuver.gizmo_interaction().drag_maneuver_basis_t_world = node->maneuver_basis_t_world;
+        _maneuver.gizmo_interaction().drag_maneuver_basis_n_world = node->maneuver_basis_n_world;
+        _maneuver.gizmo_interaction().drag_start_mouse_window_pos = mouse_pos_window;
+        _maneuver.gizmo_interaction().drag_last_sample_mouse_window_pos = mouse_pos_window;
+        _maneuver.gizmo_interaction().drag_threshold_passed = false;
+        _maneuver.gizmo_interaction().drag_display_snapshots.clear();
+        _maneuver.gizmo_interaction().drag_display_snapshots.reserve(_maneuver.plan().nodes.size());
+        for (const ManeuverNode &candidate : _maneuver.plan().nodes)
         {
             if (!candidate.gizmo_valid)
             {
                 continue;
             }
 
-            _maneuver_gizmo_interaction.drag_display_snapshots.push_back(ManeuverNodeDisplaySnapshot{
+            _maneuver.gizmo_interaction().drag_display_snapshots.push_back(ManeuverNodeDisplaySnapshot{
                     .node_id = candidate.id,
                     .position_world = candidate.position_world,
                     .basis_r_world = candidate.basis_r_world,
@@ -379,7 +379,7 @@ namespace Game
                     .basis_n_world = candidate.basis_n_world,
             });
         }
-        _maneuver_gizmo_interaction.applied_delta = false;
+        _maneuver.gizmo_interaction().applied_delta = false;
         if (PredictionTrackState *track = active_prediction_track())
         {
             refresh_prediction_preview_anchor(*track, current_sim_time_s(), true);
@@ -403,34 +403,34 @@ namespace Game
         const auto drag_apply_start_tp = PredictionDragDebugTelemetry::Clock::now();
 
         const glm::vec2 drag_from_start =
-                mouse_pos_window - _maneuver_gizmo_interaction.drag_start_mouse_window_pos;
-        if (!_maneuver_gizmo_interaction.drag_threshold_passed)
+                mouse_pos_window - _maneuver.gizmo_interaction().drag_start_mouse_window_pos;
+        if (!_maneuver.gizmo_interaction().drag_threshold_passed)
         {
             const float drag_threshold_px =
-                    std::max(ImGui::GetIO().MouseDragThreshold, _maneuver_ui_config.scaled(2.0f));
+                    std::max(ImGui::GetIO().MouseDragThreshold, _maneuver.settings().ui_config.scaled(2.0f));
             if (glm::dot(drag_from_start, drag_from_start) < (drag_threshold_px * drag_threshold_px))
             {
                 return;
             }
-            _maneuver_gizmo_interaction.drag_threshold_passed = true;
+            _maneuver.gizmo_interaction().drag_threshold_passed = true;
         }
 
         const glm::vec2 drag_since_last_sample =
-                mouse_pos_window - _maneuver_gizmo_interaction.drag_last_sample_mouse_window_pos;
+                mouse_pos_window - _maneuver.gizmo_interaction().drag_last_sample_mouse_window_pos;
         if (glm::dot(drag_since_last_sample, drag_since_last_sample) <= 1.0e-8f)
         {
             return;
         }
-        _maneuver_gizmo_interaction.drag_last_sample_mouse_window_pos = mouse_pos_window;
+        _maneuver.gizmo_interaction().drag_last_sample_mouse_window_pos = mouse_pos_window;
 
         const AxisResolveResult axis_result = resolve_axis(
-                _maneuver_gizmo_interaction.axis,
-                _maneuver_gizmo_interaction.drag_basis_r_world,
-                _maneuver_gizmo_interaction.drag_basis_t_world,
-                _maneuver_gizmo_interaction.drag_basis_n_world);
+                _maneuver.gizmo_interaction().axis,
+                _maneuver.gizmo_interaction().drag_basis_r_world,
+                _maneuver.gizmo_interaction().drag_basis_t_world,
+                _maneuver.gizmo_interaction().drag_basis_n_world);
         if (!axis_result.valid)
         {
-            _maneuver_gizmo_interaction = {};
+            _maneuver.gizmo_interaction() = {};
             return;
         }
         const glm::dvec3 &axis_dir_world = axis_result.axis_dir_world;
@@ -446,7 +446,7 @@ namespace Game
         double current_t = 0.0;
         WorldVec3 axis_origin_world = node.position_world;
         if (const ManeuverNodeDisplaySnapshot *drag_snapshot =
-                    find_display_snapshot(_maneuver_gizmo_interaction.drag_display_snapshots, node.id))
+                    find_display_snapshot(_maneuver.gizmo_interaction().drag_display_snapshots, node.id))
         {
             axis_origin_world = drag_snapshot->position_world;
         }
@@ -456,8 +456,8 @@ namespace Game
             return;
         }
 
-        const double delta_axis_m = current_t - _maneuver_gizmo_interaction.start_axis_t_m;
-        double scale = static_cast<double>(std::max(0.00001f, _maneuver_gizmo_style.drag_sensitivity_mps_per_m));
+        const double delta_axis_m = current_t - _maneuver.gizmo_interaction().start_axis_t_m;
+        double scale = static_cast<double>(std::max(0.00001f, _maneuver.settings().gizmo_style.drag_sensitivity_mps_per_m));
         const InputModifiers mods = ctx.input->modifiers();
         if (mods.ctrl && !mods.shift)
         {
@@ -470,36 +470,36 @@ namespace Game
 
         // The drag solver works in world meters along the selected axis; convert that signed motion into DV.
         const double delta_mps = delta_axis_m * scale * sign;
-        glm::dvec3 dv_display_new = _maneuver_gizmo_interaction.start_dv_display_mps;
+        glm::dvec3 dv_display_new = _maneuver.gizmo_interaction().start_dv_display_mps;
         if (component == 0)
         {
-            dv_display_new.x = _maneuver_gizmo_interaction.start_dv_display_mps.x + delta_mps;
+            dv_display_new.x = _maneuver.gizmo_interaction().start_dv_display_mps.x + delta_mps;
         }
         else if (component == 1)
         {
-            dv_display_new.y = _maneuver_gizmo_interaction.start_dv_display_mps.y + delta_mps;
+            dv_display_new.y = _maneuver.gizmo_interaction().start_dv_display_mps.y + delta_mps;
         }
         else
         {
-            dv_display_new.z = _maneuver_gizmo_interaction.start_dv_display_mps.z + delta_mps;
+            dv_display_new.z = _maneuver.gizmo_interaction().start_dv_display_mps.z + delta_mps;
         }
 
         const glm::dvec3 dv_world_new =
                 compose_basis_vector(dv_display_new,
-                                     _maneuver_gizmo_interaction.drag_basis_r_world,
-                                     _maneuver_gizmo_interaction.drag_basis_t_world,
-                                     _maneuver_gizmo_interaction.drag_basis_n_world);
+                                     _maneuver.gizmo_interaction().drag_basis_r_world,
+                                     _maneuver.gizmo_interaction().drag_basis_t_world,
+                                     _maneuver.gizmo_interaction().drag_basis_n_world);
         const glm::dvec3 dv_new =
                 project_basis_vector(dv_world_new,
-                                     _maneuver_gizmo_interaction.drag_maneuver_basis_r_world,
-                                     _maneuver_gizmo_interaction.drag_maneuver_basis_t_world,
-                                     _maneuver_gizmo_interaction.drag_maneuver_basis_n_world);
+                                     _maneuver.gizmo_interaction().drag_maneuver_basis_r_world,
+                                     _maneuver.gizmo_interaction().drag_maneuver_basis_t_world,
+                                     _maneuver.gizmo_interaction().drag_maneuver_basis_n_world);
 
         if (finite3(dv_new) && safe_length(dv_new - node.dv_rtn_mps) > 1.0e-7)
         {
             (void) apply_maneuver_command(ManeuverCommand::set_node_dv(node.id, dv_new, true));
             node.total_dv_mps = safe_length(node.dv_rtn_mps);
-            _maneuver_gizmo_interaction.applied_delta = true;
+            _maneuver.gizmo_interaction().applied_delta = true;
 
             if (PredictionTrackState *track = active_prediction_track())
             {
@@ -530,8 +530,8 @@ namespace Game
         out_hubs.clear();
         out_handles.clear();
 
-        out_hubs.reserve(_maneuver_state.nodes.size());
-        for (const ManeuverNode &node : _maneuver_state.nodes)
+        out_hubs.reserve(_maneuver.plan().nodes.size());
+        for (const ManeuverNode &node : _maneuver.plan().nodes)
         {
             if (!node.gizmo_valid)
             {
@@ -553,7 +553,7 @@ namespace Game
         }
 
         out_handles.reserve(6);
-        const ManeuverNode *selected = _maneuver_state.find_node(_maneuver_state.selected_node_id);
+        const ManeuverNode *selected = _maneuver.plan().find_node(_maneuver.plan().selected_node_id);
         if (!selected || !selected->gizmo_valid || Gizmo::maneuver_gizmo_is_occluded(view, selected->position_world))
         {
             return;
@@ -595,9 +595,9 @@ namespace Game
         {
             const glm::dvec3 dir = normalized_or(desc.dir_world, glm::dvec3(0.0, 1.0, 0.0));
             const bool is_active_axis =
-                    (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis) &&
-                    (_maneuver_gizmo_interaction.node_id == selected->id) &&
-                    (_maneuver_gizmo_interaction.axis == desc.axis);
+                    (_maneuver.gizmo_interaction().state == ManeuverGizmoInteraction::State::DragAxis) &&
+                    (_maneuver.gizmo_interaction().node_id == selected->id) &&
+                    (_maneuver.gizmo_interaction().axis == desc.axis);
             const double axis_offset_active_m = axis_offset_m * (is_active_axis ? 1.14 : 1.0);
             const WorldVec3 handle_world = selected->position_world + dir * axis_offset_active_m;
             if (Gizmo::maneuver_gizmo_is_occluded(view, handle_world))
@@ -610,7 +610,7 @@ namespace Game
             marker.axis = desc.axis;
             marker.hub_screen = hub_screen;
             marker.base_color = Gizmo::maneuver_axis_color(desc.axis);
-            marker.label = Gizmo::maneuver_axis_label(_maneuver_gizmo_basis_mode, desc.axis);
+            marker.label = Gizmo::maneuver_axis_label(_maneuver.settings().gizmo_basis_mode, desc.axis);
             if (!Gizmo::project_maneuver_gizmo_point(view, handle_world, marker.handle_screen, marker.depth_m))
             {
                 continue;

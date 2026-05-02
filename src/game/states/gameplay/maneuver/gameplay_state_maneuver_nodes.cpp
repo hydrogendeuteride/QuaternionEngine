@@ -1,5 +1,4 @@
 #include "game/states/gameplay/gameplay_state.h"
-#include "game/states/gameplay/maneuver/maneuver_controller.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 
 #include <algorithm>
@@ -11,11 +10,6 @@ namespace Game
     namespace
     {
         using namespace ManeuverUtil;
-
-        bool contains_node_id(const std::vector<int> &ids, const int node_id)
-        {
-            return std::find(ids.begin(), ids.end(), node_id) != ids.end();
-        }
     } // namespace
 
     double GameplayState::current_sim_time_s() const
@@ -25,57 +19,28 @@ namespace Game
 
     bool GameplayState::maneuver_live_preview_active(const bool with_maneuvers) const
     {
-        if (!with_maneuvers || !_maneuver_plan_live_preview_active)
-        {
-            return false;
-        }
-
-        if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
-        {
-            return _maneuver_state.find_node(active_maneuver_preview_anchor_node_id()) != nullptr;
-        }
-
-        const bool node_edit_preview_active =
-                _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingDv ||
-                _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime;
-        return node_edit_preview_active &&
-               _maneuver_state.find_node(_maneuver_node_edit_preview.node_id) != nullptr;
+        return _maneuver.live_preview_active(with_maneuvers);
     }
 
     int GameplayState::active_maneuver_preview_anchor_node_id() const
     {
-        if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
-        {
-            if (_maneuver_state.find_node(_maneuver_gizmo_interaction.node_id))
-            {
-                return _maneuver_gizmo_interaction.node_id;
-            }
-            return _maneuver_state.selected_node_id;
-        }
-
-        if (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingDv ||
-            _maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime)
-        {
-            return _maneuver_node_edit_preview.node_id;
-        }
-
-        return -1;
+        return _maneuver.active_preview_anchor_node_id();
     }
 
     void GameplayState::begin_maneuver_node_dv_edit_preview(const int node_id)
     {
-        if (!_maneuver_state.find_node(node_id))
+        if (!_maneuver.plan().find_node(node_id))
         {
             cancel_maneuver_node_edit_preview();
             return;
         }
 
-        if (_maneuver_node_edit_preview.state != ManeuverNodeEditPreview::State::EditingDv ||
-            _maneuver_node_edit_preview.node_id != node_id)
+        if (_maneuver.edit_preview().state != ManeuverNodeEditPreview::State::EditingDv ||
+            _maneuver.edit_preview().node_id != node_id)
         {
-            _maneuver_node_edit_preview = {};
-            _maneuver_node_edit_preview.state = ManeuverNodeEditPreview::State::EditingDv;
-            _maneuver_node_edit_preview.node_id = node_id;
+            _maneuver.edit_preview() = {};
+            _maneuver.edit_preview().state = ManeuverNodeEditPreview::State::EditingDv;
+            _maneuver.edit_preview().node_id = node_id;
             if (PredictionTrackState *track = active_prediction_track())
             {
                 refresh_prediction_preview_anchor(*track, current_sim_time_s(), true);
@@ -86,12 +51,12 @@ namespace Game
     void GameplayState::update_maneuver_node_dv_edit_preview(const int node_id)
     {
         begin_maneuver_node_dv_edit_preview(node_id);
-        if (_maneuver_node_edit_preview.state != ManeuverNodeEditPreview::State::EditingDv)
+        if (_maneuver.edit_preview().state != ManeuverNodeEditPreview::State::EditingDv)
         {
             return;
         }
 
-        _maneuver_node_edit_preview.changed = true;
+        _maneuver.edit_preview().changed = true;
         if (PredictionTrackState *track = active_prediction_track())
         {
             _prediction_system.mark_maneuver_preview_dirty(*track);
@@ -103,11 +68,11 @@ namespace Game
     {
         const bool preview_changed =
                 changed ||
-                (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingDv &&
-                 _maneuver_node_edit_preview.changed);
-        if (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingDv)
+                (_maneuver.edit_preview().state == ManeuverNodeEditPreview::State::EditingDv &&
+                 _maneuver.edit_preview().changed);
+        if (_maneuver.edit_preview().state == ManeuverNodeEditPreview::State::EditingDv)
         {
-            _maneuver_node_edit_preview = {};
+            _maneuver.edit_preview() = {};
         }
 
         if (!preview_changed)
@@ -125,20 +90,20 @@ namespace Game
     void GameplayState::begin_maneuver_node_time_edit_preview(const int node_id,
                                                               const double previous_time_s)
     {
-        const ManeuverNode *node = _maneuver_state.find_node(node_id);
+        const ManeuverNode *node = _maneuver.plan().find_node(node_id);
         if (!node)
         {
             cancel_maneuver_node_edit_preview();
             return;
         }
 
-        if (_maneuver_node_edit_preview.state != ManeuverNodeEditPreview::State::EditingTime ||
-            _maneuver_node_edit_preview.node_id != node_id)
+        if (_maneuver.edit_preview().state != ManeuverNodeEditPreview::State::EditingTime ||
+            _maneuver.edit_preview().node_id != node_id)
         {
-            _maneuver_node_edit_preview = {};
-            _maneuver_node_edit_preview.state = ManeuverNodeEditPreview::State::EditingTime;
-            _maneuver_node_edit_preview.node_id = node_id;
-            _maneuver_node_edit_preview.start_time_s =
+            _maneuver.edit_preview() = {};
+            _maneuver.edit_preview().state = ManeuverNodeEditPreview::State::EditingTime;
+            _maneuver.edit_preview().node_id = node_id;
+            _maneuver.edit_preview().start_time_s =
                     std::isfinite(previous_time_s) ? previous_time_s : node->time_s;
             if (PredictionTrackState *track = active_prediction_track())
             {
@@ -151,12 +116,12 @@ namespace Game
                                                                const double previous_time_s)
     {
         begin_maneuver_node_time_edit_preview(node_id, previous_time_s);
-        if (_maneuver_node_edit_preview.state != ManeuverNodeEditPreview::State::EditingTime)
+        if (_maneuver.edit_preview().state != ManeuverNodeEditPreview::State::EditingTime)
         {
             return;
         }
 
-        _maneuver_node_edit_preview.changed = true;
+        _maneuver.edit_preview().changed = true;
         if (PredictionTrackState *track = active_prediction_track())
         {
             _prediction_system.mark_maneuver_preview_dirty(*track);
@@ -168,11 +133,11 @@ namespace Game
     {
         const bool preview_changed =
                 changed ||
-                (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime &&
-                 _maneuver_node_edit_preview.changed);
-        if (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime)
+                (_maneuver.edit_preview().state == ManeuverNodeEditPreview::State::EditingTime &&
+                 _maneuver.edit_preview().changed);
+        if (_maneuver.edit_preview().state == ManeuverNodeEditPreview::State::EditingTime)
         {
-            _maneuver_node_edit_preview = {};
+            _maneuver.edit_preview() = {};
         }
 
         if (!preview_changed)
@@ -189,7 +154,7 @@ namespace Game
 
     void GameplayState::cancel_maneuver_node_edit_preview()
     {
-        _maneuver_node_edit_preview = {};
+        _maneuver.edit_preview() = {};
     }
 
     void GameplayState::cancel_maneuver_node_dv_edit_preview()
@@ -260,27 +225,10 @@ namespace Game
 
     ManeuverCommandResult GameplayState::apply_maneuver_command(const ManeuverCommand &command)
     {
-        ManeuverCommandResult result = ManeuverPlanController::apply(_maneuver_state, command);
+        ManeuverCommandResult result = _maneuver.apply_command(command);
         if (!result.applied)
         {
             return result;
-        }
-
-        if (result.nodes_removed)
-        {
-            if (contains_node_id(result.removed_node_ids, _maneuver_gizmo_interaction.node_id))
-            {
-                _maneuver_gizmo_interaction = {};
-            }
-            if (_execute_node_armed && contains_node_id(result.removed_node_ids, _execute_node_id))
-            {
-                _execute_node_armed = false;
-                _execute_node_id = -1;
-            }
-            if (contains_node_id(result.removed_node_ids, _maneuver_node_edit_preview.node_id))
-            {
-                cancel_maneuver_node_dv_edit_preview();
-            }
         }
 
         if (result.clear_prediction_artifacts)

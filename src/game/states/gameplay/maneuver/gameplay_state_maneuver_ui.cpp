@@ -29,7 +29,7 @@ namespace Game
     {
         if (!ctx.renderer || !ctx.renderer->_window)
         {
-            _maneuver_ui_config.effective_scale = _maneuver_ui_config.ui_scale;
+            _maneuver.settings().ui_config.effective_scale = _maneuver.settings().ui_config.ui_scale;
             return;
         }
 
@@ -38,12 +38,12 @@ namespace Game
         SDL_Vulkan_GetDrawableSize(ctx.renderer->_window, &draw_w, &draw_h);
 
         float dpi_scale = 1.0f;
-        if (_maneuver_ui_config.auto_dpi_scale && win_w > 0 && draw_w > 0)
+        if (_maneuver.settings().ui_config.auto_dpi_scale && win_w > 0 && draw_w > 0)
         {
             dpi_scale = static_cast<float>(draw_w) / static_cast<float>(win_w);
         }
 
-        float display_dpi = _maneuver_ui_config.base_dpi;
+        float display_dpi = _maneuver.settings().ui_config.base_dpi;
         const int display_idx = SDL_GetWindowDisplayIndex(ctx.renderer->_window);
         if (display_idx >= 0)
         {
@@ -54,8 +54,8 @@ namespace Game
             }
         }
 
-        _maneuver_ui_config.effective_scale = _maneuver_ui_config.ui_scale * std::max(dpi_scale, display_dpi / _maneuver_ui_config.base_dpi);
-        _maneuver_ui_config.effective_scale = std::clamp(_maneuver_ui_config.effective_scale, 0.5f, 4.0f);
+        _maneuver.settings().ui_config.effective_scale = _maneuver.settings().ui_config.ui_scale * std::max(dpi_scale, display_dpi / _maneuver.settings().ui_config.base_dpi);
+        _maneuver.settings().ui_config.effective_scale = std::clamp(_maneuver.settings().ui_config.effective_scale, 0.5f, 4.0f);
     }
 
     void GameplayState::draw_maneuver_gizmo_markers(ImDrawList *draw_list,
@@ -77,7 +77,7 @@ namespace Game
         };
 
         auto clamped_style_color = [&](const float boost, const float alpha_scale) -> ImVec4 {
-            const glm::vec4 base = _maneuver_gizmo_style.icon_color;
+            const glm::vec4 base = _maneuver.settings().gizmo_style.icon_color;
             return ImVec4(std::clamp(base.x + boost, 0.0f, 1.0f),
                           std::clamp(base.y + boost, 0.0f, 1.0f),
                           std::clamp(base.z + boost, 0.0f, 1.0f),
@@ -86,7 +86,7 @@ namespace Game
 
         for (const ManeuverHubMarker &hub : hubs)
         {
-            const bool is_selected = (hub.node_id == _maneuver_state.selected_node_id);
+            const bool is_selected = (hub.node_id == _maneuver.plan().selected_node_id);
             const bool is_hovered = (hovered_hub_idx >= 0 && hubs[hovered_hub_idx].node_id == hub.node_id);
             const float radius = is_selected ? hub_hit_px * 0.58f : hub_hit_px * 0.50f;
 
@@ -100,7 +100,7 @@ namespace Game
                                          : clamped_style_color(0.25f, 0.72f);
 
             draw_list->AddCircleFilled(to_imvec2(hub.screen), radius, ImGui::ColorConvertFloat4ToU32(fill_rgba), 24);
-            draw_list->AddCircle(to_imvec2(hub.screen), radius + _maneuver_ui_config.scaled(2.5f), ImGui::ColorConvertFloat4ToU32(ring_rgba), 24, _maneuver_ui_config.scaled(1.8f));
+            draw_list->AddCircle(to_imvec2(hub.screen), radius + _maneuver.settings().ui_config.scaled(2.5f), ImGui::ColorConvertFloat4ToU32(ring_rgba), 24, _maneuver.settings().ui_config.scaled(1.8f));
         }
 
         for (const ManeuverAxisMarker &h : handles)
@@ -108,9 +108,9 @@ namespace Game
             const bool is_hovered = (hovered_handle_idx >= 0 &&
                                      handles[hovered_handle_idx].node_id == h.node_id &&
                                      handles[hovered_handle_idx].axis == h.axis);
-            const bool is_active = (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis) &&
-                                   (_maneuver_gizmo_interaction.node_id == h.node_id) &&
-                                   (_maneuver_gizmo_interaction.axis == h.axis);
+            const bool is_active = (_maneuver.gizmo_interaction().state == ManeuverGizmoInteraction::State::DragAxis) &&
+                                   (_maneuver.gizmo_interaction().node_id == h.node_id) &&
+                                   (_maneuver.gizmo_interaction().axis == h.axis);
 
             const ImU32 col = is_active
                                   ? ManeuverColors::kDragAxisActive
@@ -122,9 +122,9 @@ namespace Game
 
             draw_list->AddLine(to_imvec2(h.hub_screen), to_imvec2(h.handle_screen), col, thickness);
             draw_list->AddCircleFilled(to_imvec2(h.handle_screen), handle_r, col, 24);
-            if (_maneuver_gizmo_style.show_axis_labels)
+            if (_maneuver.settings().gizmo_style.show_axis_labels)
             {
-                draw_list->AddText(ImVec2(h.handle_screen.x + handle_r + _maneuver_ui_config.scaled(2.0f), h.handle_screen.y - handle_r), col, h.label);
+                draw_list->AddText(ImVec2(h.handle_screen.x + handle_r + _maneuver.settings().ui_config.scaled(2.0f), h.handle_screen.y - handle_r), col, h.label);
             }
         }
     }
@@ -138,15 +138,15 @@ namespace Game
         }
 
         const ManeuverAxisMarker &hover_h = handles[hovered_handle_idx];
-        if (const ManeuverNode *node = _maneuver_state.find_node(hover_h.node_id))
+        if (const ManeuverNode *node = _maneuver.plan().find_node(hover_h.node_id))
         {
             ImGui::BeginTooltip();
             ImGui::Text("Node %d", node->id);
             ImGui::Text("Axis: %s", hover_h.label);
-            ImGui::Text("Basis: %s", ManeuverUtil::basis_mode_label(_maneuver_gizmo_basis_mode));
+            ImGui::Text("Basis: %s", ManeuverUtil::basis_mode_label(_maneuver.settings().gizmo_basis_mode));
             const char *dv_fmt = (node->total_dv_mps < 1.0) ? "DV RTN: (%.4f, %.4f, %.4f) m/s" : "DV RTN: (%.2f, %.2f, %.2f) m/s";
             ImGui::Text(dv_fmt, node->dv_rtn_mps.x, node->dv_rtn_mps.y, node->dv_rtn_mps.z);
-            if (_maneuver_gizmo_basis_mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal)
+            if (_maneuver.settings().gizmo_basis_mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal)
             {
                 const glm::dvec3 dv_display = dv_rtn_to_display_basis(*node);
                 const char *pon_fmt = (node->total_dv_mps < 1.0) ? "DV PON: (%.4f, %.4f, %.4f) m/s" : "DV PON: (%.2f, %.2f, %.2f) m/s";
@@ -162,7 +162,7 @@ namespace Game
     {
         // Per-frame gizmo loop: reuse the runtime cache refreshed during on_update(),
         // rebuild markers, resolve hover/drag state, then draw overlay UI.
-        if (!_maneuver_nodes_enabled || _maneuver_state.nodes.empty())
+        if (!_maneuver.settings().nodes_enabled || _maneuver.plan().nodes.empty())
         {
             return;
         }
@@ -180,8 +180,8 @@ namespace Game
             return;
         }
 
-        const float overlay_scale = std::max(0.25f, _maneuver_gizmo_style.overlay_scale);
-        const float overlay_size_px = std::max(6.0f, _maneuver_ui_config.scaled(_maneuver_gizmo_style.icon_size_px * overlay_scale));
+        const float overlay_scale = std::max(0.25f, _maneuver.settings().gizmo_style.overlay_scale);
+        const float overlay_size_px = std::max(6.0f, _maneuver.settings().ui_config.scaled(_maneuver.settings().gizmo_style.icon_size_px * overlay_scale));
 
         std::vector<ManeuverHubMarker> hubs{};
         std::vector<ManeuverAxisMarker> handles{};
@@ -190,8 +190,8 @@ namespace Game
         const ImGuiIO &io = ImGui::GetIO();
         const glm::vec2 mouse_pos(io.MousePos.x, io.MousePos.y);
 
-        const float hub_hit_px = std::max(_maneuver_ui_config.scaled(10.0f), overlay_size_px * 0.45f);
-        const float axis_hit_px = std::max(_maneuver_ui_config.scaled(9.0f), overlay_size_px * 0.36f);
+        const float hub_hit_px = std::max(_maneuver.settings().ui_config.scaled(10.0f), overlay_size_px * 0.45f);
+        const float axis_hit_px = std::max(_maneuver.settings().ui_config.scaled(9.0f), overlay_size_px * 0.36f);
         const float hub_hit_px2 = hub_hit_px * hub_hit_px;
         const float axis_hit_px2 = axis_hit_px * axis_hit_px;
 
@@ -204,17 +204,17 @@ namespace Game
         const bool ui_item_hovered = ImGui::IsAnyItemHovered();
         const bool can_capture_click = !(ui_item_active || ui_item_hovered);
 
-        if (_maneuver_gizmo_interaction.state != ManeuverGizmoInteraction::State::DragAxis)
+        if (_maneuver.gizmo_interaction().state != ManeuverGizmoInteraction::State::DragAxis)
         {
             if (hovered_handle_idx >= 0)
             {
-                _maneuver_gizmo_interaction.state = ManeuverGizmoInteraction::State::HoverAxis;
-                _maneuver_gizmo_interaction.node_id = handles[hovered_handle_idx].node_id;
-                _maneuver_gizmo_interaction.axis = handles[hovered_handle_idx].axis;
+                _maneuver.gizmo_interaction().state = ManeuverGizmoInteraction::State::HoverAxis;
+                _maneuver.gizmo_interaction().node_id = handles[hovered_handle_idx].node_id;
+                _maneuver.gizmo_interaction().axis = handles[hovered_handle_idx].axis;
             }
             else
             {
-                _maneuver_gizmo_interaction = {};
+                _maneuver.gizmo_interaction() = {};
             }
         }
 
@@ -235,9 +235,9 @@ namespace Game
             }
         }
 
-        if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
+        if (_maneuver.gizmo_interaction().state == ManeuverGizmoInteraction::State::DragAxis)
         {
-            ManeuverNode *node = _maneuver_state.find_node(_maneuver_gizmo_interaction.node_id);
+            ManeuverNode *node = _maneuver.plan().find_node(_maneuver.gizmo_interaction().node_id);
             if (!node || !node->gizmo_valid)
             {
                 if (PredictionTrackState *track = active_prediction_track())
@@ -247,11 +247,11 @@ namespace Game
                     debug.last_drag_end_tp = PredictionDragDebugTelemetry::Clock::now();
                     _prediction_system.clear_unapplied_maneuver_drag_preview(*track);
                 }
-                _maneuver_gizmo_interaction = {};
+                _maneuver.gizmo_interaction() = {};
             }
             else if (!ctx.input->mouse_down(MouseButton::Left))
             {
-                const bool changed = _maneuver_gizmo_interaction.applied_delta;
+                const bool changed = _maneuver.gizmo_interaction().applied_delta;
                 if (PredictionTrackState *track = active_prediction_track())
                 {
                     PredictionDragDebugTelemetry &debug = track->drag_debug;
@@ -264,14 +264,14 @@ namespace Game
                 }
                 if (hovered_handle_idx >= 0)
                 {
-                    _maneuver_gizmo_interaction.state = ManeuverGizmoInteraction::State::HoverAxis;
-                    _maneuver_gizmo_interaction.node_id = handles[hovered_handle_idx].node_id;
-                    _maneuver_gizmo_interaction.axis = handles[hovered_handle_idx].axis;
-                    _maneuver_gizmo_interaction.applied_delta = false;
+                    _maneuver.gizmo_interaction().state = ManeuverGizmoInteraction::State::HoverAxis;
+                    _maneuver.gizmo_interaction().node_id = handles[hovered_handle_idx].node_id;
+                    _maneuver.gizmo_interaction().axis = handles[hovered_handle_idx].axis;
+                    _maneuver.gizmo_interaction().applied_delta = false;
                 }
                 else
                 {
-                    _maneuver_gizmo_interaction = {};
+                    _maneuver.gizmo_interaction() = {};
                 }
 
                 if (changed)
@@ -308,7 +308,7 @@ namespace Game
 
         draw_maneuver_gizmo_markers(dl, hubs, handles, hovered_hub_idx, hovered_handle_idx, hub_hit_px, axis_hit_px);
 
-        if (hovered_handle_idx >= 0 && _maneuver_gizmo_interaction.state != ManeuverGizmoInteraction::State::DragAxis)
+        if (hovered_handle_idx >= 0 && _maneuver.gizmo_interaction().state != ManeuverGizmoInteraction::State::DragAxis)
         {
             draw_maneuver_gizmo_hover_tooltip(handles, hovered_handle_idx);
         }
@@ -317,7 +317,7 @@ namespace Game
     void GameplayState::emit_maneuver_node_debug_overlay(GameStateContext &ctx)
     {
         // World-space debug overlay mirrors the screen-space gizmo state for inspection and tuning.
-        if (!_maneuver_nodes_enabled || !_maneuver_nodes_debug_draw)
+        if (!_maneuver.settings().nodes_enabled || !_maneuver.settings().nodes_debug_draw)
         {
             return;
         }
@@ -328,14 +328,14 @@ namespace Game
 
         const float ttl_s = std::clamp(ctx.delta_time(), 0.0f, 0.1f) + 0.002f;
 
-        for (auto &node : _maneuver_state.nodes)
+        for (auto &node : _maneuver.plan().nodes)
         {
             if (!node.gizmo_valid)
             {
                 continue;
             }
 
-            const bool selected = node.id == _maneuver_state.selected_node_id;
+            const bool selected = node.id == _maneuver.plan().selected_node_id;
             const glm::vec4 c_node = selected ? ManeuverColors::kDebugNodeSelected : ManeuverColors::kDebugNode;
 
             const glm::dvec3 p = glm::dvec3(node.position_world);
@@ -350,7 +350,7 @@ namespace Game
                 ctx.api->debug_draw_ray(p, node.burn_direction_world, arrow_len_m, ManeuverColors::kDebugDv, ttl_s, true);
             }
 
-            if (selected || _maneuver_gizmo_style.show_axis_labels)
+            if (selected || _maneuver.settings().gizmo_style.show_axis_labels)
             {
                 const double axis_len_m = static_cast<double>(node.gizmo_scale_m) * (selected ? 2.8 : 1.8);
                 ctx.api->debug_draw_ray(p, node.basis_r_world, axis_len_m, ManeuverColors::kDebugRadial, ttl_s, true);

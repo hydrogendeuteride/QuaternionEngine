@@ -39,15 +39,7 @@ namespace Game
         _elapsed = 0.0f;
         _fixed_time_s = 0.0;
         reset_time_warp_state();
-        _warp_to_time_active = false;
-        _warp_to_time_target_s = 0.0;
-        _warp_to_time_restore_level = 0;
-        _execute_node_armed = false;
-        _execute_node_id = -1;
-        _maneuver_state.nodes.clear();
-        _maneuver_state.selected_node_id = -1;
-        _maneuver_state.next_node_id = 0;
-        _maneuver_gizmo_interaction = {};
+        _maneuver.reset_session();
         _reset_requested = false;
         _scenario_io_status.clear();
         _scenario_io_status_ok = true;
@@ -153,15 +145,7 @@ namespace Game
             ctx.renderer->_context->orbit_plot->clear_all();
         }
         reset_time_warp_state();
-        _warp_to_time_active = false;
-        _warp_to_time_target_s = 0.0;
-        _warp_to_time_restore_level = 0;
-        _execute_node_armed = false;
-        _execute_node_id = -1;
-        _maneuver_state.nodes.clear();
-        _maneuver_state.selected_node_id = -1;
-        _maneuver_state.next_node_id = 0;
-        _maneuver_gizmo_interaction = {};
+        _maneuver.reset_session();
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
         if (ctx.renderer && ctx.renderer->_context)
         {
@@ -235,10 +219,10 @@ namespace Game
             if (_rails_warp_active)
             {
                 double dt_s = static_cast<double>(fixed_dt) * warp_factor;
-                if (_warp_to_time_active)
+                if (_maneuver.runtime().warp_to_time_active)
                 {
                     const double now_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
-                    const double remaining_s = _warp_to_time_target_s - now_s;
+                    const double remaining_s = _maneuver.runtime().warp_to_time_target_s - now_s;
                     if (std::isfinite(remaining_s) && remaining_s > 0.0)
                     {
                         dt_s = std::min(dt_s, remaining_s);
@@ -294,7 +278,7 @@ namespace Game
             return;
         }
 
-        if (_warp_to_time_active)
+        if (_maneuver.runtime().warp_to_time_active)
         {
             return;
         }

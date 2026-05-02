@@ -3,7 +3,7 @@
 #include "game/game_world.h"
 #include "game/state/game_state.h"
 #include "core/game_api.h"
-#include "game/states/gameplay/maneuver/gameplay_state_maneuver_types.h"
+#include "game/states/gameplay/maneuver/maneuver_system.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_state.h"
 #include "game/states/gameplay/prediction/prediction_system.h"
 #include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
@@ -198,6 +198,7 @@ namespace Game
         double prediction_future_window_s(PredictionSubjectKey key) const;
         double maneuver_plan_horizon_s() const;
         uint64_t current_maneuver_plan_signature() const;
+        double prediction_authored_plan_request_window_s(double now_s) const;
         PredictionTimeContext build_prediction_time_context(
                 PredictionSubjectKey key,
                 double sim_now_s,
@@ -419,27 +420,8 @@ namespace Game
 
         GameplayPredictionState _prediction{};
         PredictionSystem _prediction_system{_prediction};
-        ManeuverPlanHorizonSettings _maneuver_plan_horizon{};
-        ManeuverPlanWindowSettings _maneuver_plan_windows{};
         OrbitPlotBudgetSettings _orbit_plot_budget{};
-        bool _maneuver_plan_live_preview_active{true};
-        uint64_t _maneuver_plan_revision{0};
-
-        // Maneuver-system extraction candidates.
-        bool _maneuver_nodes_enabled{true};
-        bool _maneuver_nodes_debug_draw{true};
-        double _maneuver_timeline_window_s{3600.0};
-        ManeuverPlanState _maneuver_state{};
-        ManeuverGizmoBasisMode _maneuver_gizmo_basis_mode{ManeuverGizmoBasisMode::ProgradeOutwardNormal};
-        ManeuverGizmoStyle _maneuver_gizmo_style{};
-        ManeuverUIConfig _maneuver_ui_config{};
-        ManeuverGizmoInteraction _maneuver_gizmo_interaction{};
-        ManeuverNodeEditPreview _maneuver_node_edit_preview{};
-        bool _warp_to_time_active{false};
-        double _warp_to_time_target_s{0.0};
-        int _warp_to_time_restore_level{0};
-        bool _execute_node_armed{false};
-        int _execute_node_id{-1};
+        ManeuverSystem _maneuver{};
 
         float _elapsed{0.0f};
         double _fixed_time_s{0.0};

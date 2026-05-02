@@ -151,7 +151,7 @@ namespace Game
                                                             const double window_t0_s,
                                                             const double window_t1_s) {
             std::vector<double> anchors;
-            anchors.reserve(cache.solver.maneuver_previews.size() + _maneuver_state.nodes.size() + 4u);
+            anchors.reserve(cache.solver.maneuver_previews.size() + _maneuver.plan().nodes.size() + 4u);
             const auto push_anchor_time = [&](const double t_s, const bool allow_endpoint) {
                 if (!std::isfinite(t_s))
                 {
@@ -181,7 +181,7 @@ namespace Game
                     push_anchor_time(preview.t_s, false);
                 }
             }
-            for (const ManeuverNode &node : _maneuver_state.nodes)
+            for (const ManeuverNode &node : _maneuver.plan().nodes)
             {
                 push_anchor_time(node.time_s, false);
             }

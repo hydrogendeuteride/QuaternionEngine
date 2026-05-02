@@ -160,12 +160,12 @@ namespace Game
         }
         _show_maneuver_nodes_panel = panel_open;
 
-        if (ImGui::Checkbox("Maneuver Nodes", &_maneuver_nodes_enabled))
+        if (ImGui::Checkbox("Maneuver Nodes", &_maneuver.settings().nodes_enabled))
         {
-            if (!_maneuver_nodes_enabled)
+            if (!_maneuver.settings().nodes_enabled)
             {
                 clear_maneuver_gizmo_instances(ctx);
-                _maneuver_gizmo_interaction = {};
+                _maneuver.gizmo_interaction() = {};
                 cancel_maneuver_node_dv_edit_preview();
                 clear_maneuver_prediction_artifacts();
             }
@@ -173,7 +173,7 @@ namespace Game
         }
 
         ImGui::SameLine();
-        if (ImGui::Checkbox("Debug", &_maneuver_nodes_debug_draw))
+        if (ImGui::Checkbox("Debug", &_maneuver.settings().nodes_debug_draw))
         {
             // no-op
         }
@@ -196,34 +196,34 @@ namespace Game
         }
 
         ImGui::SameLine();
-        if (ImGui::Button("Clear") && !_maneuver_state.nodes.empty())
+        if (ImGui::Button("Clear") && !_maneuver.plan().nodes.empty())
         {
-            _execute_node_armed = false;
-            _execute_node_id = -1;
-            _maneuver_gizmo_interaction = {};
+            _maneuver.runtime().execute_node_armed = false;
+            _maneuver.runtime().execute_node_id = -1;
+            _maneuver.gizmo_interaction() = {};
             cancel_maneuver_node_dv_edit_preview();
             clear_maneuver_gizmo_instances(ctx);
             (void) apply_maneuver_command(ManeuverCommand::clear_plan());
         }
 
         ImGui::SameLine();
-        float window_s = static_cast<float>(_maneuver_timeline_window_s);
+        float window_s = static_cast<float>(_maneuver.settings().timeline_window_s);
         if (ImGui::DragFloat("Timeline Window (s)", &window_s, 10.0f, 60.0f, 15'552'000.0f, "%.0f"))
         {
-            _maneuver_timeline_window_s = static_cast<double>(std::max(60.0f, window_s));
+            _maneuver.settings().timeline_window_s = static_cast<double>(std::max(60.0f, window_s));
         }
 
         ImGui::SeparatorText("Planner Preview");
-        float plan_horizon_s = static_cast<float>(_maneuver_plan_horizon.horizon_s);
+        float plan_horizon_s = static_cast<float>(_maneuver.settings().plan_horizon.horizon_s);
         if (ImGui::DragFloat("Plan Horizon (s)", &plan_horizon_s, 10.0f, 0.0f, 15'552'000.0f, "%.0f"))
         {
-            _maneuver_plan_horizon.horizon_s = static_cast<double>(std::max(0.0f, plan_horizon_s));
+            _maneuver.settings().plan_horizon.horizon_s = static_cast<double>(std::max(0.0f, plan_horizon_s));
             (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
         }
 
-        if (ImGui::Checkbox("Live Preview", &_maneuver_plan_live_preview_active))
+        if (ImGui::Checkbox("Live Preview", &_maneuver.settings().live_preview_active))
         {
-            if (!_maneuver_plan_live_preview_active)
+            if (!_maneuver.settings().live_preview_active)
             {
                 _prediction_system.clear_maneuver_live_preview_state();
                 cancel_maneuver_node_dv_edit_preview();
@@ -233,7 +233,7 @@ namespace Game
 
         if (player_track)
         {
-            const bool has_plan = _maneuver_nodes_enabled && !_maneuver_state.nodes.empty();
+            const bool has_plan = _maneuver.settings().nodes_enabled && !_maneuver.plan().nodes.empty();
             const uint64_t current_plan_signature = has_plan ? current_maneuver_plan_signature() : 0u;
             const auto cache_has_ready_current_plan = [&](const OrbitPredictionCache &cache) {
                 return has_plan &&
@@ -354,7 +354,7 @@ namespace Game
 
             for (int bi = 0; bi < 2; ++bi)
             {
-                const bool is_active = (_maneuver_gizmo_basis_mode == ManeuverColors::kBasisModes[bi]);
+                const bool is_active = (_maneuver.settings().gizmo_basis_mode == ManeuverColors::kBasisModes[bi]);
                 const char *label = ManeuverUtil::basis_mode_label(ManeuverColors::kBasisModes[bi]);
 
                 if (is_active)
@@ -372,8 +372,8 @@ namespace Game
 
                 if (ImGui::Button(label, ImVec2(btn_w, btn_h)))
                 {
-                    _maneuver_gizmo_basis_mode = ManeuverColors::kBasisModes[bi];
-                    _maneuver_gizmo_interaction = {};
+                    _maneuver.settings().gizmo_basis_mode = ManeuverColors::kBasisModes[bi];
+                    _maneuver.gizmo_interaction() = {};
                 }
                 ImGui::PopStyleColor(3);
 
@@ -384,51 +384,51 @@ namespace Game
             }
         }
 
-        if (_maneuver_gizmo_interaction.state == ManeuverGizmoInteraction::State::DragAxis)
+        if (_maneuver.gizmo_interaction().state == ManeuverGizmoInteraction::State::DragAxis)
         {
             ImGui::TextUnformatted("Gizmo: DragAxis  (Shift x0.1 / Ctrl x10)");
         }
 
-        if (_maneuver_nodes_debug_draw)
+        if (_maneuver.settings().nodes_debug_draw)
         {
             bool style_changed = false;
             if (ImGui::CollapsingHeader("Gizmo Style"))
             {
-                style_changed |= ImGui::ColorEdit4("Icon Color", &_maneuver_gizmo_style.icon_color.x,
+                style_changed |= ImGui::ColorEdit4("Icon Color", &_maneuver.settings().gizmo_style.icon_color.x,
                                                    ImGuiColorEditFlags_NoInputs);
-                style_changed |= ImGui::DragFloat("Overlay Size (px)", &_maneuver_gizmo_style.icon_size_px, 0.25f, 8.0f,
+                style_changed |= ImGui::DragFloat("Overlay Size (px)", &_maneuver.settings().gizmo_style.icon_size_px, 0.25f, 8.0f,
                                                   160.0f, "%.1f");
-                style_changed |= ImGui::DragFloat("Overlay Scale", &_maneuver_gizmo_style.overlay_scale, 0.01f, 0.25f,
+                style_changed |= ImGui::DragFloat("Overlay Scale", &_maneuver.settings().gizmo_style.overlay_scale, 0.01f, 0.25f,
                                                   6.0f, "%.2f");
-                style_changed |= ImGui::DragFloat("Drag Sensitivity", &_maneuver_gizmo_style.drag_sensitivity_mps_per_m,
+                style_changed |= ImGui::DragFloat("Drag Sensitivity", &_maneuver.settings().gizmo_style.drag_sensitivity_mps_per_m,
                                                   0.0001f, 0.00001f, 1.0f, "%.5f");
-                style_changed |= ImGui::Checkbox("Show Axis Overlay", &_maneuver_gizmo_style.show_axis_labels);
+                style_changed |= ImGui::Checkbox("Show Axis Overlay", &_maneuver.settings().gizmo_style.show_axis_labels);
             }
 
             if (style_changed)
             {
-                _maneuver_gizmo_style.icon_size_px = std::clamp(_maneuver_gizmo_style.icon_size_px, 8.0f, 160.0f);
-                _maneuver_gizmo_style.overlay_scale = std::clamp(_maneuver_gizmo_style.overlay_scale, 0.25f, 6.0f);
-                _maneuver_gizmo_style.drag_sensitivity_mps_per_m =
-                        std::clamp(_maneuver_gizmo_style.drag_sensitivity_mps_per_m, 0.00001f, 1.0f);
+                _maneuver.settings().gizmo_style.icon_size_px = std::clamp(_maneuver.settings().gizmo_style.icon_size_px, 8.0f, 160.0f);
+                _maneuver.settings().gizmo_style.overlay_scale = std::clamp(_maneuver.settings().gizmo_style.overlay_scale, 0.25f, 6.0f);
+                _maneuver.settings().gizmo_style.drag_sensitivity_mps_per_m =
+                        std::clamp(_maneuver.settings().gizmo_style.drag_sensitivity_mps_per_m, 0.00001f, 1.0f);
             }
         }
 
-        if (_warp_to_time_active)
+        if (_maneuver.runtime().warp_to_time_active)
         {
-            const std::string warp_label = format_t_plus_from_time_s(_warp_to_time_target_s);
+            const std::string warp_label = format_t_plus_from_time_s(_maneuver.runtime().warp_to_time_target_s);
             ImGui::SameLine();
             ImGui::Text("Warping: %s", warp_label.c_str());
         }
 
         const double t_start_s = time_ctx.sim_now_s;
-        const double t_end_s = time_ctx.sim_now_s + std::max(60.0, _maneuver_timeline_window_s);
+        const double t_end_s = time_ctx.sim_now_s + std::max(60.0, _maneuver.settings().timeline_window_s);
         const double span_s = t_end_s - t_start_s;
 
         const PickingSystem *picking = nullptr;
         const PickingSystem::PickInfo *orbit_pick = nullptr;
-        const bool allow_base_pick = _maneuver_state.nodes.empty();
-        const bool allow_planned_pick = !_maneuver_state.nodes.empty();
+        const bool allow_base_pick = _maneuver.plan().nodes.empty();
+        const bool allow_planned_pick = !_maneuver.plan().nodes.empty();
         // First node is placed on the base orbit; once a plan exists, additional nodes snap to the planned orbit instead.
         auto pick_allowed_for_node_add = [&](const PickingSystem::PickInfo &pick) {
             if (!pick.valid || pick.kind != PickingSystem::PickInfo::Kind::Line)
@@ -593,7 +593,7 @@ namespace Game
         // --- Timeline bar ---
         // This is both a readout and a direct-manipulation editor: marker drag writes back to node.time_s.
         ImDrawList *dl = ImGui::GetWindowDrawList();
-        const float bar_h = _maneuver_ui_config.scaled(28.0f);
+        const float bar_h = _maneuver.settings().ui_config.scaled(28.0f);
         const float bar_w = std::max(200.0f, ImGui::GetContentRegionAvail().x);
 
         ImGui::InvisibleButton("##mn_timeline", ImVec2(bar_w, bar_h));
@@ -620,7 +620,7 @@ namespace Game
 
         // Node markers overlay
         bool needs_sort = false;
-        for (auto &node : _maneuver_state.nodes)
+        for (auto &node : _maneuver.plan().nodes)
         {
             const double u = (span_s > 0.0) ? (node.time_s - t_start_s) / span_s : 0.0;
             if (!std::isfinite(u))
@@ -632,9 +632,9 @@ namespace Game
             const float x = p0.x + uf * (p1.x - p0.x);
             const float y = pc.y;
 
-            const bool selected = node.id == _maneuver_state.selected_node_id;
-            const float r_px = _maneuver_ui_config.scaled(selected ? 7.0f : 6.0f);
-            const float hit = _maneuver_ui_config.scaled(12.0f);
+            const bool selected = node.id == _maneuver.plan().selected_node_id;
+            const float r_px = _maneuver.settings().ui_config.scaled(selected ? 7.0f : 6.0f);
+            const float hit = _maneuver.settings().ui_config.scaled(12.0f);
 
             ImGui::SetCursorScreenPos(ImVec2(x - hit, y - hit));
             ImGui::PushID(node.id);
@@ -693,24 +693,24 @@ namespace Game
         ImGui::Separator();
 
         double total_plan_dv_mps = 0.0;
-        for (const ManeuverNode &node : _maneuver_state.nodes)
+        for (const ManeuverNode &node : _maneuver.plan().nodes)
         {
             total_plan_dv_mps += safe_length(node.dv_rtn_mps);
         }
 
-        ImGui::Text("%zu nodes  |  Total DV %.2f m/s", _maneuver_state.nodes.size(), total_plan_dv_mps);
-        if (_execute_node_armed && _execute_node_id >= 0)
+        ImGui::Text("%zu nodes  |  Total DV %.2f m/s", _maneuver.plan().nodes.size(), total_plan_dv_mps);
+        if (_maneuver.runtime().execute_node_armed && _maneuver.runtime().execute_node_id >= 0)
         {
             ImGui::SameLine();
-            ImGui::TextDisabled("Armed: Node %d", _execute_node_id);
+            ImGui::TextDisabled("Armed: Node %d", _maneuver.runtime().execute_node_id);
         }
 
-        if (_maneuver_state.selected_node_id < 0 && !_maneuver_state.nodes.empty())
+        if (_maneuver.plan().selected_node_id < 0 && !_maneuver.plan().nodes.empty())
         {
             (void) apply_maneuver_command(ManeuverCommand::ensure_selection());
         }
 
-        if (_maneuver_state.nodes.empty())
+        if (_maneuver.plan().nodes.empty())
         {
             ImGui::TextUnformatted("No maneuver nodes. Add one with +Node or Add Node @ Pick.");
             if (needs_sort)
@@ -722,9 +722,9 @@ namespace Game
         }
 
         auto find_node_index = [&](const int node_id) -> int {
-            for (size_t i = 0; i < _maneuver_state.nodes.size(); ++i)
+            for (size_t i = 0; i < _maneuver.plan().nodes.size(); ++i)
             {
-                if (_maneuver_state.nodes[i].id == node_id)
+                if (_maneuver.plan().nodes[i].id == node_id)
                 {
                     return static_cast<int>(i);
                 }
@@ -734,15 +734,15 @@ namespace Game
 
         const float panel_h = std::max(120.0f, ImGui::GetContentRegionAvail().y);
         const float list_w = std::min(320.0f, ImGui::GetContentRegionAvail().x * 0.42f);
-        const int selected_idx = find_node_index(_maneuver_state.selected_node_id);
+        const int selected_idx = find_node_index(_maneuver.plan().selected_node_id);
 
         ImGui::BeginChild("##mn_node_list", ImVec2(list_w, panel_h), true);
         ImGui::TextUnformatted("Nodes");
         ImGui::Separator();
 
-        for (size_t i = 0; i < _maneuver_state.nodes.size(); ++i)
+        for (size_t i = 0; i < _maneuver.plan().nodes.size(); ++i)
         {
-            ManeuverNode &node = _maneuver_state.nodes[i];
+            ManeuverNode &node = _maneuver.plan().nodes[i];
             node.total_dv_mps = safe_length(node.dv_rtn_mps);
 
             char label[96];
@@ -755,11 +755,11 @@ namespace Game
                           node.total_dv_mps);
 
             ImGui::PushID(node.id);
-            if (ImGui::Selectable(label, node.id == _maneuver_state.selected_node_id))
+            if (ImGui::Selectable(label, node.id == _maneuver.plan().selected_node_id))
             {
                 (void) apply_maneuver_command(ManeuverCommand::select_node(node.id));
             }
-            if (_maneuver_gizmo_basis_mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal && node.gizmo_valid)
+            if (_maneuver.settings().gizmo_basis_mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal && node.gizmo_valid)
             {
                 const glm::dvec3 dv_d = ManeuverUtil::dv_rtn_to_display_basis(node);
                 ImGui::TextDisabled("PON  %.1f / %.1f / %.1f", dv_d.y, dv_d.x, dv_d.z);
@@ -768,7 +768,7 @@ namespace Game
             {
                 ImGui::TextDisabled("RTN  %.1f / %.1f / %.1f", node.dv_rtn_mps.x, node.dv_rtn_mps.y, node.dv_rtn_mps.z);
             }
-            if (i + 1 < _maneuver_state.nodes.size())
+            if (i + 1 < _maneuver.plan().nodes.size())
             {
                 ImGui::Separator();
             }
@@ -780,7 +780,7 @@ namespace Game
 
         ImGui::BeginChild("##mn_node_detail", ImVec2(0.0f, panel_h), true);
 
-        ManeuverNode *sel = _maneuver_state.find_node(_maneuver_state.selected_node_id);
+        ManeuverNode *sel = _maneuver.plan().find_node(_maneuver.plan().selected_node_id);
         if (!sel)
         {
             ImGui::TextUnformatted("Select a node to edit.");
@@ -806,7 +806,7 @@ namespace Game
         ImGui::EndDisabled();
 
         ImGui::SameLine();
-        ImGui::BeginDisabled(selected_idx < 0 || selected_idx + 1 >= static_cast<int>(_maneuver_state.nodes.size()));
+        ImGui::BeginDisabled(selected_idx < 0 || selected_idx + 1 >= static_cast<int>(_maneuver.plan().nodes.size()));
         if (ImGui::Button("Next"))
         {
             (void) apply_maneuver_command(ManeuverCommand::select_node_by_index(selected_idx + 1));
@@ -816,22 +816,22 @@ namespace Game
         // Actions
         if (ImGui::Button("Warp to Node"))
         {
-            _warp_to_time_active = true;
-            _warp_to_time_target_s = sel->time_s;
-            _warp_to_time_restore_level = 0;
+            _maneuver.runtime().warp_to_time_active = true;
+            _maneuver.runtime().warp_to_time_target_s = sel->time_s;
+            _maneuver.runtime().warp_to_time_restore_level = 0;
         }
 
         ImGui::SameLine();
         if (ImGui::Button("Execute"))
         {
-            _execute_node_armed = true;
-            _execute_node_id = sel->id;
+            _maneuver.runtime().execute_node_armed = true;
+            _maneuver.runtime().execute_node_id = sel->id;
 
             if (sel->time_s > time_ctx.sim_now_s + 0.01)
             {
-                _warp_to_time_active = true;
-                _warp_to_time_target_s = sel->time_s;
-                _warp_to_time_restore_level = 0;
+                _maneuver.runtime().warp_to_time_active = true;
+                _maneuver.runtime().warp_to_time_target_s = sel->time_s;
+                _maneuver.runtime().warp_to_time_restore_level = 0;
             }
         }
 
@@ -900,7 +900,7 @@ namespace Game
 
         ImGui::Text("DV total: %.2f m/s", safe_length(sel->dv_rtn_mps));
 
-        if (sel->gizmo_valid && _maneuver_gizmo_basis_mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal)
+        if (sel->gizmo_valid && _maneuver.settings().gizmo_basis_mode == ManeuverGizmoBasisMode::ProgradeOutwardNormal)
         {
             const glm::dvec3 dv_display = ManeuverUtil::dv_rtn_to_display_basis(*sel);
             ImGui::Text("Gizmo PON: %.2f / %.2f / %.2f m/s",

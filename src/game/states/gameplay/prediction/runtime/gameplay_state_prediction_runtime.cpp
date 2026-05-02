@@ -205,13 +205,13 @@ namespace Game
 
     void GameplayState::mark_maneuver_plan_dirty()
     {
-        ++_maneuver_plan_revision;
+        const uint64_t revision = _maneuver.increment_revision();
         Logger::debug("Maneuver plan dirty: revision={} selected_node={} node_count={}",
-                      _maneuver_plan_revision,
-                      _maneuver_state.selected_node_id,
-                      _maneuver_state.nodes.size());
+                      revision,
+                      _maneuver.plan().selected_node_id,
+                      _maneuver.plan().nodes.size());
 
-        _prediction_system.invalidate_maneuver_plan_revision(_maneuver_plan_revision);
+        _prediction_system.invalidate_maneuver_plan_revision(revision);
 
         mark_prediction_dirty();
     }
@@ -249,7 +249,7 @@ namespace Game
         const bool preview_active =
                 track.supports_maneuvers &&
                 maneuver_live_preview_active(with_maneuvers);
-        const ManeuverNode *selected = _maneuver_state.find_node(active_maneuver_preview_anchor_node_id());
+        const ManeuverNode *selected = _maneuver.plan().find_node(active_maneuver_preview_anchor_node_id());
 
         if (preview_active && selected && std::isfinite(selected->time_s))
         {
@@ -257,8 +257,8 @@ namespace Game
             const double anchor_offset_s = std::max(0.0, selected->time_s - now_s);
             const double visual_window_s = resolve_live_preview_visual_window_s(request_window_s,
                                                                                 anchor_offset_s,
-                                                                                _maneuver_plan_windows.preview_window_s);
-            const double exact_window_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
+                                                                                _maneuver.settings().plan_windows.preview_window_s);
+            const double exact_window_s = std::max(0.0, _maneuver.settings().plan_windows.solve_margin_s);
 
             track.preview_anchor.valid = true;
             track.preview_anchor.anchor_node_id = selected->id;
@@ -291,9 +291,9 @@ namespace Game
                                                             const double /*now_s*/,
                                                             const bool /*with_maneuvers*/) const
     {
-        const double configured_exact_window_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
+        const double configured_exact_window_s = std::max(0.0, _maneuver.settings().plan_windows.solve_margin_s);
         double preview_exact_cap_s = std::max(OrbitPredictionTuning::kPreviewExactWindowMinS,
-                                              _maneuver_plan_windows.preview_window_s);
+                                              _maneuver.settings().plan_windows.preview_window_s);
         if (track.preview_anchor.valid && track.preview_anchor.visual_window_s > 0.0)
         {
             // Keep drag previews centered on the immediately visible patch instead of solving the
@@ -315,12 +315,69 @@ namespace Game
         return policy.exact_window_s;
     }
 
+    // Request building can observe a shorter time context than the authored maneuver
+    // plan draw path, so recompute the live plan horizon directly from the nodes here.
+    double GameplayState::prediction_authored_plan_request_window_s(const double now_s) const
+    {
+        if (!_maneuver.settings().nodes_enabled ||
+            _maneuver.plan().nodes.empty() ||
+            !std::isfinite(now_s))
+        {
+            return 0.0;
+        }
+
+        double first_future_node_time_s = std::numeric_limits<double>::quiet_NaN();
+        double last_future_node_time_s = std::numeric_limits<double>::quiet_NaN();
+        for (const ManeuverNode &node : _maneuver.plan().nodes)
+        {
+            if (!std::isfinite(node.time_s) ||
+                node.time_s + kPredictionTimeEpsilonS < now_s)
+            {
+                continue;
+            }
+
+            first_future_node_time_s = std::isfinite(first_future_node_time_s)
+                                               ? std::min(first_future_node_time_s, node.time_s)
+                                               : node.time_s;
+            last_future_node_time_s = std::isfinite(last_future_node_time_s)
+                                              ? std::max(last_future_node_time_s, node.time_s)
+                                              : node.time_s;
+        }
+
+        if (!std::isfinite(first_future_node_time_s))
+        {
+            return 0.0;
+        }
+
+        const double request_end_s = resolve_authored_plan_end_s(PredictionTimeContext{.sim_now_s = now_s},
+                                                                 first_future_node_time_s,
+                                                                 std::isfinite(last_future_node_time_s)
+                                                                         ? last_future_node_time_s
+                                                                         : first_future_node_time_s,
+                                                                 maneuver_plan_horizon_s(),
+                                                                 OrbitPredictionTuning::kPostNodeCoverageMinS);
+        if (!std::isfinite(request_end_s) ||
+            request_end_s <= now_s + kPredictionTimeEpsilonS)
+        {
+            return 0.0;
+        }
+
+        return std::max(0.0, request_end_s - now_s);
+    }
+
     double GameplayState::prediction_required_window_s(const PredictionTrackState &track,
                                                        const double now_s,
                                                        const bool with_maneuvers) const
     {
         const PredictionTimeContext time_ctx = build_prediction_time_context(track.key, now_s);
-        const PredictionWindowPolicyResult policy = resolve_prediction_window_policy(&track, time_ctx, with_maneuvers);
+        PredictionWindowPolicyResult policy = resolve_prediction_window_policy(&track, time_ctx, with_maneuvers);
+        if (with_maneuvers && track.supports_maneuvers)
+        {
+            // Keep solver coverage aligned with the authored plan horizon even when the
+            // generic policy path falls back to the subject's base sampling window.
+            policy.request_window_s = std::max(policy.request_window_s,
+                                               prediction_authored_plan_request_window_s(now_s));
+        }
         return policy.request_window_s;
     }
 
@@ -333,7 +390,14 @@ namespace Game
             return prediction_required_window_s(*track, now_s, with_maneuvers);
         }
         const PredictionTimeContext time_ctx = build_prediction_time_context(key, now_s);
-        const PredictionWindowPolicyResult policy = resolve_prediction_window_policy(nullptr, time_ctx, with_maneuvers);
+        PredictionWindowPolicyResult policy = resolve_prediction_window_policy(nullptr, time_ctx, with_maneuvers);
+        if (with_maneuvers)
+        {
+            // Subject-only queries still need the authored plan horizon, not just the
+            // per-subject base window, otherwise near-future nodes collapse to fallback coverage.
+            policy.request_window_s = std::max(policy.request_window_s,
+                                               prediction_authored_plan_request_window_s(now_s));
+        }
         return policy.request_window_s;
     }
 
@@ -349,7 +413,7 @@ namespace Game
         out.trajectory_t0_s = trajectory_t0_s;
         out.trajectory_t1_s = trajectory_t1_s;
 
-        if (const ManeuverNode *selected = _maneuver_state.find_node(_maneuver_state.selected_node_id))
+        if (const ManeuverNode *selected = _maneuver.plan().find_node(_maneuver.plan().selected_node_id))
         {
             if (node_time_in_context_range(out, selected->time_s))
             {
@@ -357,7 +421,7 @@ namespace Game
             }
         }
 
-        for (const ManeuverNode &node : _maneuver_state.nodes)
+        for (const ManeuverNode &node : _maneuver.plan().nodes)
         {
             if (!node_time_in_context_range(out, node.time_s))
             {
@@ -392,7 +456,7 @@ namespace Game
         PredictionWindowPolicyResult out{};
         out.request_window_s =
                 std::max(0.0, _prediction.draw_future_segment ? prediction_future_window_s(key) : 0.0);
-        const double solve_margin_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
+        const double solve_margin_s = std::max(0.0, _maneuver.settings().plan_windows.solve_margin_s);
         const double post_node_coverage_s = OrbitPredictionTuning::kPostNodeCoverageMinS;
         const bool supports_maneuver_windows = with_maneuvers && time_ctx.has_plan;
         const double plan_horizon_s = maneuver_plan_horizon_s();
@@ -444,7 +508,7 @@ namespace Game
             const double preview_exact_window_s =
                     std::min(solve_margin_s,
                              std::max(OrbitPredictionTuning::kPreviewExactWindowMinS,
-                                      std::max(0.0, _maneuver_plan_windows.preview_window_s)));
+                                      std::max(0.0, _maneuver.settings().plan_windows.preview_window_s)));
             if (preview_exact_window_s > 0.0)
             {
                 out.request_window_s = std::max(out.request_window_s,
@@ -452,8 +516,8 @@ namespace Game
             }
             const double anchored_visual_window_s = resolve_live_preview_visual_window_s(out.request_window_s,
                                                                                          anchor_offset_s,
-                                                                                         _maneuver_plan_windows.preview_window_s);
-            const double exact_window_s = std::max(0.0, _maneuver_plan_windows.solve_margin_s);
+                                                                                         _maneuver.settings().plan_windows.preview_window_s);
+            const double exact_window_s = std::max(0.0, _maneuver.settings().plan_windows.solve_margin_s);
 
             out.visual_window_s = anchored_visual_window_s;
             out.pick_window_s = anchored_visual_window_s;

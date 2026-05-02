@@ -172,8 +172,8 @@ namespace Game
         const bool with_maneuver_live_preview =
                 out.active_player_track &&
                 prediction_subject_supports_maneuvers(track.key) &&
-                _maneuver_nodes_enabled &&
-                !_maneuver_state.nodes.empty();
+                _maneuver.settings().nodes_enabled &&
+                !_maneuver.plan().nodes.empty();
         out.active_maneuver_track = with_maneuver_live_preview;
         const bool live_preview_active = maneuver_live_preview_active(with_maneuver_live_preview);
         out.maneuver_drag_active =
@@ -199,17 +199,17 @@ namespace Game
         {
             const auto resolve_stale_prefix_cutoff_s = [&]() {
                 double cutoff_s = std::numeric_limits<double>::quiet_NaN();
-                if (_maneuver_node_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime)
+                if (_maneuver.edit_preview().state == ManeuverNodeEditPreview::State::EditingTime)
                 {
                     if (const ManeuverNode *edit_node =
-                                _maneuver_state.find_node(_maneuver_node_edit_preview.node_id))
+                                _maneuver.plan().find_node(_maneuver.edit_preview().node_id))
                     {
                         cutoff_s = edit_node->time_s;
-                        if (std::isfinite(_maneuver_node_edit_preview.start_time_s))
+                        if (std::isfinite(_maneuver.edit_preview().start_time_s))
                         {
                             cutoff_s = std::isfinite(cutoff_s)
-                                               ? std::min(cutoff_s, _maneuver_node_edit_preview.start_time_s)
-                                               : _maneuver_node_edit_preview.start_time_s;
+                                               ? std::min(cutoff_s, _maneuver.edit_preview().start_time_s)
+                                               : _maneuver.edit_preview().start_time_s;
                         }
                     }
                     return cutoff_s;
@@ -220,7 +220,7 @@ namespace Game
                 if (!std::isfinite(cutoff_s) && out.active_player_track)
                 {
                     if (const ManeuverNode *anchor_node =
-                                _maneuver_state.find_node(active_maneuver_preview_anchor_node_id()))
+                                _maneuver.plan().find_node(active_maneuver_preview_anchor_node_id()))
                     {
                         cutoff_s = anchor_node->time_s;
                     }
@@ -229,7 +229,7 @@ namespace Game
                     (live_preview_active || lifecycle.preview_state != PredictionPreviewRuntimeState::Idle))
                 {
                     if (const ManeuverNode *selected_node =
-                                _maneuver_state.find_node(_maneuver_state.selected_node_id))
+                                _maneuver.plan().find_node(_maneuver.plan().selected_node_id))
                     {
                         cutoff_s = selected_node->time_s;
                     }

@@ -25,8 +25,8 @@ namespace Game
         OrbitPredictionCache &stable_cache = *track_ctx.stable_cache;
         OrbitPredictionCache &planned_cache = *track_ctx.planned_cache;
 
-        const bool allow_base_pick = _maneuver_state.nodes.empty();
-        const bool allow_planned_pick = !_maneuver_state.nodes.empty();
+        const bool allow_base_pick = _maneuver.plan().nodes.empty();
+        const bool allow_planned_pick = !_maneuver.plan().nodes.empty();
         const uint32_t pick_group_base = global_ctx.picking->add_line_pick_group("OrbitPlot/Base");
         const uint32_t pick_group_planned = global_ctx.picking->add_line_pick_group("OrbitPlot/Planned");
 
@@ -36,7 +36,7 @@ namespace Game
         OrbitRenderCurve::PickSettings pick_settings{};
         pick_settings.frustum_margin_ratio = pick_frustum_margin_ratio;
 
-        std::vector<double> pick_anchor_times = Draw::collect_maneuver_node_times(_maneuver_state.nodes);
+        std::vector<double> pick_anchor_times = Draw::collect_maneuver_node_times(_maneuver.plan().nodes);
         pick_anchor_times.insert(pick_anchor_times.begin(), track_ctx.now_s);
         if (track_ctx.planned_pick_window.valid && std::isfinite(track_ctx.planned_pick_window.anchor_time_s))
         {
