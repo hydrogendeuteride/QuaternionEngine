@@ -17,6 +17,8 @@ namespace Game
         struct PredictionTrackDrawContext;
     } // namespace PredictionDrawDetail
 
+    class PredictionSubjectStateProvider;
+
     class GameplayPredictionAdapter
     {
     public:
@@ -211,6 +213,8 @@ namespace Game
         void clear_maneuver_prediction_artifacts();
 
     private:
+        PredictionSubjectStateProvider make_subject_state_provider() const;
+
         double current_sim_time_s() const { return _state.current_sim_time_s(); }
         OrbiterInfo *find_player_orbiter() { return _state._orbit.find_player_orbiter(); }
         const OrbiterInfo *find_player_orbiter() const { return _state._orbit.find_player_orbiter(); }

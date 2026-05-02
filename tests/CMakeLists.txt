@@ -266,6 +266,7 @@ add_executable(gameplay_prediction_maneuver_tests
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/orbital_runtime_system.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/formation_hold_system.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/gameplay_state_prediction.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/prediction_subject_state_provider.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_solver.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.cpp"

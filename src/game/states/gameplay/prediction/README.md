@@ -14,7 +14,8 @@ prediction/
   streamed_chunk_assembly_builder.h / .cpp       # streamed/published chunk assembly entry point
   gameplay_prediction_derived_service.h / .cpp   # background-threaded derived cache builder
   prediction_system.h / .cpp                     # facade over runtime, invalidation, solver, and derived services
-  gameplay_state_prediction.cpp                  # world-state resolution for prediction subjects
+  prediction_subject_state_provider.h / .cpp     # world-state resolution for prediction subjects
+  gameplay_state_prediction.cpp                  # GameplayState adapter glue for prediction host context
   gameplay_state_prediction_frames.cpp           # display-frame selection, frame rebuild, analysis spec
   draw/
     gameplay_state_prediction_draw_internal.h     # shared draw/pick context structs
@@ -64,10 +65,13 @@ prediction/
 - `prediction_system.h`
   `PredictionSystem` -- a thin facade owned by `GameplayState` that keeps prediction runtime orchestration, invalidation, and solver/derived service access behind one boundary while `GameplayPredictionState` remains the compatibility state container.
 
+- `prediction_subject_state_provider.h`
+  `PredictionSubjectStateProvider` -- explicit read-only provider for prediction subjects. Resolves subject lists, player detection, render positions, thrust activity, and live world positions/velocities from `OrbitalRuntimeSystem`, `GameWorld`, physics, and scenario config without going through `GameplayState` private adapter access.
+
 ### Implementation Files
 
 - `gameplay_state_prediction.cpp`
-  World-state resolution: `get_player_world_state`, `get_orbiter_world_state`, `get_prediction_subject_world_state`. Resolves live entity positions/velocities from either the orbit sim (on-rails) or the physics body (off-rails).
+  Gameplay prediction adapter glue: builds `PredictionHostContext`, forwards compatibility world-state helper calls to `PredictionSubjectStateProvider`, and keeps prediction subject synchronization behind `PredictionSystem`.
 
 - `gameplay_state_prediction_frames.cpp`
   Display-frame management: frame-spec selection, display-frame option building, frame rebuild triggers, analysis body resolution, and helper functions like `find_celestial_body_info` and `find_massive_body`. Drives `PredictionFrameCacheBuilder` when the user switches display frames.

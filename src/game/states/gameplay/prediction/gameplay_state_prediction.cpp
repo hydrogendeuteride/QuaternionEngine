@@ -1,88 +1,49 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/maneuver_prediction_bridge.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
+#include "game/states/gameplay/prediction/prediction_subject_state_provider.h"
 
-#include "game/component/ship_controller.h"
 #include "game/orbit/orbit_prediction_tuning.h"
-#include "physics/physics_context.h"
-#include "physics/physics_world.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <utility>
 
 namespace Game
 {
+    PredictionSubjectStateProvider GameplayPredictionAdapter::make_subject_state_provider() const
+    {
+        return PredictionSubjectStateProvider(PredictionSubjectStateProvider::Context{
+                .orbit = _orbit,
+                .world = _world,
+                .physics = _physics.get(),
+                .physics_context = _physics_context.get(),
+                .scenario_config = _scenario_config,
+                .orbital_physics = _orbital_physics,
+                .time_warp = _time_warp,
+        });
+    }
+
     PredictionSubjectKey GameplayPredictionAdapter::player_prediction_subject_key() const
     {
-        const EntityId player_eid = _orbit.player_entity();
-        return player_eid.is_valid()
-                   ? PredictionSubjectKey{PredictionSubjectKind::Orbiter, player_eid.value}
-                   : PredictionSubjectKey{};
+        return make_subject_state_provider().player_subject_key();
     }
 
     std::vector<PredictionSubjectDescriptor> GameplayPredictionAdapter::build_prediction_subject_descriptors() const
     {
-        std::vector<PredictionSubjectDescriptor> subjects;
-        subjects.reserve(_orbit.orbiters().size() + (_orbit.scenario_owner() ? _orbit.scenario_owner()->bodies.size() : 0u));
-
-        for (const OrbiterInfo &orbiter : _orbit.orbiters())
-        {
-            if (!orbiter.entity.is_valid())
-            {
-                continue;
-            }
-
-            PredictionSubjectKey key{};
-            key.kind = PredictionSubjectKind::Orbiter;
-            key.value = orbiter.entity.value;
-
-            subjects.push_back(PredictionSubjectDescriptor{
-                    .key = key,
-                    .label = orbiter.name,
-                    .supports_maneuvers = orbiter.is_player ||
-                                           (orbiter.formation_hold_enabled && !orbiter.formation_leader_name.empty()),
-                    .is_celestial = false,
-                    .orbit_rgb = prediction_subject_orbit_rgb(key),
-            });
-        }
-
-        if (_orbit.scenario_owner())
-        {
-            const CelestialBodyInfo *ref_info = _orbit.scenario_owner()->world_reference_body();
-            for (const CelestialBodyInfo &body : _orbit.scenario_owner()->bodies)
-            {
-                if (ref_info && body.sim_id == ref_info->sim_id)
-                {
-                    continue;
-                }
-
-                PredictionSubjectKey key{};
-                key.kind = PredictionSubjectKind::Celestial;
-                key.value = static_cast<uint32_t>(body.sim_id);
-
-                subjects.push_back(PredictionSubjectDescriptor{
-                        .key = key,
-                        .label = body.name,
-                        .supports_maneuvers = false,
-                        .is_celestial = true,
-                        .orbit_rgb = prediction_subject_orbit_rgb(key),
-                });
-            }
-        }
-
-        return subjects;
+        return make_subject_state_provider().build_subject_descriptors();
     }
 
     PredictionHostContext GameplayPredictionAdapter::build_prediction_host_context(const GameStateContext *ctx) const
     {
+        PredictionSubjectStateProvider subjects = make_subject_state_provider();
+        GameplayPredictionAdapter prediction = *this;
         GameplayState *state = &_state;
 
         PredictionHostContext host{};
         host.orbital_scenario = _orbit.scenario_owner().get();
-        host.subjects = build_prediction_subject_descriptors();
-        host.player_subject = player_prediction_subject_key();
+        host.subjects = subjects.build_subject_descriptors();
+        host.player_subject = subjects.player_subject_key();
         host.current_sim_time_s = current_sim_time_s();
         host.last_sim_step_dt_s = _orbital_physics.last_sim_step_dt_s();
         host.fixed_delta_time_s = ctx ? ctx->fixed_delta_time() : 0.0f;
@@ -104,77 +65,53 @@ namespace Game
         host.maneuver.signature = current_maneuver_plan_signature();
         host.maneuver.active_preview_anchor_node_id = _maneuver.active_preview_anchor_node_id();
 
-        host.reference_body_world = [state]() {
-            return GameplayPredictionAdapter(*state).prediction_world_reference_body_world();
+        host.reference_body_world = [subjects]() {
+            return subjects.reference_body_world();
         };
-        host.get_subject_world_state = [state](const PredictionSubjectKey key,
-                                               WorldVec3 &out_pos_world,
-                                               glm::dvec3 &out_vel_world,
-                                               glm::vec3 &out_vel_local) {
-            return GameplayPredictionAdapter(*state).get_prediction_subject_world_state(
-                    key,
-                    out_pos_world,
-                    out_vel_world,
-                    out_vel_local);
+        host.get_subject_world_state = [subjects](const PredictionSubjectKey key,
+                                                  WorldVec3 &out_pos_world,
+                                                  glm::dvec3 &out_vel_world,
+                                                  glm::vec3 &out_vel_local) {
+            return subjects.get_subject_world_state(key, out_pos_world, out_vel_world, out_vel_local);
         };
-        host.render_subject_position_world = [state](const PredictionSubjectKey key, const float alpha_f) {
-            if (key.kind == PredictionSubjectKind::Orbiter)
-            {
-                if (const Entity *entity = state->_world.entities().find(EntityId{key.value}))
-                {
-                    return entity->get_render_physics_center_of_mass_world(alpha_f);
-                }
-            }
-
-            WorldVec3 pos_world{0.0, 0.0, 0.0};
-            glm::dvec3 vel_world{0.0};
-            glm::vec3 vel_local{0.0f};
-            (void) GameplayPredictionAdapter(*state).get_prediction_subject_world_state(
-                    key,
-                    pos_world,
-                    vel_world,
-                    vel_local);
-            return pos_world;
+        host.render_subject_position_world = [subjects](const PredictionSubjectKey key, const float alpha_f) {
+            return subjects.render_subject_position_world(key, alpha_f);
         };
-        host.future_window_s = [state](const PredictionSubjectKey key) {
-            return GameplayPredictionAdapter(*state).prediction_future_window_s(key);
+        host.future_window_s = [prediction](const PredictionSubjectKey key) {
+            return prediction.prediction_future_window_s(key);
         };
-        host.required_window_s = [state](const PredictionTrackState &track,
-                                         const double now_s,
-                                         const bool with_maneuvers) {
-            return GameplayPredictionAdapter(*state).prediction_required_window_s(track, now_s, with_maneuvers);
-        };
-        host.preview_exact_window_s = [state](const PredictionTrackState &track,
+        host.required_window_s = [prediction](const PredictionTrackState &track,
                                               const double now_s,
                                               const bool with_maneuvers) {
-            return GameplayPredictionAdapter(*state).prediction_preview_exact_window_s(track, now_s, with_maneuvers);
+            return prediction.prediction_required_window_s(track, now_s, with_maneuvers);
         };
-        host.refresh_preview_anchor = [state](PredictionTrackState &track,
-                                              const double now_s,
-                                              const bool with_maneuvers) {
-            GameplayPredictionAdapter(*state).refresh_prediction_preview_anchor(track, now_s, with_maneuvers);
+        host.preview_exact_window_s = [prediction](const PredictionTrackState &track,
+                                                   const double now_s,
+                                                   const bool with_maneuvers) {
+            return prediction.prediction_preview_exact_window_s(track, now_s, with_maneuvers);
         };
-        host.subject_is_player = [state](const PredictionSubjectKey key) {
-            return GameplayPredictionAdapter(*state).prediction_subject_is_player(key);
+        host.refresh_preview_anchor = [prediction](PredictionTrackState &track,
+                                                   const double now_s,
+                                                   const bool with_maneuvers) {
+            prediction.refresh_prediction_preview_anchor(track, now_s, with_maneuvers);
         };
-        host.subject_thrust_applied_this_tick = [state](const PredictionSubjectKey key) {
-            return GameplayPredictionAdapter(*state).prediction_subject_thrust_applied_this_tick(key);
+        host.subject_is_player = [subjects](const PredictionSubjectKey key) {
+            return subjects.subject_is_player(key);
+        };
+        host.subject_thrust_applied_this_tick = [subjects](const PredictionSubjectKey key) {
+            return subjects.subject_thrust_applied_this_tick(key);
         };
         host.resolve_maneuver_node_primary_body_id = [state](const ManeuverNode &node, const double query_time_s) {
             return ManeuverPredictionBridge::resolve_node_primary_body_id(*state, node, query_time_s);
         };
-        host.resolve_display_frame_spec = [state](const OrbitPredictionCache &cache, const double display_time_s) {
-            return GameplayPredictionAdapter(*state).resolve_prediction_display_frame_spec(cache, display_time_s);
+        host.resolve_display_frame_spec = [prediction](const OrbitPredictionCache &cache, const double display_time_s) {
+            return prediction.resolve_prediction_display_frame_spec(cache, display_time_s);
         };
-        host.resolve_analysis_body_id = [state](const OrbitPredictionCache &cache,
-                                                const PredictionSubjectKey key,
-                                                const double query_time_s,
-                                                const orbitsim::BodyId preferred_body_id) {
-            return GameplayPredictionAdapter(*state).resolve_prediction_analysis_body_id(
-                    cache,
-                    key,
-                    query_time_s,
-                    preferred_body_id);
+        host.resolve_analysis_body_id = [prediction](const OrbitPredictionCache &cache,
+                                                     const PredictionSubjectKey key,
+                                                     const double query_time_s,
+                                                     const orbitsim::BodyId preferred_body_id) {
+            return prediction.resolve_prediction_analysis_body_id(cache, key, query_time_s, preferred_body_id);
         };
         return host;
     }
@@ -183,9 +120,7 @@ namespace Game
                                                            glm::dvec3 &out_vel_world,
                                                            glm::vec3 &out_vel_local) const
     {
-        // Resolve the player orbiter into the common world-state format.
-        const OrbiterInfo *player = _orbit.find_player_orbiter();
-        return player && get_orbiter_world_state(*player, out_pos_world, out_vel_world, out_vel_local);
+        return make_subject_state_provider().get_player_world_state(out_pos_world, out_vel_world, out_vel_local);
     }
 
     bool GameplayPredictionAdapter::get_orbiter_world_state(const OrbiterInfo &orbiter,
@@ -193,57 +128,11 @@ namespace Game
                                                             glm::dvec3 &out_vel_world,
                                                             glm::vec3 &out_vel_local) const
     {
-        // Look up the live entity that currently represents this orbiter.
-        if (!orbiter.entity.is_valid())
-        {
-            return false;
-        }
-
-        const Entity *entity = _world.entities().find(orbiter.entity);
-        if (!entity)
-        {
-            return false;
-        }
-
-        out_pos_world = entity->physics_center_of_mass_world();
-        out_vel_world = glm::dvec3(0.0);
-        out_vel_local = glm::vec3(0.0f);
-
-        // Prefer the authoritative orbit-sim spacecraft state whenever this orbiter is currently on rails.
-        if (_orbit.scenario_owner())
-        {
-            const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
-            if (orbiter.rails.active() && ref_sim)
-            {
-                if (const orbitsim::Spacecraft *sc = _orbit.scenario_owner()->sim.spacecraft_by_id(orbiter.rails.sc_id))
-                {
-                    out_pos_world = _scenario_config.system_center +
-                            WorldVec3(sc->state.position_m - ref_sim->state.position_m);
-                    out_vel_world = sc->state.velocity_mps - ref_sim->state.velocity_mps;
-                    out_vel_local = glm::vec3(0.0f);
-                    return true;
-                }
-            }
-        }
-
-#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-        // Outside rails warp, derive current velocity from the physics body when available.
-        if (_physics && _physics_context && entity->has_physics())
-        {
-            const Physics::BodyId body_id{entity->physics_body_value()};
-            if (_physics->is_body_valid(body_id))
-            {
-                const glm::quat rotation = _physics->get_rotation(body_id);
-                const WorldVec3 body_origin_world =
-                        local_to_world_d(_physics->get_position(body_id), _physics_context->origin_world());
-                out_pos_world = entity->physics_center_of_mass_world(body_origin_world, rotation);
-                out_vel_local = _physics->get_linear_velocity(body_id);
-                out_vel_world = _physics_context->velocity_origin_world() + glm::dvec3(out_vel_local);
-            }
-        }
-#endif
-
-        return true;
+        return make_subject_state_provider().get_orbiter_world_state(
+                orbiter,
+                out_pos_world,
+                out_vel_world,
+                out_vel_local);
     }
 
     bool GameplayPredictionAdapter::get_prediction_subject_world_state(PredictionSubjectKey key,
@@ -251,57 +140,11 @@ namespace Game
                                                                        glm::dvec3 &out_vel_world,
                                                                        glm::vec3 &out_vel_local) const
     {
-        // Normalize any prediction subject into a shared world-space state snapshot.
-        out_pos_world = WorldVec3(0.0);
-        out_vel_world = glm::dvec3(0.0);
-        out_vel_local = glm::vec3(0.0f);
-
-        if (!key.valid())
-        {
-            return false;
-        }
-
-        if (key.kind == PredictionSubjectKind::Orbiter)
-        {
-            // Orbiters resolve through the gameplay entity/runtime state.
-            const OrbiterInfo *orbiter = _orbit.find_orbiter(EntityId{key.value});
-            return orbiter && get_orbiter_world_state(*orbiter, out_pos_world, out_vel_world, out_vel_local);
-        }
-
-        if (!_orbit.scenario_owner())
-        {
-            return false;
-        }
-
-        const CelestialBodyInfo *body_info = nullptr;
-        for (const CelestialBodyInfo &candidate : _orbit.scenario_owner()->bodies)
-        {
-            if (static_cast<uint32_t>(candidate.sim_id) == key.value)
-            {
-                body_info = &candidate;
-                break;
-            }
-        }
-
-        const orbitsim::MassiveBody *body = body_info ? _orbit.scenario_owner()->sim.body_by_id(body_info->sim_id) : nullptr;
-        const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
-        if (!body || !ref_sim)
-        {
-            return false;
-        }
-
-        // Celestials are expressed relative to the active reference body frame.
-        out_pos_world = _scenario_config.system_center + WorldVec3(body->state.position_m - ref_sim->state.position_m);
-        out_vel_world = body->state.velocity_mps - ref_sim->state.velocity_mps;
-        if (body_info && body_info->render_entity.is_valid())
-        {
-            if (const Entity *render_entity = _world.entities().find(body_info->render_entity))
-            {
-                out_pos_world = render_entity->position_world();
-            }
-        }
-
-        return true;
+        return make_subject_state_provider().get_subject_world_state(
+                key,
+                out_pos_world,
+                out_vel_world,
+                out_vel_local);
     }
 
     void GameplayPredictionAdapter::rebuild_prediction_subjects()
@@ -389,26 +232,12 @@ namespace Game
 
     bool GameplayPredictionAdapter::prediction_subject_is_player(PredictionSubjectKey key) const
     {
-        // Only the player ship is treated as the maneuver-authoring subject.
-        return key.kind == PredictionSubjectKind::Orbiter && key.value == _orbit.player_entity().value;
+        return make_subject_state_provider().subject_is_player(key);
     }
 
     bool GameplayPredictionAdapter::prediction_subject_supports_maneuvers(PredictionSubjectKey key) const
     {
-        // Maneuver planning applies to the player and formation followers that mirror the leader's plan.
-        if (prediction_subject_is_player(key))
-        {
-            return true;
-        }
-        if (key.kind == PredictionSubjectKind::Orbiter)
-        {
-            const OrbiterInfo *orbiter = _orbit.find_orbiter(EntityId(key.value));
-            if (orbiter && orbiter->formation_hold_enabled && !orbiter->formation_leader_name.empty())
-            {
-                return true;
-            }
-        }
-        return false;
+        return make_subject_state_provider().subject_supports_maneuvers(key);
     }
 
     std::string GameplayPredictionAdapter::prediction_subject_label(PredictionSubjectKey key) const
@@ -433,104 +262,12 @@ namespace Game
 
     glm::vec3 GameplayPredictionAdapter::prediction_subject_orbit_rgb(const PredictionSubjectKey key) const
     {
-        static constexpr std::array<glm::vec3, 4> kOrbiterPalette{{
-                {1.00f, 0.25f, 0.25f},
-                {0.25f, 0.52f, 1.00f},
-                {0.62f, 0.65f, 0.70f},
-                {0.28f, 0.88f, 0.38f},
-        }};
-        static constexpr glm::vec3 kAnchorOrbiterColor{0.70f, 0.35f, 1.00f};
-        static constexpr glm::vec3 kDefaultCelestialColor{0.80f, 0.82f, 0.86f};
-
-        if (!key.valid())
-        {
-            return kDefaultCelestialColor;
-        }
-
-        if (key.kind == PredictionSubjectKind::Celestial)
-        {
-            const CelestialBodyInfo *body_info = find_celestial_body_info(static_cast<orbitsim::BodyId>(key.value));
-            if (!body_info)
-            {
-                return kDefaultCelestialColor;
-            }
-
-            for (const ScenarioConfig::CelestialDef &body_def : _scenario_config.celestials)
-            {
-                if (body_def.name == body_info->name)
-                {
-                    return body_def.has_prediction_orbit_color
-                               ? body_def.prediction_orbit_color
-                               : kDefaultCelestialColor;
-                }
-            }
-
-            return kDefaultCelestialColor;
-        }
-
-        if (prediction_subject_is_player(key))
-        {
-            return kAnchorOrbiterColor;
-        }
-
-        const OrbiterInfo *orbiter = _orbit.find_orbiter(EntityId{key.value});
-        if (orbiter)
-        {
-            for (const ScenarioConfig::OrbiterDef &orbiter_def : _scenario_config.orbiters)
-            {
-                if (orbiter_def.name == orbiter->name && orbiter_def.has_prediction_orbit_color)
-                {
-                    return orbiter_def.prediction_orbit_color;
-                }
-            }
-        }
-
-        std::size_t orbiter_palette_index = 0;
-        for (const OrbiterInfo &orbiter : _orbit.orbiters())
-        {
-            if (!orbiter.entity.is_valid() || orbiter.is_player)
-            {
-                continue;
-            }
-
-            if (orbiter.entity.value == key.value)
-            {
-                return kOrbiterPalette[orbiter_palette_index % kOrbiterPalette.size()];
-            }
-            ++orbiter_palette_index;
-        }
-
-        return kOrbiterPalette[0];
+        return make_subject_state_provider().subject_orbit_rgb(key);
     }
 
     bool GameplayPredictionAdapter::prediction_subject_thrust_applied_this_tick(PredictionSubjectKey key) const
     {
-        // Thrust-triggered refresh only matters for the actively piloted subject.
-        if (!prediction_subject_is_player(key))
-        {
-            return false;
-        }
-
-        // Rails warp uses a separate thrust path from the physics-driven ship controller.
-        if (_orbital_physics.rails_warp_active() && _time_warp.mode == TimeWarpState::Mode::RailsWarp)
-        {
-            return _orbital_physics.rails_thrust_applied_this_tick();
-        }
-
-        const EntityId player_eid = _orbit.player_entity();
-        if (!player_eid.is_valid())
-        {
-            return false;
-        }
-
-        const Entity *player = _world.entities().find(player_eid);
-        if (!player)
-        {
-            return false;
-        }
-
-        const ShipController *sc = player->get_component<ShipController>();
-        return sc && sc->thrust_applied_this_tick();
+        return make_subject_state_provider().subject_thrust_applied_this_tick(key);
     }
 
 } // namespace Game
