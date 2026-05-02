@@ -25,12 +25,12 @@ namespace Game
 
     const CelestialBodyInfo *GameplayPredictionAdapter::find_celestial_body_info(const orbitsim::BodyId body_id) const
     {
-        if (!_orbitsim || body_id == orbitsim::kInvalidBodyId)
+        if (!_orbit.scenario_owner() || body_id == orbitsim::kInvalidBodyId)
         {
             return nullptr;
         }
 
-        for (const CelestialBodyInfo &body : _orbitsim->bodies)
+        for (const CelestialBodyInfo &body : _orbit.scenario_owner()->bodies)
         {
             if (body.sim_id == body_id)
             {
@@ -97,7 +97,7 @@ namespace Game
         }
 
         const double sample_time_s =
-                std::isfinite(query_time_s) ? query_time_s : (_orbitsim ? _orbitsim->sim.time_s() : 0.0);
+                std::isfinite(query_time_s) ? query_time_s : (_orbit.scenario_owner() ? _orbit.scenario_owner()->sim.time_s() : 0.0);
         const OrbitPredictionCache *position_cache = cache;
         if (!position_cache)
         {
@@ -109,9 +109,9 @@ namespace Game
         {
             body = find_massive_body(position_cache->resolved_massive_bodies(), body_id);
         }
-        if (!body && _orbitsim)
+        if (!body && _orbit.scenario_owner())
         {
-            body = _orbitsim->sim.body_by_id(body_id);
+            body = _orbit.scenario_owner()->sim.body_by_id(body_id);
         }
         if (!body)
         {
@@ -131,9 +131,9 @@ namespace Game
         const WorldVec3 world_ref_world = prediction_world_reference_body_world();
         orbitsim::State world_ref_state{};
         bool have_world_ref_state = false;
-        if (_orbitsim)
+        if (_orbit.scenario_owner())
         {
-            if (const CelestialBodyInfo *world_ref_info = _orbitsim->world_reference_body())
+            if (const CelestialBodyInfo *world_ref_info = _orbit.scenario_owner()->world_reference_body())
             {
                 if (position_cache)
                 {
@@ -146,7 +146,7 @@ namespace Game
                 }
                 if (!have_world_ref_state)
                 {
-                    if (const orbitsim::MassiveBody *world_ref_sim = _orbitsim->world_reference_sim_body())
+                    if (const orbitsim::MassiveBody *world_ref_sim = _orbit.scenario_owner()->world_reference_sim_body())
                     {
                         world_ref_state = world_ref_sim->state;
                         have_world_ref_state = true;
@@ -199,21 +199,21 @@ namespace Game
         context.frame_selection = _prediction->state().frame_selection;
         context.system_center = _scenario_config.system_center;
         context.world_reference_body_world = prediction_world_reference_body_world();
-        context.current_sim_time_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
-        context.softening_length_m = _orbitsim ? _orbitsim->sim.config().softening_length_m : 0.0;
+        context.current_sim_time_s = _orbit.scenario_owner() ? _orbit.scenario_owner()->sim.time_s() : _fixed_time_s;
+        context.softening_length_m = _orbit.scenario_owner() ? _orbit.scenario_owner()->sim.config().softening_length_m : 0.0;
         context.maneuver_nodes_enabled = _maneuver.settings().nodes_enabled;
         context.maneuver_plan_has_nodes = !_maneuver.plan().nodes.empty();
         context.maneuver_axis_drag_active =
                 _maneuver.gizmo_interaction().state == ManeuverGizmoInteraction::State::DragAxis;
         context.maneuver_drag_display_reference_time_s =
                 _maneuver.gizmo_interaction().drag_display_reference_time_s;
-        if (_orbitsim)
+        if (_orbit.scenario_owner())
         {
-            if (const CelestialBodyInfo *world_ref = _orbitsim->world_reference_body())
+            if (const CelestialBodyInfo *world_ref = _orbit.scenario_owner()->world_reference_body())
             {
                 context.world_reference_body_id = world_ref->sim_id;
             }
-            context.world_reference_sim_body = _orbitsim->world_reference_sim_body();
+            context.world_reference_sim_body = _orbit.scenario_owner()->world_reference_sim_body();
         }
         context.player_lookup = build_prediction_player_lookup();
         return context;
@@ -225,7 +225,7 @@ namespace Game
         context.derived_service = const_cast<OrbitPredictionDerivedService *>(&_prediction->derived_service());
         context.selection = _prediction->state().selection;
         context.display_frame_revision = _prediction->state().display_frame_revision;
-        context.sim_config = _orbitsim ? _orbitsim->sim.config() : orbitsim::GameSimulation::Config{};
+        context.sim_config = _orbit.scenario_owner() ? _orbit.scenario_owner()->sim.config() : orbitsim::GameSimulation::Config{};
         context.resolve_display_frame_spec = [this](const OrbitPredictionCache &cache, const double display_time_s) {
             return resolve_prediction_display_frame_spec(cache, display_time_s);
         };
@@ -267,9 +267,9 @@ namespace Game
 
     orbitsim::TrajectoryFrameSpec GameplayPredictionAdapter::default_prediction_frame_spec() const
     {
-        if (_orbitsim)
+        if (_orbit.scenario_owner())
         {
-            if (const CelestialBodyInfo *world_ref = _orbitsim->world_reference_body())
+            if (const CelestialBodyInfo *world_ref = _orbit.scenario_owner()->world_reference_body())
             {
                 return orbitsim::TrajectoryFrameSpec::body_centered_inertial(world_ref->sim_id);
             }
@@ -286,9 +286,9 @@ namespace Game
                 .label = "Auto Primary (BCI)",
         });
 
-        if (_orbitsim)
+        if (_orbit.scenario_owner())
         {
-            for (const CelestialBodyInfo &body : _orbitsim->bodies)
+            for (const CelestialBodyInfo &body : _orbit.scenario_owner()->bodies)
             {
                 options.push_back(PredictionAnalysisOption{
                         .spec = PredictionAnalysisSpec{
@@ -360,20 +360,20 @@ namespace Game
                 .label = "Inertial (Barycentric)",
         });
 
-        if (_orbitsim)
+        if (_orbit.scenario_owner())
         {
-            const double display_time_s = _orbitsim->sim.time_s();
+            const double display_time_s = _orbit.scenario_owner()->sim.time_s();
             const auto player_lookup = build_prediction_player_lookup();
-            const CelestialBodyInfo *world_ref = _orbitsim->world_reference_body();
+            const CelestialBodyInfo *world_ref = _orbit.scenario_owner()->world_reference_body();
 
-            for (const CelestialBodyInfo &body : _orbitsim->bodies)
+            for (const CelestialBodyInfo &body : _orbit.scenario_owner()->bodies)
             {
                 options.push_back(PredictionFrameOption{
                         .spec = orbitsim::TrajectoryFrameSpec::body_centered_inertial(body.sim_id),
                         .label = body.name + " BCI",
                 });
 
-                if (const orbitsim::MassiveBody *sim_body = _orbitsim->sim.body_by_id(body.sim_id))
+                if (const orbitsim::MassiveBody *sim_body = _orbit.scenario_owner()->sim.body_by_id(body.sim_id))
                 {
                     const std::optional<orbitsim::RotatingFrame> body_fixed =
                             orbitsim::make_body_fixed_frame_at(orbitsim::CelestialEphemeris{}, *sim_body, display_time_s);
@@ -389,7 +389,7 @@ namespace Game
 
             if (world_ref)
             {
-                for (const CelestialBodyInfo &body : _orbitsim->bodies)
+                for (const CelestialBodyInfo &body : _orbit.scenario_owner()->bodies)
                 {
                     if (body.sim_id == world_ref->sim_id)
                     {
@@ -547,12 +547,12 @@ namespace Game
 
     WorldVec3 GameplayPredictionAdapter::prediction_world_reference_body_world() const
     {
-        if (!_orbitsim)
+        if (!_orbit.scenario_owner())
         {
             return _scenario_config.system_center;
         }
 
-        const CelestialBodyInfo *ref_info = _orbitsim->world_reference_body();
+        const CelestialBodyInfo *ref_info = _orbit.scenario_owner()->world_reference_body();
         if (ref_info && ref_info->render_entity.is_valid())
         {
             if (const Entity *ref_entity = _world.entities().find(ref_info->render_entity))

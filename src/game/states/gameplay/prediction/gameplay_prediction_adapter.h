@@ -21,12 +21,13 @@ namespace Game
     public:
         explicit GameplayPredictionAdapter(GameplayState &state)
             : _state(state)
+            , _orbit(state._orbit)
             , _world(state._world)
             , _physics(state._physics)
             , _physics_context(state._physics_context)
             , _scenario_config(state._scenario_config)
-            , _orbiters(state._orbiters)
-            , _orbitsim(state._orbitsim)
+            , _orbiters(state._orbit.orbiters())
+            , _orbitsim(state._orbit.scenario_owner())
             , _debug_draw_enabled(state._debug_draw_enabled)
             , _prediction(state._prediction)
             , _maneuver(state._maneuver)
@@ -211,11 +212,11 @@ namespace Game
 
     private:
         double current_sim_time_s() const { return _state.current_sim_time_s(); }
-        OrbiterInfo *find_player_orbiter() { return _state.find_player_orbiter(); }
-        const OrbiterInfo *find_player_orbiter() const { return _state.find_player_orbiter(); }
-        OrbiterInfo *find_orbiter(EntityId entity) { return _state.find_orbiter(entity); }
-        const OrbiterInfo *find_orbiter(EntityId entity) const { return _state.find_orbiter(entity); }
-        EntityId player_entity() const { return _state.player_entity(); }
+        OrbiterInfo *find_player_orbiter() { return _state._orbit.find_player_orbiter(); }
+        const OrbiterInfo *find_player_orbiter() const { return _state._orbit.find_player_orbiter(); }
+        OrbiterInfo *find_orbiter(EntityId entity) { return _state._orbit.find_orbiter(entity); }
+        const OrbiterInfo *find_orbiter(EntityId entity) const { return _state._orbit.find_orbiter(entity); }
+        EntityId player_entity() const { return _state._orbit.player_entity(); }
         bool maneuver_live_preview_active(bool with_maneuvers) const
         {
             return _state.maneuver_live_preview_active(with_maneuvers);
@@ -236,6 +237,7 @@ namespace Game
         }
 
         GameplayState &_state;
+        OrbitalRuntimeSystem &_orbit;
         GameWorld &_world;
         std::unique_ptr<Physics::PhysicsWorld> &_physics;
         std::unique_ptr<Physics::PhysicsContext> &_physics_context;

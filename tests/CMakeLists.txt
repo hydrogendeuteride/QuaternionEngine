@@ -186,6 +186,8 @@ add_test(NAME time_warp_state_tests COMMAND time_warp_state_tests)
 add_executable(gameplay_time_warp_transition_tests
   gameplay_time_warp_transition_tests.cpp
   gameplay_state_test_stubs.cpp
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/orbital_runtime_system.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/formation_hold_system.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_sim.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_math.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve.cpp"
@@ -257,6 +259,8 @@ add_executable(gameplay_prediction_maneuver_tests
   "${PROJECT_SOURCE_DIR}/src/core/orbit_plot/orbit_plot.cpp"
   ${ORBIT_PREDICTION_SERVICE_SOURCES}
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_sim.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/orbital_runtime_system.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/formation_hold_system.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/gameplay_state_prediction.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_solver.cpp"

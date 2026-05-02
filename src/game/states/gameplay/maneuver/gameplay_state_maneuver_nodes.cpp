@@ -15,7 +15,7 @@ namespace Game
 
     double GameplayState::current_sim_time_s() const
     {
-        return _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+        return _orbit.scenario_owner() ? _orbit.scenario_owner()->sim.time_s() : _fixed_time_s;
     }
 
     bool GameplayState::maneuver_live_preview_active(const bool with_maneuvers) const
@@ -186,9 +186,9 @@ namespace Game
             return node.primary_body_id;
         }
 
-        if (_orbitsim && _orbitsim->world_reference_body())
+        if (_orbit.scenario_owner() && _orbit.scenario_owner()->world_reference_body())
         {
-            return _orbitsim->world_reference_body()->sim_id;
+            return _orbit.scenario_owner()->world_reference_body()->sim_id;
         }
 
         return orbitsim::kInvalidBodyId;
@@ -265,7 +265,7 @@ namespace Game
             return WorldVec3(0.0, 0.0, 0.0);
         }
 
-        const EntityId player_eid = player_entity();
+        const EntityId player_eid = _orbit.player_entity();
         if (const Entity *player = _world.entities().find(player_eid))
         {
             ship_pos_world = player->get_render_physics_center_of_mass_world(alpha_f);

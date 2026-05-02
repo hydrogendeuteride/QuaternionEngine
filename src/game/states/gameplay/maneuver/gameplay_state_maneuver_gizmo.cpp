@@ -348,7 +348,7 @@ namespace Game
         const float alpha_f = std::clamp(ctx.interpolation_alpha(), 0.0f, 1.0f);
         const double interp_dt_s =
                 (_last_sim_step_dt_s > 0.0) ? _last_sim_step_dt_s : static_cast<double>(ctx.fixed_delta_time());
-        double drag_display_reference_time_s = _orbitsim ? _orbitsim->sim.time_s() : 0.0;
+        double drag_display_reference_time_s = _orbit.scenario_owner() ? _orbit.scenario_owner()->sim.time_s() : 0.0;
         if (std::isfinite(interp_dt_s) && interp_dt_s > 0.0)
         {
             drag_display_reference_time_s -= (1.0 - static_cast<double>(alpha_f)) * interp_dt_s;

@@ -124,8 +124,7 @@ namespace Game
         _world.set_physics(nullptr);
         _world.set_physics_context(nullptr);
         _world.set_api(nullptr);
-        _orbitsim.reset();
-        _orbiters.clear();
+        _orbit.reset();
         _contact_log.clear();
         _prediction->reset_session_state();
         _renderer = nullptr;
@@ -208,7 +207,7 @@ namespace Game
                 double dt_s = static_cast<double>(fixed_dt) * warp_factor;
                 if (_maneuver.runtime().warp_to_time_active)
                 {
-                    const double now_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+                    const double now_s = _orbit.scenario_owner() ? _orbit.scenario_owner()->sim.time_s() : _fixed_time_s;
                     const double remaining_s = _maneuver.runtime().warp_to_time_target_s - now_s;
                     if (std::isfinite(remaining_s) && remaining_s > 0.0)
                     {

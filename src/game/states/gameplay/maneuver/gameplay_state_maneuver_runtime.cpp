@@ -21,14 +21,14 @@ namespace Game
             return;
         }
 
-        if (!_orbitsim)
+        if (!_orbit.scenario_owner())
         {
             _maneuver.runtime().warp_to_time_active = false;
             set_time_warp_level(ctx, _maneuver.runtime().warp_to_time_restore_level);
             return;
         }
 
-        const double now_s = _orbitsim->sim.time_s();
+        const double now_s = _orbit.scenario_owner()->sim.time_s();
         const double remaining_s = _maneuver.runtime().warp_to_time_target_s - now_s;
         if (!std::isfinite(remaining_s) || remaining_s <= 0.0)
         {
@@ -98,10 +98,10 @@ namespace Game
         glm::dvec3 r_rel_m(0.0);
         glm::dvec3 v_rel_mps = ship_vel_world;
         const orbitsim::BodyId primary_body_id = resolve_maneuver_node_primary_body_id(*node, now_s);
-        if (_orbitsim && primary_body_id != orbitsim::kInvalidBodyId)
+        if (_orbit.scenario_owner() && primary_body_id != orbitsim::kInvalidBodyId)
         {
-            const orbitsim::MassiveBody *world_ref_sim = _orbitsim->world_reference_sim_body();
-            const orbitsim::MassiveBody *primary_body = _orbitsim->sim.body_by_id(primary_body_id);
+            const orbitsim::MassiveBody *world_ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
+            const orbitsim::MassiveBody *primary_body = _orbit.scenario_owner()->sim.body_by_id(primary_body_id);
             if (world_ref_sim && primary_body)
             {
                 const WorldVec3 primary_world =
@@ -137,13 +137,13 @@ namespace Game
         const bool rails = _rails_warp_active && _time_warp.mode == TimeWarpState::Mode::RailsWarp;
         bool applied = false;
 
-        if (rails && _orbitsim)
+        if (rails && _orbit.scenario_owner())
         {
             // In rails mode the authoritative velocity lives in orbitsim, so patch the sim state directly.
-            const OrbiterInfo *p = find_player_orbiter();
+            const OrbiterInfo *p = _orbit.find_player_orbiter();
             if (p && p->rails.active())
             {
-                if (orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(p->rails.sc_id))
+                if (orbitsim::Spacecraft *sc = _orbit.scenario_owner()->sim.spacecraft_by_id(p->rails.sc_id))
                 {
                     sc->state.velocity_mps += orbitsim::Vec3{dv_world.x, dv_world.y, dv_world.z};
                     applied = true;
@@ -155,7 +155,7 @@ namespace Game
         if (!applied)
         {
             // Otherwise push the same world-space DV into the active physics body.
-            const EntityId player_eid = player_entity();
+            const EntityId player_eid = _orbit.player_entity();
             if (_physics && _physics_context && player_eid.is_valid())
             {
                 const Entity *player = _world.entities().find(player_eid);
@@ -186,10 +186,10 @@ namespace Game
 
         // Propagate the same delta-v to formation followers referencing the burned orbiter as leader.
         {
-            const OrbiterInfo *player_orbiter = find_player_orbiter();
+            const OrbiterInfo *player_orbiter = _orbit.find_player_orbiter();
             if (player_orbiter)
             {
-                for (auto &follower : _orbiters)
+                for (auto &follower : _orbit.orbiters())
                 {
                     if (!follower.formation_hold_enabled || &follower == player_orbiter)
                     {
@@ -200,9 +200,9 @@ namespace Game
                         continue;
                     }
 
-                    if (rails && _orbitsim && follower.rails.active())
+                    if (rails && _orbit.scenario_owner() && follower.rails.active())
                     {
-                        if (orbitsim::Spacecraft *fsc = _orbitsim->sim.spacecraft_by_id(follower.rails.sc_id))
+                        if (orbitsim::Spacecraft *fsc = _orbit.scenario_owner()->sim.spacecraft_by_id(follower.rails.sc_id))
                         {
                             fsc->state.velocity_mps += orbitsim::Vec3{dv_world.x, dv_world.y, dv_world.z};
                         }

@@ -11,7 +11,7 @@ namespace
         Game::OrbiterInfo player{};
         player.entity = entity.id();
         player.is_player = true;
-        state._orbiters.push_back(player);
+        state._orbit.orbiters().push_back(player);
         state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, entity.id().value};
     }
 
@@ -165,8 +165,8 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowDoesNotAddLargeSol
 TEST(GameplayPredictionManeuverTests, FullRequestAnchorsPlanHorizonAfterNearbyNode)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
     state.prediction_for_test().draw_future_segment = true;
     state.prediction_for_test().sampling_policy.orbiter_min_window_s = 120.0;
@@ -203,8 +203,8 @@ TEST(GameplayPredictionManeuverTests, FullRequestAnchorsPlanHorizonAfterNearbyNo
 TEST(GameplayPredictionManeuverTests, FullRequestKeepsFarFutureNodeWhenPlanHorizonIsShorterThanNodeTime)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
     state.prediction_for_test().draw_future_segment = true;
     state.prediction_for_test().sampling_policy.orbiter_min_window_s = 120.0;
@@ -241,8 +241,8 @@ TEST(GameplayPredictionManeuverTests, FullRequestKeepsFarFutureNodeWhenPlanHoriz
 TEST(GameplayPredictionManeuverTests, FullRequestUsesConfiguredPlanHorizonForNearFutureNode)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(23.8);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(23.8);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
     state.prediction_for_test().draw_future_segment = true;
     state.prediction_for_test().sampling_policy.orbiter_min_window_s = 600.0;
@@ -505,8 +505,8 @@ TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheTransitionsToAwaitFullRe
 TEST(GameplayPredictionManeuverTests, RequestOrbiterPredictionTracksPreviewRequestTimestamp)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
     state._maneuver.settings().plan_windows.preview_window_s = 180.0;
     state._maneuver.settings().plan_windows.solve_margin_s = 300.0;
@@ -542,8 +542,8 @@ TEST(GameplayPredictionManeuverTests, RequestOrbiterPredictionTracksPreviewReque
 TEST(GameplayPredictionManeuverTests, FastPreviewRequestKeepsUpstreamManeuversBeforeAnchor)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
     state._maneuver.settings().plan_windows.preview_window_s = 180.0;
     state._maneuver.settings().plan_windows.solve_margin_s = 300.0;
@@ -584,8 +584,8 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestKeepsUpstreamManeuversBe
 TEST(GameplayPredictionManeuverTests, FastPreviewRequestKeepsDownstreamManeuversBeyondPreviewDisplayWindow)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
     state.prediction_for_test().draw_future_segment = true;
     state.prediction_for_test().sampling_policy.orbiter_min_window_s = 120.0;
@@ -628,8 +628,8 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestKeepsDownstreamManeuvers
 TEST(GameplayPredictionManeuverTests, FastPreviewRequestCapsHorizonToExactPatchWindow)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
     state.prediction_for_test().draw_future_segment = true;
     state.prediction_for_test().sampling_policy.orbiter_min_window_s =
@@ -672,8 +672,8 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestCapsHorizonToExactPatchW
 TEST(GameplayPredictionManeuverTests, FastPreviewRequestUsesSelectedNodePreviewForAnchorState)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
     state._maneuver.settings().plan_windows.preview_window_s = 180.0;
     state._maneuver.settings().plan_windows.solve_margin_s = 300.0;
@@ -730,8 +730,8 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestUsesSelectedNodePreviewF
 TEST(GameplayPredictionManeuverTests, FullRequestEnablesPlannedSuffixRefineForPostDragAnchor)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
 
     Game::ManeuverNode upstream{};
@@ -805,8 +805,8 @@ TEST(GameplayPredictionManeuverTests, FullRequestEnablesPlannedSuffixRefineForPo
 TEST(GameplayPredictionManeuverTests, FastPreviewRequestFallsBackToInertialCacheForAnchorState)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
     state._maneuver.settings().plan_windows.preview_window_s = 180.0;
     state._maneuver.settings().plan_windows.solve_margin_s = 300.0;
@@ -848,8 +848,8 @@ TEST(GameplayPredictionManeuverTests, FastPreviewRequestFallsBackToInertialCache
 TEST(GameplayPredictionManeuverTests, TimeEditActivatesFastPreviewRequest)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
     state._maneuver.settings().plan_windows.preview_window_s = 180.0;
     state._maneuver.settings().plan_windows.solve_margin_s = 300.0;
@@ -894,8 +894,8 @@ TEST(GameplayPredictionManeuverTests, TimeEditActivatesFastPreviewRequest)
 TEST(GameplayPredictionManeuverTests, TimeEditUsesBaselineAnchorStateForMovedFirstNode)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
     state._maneuver.settings().plan_windows.preview_window_s = 180.0;
     state._maneuver.settings().plan_windows.solve_margin_s = 300.0;
@@ -952,8 +952,8 @@ TEST(GameplayPredictionManeuverTests, TimeEditUsesBaselineAnchorStateForMovedFir
 TEST(GameplayPredictionManeuverTests, TimeEditLeavesAnchorStateUnseededWhenPriorManeuverExists)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
     state._maneuver.settings().plan_windows.preview_window_s = 180.0;
     state._maneuver.settings().plan_windows.solve_margin_s = 300.0;
@@ -1027,8 +1027,8 @@ TEST(GameplayPredictionManeuverTests, TimeEditFinishRequestsFullRefine)
 TEST(GameplayPredictionManeuverTests, FinishedTimeEditDoesNotSeedAnchorFromStalePlannedPath)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
 
     Game::ManeuverNode selected{};
@@ -1092,8 +1092,8 @@ TEST(GameplayPredictionManeuverTests, FinishedTimeEditDoesNotSeedAnchorFromStale
 TEST(GameplayPredictionManeuverTests, DrawContextUsesAuthoritativePlannedPrefixDuringDeltaVEdit)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     Game::Entity player_entity{Game::EntityId{1}, "player"};
     register_player_draw_subject(state, player_entity);
 
@@ -1148,8 +1148,8 @@ TEST(GameplayPredictionManeuverTests, DrawContextUsesAuthoritativePlannedPrefixD
 TEST(GameplayPredictionManeuverTests, DrawContextLimitsTimeEditStalePrefixToEarlierNodeTime)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     Game::Entity player_entity{Game::EntityId{1}, "player"};
     register_player_draw_subject(state, player_entity);
 
@@ -1201,8 +1201,8 @@ TEST(GameplayPredictionManeuverTests, DrawContextLimitsTimeEditStalePrefixToEarl
 TEST(GameplayPredictionManeuverTests, DrawContextKeepsAuthoritativePlannedPrefixAfterEditRelease)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     Game::Entity player_entity{Game::EntityId{1}, "player"};
     register_player_draw_subject(state, player_entity);
 
@@ -1256,8 +1256,8 @@ TEST(GameplayPredictionManeuverTests, DrawContextKeepsAuthoritativePlannedPrefix
 TEST(GameplayPredictionManeuverTests, DrawTrackUsesFullStreamOverlayForActiveManeuverRefine)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     Game::Entity player_entity{Game::EntityId{1}, "player"};
     register_player_draw_subject(state, player_entity);
 
@@ -1312,8 +1312,8 @@ TEST(GameplayPredictionManeuverTests, DrawTrackUsesFullStreamOverlayForActiveMan
 TEST(GameplayPredictionManeuverTests, DrawTrackUsesStalePrefixWhenAwaitingFullRefineHasNoOverlay)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     state.prediction_for_test().draw_full_orbit = false;
     state.prediction_for_test().draw_future_segment = false;
     state.prediction_for_test().draw_config.draw_planned_as_dashed = false;
@@ -1366,8 +1366,8 @@ TEST(GameplayPredictionManeuverTests, DrawTrackUsesStalePrefixWhenAwaitingFullRe
 TEST(GameplayPredictionManeuverTests, RuntimeCacheKeepsCachedNodeGizmoAfterEditRelease)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
     Game::Entity player_entity{Game::EntityId{1}, "player"};
     register_player_draw_subject(state, player_entity);
 
@@ -1417,13 +1417,13 @@ TEST(GameplayPredictionManeuverTests, RuntimeCacheKeepsCachedNodeGizmoAfterEditR
 TEST(GameplayPredictionManeuverTests, FullRequestKeepsFullStreamPublishDisabledForStableActivePlayerWithManeuvers)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
 
     Game::OrbiterInfo player{};
     player.entity = Game::EntityId{1};
     player.is_player = true;
-    state._orbiters.push_back(player);
+    state._orbit.orbiters().push_back(player);
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
 
     Game::ManeuverNode node{};
@@ -1453,13 +1453,13 @@ TEST(GameplayPredictionManeuverTests, FullRequestKeepsFullStreamPublishDisabledF
 TEST(GameplayPredictionManeuverTests, FullRequestEnablesFullStreamPublishForPostPreviewRefineWithPendingDerivedWork)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
 
     Game::OrbiterInfo player{};
     player.entity = Game::EntityId{1};
     player.is_player = true;
-    state._orbiters.push_back(player);
+    state._orbit.orbiters().push_back(player);
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
 
     Game::ManeuverNode node{};
@@ -1498,13 +1498,13 @@ TEST(GameplayPredictionManeuverTests, FullRequestEnablesFullStreamPublishForPost
 TEST(GameplayPredictionManeuverTests, FullRequestKeepsFullStreamPublishDisabledOutsideActivePlayerManeuverRefine)
 {
     Game::GameplayState state{};
-    state._orbitsim = make_reference_orbitsim(100.0);
-    ASSERT_TRUE(state._orbitsim);
+    state._orbit.scenario_owner() = make_reference_orbitsim(100.0);
+    ASSERT_TRUE(state._orbit.scenario_owner());
 
     Game::OrbiterInfo player{};
     player.entity = Game::EntityId{1};
     player.is_player = true;
-    state._orbiters.push_back(player);
+    state._orbit.orbiters().push_back(player);
     state.prediction_for_test().selection.active_subject = {Game::PredictionSubjectKind::Orbiter, 1};
 
     Game::ManeuverNode node{};

@@ -77,9 +77,14 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/gameplay_state_sim.cpp
   game/states/gameplay/gameplay_settings.h
   game/states/gameplay/gameplay_settings.cpp
+  game/states/gameplay/formation_hold_system.h
+  game/states/gameplay/formation_hold_system.cpp
   game/states/gameplay/frame_monitor.h
   game/states/gameplay/frame_monitor.cpp
   game/states/gameplay/orbit_helpers.h
+  game/states/gameplay/orbit_runtime_types.h
+  game/states/gameplay/orbital_runtime_system.h
+  game/states/gameplay/orbital_runtime_system.cpp
   game/states/gameplay/time_warp_state.h
   game/states/gameplay/prediction/gameplay_state_prediction_types.h
   game/states/gameplay/prediction/gameplay_prediction_cache_internal.h

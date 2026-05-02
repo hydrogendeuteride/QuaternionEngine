@@ -17,7 +17,7 @@ namespace Game
         out.orbit_plot = (ctx.renderer && ctx.renderer->_context) ? ctx.renderer->_context->orbit_plot : nullptr;
         Draw::reset_orbit_plot_state(out.picking, out.orbit_plot, _prediction->state().orbit_plot_perf, _prediction->state().enabled);
 
-        if (!_prediction->state().enabled || !ctx.api || !_orbitsim)
+        if (!_prediction->state().enabled || !ctx.api || !_orbit.scenario_owner())
         {
             return false;
         }
@@ -28,7 +28,7 @@ namespace Game
         }
 
         out.alpha_f = std::clamp(ctx.interpolation_alpha(), 0.0f, 1.0f);
-        out.display_time_s = Draw::compute_prediction_display_time_s(_orbitsim->sim.time_s(),
+        out.display_time_s = Draw::compute_prediction_display_time_s(_orbit.scenario_owner()->sim.time_s(),
                                                                      _last_sim_step_dt_s,
                                                                      ctx.fixed_delta_time(),
                                                                      out.alpha_f);

@@ -15,7 +15,7 @@ namespace Game
 {
     PredictionSubjectKey GameplayPredictionAdapter::player_prediction_subject_key() const
     {
-        const EntityId player_eid = player_entity();
+        const EntityId player_eid = _orbit.player_entity();
         return player_eid.is_valid()
                    ? PredictionSubjectKey{PredictionSubjectKind::Orbiter, player_eid.value}
                    : PredictionSubjectKey{};
@@ -24,9 +24,9 @@ namespace Game
     std::vector<PredictionSubjectDescriptor> GameplayPredictionAdapter::build_prediction_subject_descriptors() const
     {
         std::vector<PredictionSubjectDescriptor> subjects;
-        subjects.reserve(_orbiters.size() + (_orbitsim ? _orbitsim->bodies.size() : 0u));
+        subjects.reserve(_orbit.orbiters().size() + (_orbit.scenario_owner() ? _orbit.scenario_owner()->bodies.size() : 0u));
 
-        for (const OrbiterInfo &orbiter : _orbiters)
+        for (const OrbiterInfo &orbiter : _orbit.orbiters())
         {
             if (!orbiter.entity.is_valid())
             {
@@ -47,10 +47,10 @@ namespace Game
             });
         }
 
-        if (_orbitsim)
+        if (_orbit.scenario_owner())
         {
-            const CelestialBodyInfo *ref_info = _orbitsim->world_reference_body();
-            for (const CelestialBodyInfo &body : _orbitsim->bodies)
+            const CelestialBodyInfo *ref_info = _orbit.scenario_owner()->world_reference_body();
+            for (const CelestialBodyInfo &body : _orbit.scenario_owner()->bodies)
             {
                 if (ref_info && body.sim_id == ref_info->sim_id)
                 {
@@ -79,7 +79,7 @@ namespace Game
         GameplayPredictionAdapter prediction(*this);
 
         PredictionHostContext host{};
-        host.orbital_scenario = _orbitsim.get();
+        host.orbital_scenario = _orbit.scenario_owner().get();
         host.subjects = prediction.build_prediction_subject_descriptors();
         host.player_subject = prediction.player_prediction_subject_key();
         host.current_sim_time_s = current_sim_time_s();
@@ -183,7 +183,7 @@ namespace Game
                                                            glm::vec3 &out_vel_local) const
     {
         // Resolve the player orbiter into the common world-state format.
-        const OrbiterInfo *player = find_player_orbiter();
+        const OrbiterInfo *player = _orbit.find_player_orbiter();
         return player && get_orbiter_world_state(*player, out_pos_world, out_vel_world, out_vel_local);
     }
 
@@ -209,12 +209,12 @@ namespace Game
         out_vel_local = glm::vec3(0.0f);
 
         // Prefer the authoritative orbit-sim spacecraft state whenever this orbiter is currently on rails.
-        if (_orbitsim)
+        if (_orbit.scenario_owner())
         {
-            const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
+            const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
             if (orbiter.rails.active() && ref_sim)
             {
-                if (const orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id))
+                if (const orbitsim::Spacecraft *sc = _orbit.scenario_owner()->sim.spacecraft_by_id(orbiter.rails.sc_id))
                 {
                     out_pos_world = _scenario_config.system_center +
                             WorldVec3(sc->state.position_m - ref_sim->state.position_m);
@@ -263,17 +263,17 @@ namespace Game
         if (key.kind == PredictionSubjectKind::Orbiter)
         {
             // Orbiters resolve through the gameplay entity/runtime state.
-            const OrbiterInfo *orbiter = find_orbiter(EntityId{key.value});
+            const OrbiterInfo *orbiter = _orbit.find_orbiter(EntityId{key.value});
             return orbiter && get_orbiter_world_state(*orbiter, out_pos_world, out_vel_world, out_vel_local);
         }
 
-        if (!_orbitsim)
+        if (!_orbit.scenario_owner())
         {
             return false;
         }
 
         const CelestialBodyInfo *body_info = nullptr;
-        for (const CelestialBodyInfo &candidate : _orbitsim->bodies)
+        for (const CelestialBodyInfo &candidate : _orbit.scenario_owner()->bodies)
         {
             if (static_cast<uint32_t>(candidate.sim_id) == key.value)
             {
@@ -282,8 +282,8 @@ namespace Game
             }
         }
 
-        const orbitsim::MassiveBody *body = body_info ? _orbitsim->sim.body_by_id(body_info->sim_id) : nullptr;
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
+        const orbitsim::MassiveBody *body = body_info ? _orbit.scenario_owner()->sim.body_by_id(body_info->sim_id) : nullptr;
+        const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
         if (!body || !ref_sim)
         {
             return false;
@@ -389,7 +389,7 @@ namespace Game
     bool GameplayPredictionAdapter::prediction_subject_is_player(PredictionSubjectKey key) const
     {
         // Only the player ship is treated as the maneuver-authoring subject.
-        return key.kind == PredictionSubjectKind::Orbiter && key.value == player_entity().value;
+        return key.kind == PredictionSubjectKind::Orbiter && key.value == _orbit.player_entity().value;
     }
 
     bool GameplayPredictionAdapter::prediction_subject_supports_maneuvers(PredictionSubjectKey key) const
@@ -401,7 +401,7 @@ namespace Game
         }
         if (key.kind == PredictionSubjectKind::Orbiter)
         {
-            const OrbiterInfo *orbiter = find_orbiter(EntityId(key.value));
+            const OrbiterInfo *orbiter = _orbit.find_orbiter(EntityId(key.value));
             if (orbiter && orbiter->formation_hold_enabled && !orbiter->formation_leader_name.empty())
             {
                 return true;
@@ -472,7 +472,7 @@ namespace Game
             return kAnchorOrbiterColor;
         }
 
-        const OrbiterInfo *orbiter = find_orbiter(EntityId{key.value});
+        const OrbiterInfo *orbiter = _orbit.find_orbiter(EntityId{key.value});
         if (orbiter)
         {
             for (const ScenarioConfig::OrbiterDef &orbiter_def : _scenario_config.orbiters)
@@ -485,7 +485,7 @@ namespace Game
         }
 
         std::size_t orbiter_palette_index = 0;
-        for (const OrbiterInfo &orbiter : _orbiters)
+        for (const OrbiterInfo &orbiter : _orbit.orbiters())
         {
             if (!orbiter.entity.is_valid() || orbiter.is_player)
             {
@@ -516,7 +516,7 @@ namespace Game
             return _rails_thrust_applied_this_tick;
         }
 
-        const EntityId player_eid = player_entity();
+        const EntityId player_eid = _orbit.player_entity();
         if (!player_eid.is_valid())
         {
             return false;

@@ -9,7 +9,7 @@
 #include "game/states/gameplay/gameplay_settings.h"
 #include "game/input/keybinds.h"
 #include "game/states/gameplay/scenario/scenario_config.h"
-#include "orbit_runtime_types.h"
+#include "orbital_runtime_system.h"
 #include "frame_monitor.h"
 #include "time_warp_state.h"
 #include "physics/physics_body.h"
@@ -122,26 +122,12 @@ namespace Game
                                                     glm::vec3 *out_origin_offset_local = nullptr);
         bool destroy_orbiter_physics_body(bool render_is_gltf, Entity &entity);
 
-        // Orbiter helpers
-        OrbiterInfo *find_player_orbiter();
-        const OrbiterInfo *find_player_orbiter() const;
-        OrbiterInfo *find_orbiter(EntityId entity);
-        const OrbiterInfo *find_orbiter(EntityId entity) const;
-        OrbiterInfo *find_orbiter(std::string_view name);
-        const OrbiterInfo *find_orbiter(std::string_view name) const;
-        EntityId player_entity() const;
-        EntityId select_rebase_anchor_entity() const;
+        // Orbiter adapters
         void update_rebase_anchor();
         bool set_active_player_orbiter(GameStateContext &ctx, EntityId entity);
         bool cycle_player_orbiter(GameStateContext &ctx, int direction);
         void sync_player_camera_target(GameStateContext &ctx) const;
         void sync_player_collision_callbacks();
-        bool get_orbiter_inertial_state(const OrbiterInfo &orbiter, orbitsim::State &out_state) const;
-        const orbitsim::MassiveBody *select_primary_body_for_state(const orbitsim::State &state) const;
-        bool build_orbiter_lvlh_frame(const OrbiterInfo &leader,
-                                      orbitsim::RotatingFrame &out_frame,
-                                      orbitsim::State *out_leader_state = nullptr,
-                                      orbitsim::State *out_primary_state = nullptr) const;
         void update_formation_hold(double dt_s);
 
         // Prediction entry points
@@ -225,8 +211,7 @@ namespace Game
         std::string _scenario_io_status{};
         bool _scenario_io_status_ok{true};
 
-        std::vector<OrbiterInfo> _orbiters;
-        std::unique_ptr<OrbitalScenario> _orbitsim;
+        OrbitalRuntimeSystem _orbit;
 
         struct ContactLogEntry
         {
@@ -252,9 +237,6 @@ namespace Game
         bool _show_frame_view{true};
         bool _show_maneuver_nodes_panel{false};
         bool _reset_requested{false};
-        bool _runtime_orbiter_rails_enabled{true};
-        double _runtime_orbiter_rails_distance_m{kDefaultRuntimeOrbiterRailsDistanceM};
-
         std::unique_ptr<PredictionSystem> _prediction;
         ManeuverSystem _maneuver{};
 

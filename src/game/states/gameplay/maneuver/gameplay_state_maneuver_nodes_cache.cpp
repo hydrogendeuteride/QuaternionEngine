@@ -26,7 +26,7 @@ namespace Game
                         interaction_idle);
 
         const bool can_refresh_from_prediction =
-                _orbitsim &&
+                _orbit.scenario_owner() &&
                 _prediction->state().selection.active_subject.valid() &&
                 prediction.prediction_subject_is_player(_prediction->state().selection.active_subject);
 
@@ -55,7 +55,7 @@ namespace Game
             const float alpha_f = std::clamp(ctx.interpolation_alpha(), 0.0f, 1.0f);
             const double interp_dt_s =
                     (_last_sim_step_dt_s > 0.0) ? _last_sim_step_dt_s : static_cast<double>(ctx.fixed_delta_time());
-            double now_s = _orbitsim->sim.time_s();
+            double now_s = _orbit.scenario_owner()->sim.time_s();
             if (std::isfinite(interp_dt_s) && interp_dt_s > 0.0)
             {
                 now_s -= (1.0 - static_cast<double>(alpha_f)) * interp_dt_s;

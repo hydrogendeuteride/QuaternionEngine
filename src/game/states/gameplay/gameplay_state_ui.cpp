@@ -195,8 +195,8 @@ namespace Game
         s.maneuver_plan_live_preview_active = _maneuver.settings().live_preview_active;
         s.orbit_plot_budget = _prediction->budget();
         s.debug_draw_enabled = _debug_draw_enabled;
-        s.runtime_orbiter_rails_enabled = _runtime_orbiter_rails_enabled;
-        s.runtime_orbiter_rails_distance_m = _runtime_orbiter_rails_distance_m;
+        s.runtime_orbiter_rails_enabled = _orbit.runtime_orbiter_rails_enabled();
+        s.runtime_orbiter_rails_distance_m = _orbit.runtime_orbiter_rails_distance_m();
         s.contact_log_enabled = _contact_log_enabled;
         s.contact_log_print_console = _contact_log_print_console;
         return s;
@@ -217,8 +217,8 @@ namespace Game
         _maneuver.settings().live_preview_active = s.maneuver_plan_live_preview_active;
         _prediction->budget() = s.orbit_plot_budget;
         _debug_draw_enabled = s.debug_draw_enabled;
-        _runtime_orbiter_rails_enabled = s.runtime_orbiter_rails_enabled;
-        _runtime_orbiter_rails_distance_m = s.runtime_orbiter_rails_distance_m;
+        _orbit.runtime_orbiter_rails_enabled() = s.runtime_orbiter_rails_enabled;
+        _orbit.runtime_orbiter_rails_distance_m() = s.runtime_orbiter_rails_distance_m;
         _contact_log_enabled = s.contact_log_enabled;
         _contact_log_print_console = s.contact_log_print_console;
         mark_prediction_dirty();
@@ -254,7 +254,7 @@ namespace Game
                 // ----------------------------------------------------------------
                 // Player HUD: sim time, warp, vessel, controls
                 // ----------------------------------------------------------------
-                const double sim_time_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
+                const double sim_time_s = _orbit.scenario_owner() ? _orbit.scenario_owner()->sim.time_s() : _fixed_time_s;
                 const int sim_hours = static_cast<int>(std::floor(sim_time_s / 3600.0));
                 const int sim_minutes = static_cast<int>(std::floor(std::fmod(sim_time_s, 3600.0) / 60.0));
                 const double sim_seconds = std::fmod(sim_time_s, 60.0);
@@ -275,7 +275,7 @@ namespace Game
 
                 ImGui::Text("Sim: %dh %dm %.1fs", sim_hours, sim_minutes, sim_seconds);
                 const char *controlled_vessel = "None";
-                if (const OrbiterInfo *player_orbiter = find_player_orbiter())
+                if (const OrbiterInfo *player_orbiter = _orbit.find_player_orbiter())
                 {
                     controlled_vessel = player_orbiter->name.c_str();
                 }
@@ -415,11 +415,13 @@ namespace Game
                     }
                 }
 
-                if (ImGui::Checkbox("Runtime orbiter rails", &_runtime_orbiter_rails_enabled))
+                bool runtime_rails_enabled = _orbit.runtime_orbiter_rails_enabled();
+                if (ImGui::Checkbox("Runtime orbiter rails", &runtime_rails_enabled))
                 {
+                    _orbit.runtime_orbiter_rails_enabled() = runtime_rails_enabled;
                     mark_prediction_dirty();
                 }
-                double runtime_rails_distance_m = _runtime_orbiter_rails_distance_m;
+                double runtime_rails_distance_m = _orbit.runtime_orbiter_rails_distance_m();
                 if (ImGui::DragScalar("Runtime rails distance (m)",
                                       ImGuiDataType_Double,
                                       &runtime_rails_distance_m,
@@ -428,7 +430,7 @@ namespace Game
                                       nullptr,
                                       "%.0f"))
                 {
-                    _runtime_orbiter_rails_distance_m = std::max(0.0, runtime_rails_distance_m);
+                    _orbit.runtime_orbiter_rails_distance_m() = std::max(0.0, runtime_rails_distance_m);
                 }
 
                 // ----------------------------------------------------------------
@@ -456,7 +458,7 @@ namespace Game
                 // ----------------------------------------------------------------
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
                 {
-                    const EntityId player_eid = player_entity();
+                    const EntityId player_eid = _orbit.player_entity();
                     if (player_eid.is_valid())
                     {
                         Entity *player = _world.entities().find(player_eid);
@@ -529,7 +531,7 @@ namespace Game
 #endif
 
                 {
-                    const EntityId player_eid = player_entity();
+                    const EntityId player_eid = _orbit.player_entity();
                     if (player_eid.is_valid())
                     {
                         const Entity *player = _world.entities().find(player_eid);
@@ -685,7 +687,7 @@ namespace Game
                         }
 
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-                        const EntityId player_eid = player_entity();
+                        const EntityId player_eid = _orbit.player_entity();
                         if (_physics && _physics_context && player_eid.is_valid() &&
                             active_prediction &&
                             prediction.prediction_subject_is_player(active_prediction->key))
@@ -967,7 +969,7 @@ namespace Game
                     ImGui::SameLine();
                     ImGui::TextUnformatted("(0 = off)");
 
-                    const EntityId player_eid = player_entity();
+                    const EntityId player_eid = _orbit.player_entity();
                     if (_physics && player_eid.is_valid())
                     {
                         const Entity *player = _world.entities().find(player_eid);
@@ -1115,8 +1117,8 @@ namespace Game
         const bool live_chunk_path_supported =
                 frame_spec.type != orbitsim::TrajectoryFrameType::Inertial &&
                 frame_spec.type != orbitsim::TrajectoryFrameType::LVLH;
-        const bool have_sim_now = _orbitsim != nullptr;
-        const double sim_now_s = have_sim_now ? _orbitsim->sim.time_s() : 0.0;
+        const bool have_sim_now = _orbit.scenario_owner() != nullptr;
+        const double sim_now_s = have_sim_now ? _orbit.scenario_owner()->sim.time_s() : 0.0;
         const bool have_build_time = active_track->cache.identity.valid && have_sim_now;
         const double sim_since_build_s =
                 have_build_time ? std::max(0.0, sim_now_s - active_track->cache.identity.build_time_s) : 0.0;

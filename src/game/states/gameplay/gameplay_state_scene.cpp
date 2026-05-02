@@ -275,8 +275,7 @@ namespace Game
         _world.clear_rebase_anchor();
         _world.clear();
 
-        _orbiters.clear();
-        _orbitsim.reset();
+        _orbit.reset();
 
         if (ctx.api)
         {
@@ -486,11 +485,11 @@ namespace Game
         // Spawn all orbiters from config
         const auto &cfg = _scenario_config;
         std::vector<ScenarioConfig::OrbiterDef> orbiter_defs = cfg.orbiters;
-        const CelestialBodyInfo *ref_info = _orbitsim ? _orbitsim->world_reference_body() : nullptr;
+        const CelestialBodyInfo *ref_info = _orbit.scenario_owner() ? _orbit.scenario_owner()->world_reference_body() : nullptr;
         const double reference_radius_m = ref_info ? ref_info->radius_m : 0.0;
         const double reference_mass_kg = ref_info ? ref_info->mass_kg : 0.0;
         const double gravitational_constant =
-                _orbitsim ? _orbitsim->sim.config().gravitational_constant : 0.0;
+                _orbit.scenario_owner() ? _orbit.scenario_owner()->sim.config().gravitational_constant : 0.0;
         for (auto &orbiter_def : orbiter_defs)
         {
             update_orbiter_spawn_from_player_orbit(orbiter_def,
@@ -541,7 +540,7 @@ namespace Game
             info.formation_hold_enabled = orbiter_def.formation_hold_enabled;
             info.formation_leader_name = orbiter_def.formation_leader;
             info.formation_slot_lvlh_m = orbiter_def.formation_slot_lvlh_m;
-            _orbiters.push_back(std::move(info));
+            _orbit.orbiters().push_back(std::move(info));
         }
 
         GameplayPredictionAdapter(*this).rebuild_prediction_subjects();
@@ -556,11 +555,11 @@ namespace Game
         }
         update_rebase_anchor();
 
-        const EntityId primary_player_eid = player_entity();
+        const EntityId primary_player_eid = _orbit.player_entity();
 
         sync_player_collision_callbacks();
 
-        if (primary_player_eid.is_valid() || !_orbiters.empty())
+        if (primary_player_eid.is_valid() || !_orbit.orbiters().empty())
         {
             GameAPI::OrbitCameraSettings orbit{};
             orbit.target.type = GameAPI::CameraTargetType::MeshInstance;
@@ -607,14 +606,14 @@ namespace Game
         }
 
         const auto &cfg = _scenario_config;
-        const orbitsim::MassiveBody *ref_sim = _orbitsim ? _orbitsim->world_reference_sim_body() : nullptr;
+        const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner() ? _orbit.scenario_owner()->world_reference_sim_body() : nullptr;
         const auto celestial_world_position = [&](const std::string &name) {
             WorldVec3 planet_center_world = cfg.system_center;
-            if (_orbitsim && ref_sim)
+            if (_orbit.scenario_owner() && ref_sim)
             {
-                if (const CelestialBodyInfo *info = _orbitsim->find_body(name))
+                if (const CelestialBodyInfo *info = _orbit.scenario_owner()->find_body(name))
                 {
-                    if (const orbitsim::MassiveBody *sim_body = _orbitsim->sim.body_by_id(info->sim_id))
+                    if (const orbitsim::MassiveBody *sim_body = _orbit.scenario_owner()->sim.body_by_id(info->sim_id))
                     {
                         planet_center_world = cfg.system_center +
                                 WorldVec3(sim_body->state.position_m - ref_sim->state.position_m);
@@ -808,7 +807,7 @@ namespace Game
 
         if (!all_valid || scenario->bodies.empty())
         {
-            _orbitsim = std::move(scenario);
+            _orbit.set_scenario(std::move(scenario));
             return;
         }
 
@@ -837,147 +836,12 @@ namespace Game
             player_vel_world = glm::dvec3(ship_rel.velocity_mps);
         }
 
-        _orbitsim = std::move(scenario);
-    }
-
-    // ---- Orbiter helpers ----
-
-    OrbiterInfo *GameplayState::find_player_orbiter()
-    {
-        for (auto &o : _orbiters)
-        {
-            if (o.is_player)
-            {
-                return &o;
-            }
-        }
-        return nullptr;
-    }
-
-    const OrbiterInfo *GameplayState::find_player_orbiter() const
-    {
-        for (const auto &o : _orbiters)
-        {
-            if (o.is_player)
-            {
-                return &o;
-            }
-        }
-        return nullptr;
-    }
-
-    OrbiterInfo *GameplayState::find_orbiter(const EntityId entity)
-    {
-        if (!entity.is_valid())
-        {
-            return nullptr;
-        }
-
-        for (auto &orbiter : _orbiters)
-        {
-            if (orbiter.entity == entity)
-            {
-                return &orbiter;
-            }
-        }
-
-        return nullptr;
-    }
-
-    const OrbiterInfo *GameplayState::find_orbiter(const EntityId entity) const
-    {
-        if (!entity.is_valid())
-        {
-            return nullptr;
-        }
-
-        for (const auto &orbiter : _orbiters)
-        {
-            if (orbiter.entity == entity)
-            {
-                return &orbiter;
-            }
-        }
-
-        return nullptr;
-    }
-
-    OrbiterInfo *GameplayState::find_orbiter(const std::string_view name)
-    {
-        if (name.empty())
-        {
-            return nullptr;
-        }
-
-        for (auto &orbiter : _orbiters)
-        {
-            if (orbiter.name == name)
-            {
-                return &orbiter;
-            }
-        }
-
-        return nullptr;
-    }
-
-    const OrbiterInfo *GameplayState::find_orbiter(const std::string_view name) const
-    {
-        if (name.empty())
-        {
-            return nullptr;
-        }
-
-        for (const auto &orbiter : _orbiters)
-        {
-            if (orbiter.name == name)
-            {
-                return &orbiter;
-            }
-        }
-
-        return nullptr;
-    }
-
-    EntityId GameplayState::player_entity() const
-    {
-        const OrbiterInfo *p = find_player_orbiter();
-        return p ? p->entity : EntityId{};
-    }
-
-    EntityId GameplayState::select_rebase_anchor_entity() const
-    {
-        for (const auto &orbiter : _orbiters)
-        {
-            if (orbiter.is_rebase_anchor && orbiter.entity.is_valid())
-            {
-                return orbiter.entity;
-            }
-        }
-
-        // Fallback: first valid player.
-        for (const auto &orbiter : _orbiters)
-        {
-            if (orbiter.is_player && orbiter.entity.is_valid())
-            {
-                return orbiter.entity;
-            }
-        }
-
-        // Last resort: any valid orbiter.
-        for (const auto &orbiter : _orbiters)
-        {
-            if (orbiter.entity.is_valid())
-            {
-                return orbiter.entity;
-            }
-        }
-
-        return EntityId{};
+        _orbit.set_scenario(std::move(scenario));
     }
 
     void GameplayState::update_rebase_anchor()
     {
-        const EntityId next_anchor = select_rebase_anchor_entity();
+        const EntityId next_anchor = _orbit.select_rebase_anchor_entity();
         if (!next_anchor.is_valid())
         {
             _world.clear_rebase_anchor();
@@ -997,7 +861,7 @@ namespace Game
             return;
         }
 
-        const OrbiterInfo *player_orbiter = find_player_orbiter();
+        const OrbiterInfo *player_orbiter = _orbit.find_player_orbiter();
         if (!player_orbiter || player_orbiter->name.empty())
         {
             return;
@@ -1034,7 +898,7 @@ namespace Game
             return;
         }
 
-        for (const OrbiterInfo &orbiter : _orbiters)
+        for (const OrbiterInfo &orbiter : _orbit.orbiters())
         {
             if (!orbiter.entity.is_valid())
             {
@@ -1056,7 +920,7 @@ namespace Game
             _physics->clear_body_callbacks(body_id);
         }
 
-        const OrbiterInfo *player_orbiter = find_player_orbiter();
+        const OrbiterInfo *player_orbiter = _orbit.find_player_orbiter();
         if (!player_orbiter || !player_orbiter->entity.is_valid())
         {
             return;
@@ -1121,8 +985,8 @@ namespace Game
 
     bool GameplayState::set_active_player_orbiter(GameStateContext &ctx, const EntityId entity)
     {
-        OrbiterInfo *target = find_orbiter(entity);
-        OrbiterInfo *current = find_player_orbiter();
+        OrbiterInfo *target = _orbit.find_orbiter(entity);
+        OrbiterInfo *current = _orbit.find_player_orbiter();
         if (!target || !target->entity.is_valid() || target == current)
         {
             return false;
@@ -1158,7 +1022,7 @@ namespace Game
             (void) demote_orbiter_from_rails(*target);
         }
 
-        for (auto &orbiter : _orbiters)
+        for (auto &orbiter : _orbit.orbiters())
         {
             const bool is_active = orbiter.entity == target->entity;
             orbiter.is_player = is_active;
@@ -1203,16 +1067,16 @@ namespace Game
 
     bool GameplayState::cycle_player_orbiter(GameStateContext &ctx, const int direction)
     {
-        if (_orbiters.size() < 2 || direction == 0)
+        if (_orbit.orbiters().size() < 2 || direction == 0)
         {
             return false;
         }
 
         std::size_t current_index = 0;
         bool found_current = false;
-        for (std::size_t i = 0; i < _orbiters.size(); ++i)
+        for (std::size_t i = 0; i < _orbit.orbiters().size(); ++i)
         {
-            if (_orbiters[i].is_player)
+            if (_orbit.orbiters()[i].is_player)
             {
                 current_index = i;
                 found_current = true;
@@ -1222,9 +1086,9 @@ namespace Game
 
         if (!found_current)
         {
-            for (std::size_t i = 0; i < _orbiters.size(); ++i)
+            for (std::size_t i = 0; i < _orbit.orbiters().size(); ++i)
             {
-                if (_orbiters[i].entity.is_valid())
+                if (_orbit.orbiters()[i].entity.is_valid())
                 {
                     current_index = i;
                     found_current = true;
@@ -1238,7 +1102,7 @@ namespace Game
             return false;
         }
 
-        const std::size_t count = _orbiters.size();
+        const std::size_t count = _orbit.orbiters().size();
         std::size_t next_index = current_index;
         const int step = direction > 0 ? 1 : -1;
         for (std::size_t attempt = 0; attempt < count; ++attempt)
@@ -1246,17 +1110,17 @@ namespace Game
             const int signed_next =
                     (static_cast<int>(next_index) + step + static_cast<int>(count)) % static_cast<int>(count);
             next_index = static_cast<std::size_t>(signed_next);
-            if (_orbiters[next_index].entity.is_valid())
+            if (_orbit.orbiters()[next_index].entity.is_valid())
             {
                 break;
             }
         }
 
-        if (next_index == current_index || !_orbiters[next_index].entity.is_valid())
+        if (next_index == current_index || !_orbit.orbiters()[next_index].entity.is_valid())
         {
             return false;
         }
 
-        return set_active_player_orbiter(ctx, _orbiters[next_index].entity);
+        return set_active_player_orbiter(ctx, _orbit.orbiters()[next_index].entity);
     }
 } // namespace Game

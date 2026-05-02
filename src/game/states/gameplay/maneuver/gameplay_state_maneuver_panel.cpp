@@ -139,8 +139,8 @@ namespace Game
                 }
             }
 
-            return (_orbitsim && _orbitsim->world_reference_body())
-                           ? _orbitsim->world_reference_body()->sim_id
+            return (_orbit.scenario_owner() && _orbit.scenario_owner()->world_reference_body())
+                           ? _orbit.scenario_owner()->world_reference_body()->sim_id
                            : orbitsim::kInvalidBodyId;
         };
 

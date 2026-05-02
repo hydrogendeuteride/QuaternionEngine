@@ -1,11 +1,10 @@
 #include "gameplay_state.h"
+#include "formation_hold_system.h"
 #include "orbit_helpers.h"
 #include "core/game_api.h"
 #include "core/input/input_system.h"
 #include "game/component/ship_controller.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
-#include "orbitsim/coordinate_frames.hpp"
-#include "orbitsim/frame_utils.hpp"
 #include "physics/physics_context.h"
 #include "physics/physics_world.h"
 
@@ -97,28 +96,28 @@ namespace Game
     // Updates render/world-space celestial body transforms from the orbit simulation frame.
     void GameplayState::sync_celestial_render_entities(GameStateContext &ctx)
     {
-        if (!_orbitsim || _orbitsim->bodies.empty())
+        if (!_orbit.scenario_owner() || _orbit.scenario_owner()->bodies.empty())
         {
             return;
         }
 
         const auto &cfg = _scenario_config;
 
-        const CelestialBodyInfo *ref_info = _orbitsim->world_reference_body();
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
+        const CelestialBodyInfo *ref_info = _orbit.scenario_owner()->world_reference_body();
+        const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
         if (!ref_info || !ref_sim)
         {
             return;
         }
 
-        for (auto &body_info : _orbitsim->bodies)
+        for (auto &body_info : _orbit.scenario_owner()->bodies)
         {
             if (body_info.sim_id == ref_info->sim_id)
             {
                 continue;
             }
 
-            const orbitsim::MassiveBody *sim_body = _orbitsim->sim.body_by_id(body_info.sim_id);
+            const orbitsim::MassiveBody *sim_body = _orbit.scenario_owner()->sim.body_by_id(body_info.sim_id);
             if (!sim_body)
             {
                 continue;
@@ -154,22 +153,22 @@ namespace Game
         }
 
         const bool can_run_runtime_rails =
-                _runtime_orbiter_rails_enabled &&
-                _runtime_orbiter_rails_distance_m > 0.0 &&
-                _orbitsim &&
+                _orbit.runtime_orbiter_rails_enabled() &&
+                _orbit.runtime_orbiter_rails_distance_m() > 0.0 &&
+                _orbit.scenario_owner() &&
                 _physics &&
                 _physics_context &&
-                _orbitsim->world_reference_sim_body();
+                _orbit.scenario_owner()->world_reference_sim_body();
 
-        const EntityId anchor_eid = select_rebase_anchor_entity();
+        const EntityId anchor_eid = _orbit.select_rebase_anchor_entity();
         const Entity *anchor_entity = _world.entities().find(anchor_eid);
         const WorldVec3 anchor_pos_world =
                 anchor_entity ? anchor_entity->physics_center_of_mass_world() : _scenario_config.system_center;
 
-        const double promote_distance_m = std::max(0.0, _runtime_orbiter_rails_distance_m);
+        const double promote_distance_m = std::max(0.0, _orbit.runtime_orbiter_rails_distance_m());
         const double return_distance_m = promote_distance_m * kRuntimeOrbiterRailsReturnDistanceRatio;
 
-        for (auto &orbiter : _orbiters)
+        for (auto &orbiter : _orbit.orbiters())
         {
             if (orbiter.is_player || !orbiter.entity.is_valid())
             {
@@ -177,10 +176,10 @@ namespace Game
             }
 
             WorldVec3 orbiter_pos_world{0.0, 0.0, 0.0};
-            if (orbiter.rails.active() && _orbitsim)
+            if (orbiter.rails.active() && _orbit.scenario_owner())
             {
-                const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
-                const orbitsim::Spacecraft *sc = ref_sim ? _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id) : nullptr;
+                const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
+                const orbitsim::Spacecraft *sc = ref_sim ? _orbit.scenario_owner()->sim.spacecraft_by_id(orbiter.rails.sc_id) : nullptr;
                 if (ref_sim && sc)
                 {
                     orbiter_pos_world = _scenario_config.system_center +
@@ -225,25 +224,25 @@ namespace Game
 
     void GameplayState::sync_runtime_orbiter_rails(const double dt_s)
     {
-        if (_rails_warp_active || !_orbitsim)
+        if (_rails_warp_active || !_orbit.scenario_owner())
         {
             return;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
+        const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
         if (!ref_sim)
         {
             return;
         }
 
-        for (auto &orbiter : _orbiters)
+        for (auto &orbiter : _orbit.orbiters())
         {
             if (!orbiter.rails.active() || !orbiter.entity.is_valid())
             {
                 continue;
             }
 
-            const orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id);
+            const orbitsim::Spacecraft *sc = _orbit.scenario_owner()->sim.spacecraft_by_id(orbiter.rails.sc_id);
             Entity *ent = _world.entities().find(orbiter.entity);
             if (!sc || !ent)
             {
@@ -274,12 +273,12 @@ namespace Game
 
     bool GameplayState::promote_orbiter_to_rails(OrbiterInfo &orbiter)
     {
-        if (_rails_warp_active || !_orbitsim || !_physics_context || !orbiter.entity.is_valid() || orbiter.rails.active())
+        if (_rails_warp_active || !_orbit.scenario_owner() || !_physics_context || !orbiter.entity.is_valid() || orbiter.rails.active())
         {
             return false;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
+        const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
         Entity *ent = _world.entities().find(orbiter.entity);
         if (!ref_sim || !ent || !ent->has_physics() || !_physics)
         {
@@ -305,7 +304,7 @@ namespace Game
                                         ref_sim->state.velocity_mps + vel_world);
         sc.dry_mass_kg = std::max(1.0, orbiter.mass_kg);
 
-        const auto handle = _orbitsim->sim.create_spacecraft(std::move(sc));
+        const auto handle = _orbit.scenario_owner()->sim.create_spacecraft(std::move(sc));
         if (!handle.valid())
         {
             return false;
@@ -330,14 +329,14 @@ namespace Game
 
     bool GameplayState::demote_orbiter_from_rails(OrbiterInfo &orbiter)
     {
-        if (_rails_warp_active || !_orbitsim || !_physics || !_physics_context || !orbiter.rails.active() ||
+        if (_rails_warp_active || !_orbit.scenario_owner() || !_physics || !_physics_context || !orbiter.rails.active() ||
             !orbiter.entity.is_valid())
         {
             return false;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
-        const orbitsim::Spacecraft *sc = ref_sim ? _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id) : nullptr;
+        const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
+        const orbitsim::Spacecraft *sc = ref_sim ? _orbit.scenario_owner()->sim.spacecraft_by_id(orbiter.rails.sc_id) : nullptr;
         Entity *ent = _world.entities().find(orbiter.entity);
         if (!ref_sim || !sc || !ent)
         {
@@ -394,205 +393,36 @@ namespace Game
             ent->interpolation().set_immediate(entity_pos_world, rot);
         }
 
-        (void) _orbitsim->sim.remove_spacecraft(orbiter.rails.sc_id);
+        (void) _orbit.scenario_owner()->sim.remove_spacecraft(orbiter.rails.sc_id);
         orbiter.rails.clear();
-        return true;
-    }
-
-    bool GameplayState::get_orbiter_inertial_state(const OrbiterInfo &orbiter, orbitsim::State &out_state) const
-    {
-        out_state = {};
-        if (!_orbitsim)
-        {
-            return false;
-        }
-
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
-        if (!ref_sim)
-        {
-            return false;
-        }
-
-        WorldVec3 pos_world{0.0};
-        glm::dvec3 vel_world{0.0};
-        glm::vec3 vel_local{0.0f};
-        if (!GameplayPredictionAdapter(*this).get_orbiter_world_state(orbiter, pos_world, vel_world, vel_local))
-        {
-            return false;
-        }
-
-        out_state = orbitsim::make_state(
-                ref_sim->state.position_m + glm::dvec3(pos_world - _scenario_config.system_center),
-                ref_sim->state.velocity_mps + vel_world);
-        return true;
-    }
-
-    const orbitsim::MassiveBody *GameplayState::select_primary_body_for_state(const orbitsim::State &state) const
-    {
-        if (!_orbitsim || _orbitsim->sim.massive_bodies().empty())
-        {
-            return nullptr;
-        }
-
-        const auto body_position_at = [this](const std::size_t i) -> orbitsim::Vec3 {
-            return _orbitsim->sim.massive_bodies()[i].state.position_m;
-        };
-
-        const std::size_t primary_index = orbitsim::auto_select_primary_index(
-                _orbitsim->sim.massive_bodies(),
-                state.position_m,
-                body_position_at,
-                _orbitsim->sim.config().softening_length_m);
-        if (primary_index >= _orbitsim->sim.massive_bodies().size())
-        {
-            return nullptr;
-        }
-
-        return &_orbitsim->sim.massive_bodies()[primary_index];
-    }
-
-    bool GameplayState::build_orbiter_lvlh_frame(const OrbiterInfo &leader,
-                                                 orbitsim::RotatingFrame &out_frame,
-                                                 orbitsim::State *out_leader_state,
-                                                 orbitsim::State *out_primary_state) const
-    {
-        out_frame = {};
-
-        orbitsim::State leader_state{};
-        if (!get_orbiter_inertial_state(leader, leader_state))
-        {
-            return false;
-        }
-
-        const orbitsim::MassiveBody *primary = select_primary_body_for_state(leader_state);
-        if (!primary)
-        {
-            return false;
-        }
-
-        const std::optional<orbitsim::RotatingFrame> lvlh =
-                orbitsim::make_lvlh_frame(primary->state, leader_state);
-        if (!lvlh.has_value() || !lvlh->valid())
-        {
-            return false;
-        }
-
-        out_frame = *lvlh;
-        if (out_leader_state)
-        {
-            *out_leader_state = leader_state;
-        }
-        if (out_primary_state)
-        {
-            *out_primary_state = primary->state;
-        }
         return true;
     }
 
     void GameplayState::update_formation_hold(const double dt_s)
     {
-        if (!(dt_s > 0.0) || !std::isfinite(dt_s) || !_orbitsim)
-        {
-            return;
-        }
+        const FormationHoldSystem::OrbiterWorldStateSampler inertial_state_sampler =
+                [this](const OrbiterInfo &sample_orbiter,
+                       WorldVec3 &out_pos_world,
+                       glm::dvec3 &out_vel_world,
+                       glm::vec3 &out_vel_local) {
+                    return GameplayPredictionAdapter(*this).get_orbiter_world_state(
+                            sample_orbiter,
+                            out_pos_world,
+                            out_vel_world,
+                            out_vel_local);
+                };
 
-        for (auto &orbiter : _orbiters)
-        {
-            if (!orbiter.formation_hold_enabled || orbiter.formation_leader_name.empty() || orbiter.is_player)
-            {
-                continue;
-            }
-
-            const OrbiterInfo *leader = find_orbiter(std::string_view(orbiter.formation_leader_name));
-            if (!leader || leader == &orbiter)
-            {
-                continue;
-            }
-
-            orbitsim::RotatingFrame leader_lvlh{};
-            if (!build_orbiter_lvlh_frame(*leader, leader_lvlh))
-            {
-                continue;
-            }
-
-            orbitsim::State follower_state_inertial{};
-            if (!get_orbiter_inertial_state(orbiter, follower_state_inertial))
-            {
-                continue;
-            }
-
-            const orbitsim::State follower_state_lvlh =
-                    orbitsim::inertial_state_to_frame(follower_state_inertial, leader_lvlh);
-
-            // Position error and velocity in LVLH frame.
-            const glm::dvec3 pos_error =
-                    glm::dvec3(follower_state_lvlh.position_m) - orbiter.formation_slot_lvlh_m;
-            const glm::dvec3 vel = glm::dvec3(follower_state_lvlh.velocity_mps);
-
-            // Exact integration of a critically-damped spring (unconditionally stable for any dt).
-            //   e'' = -omega^2 * e - 2*omega * e'
-            //   e(t)  = (e0 + (v0 + omega*e0)*t) * exp(-omega*t)
-            //   e'(t) = (v0*(1 - omega*t) - omega^2*e0*t) * exp(-omega*t)
-            const double omega = kFormationHoldOmega;
-            const double odt = omega * dt_s;
-            const double exp_decay = std::exp(-odt);
-            const glm::dvec3 vel_after =
-                    (vel * (1.0 - odt) - (omega * omega * pos_error * dt_s)) * exp_decay;
-            glm::dvec3 dv_lvlh = vel_after - vel;
-
-            if (!finite_vec3(dv_lvlh))
-            {
-                continue;
-            }
-
-            const double dv_len = glm::length(dv_lvlh);
-            if (std::isfinite(dv_len) && dv_len > kFormationHoldMaxDvPerStepMps && dv_len > 0.0)
-            {
-                dv_lvlh *= (kFormationHoldMaxDvPerStepMps / dv_len);
-            }
-
-            const glm::dvec3 dv_world =
-                    orbitsim::frame_vector_to_inertial(leader_lvlh, dv_lvlh);
-            if (!finite_vec3(dv_world))
-            {
-                continue;
-            }
-
-            if (orbiter.rails.active())
-            {
-                orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id);
-                if (!sc)
-                {
-                    continue;
-                }
-
-                sc->state.velocity_mps += dv_world;
-                continue;
-            }
-
-            if (!_physics || !_physics_context || !orbiter.entity.is_valid())
-            {
-                continue;
-            }
-
-            Entity *entity = _world.entities().find(orbiter.entity);
-            if (!entity || !entity->has_physics())
-            {
-                continue;
-            }
-
-            const Physics::BodyId body_id{entity->physics_body_value()};
-            if (!_physics->is_body_valid(body_id))
-            {
-                continue;
-            }
-
-            // For physics mode, convert dv into an equivalent force for this tick.
-            const double mass_kg = std::max(1.0, orbiter.mass_kg);
-            const glm::vec3 force = glm::vec3(dv_world * mass_kg / dt_s);
-            _physics->add_force(body_id, force);
-            _physics->activate(body_id);
-        }
+        FormationHoldSystem::update(FormationHoldSystem::Context{
+                                            .orbit = _orbit,
+                                            .world = _world,
+                                            .physics = _physics.get(),
+                                            .physics_context = _physics_context.get(),
+                                            .system_center = _scenario_config.system_center,
+                                            .omega = kFormationHoldOmega,
+                                            .max_dv_per_step_mps = kFormationHoldMaxDvPerStepMps,
+                                            .world_state_sampler = inertial_state_sampler,
+                                    },
+                                    dt_s);
     }
 
     // Advances one fixed-step physics tick, including orbit sim gravity and moving-origin bookkeeping.
@@ -608,13 +438,13 @@ namespace Game
         _world.pre_physics_step();
 
         const auto &cfg = _scenario_config;
-        const bool use_orbitsim = _orbitsim && !_orbitsim->bodies.empty()
-                                  && _orbitsim->world_reference_body() != nullptr;
+        const bool use_orbitsim = _orbit.scenario_owner() && !_orbit.scenario_owner()->bodies.empty()
+                                  && _orbit.scenario_owner()->world_reference_body() != nullptr;
 
         if (use_orbitsim)
         {
             update_runtime_orbiter_rails();
-            _orbitsim->sim.step(static_cast<double>(fixed_dt));
+            _orbit.scenario_owner()->sim.step(static_cast<double>(fixed_dt));
             sync_celestial_render_entities(ctx);
             sync_runtime_orbiter_rails(static_cast<double>(fixed_dt));
         }
@@ -627,7 +457,7 @@ namespace Game
             }
 
             const glm::dvec3 p_rel = glm::dvec3(p_world - cfg.system_center);
-            return nbody_accel_body_centered(*_orbitsim, p_rel);
+            return nbody_accel_body_centered(*_orbit.scenario_owner(), p_rel);
         };
 
         // Velocity-origin handling:
@@ -641,7 +471,7 @@ namespace Game
         EntityId anchor_eid = _world.rebase_anchor();
         if (!anchor_eid.is_valid())
         {
-            anchor_eid = player_entity();
+            anchor_eid = _orbit.player_entity();
         }
 
         if (anchor_eid.is_valid())
@@ -712,7 +542,7 @@ namespace Game
         };
 
         // Apply gravity to all orbiters
-        for (const auto &orbiter : _orbiters)
+        for (const auto &orbiter : _orbit.orbiters())
         {
             if (orbiter.apply_gravity && orbiter.entity.is_valid())
             {
@@ -770,12 +600,12 @@ namespace Game
             return;
         }
 
-        if (!_orbitsim)
+        if (!_orbit.scenario_owner())
         {
             return;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
+        const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
         if (!ref_sim)
         {
             return;
@@ -783,11 +613,11 @@ namespace Game
 
         bool have_player_sc = false;
         std::vector<orbitsim::SpacecraftId> created_ids;
-        created_ids.reserve(_orbiters.size());
+        created_ids.reserve(_orbit.orbiters().size());
 
         const bool sas_down = ctx.input && ctx.input->key_down(Key::T);
 
-        for (auto &orbiter : _orbiters)
+        for (auto &orbiter : _orbit.orbiters())
         {
             WorldVec3 body_pos_world{0.0, 0.0, 0.0};
             glm::dvec3 vel_world(0.0);
@@ -797,7 +627,7 @@ namespace Game
 
             if (orbiter.rails.active())
             {
-                if (const orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id))
+                if (const orbitsim::Spacecraft *sc = _orbit.scenario_owner()->sim.spacecraft_by_id(orbiter.rails.sc_id))
                 {
                     body_pos_world = _scenario_config.system_center +
                             WorldVec3(sc->state.position_m - ref_sim->state.position_m);
@@ -806,7 +636,7 @@ namespace Game
                     ang_vel_world = orbiter.rails.angular_velocity_radps;
                     have_state_snapshot = true;
                 }
-                (void) _orbitsim->sim.remove_spacecraft(orbiter.rails.sc_id);
+                (void) _orbit.scenario_owner()->sim.remove_spacecraft(orbiter.rails.sc_id);
                 orbiter.rails.clear();
             }
 
@@ -853,7 +683,7 @@ namespace Game
                                             ref_sim->state.velocity_mps + rel_vel_mps);
             sc.dry_mass_kg = std::max(1.0, orbiter.mass_kg);
 
-            const auto handle = _orbitsim->sim.create_spacecraft(std::move(sc));
+            const auto handle = _orbit.scenario_owner()->sim.create_spacecraft(std::move(sc));
             if (!handle.valid())
             {
                 continue;
@@ -887,9 +717,9 @@ namespace Game
         {
             for (orbitsim::SpacecraftId id : created_ids)
             {
-                (void) _orbitsim->sim.remove_spacecraft(id);
+                (void) _orbit.scenario_owner()->sim.remove_spacecraft(id);
             }
-            for (auto &orbiter : _orbiters)
+            for (auto &orbiter : _orbit.orbiters())
             {
                 orbiter.rails.clear();
             }
@@ -910,9 +740,9 @@ namespace Game
             return;
         }
 
-        if (!_orbitsim)
+        if (!_orbit.scenario_owner())
         {
-            for (auto &orbiter : _orbiters)
+            for (auto &orbiter : _orbit.orbiters())
             {
                 orbiter.rails.clear();
             }
@@ -920,14 +750,14 @@ namespace Game
             return;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
+        const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
         if (!ref_sim)
         {
-            for (auto &orbiter : _orbiters)
+            for (auto &orbiter : _orbit.orbiters())
             {
                 if (orbiter.rails.active())
                 {
-                    (void) _orbitsim->sim.remove_spacecraft(orbiter.rails.sc_id);
+                    (void) _orbit.scenario_owner()->sim.remove_spacecraft(orbiter.rails.sc_id);
                 }
                 orbiter.rails.clear();
             }
@@ -941,9 +771,9 @@ namespace Game
 
         {
             // Pick a resume anchor so the restored physics origin stays near a meaningful nearby body.
-            const EntityId anchor_eid = select_rebase_anchor_entity();
+            const EntityId anchor_eid = _orbit.select_rebase_anchor_entity();
             const OrbiterInfo *anchor_orbiter = nullptr;
-            for (const auto &o : _orbiters)
+            for (const auto &o : _orbit.orbiters())
             {
                 if (o.entity == anchor_eid)
                 {
@@ -954,12 +784,12 @@ namespace Game
 
             if (!anchor_orbiter)
             {
-                anchor_orbiter = find_player_orbiter();
+                anchor_orbiter = _orbit.find_player_orbiter();
             }
 
             if (anchor_orbiter && anchor_orbiter->rails.active())
             {
-                if (const orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(anchor_orbiter->rails.sc_id))
+                if (const orbitsim::Spacecraft *sc = _orbit.scenario_owner()->sim.spacecraft_by_id(anchor_orbiter->rails.sc_id))
                 {
                     anchor_pos_world = _scenario_config.system_center +
                             WorldVec3(sc->state.position_m - ref_sim->state.position_m);
@@ -976,14 +806,14 @@ namespace Game
         }
 #endif
 
-        for (auto &orbiter : _orbiters)
+        for (auto &orbiter : _orbit.orbiters())
         {
             if (!orbiter.rails.active())
             {
                 continue;
             }
 
-            const orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id);
+            const orbitsim::Spacecraft *sc = _orbit.scenario_owner()->sim.spacecraft_by_id(orbiter.rails.sc_id);
             if (!sc)
             {
                 continue;
@@ -1065,11 +895,11 @@ namespace Game
 #endif
         }
 
-        for (auto &orbiter : _orbiters)
+        for (auto &orbiter : _orbit.orbiters())
         {
             if (orbiter.rails.active())
             {
-                (void) _orbitsim->sim.remove_spacecraft(orbiter.rails.sc_id);
+                (void) _orbit.scenario_owner()->sim.remove_spacecraft(orbiter.rails.sc_id);
             }
             orbiter.rails.clear();
         }
@@ -1087,19 +917,19 @@ namespace Game
         _rails_last_thrust_dir_local = glm::vec3(0.0f);
         _rails_last_torque_dir_local = glm::vec3(0.0f);
 
-        if (!_orbitsim)
+        if (!_orbit.scenario_owner())
         {
             return;
         }
 
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
+        const orbitsim::MassiveBody *ref_sim = _orbit.scenario_owner()->world_reference_sim_body();
         if (!ref_sim)
         {
             return;
         }
 
         OrbiterInfo *player_orbiter = nullptr;
-        for (auto &o : _orbiters)
+        for (auto &o : _orbit.orbiters())
         {
             if (o.is_player)
             {
@@ -1162,7 +992,7 @@ namespace Game
             const bool has_thrust = glm::length(input.local_thrust_dir) > 0.0f;
             if (has_thrust && thrust_force_N > 0.0f)
             {
-                orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(player_orbiter->rails.sc_id);
+                orbitsim::Spacecraft *sc = _orbit.scenario_owner()->sim.spacecraft_by_id(player_orbiter->rails.sc_id);
                 if (sc)
                 {
                     // Rails thrust is modeled as an instantaneous dv on the spacecraft state for this tick.
@@ -1175,7 +1005,7 @@ namespace Game
                     mark_prediction_dirty();
 
                     // Propagate the same velocity change to formation followers.
-                    for (auto &follower : _orbiters)
+                    for (auto &follower : _orbit.orbiters())
                     {
                         if (!follower.formation_hold_enabled || follower.is_player)
                         {
@@ -1189,7 +1019,7 @@ namespace Game
                         {
                             continue;
                         }
-                        if (orbitsim::Spacecraft *fsc = _orbitsim->sim.spacecraft_by_id(follower.rails.sc_id))
+                        if (orbitsim::Spacecraft *fsc = _orbit.scenario_owner()->sim.spacecraft_by_id(follower.rails.sc_id))
                         {
                             fsc->state.velocity_mps += dv_world;
                         }
@@ -1200,11 +1030,11 @@ namespace Game
 
         update_formation_hold(dt_s);
 
-        _orbitsim->sim.step(dt_s);
+        _orbit.scenario_owner()->sim.step(dt_s);
         sync_celestial_render_entities(ctx);
 
         // Sync spacecraft states to entities.
-        for (auto &orbiter : _orbiters)
+        for (auto &orbiter : _orbit.orbiters())
         {
             if (!orbiter.rails.active() || !orbiter.entity.is_valid())
             {
@@ -1221,7 +1051,7 @@ namespace Game
                                       dt_s);
             }
 
-            const orbitsim::Spacecraft *sc = _orbitsim->sim.spacecraft_by_id(orbiter.rails.sc_id);
+            const orbitsim::Spacecraft *sc = _orbit.scenario_owner()->sim.spacecraft_by_id(orbiter.rails.sc_id);
             if (!sc)
             {
                 continue;
