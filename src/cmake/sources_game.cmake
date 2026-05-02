@@ -87,6 +87,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/orbiter_physics_bridge.cpp
   game/states/gameplay/orbital_runtime_system.h
   game/states/gameplay/orbital_runtime_system.cpp
+  game/states/gameplay/orbital_physics_system.h
+  game/states/gameplay/orbital_physics_system.cpp
   game/states/gameplay/time_warp_state.h
   game/states/gameplay/prediction/gameplay_state_prediction_types.h
   game/states/gameplay/prediction/gameplay_prediction_cache_internal.h

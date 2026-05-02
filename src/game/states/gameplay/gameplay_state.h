@@ -10,6 +10,7 @@
 #include "game/input/keybinds.h"
 #include "game/states/gameplay/scenario/scenario_config.h"
 #include "orbital_runtime_system.h"
+#include "orbital_physics_system.h"
 #include "frame_monitor.h"
 #include "time_warp_state.h"
 #include "physics/physics_body.h"
@@ -53,11 +54,6 @@ namespace Game
         friend class ManeuverUiController;
 
     public:
-        static constexpr double kRuntimeOrbiterRailsReturnDistanceRatio = 0.85;
-        // Critically-damped spring controller (exact integration, stable at any dt).
-        static constexpr double kFormationHoldOmega = 0.5;          // natural frequency [rad/s]
-        static constexpr double kFormationHoldMaxDvPerStepMps = 20.0; // safety clamp on dv per tick
-
         GameplayState();
         explicit GameplayState(ScenarioConfig scenario_config);
 
@@ -93,19 +89,11 @@ namespace Game
 
         // Simulation and time warp
         double current_sim_time_s() const;
-        void step_physics(GameStateContext &ctx, float fixed_dt);
+        OrbitalPhysicsSystem::Context build_orbital_physics_context();
         ComponentContext build_component_context(GameStateContext &ctx, float alpha = 0.0f);
         void reset_time_warp_state();
         void handle_time_warp_input(GameStateContext &ctx);
         void set_time_warp_level(GameStateContext &ctx, int level);
-        void enter_rails_warp(GameStateContext &ctx);
-        void exit_rails_warp(GameStateContext &ctx);
-        void rails_warp_step(GameStateContext &ctx, double dt_s);
-        void update_runtime_orbiter_rails();
-        void sync_runtime_orbiter_rails(double dt_s);
-        bool promote_orbiter_to_rails(OrbiterInfo &orbiter);
-        bool demote_orbiter_from_rails(OrbiterInfo &orbiter);
-        void sync_celestial_render_entities(GameStateContext &ctx);
 
         // Orbiter adapters
         void update_rebase_anchor();
@@ -113,7 +101,6 @@ namespace Game
         bool cycle_player_orbiter(GameStateContext &ctx, int direction);
         void sync_player_camera_target(GameStateContext &ctx) const;
         void sync_player_collision_callbacks();
-        void update_formation_hold(double dt_s);
 
         // Prediction entry points
         PredictionHostContext build_prediction_host_context(const GameStateContext *ctx = nullptr) const;
@@ -147,13 +134,6 @@ namespace Game
 
         std::unique_ptr<Physics::PhysicsWorld> _physics;
         std::unique_ptr<Physics::PhysicsContext> _physics_context;
-        enum class VelocityOriginMode
-        {
-            PerStepAnchorSync,
-            FreeFallAnchorFrame
-        };
-
-        VelocityOriginMode _velocity_origin_mode{VelocityOriginMode::FreeFallAnchorFrame};
 
         bool _scenario_preloaded{false};
         ScenarioConfig _scenario_config;
@@ -173,6 +153,7 @@ namespace Game
         bool _scenario_io_status_ok{true};
 
         OrbitalRuntimeSystem _orbit;
+        OrbitalPhysicsSystem _orbital_physics;
 
         struct ContactLogEntry
         {
@@ -206,11 +187,6 @@ namespace Game
 
         TimeWarpState _time_warp{};
         FrameMonitor _frame_monitor{};
-        bool _rails_warp_active{false};
-        double _last_sim_step_dt_s{0.0};
-        bool _rails_thrust_applied_this_tick{false};
-        glm::vec3 _rails_last_thrust_dir_local{0.0f};
-        glm::vec3 _rails_last_torque_dir_local{0.0f};
     };
 
     #undef VULKAN_ENGINE_GAMEPLAY_STATE_PRIVATE

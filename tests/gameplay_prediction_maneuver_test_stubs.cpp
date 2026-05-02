@@ -88,11 +88,7 @@ namespace Game
     {
         _time_warp.warp_level = 0;
         _time_warp.mode = TimeWarpState::Mode::Realtime;
-        _rails_warp_active = false;
-        _last_sim_step_dt_s = 0.0;
-        _rails_thrust_applied_this_tick = false;
-        _rails_last_thrust_dir_local = glm::vec3(0.0f);
-        _rails_last_torque_dir_local = glm::vec3(0.0f);
+        _orbital_physics.reset();
     }
 
     void GameplayState::handle_time_warp_input(GameStateContext &ctx) { (void) ctx; }
@@ -107,6 +103,37 @@ namespace Game
         comp_ctx.ui_capture_keyboard = false;
         comp_ctx.interpolation_alpha = alpha;
         return comp_ctx;
+    }
+
+    OrbitalPhysicsSystem::Context GameplayState::build_orbital_physics_context()
+    {
+        return OrbitalPhysicsSystem::Context{
+            .renderer = _renderer,
+            .world = _world,
+            .orbit = _orbit,
+            .physics = _physics.get(),
+            .physics_context = _physics_context.get(),
+            .scenario_config = _scenario_config,
+            .keybinds = &_keybinds,
+            .orbiter_world_state_sampler =
+                    [](const OrbiterInfo &sample_orbiter,
+                       WorldVec3 &out_pos_world,
+                       glm::dvec3 &out_vel_world,
+                       glm::vec3 &out_vel_local) {
+                        (void) sample_orbiter;
+                        out_pos_world = WorldVec3(0.0, 0.0, 0.0);
+                        out_vel_world = glm::dvec3(0.0);
+                        out_vel_local = glm::vec3(0.0f);
+                        return false;
+                    },
+            .ui_capture_keyboard = [](const GameStateContext &frame_ctx) {
+                (void) frame_ctx;
+                return false;
+            },
+            .mark_prediction_dirty = [this]() {
+                mark_prediction_dirty();
+            },
+        };
     }
 
     void GameplayState::update_rebase_anchor()

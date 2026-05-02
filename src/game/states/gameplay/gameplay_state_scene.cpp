@@ -900,9 +900,9 @@ namespace Game
             }
         }
 
-        if (!_rails_warp_active && target->rails.active())
+        if (!_orbital_physics.rails_warp_active() && target->rails.active())
         {
-            (void) demote_orbiter_from_rails(*target);
+            (void) _orbital_physics.demote_orbiter_from_rails(build_orbital_physics_context(), *target);
         }
 
         for (auto &orbiter : _orbit.orbiters())

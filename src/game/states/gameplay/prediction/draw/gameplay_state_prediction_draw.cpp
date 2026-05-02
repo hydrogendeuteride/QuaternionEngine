@@ -29,7 +29,7 @@ namespace Game
 
         out.alpha_f = std::clamp(ctx.interpolation_alpha(), 0.0f, 1.0f);
         out.display_time_s = Draw::compute_prediction_display_time_s(_orbit.scenario_owner()->sim.time_s(),
-                                                                     _last_sim_step_dt_s,
+                                                                     _orbital_physics.last_sim_step_dt_s(),
                                                                      ctx.fixed_delta_time(),
                                                                      out.alpha_f);
         if (!std::isfinite(out.display_time_s))

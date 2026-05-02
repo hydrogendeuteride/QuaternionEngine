@@ -3,6 +3,7 @@
 #include "orbit_helpers.h"
 #include "game/states/gameplay/gameplay_settings.h"
 #include "game/states/gameplay/maneuver/maneuver_ui_controller.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "game/states/gameplay/scenario/scenario_loader.h"
 #include "game/component/ship_controller.h"
 #include "game/states/pause_state.h"
@@ -198,12 +199,13 @@ namespace Game
 
         if (desired_mode == TimeWarpState::Mode::RailsWarp)
         {
-            if (!_rails_warp_active)
+            OrbitalPhysicsSystem::Context orbital_physics = build_orbital_physics_context();
+            if (!_orbital_physics.rails_warp_active())
             {
-                enter_rails_warp(ctx);
+                (void) _orbital_physics.enter_rails_warp(orbital_physics, ctx);
             }
 
-            if (_rails_warp_active)
+            if (_orbital_physics.rails_warp_active())
             {
                 double dt_s = static_cast<double>(fixed_dt) * warp_factor;
                 if (_maneuver.runtime().warp_to_time_active)
@@ -216,9 +218,9 @@ namespace Game
                     }
                 }
                 _fixed_time_s += dt_s;
-                _last_sim_step_dt_s = dt_s;
+                _orbital_physics.set_last_sim_step_dt_s(dt_s);
 
-                rails_warp_step(ctx, dt_s);
+                _orbital_physics.rails_warp_step(orbital_physics, ctx, dt_s);
                 update_maneuver_nodes_execution(ctx);
                 update_prediction(ctx, static_cast<float>(dt_s));
                 return;
@@ -231,16 +233,17 @@ namespace Game
                     : 1;
 
         const double effective_dt_s = static_cast<double>(fixed_dt) * static_cast<double>(physics_steps);
-        _last_sim_step_dt_s = static_cast<double>(fixed_dt);
+        _orbital_physics.set_last_sim_step_dt_s(static_cast<double>(fixed_dt));
 
         ComponentContext comp_ctx = build_component_context(ctx);
+        OrbitalPhysicsSystem::Context orbital_physics = build_orbital_physics_context();
 
         for (int i = 0; i < physics_steps; ++i)
         {
             _fixed_time_s += static_cast<double>(fixed_dt);
             _world.entities().fixed_update_components(comp_ctx, fixed_dt);
-            update_formation_hold(static_cast<double>(fixed_dt));
-            step_physics(ctx, fixed_dt);
+            _orbital_physics.update_formation_hold(orbital_physics, static_cast<double>(fixed_dt));
+            _orbital_physics.step_physics(orbital_physics, ctx, fixed_dt);
         }
 
         update_maneuver_nodes_execution(ctx);
@@ -251,11 +254,7 @@ namespace Game
     {
         _time_warp.warp_level = 0;
         _time_warp.mode = TimeWarpState::Mode::Realtime;
-        _rails_warp_active = false;
-        _last_sim_step_dt_s = 0.0;
-        _rails_thrust_applied_this_tick = false;
-        _rails_last_thrust_dir_local = glm::vec3(0.0f);
-        _rails_last_torque_dir_local = glm::vec3(0.0f);
+        _orbital_physics.reset();
     }
 
     void GameplayState::handle_time_warp_input(GameStateContext &ctx)
@@ -321,5 +320,35 @@ namespace Game
         comp_ctx.ui_capture_keyboard = ctx.renderer && ctx.renderer->ui() && ctx.renderer->ui()->wantCaptureKeyboard();
         comp_ctx.interpolation_alpha = alpha;
         return comp_ctx;
+    }
+
+    OrbitalPhysicsSystem::Context GameplayState::build_orbital_physics_context()
+    {
+        return OrbitalPhysicsSystem::Context{
+            .renderer = _renderer,
+            .world = _world,
+            .orbit = _orbit,
+            .physics = _physics.get(),
+            .physics_context = _physics_context.get(),
+            .scenario_config = _scenario_config,
+            .keybinds = &_keybinds,
+            .orbiter_world_state_sampler =
+                    [this](const OrbiterInfo &sample_orbiter,
+                           WorldVec3 &out_pos_world,
+                           glm::dvec3 &out_vel_world,
+                           glm::vec3 &out_vel_local) {
+                        return GameplayPredictionAdapter(*this).get_orbiter_world_state(
+                                sample_orbiter,
+                                out_pos_world,
+                                out_vel_world,
+                                out_vel_local);
+                    },
+            .ui_capture_keyboard = [](const GameStateContext &frame_ctx) {
+                return frame_ctx.renderer && frame_ctx.renderer->ui() && frame_ctx.renderer->ui()->wantCaptureKeyboard();
+            },
+            .mark_prediction_dirty = [this]() {
+                mark_prediction_dirty();
+            },
+        };
     }
 } // namespace Game

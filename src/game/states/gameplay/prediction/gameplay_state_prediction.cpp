@@ -83,7 +83,7 @@ namespace Game
         host.subjects = prediction.build_prediction_subject_descriptors();
         host.player_subject = prediction.player_prediction_subject_key();
         host.current_sim_time_s = current_sim_time_s();
-        host.last_sim_step_dt_s = _last_sim_step_dt_s;
+        host.last_sim_step_dt_s = _orbital_physics.last_sim_step_dt_s();
         host.fixed_delta_time_s = ctx ? ctx->fixed_delta_time() : 0.0f;
         host.interpolation_alpha = ctx ? std::clamp(ctx->interpolation_alpha(), 0.0f, 1.0f) : 0.0f;
         host.frame_delta_time_s = ctx ? ctx->delta_time() : 0.0f;
@@ -511,9 +511,9 @@ namespace Game
         }
 
         // Rails warp uses a separate thrust path from the physics-driven ship controller.
-        if (_rails_warp_active && _time_warp.mode == TimeWarpState::Mode::RailsWarp)
+        if (_orbital_physics.rails_warp_active() && _time_warp.mode == TimeWarpState::Mode::RailsWarp)
         {
-            return _rails_thrust_applied_this_tick;
+            return _orbital_physics.rails_thrust_applied_this_tick();
         }
 
         const EntityId player_eid = _orbit.player_entity();

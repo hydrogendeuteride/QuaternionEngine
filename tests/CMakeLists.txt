@@ -189,6 +189,7 @@ add_executable(gameplay_time_warp_transition_tests
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/orbital_runtime_system.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/orbiter_physics_bridge.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/formation_hold_system.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/orbital_physics_system.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_sim.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/orbit_prediction_math.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/orbit/render_curve/orbit_render_curve.cpp"
@@ -260,6 +261,7 @@ add_executable(gameplay_prediction_maneuver_tests
   "${PROJECT_SOURCE_DIR}/src/core/orbit_plot/orbit_plot.cpp"
   ${ORBIT_PREDICTION_SERVICE_SOURCES}
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/gameplay_state_sim.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/orbital_physics_system.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/orbiter_physics_bridge.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/orbital_runtime_system.cpp"
   "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/formation_hold_system.cpp"

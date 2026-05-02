@@ -134,7 +134,9 @@ namespace Game
             return;
         }
 
-        const bool rails = _rails_warp_active && _time_warp.mode == TimeWarpState::Mode::RailsWarp;
+        const bool rails =
+                _orbital_physics.rails_warp_active() &&
+                _time_warp.mode == TimeWarpState::Mode::RailsWarp;
         bool applied = false;
 
         if (rails && _orbit.scenario_owner())

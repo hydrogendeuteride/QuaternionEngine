@@ -54,7 +54,9 @@ namespace Game
 
             const float alpha_f = std::clamp(ctx.interpolation_alpha(), 0.0f, 1.0f);
             const double interp_dt_s =
-                    (_last_sim_step_dt_s > 0.0) ? _last_sim_step_dt_s : static_cast<double>(ctx.fixed_delta_time());
+                    (_orbital_physics.last_sim_step_dt_s() > 0.0)
+                        ? _orbital_physics.last_sim_step_dt_s()
+                        : static_cast<double>(ctx.fixed_delta_time());
             double now_s = _orbit.scenario_owner()->sim.time_s();
             if (std::isfinite(interp_dt_s) && interp_dt_s > 0.0)
             {

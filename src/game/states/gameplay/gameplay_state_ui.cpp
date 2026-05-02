@@ -469,12 +469,16 @@ namespace Game
                             if (sc)
                             {
                                 ImGui::Separator();
-                                const bool rails_warp = _rails_warp_active && _time_warp.mode == TimeWarpState::Mode::RailsWarp;
-                                const glm::vec3 td = rails_warp ? _rails_last_thrust_dir_local : sc->last_thrust_dir();
+                                const bool rails_warp =
+                                        _orbital_physics.rails_warp_active() &&
+                                        _time_warp.mode == TimeWarpState::Mode::RailsWarp;
+                                const glm::vec3 td = rails_warp
+                                                             ? _orbital_physics.rails_last_thrust_dir_local()
+                                                             : sc->last_thrust_dir();
                                 ImGui::Text("SAS: %s  [T] toggle", sc->sas_enabled() ? "ON " : "OFF");
                                 ImGui::Text("Thrust input: (%.1f, %.1f, %.1f)%s",
                                             td.x, td.y, td.z,
-                                            (rails_warp && _rails_thrust_applied_this_tick) ? " [applied]" : "");
+                                            (rails_warp && _orbital_physics.rails_thrust_applied_this_tick()) ? " [applied]" : "");
 
                                 if (rails_warp)
                                 {
@@ -949,14 +953,15 @@ namespace Game
 #if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
                     if (_physics && _physics_context && ImGui::CollapsingHeader("Physics Debug"))
                     {
-                    int mode_idx = (_velocity_origin_mode == VelocityOriginMode::PerStepAnchorSync) ? 0 : 1;
+                    using VelocityOriginMode = OrbitalPhysicsSystem::VelocityOriginMode;
+                    int mode_idx = (_orbital_physics.velocity_origin_mode() == VelocityOriginMode::PerStepAnchorSync) ? 0 : 1;
                     const char *modes[] = {"Per-step anchor sync", "Free-fall anchor frame"};
                     if (ImGui::Combo("Velocity origin mode", &mode_idx, modes, IM_ARRAYSIZE(modes)))
                     {
-                        _velocity_origin_mode =
+                        _orbital_physics.set_velocity_origin_mode(
                                 (mode_idx == 0)
                                     ? VelocityOriginMode::PerStepAnchorSync
-                                    : VelocityOriginMode::FreeFallAnchorFrame;
+                                    : VelocityOriginMode::FreeFallAnchorFrame);
                         mark_prediction_dirty();
                     }
 

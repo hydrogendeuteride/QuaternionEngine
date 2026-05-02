@@ -33,9 +33,7 @@ namespace Game
             , _maneuver(state._maneuver)
             , _fixed_time_s(state._fixed_time_s)
             , _time_warp(state._time_warp)
-            , _rails_warp_active(state._rails_warp_active)
-            , _last_sim_step_dt_s(state._last_sim_step_dt_s)
-            , _rails_thrust_applied_this_tick(state._rails_thrust_applied_this_tick)
+            , _orbital_physics(state._orbital_physics)
         {
         }
 
@@ -241,8 +239,6 @@ namespace Game
         ManeuverSystem &_maneuver;
         double &_fixed_time_s;
         TimeWarpState &_time_warp;
-        bool &_rails_warp_active;
-        double &_last_sim_step_dt_s;
-        bool &_rails_thrust_applied_this_tick;
+        OrbitalPhysicsSystem &_orbital_physics;
     };
 } // namespace Game

@@ -15,7 +15,7 @@ TEST(GameplayStateTimeWarpTransition, RailsRequestWithoutOrbitSimFallsBackToPhys
     Game::GameStateContext ctx{};
 
     state._orbit.scenario_owner().reset();
-    state._rails_warp_active = false;
+    state._orbital_physics.set_rails_warp_active_for_test(false);
     state._time_warp.mode = Mode::Realtime;
     state._time_warp.warp_level = 0;
 
@@ -23,7 +23,7 @@ TEST(GameplayStateTimeWarpTransition, RailsRequestWithoutOrbitSimFallsBackToPhys
 
     EXPECT_EQ(state._time_warp.warp_level, TimeWarpState::kMaxPhysicsWarpLevel);
     EXPECT_EQ(state._time_warp.mode, Mode::PhysicsWarp);
-    EXPECT_FALSE(state._rails_warp_active);
+    EXPECT_FALSE(state._orbital_physics.rails_warp_active());
 }
 
 TEST(GameplayStateTimeWarpTransition, LeavingRailsWarpClearsRailsHandlesAndDisablesRailsState)
@@ -37,7 +37,7 @@ TEST(GameplayStateTimeWarpTransition, LeavingRailsWarpClearsRailsHandlesAndDisab
     state._orbit.orbiters().push_back(orbiter);
 
     state._orbit.scenario_owner().reset();
-    state._rails_warp_active = true;
+    state._orbital_physics.set_rails_warp_active_for_test(true);
     state._time_warp.mode = Mode::RailsWarp;
     state._time_warp.warp_level = TimeWarpState::kMaxWarpLevel;
 
@@ -46,7 +46,7 @@ TEST(GameplayStateTimeWarpTransition, LeavingRailsWarpClearsRailsHandlesAndDisab
     ASSERT_EQ(state._orbit.orbiters().size(), 1u);
     EXPECT_EQ(state._time_warp.mode, Mode::Realtime);
     EXPECT_EQ(state._time_warp.warp_level, 0);
-    EXPECT_FALSE(state._rails_warp_active);
+    EXPECT_FALSE(state._orbital_physics.rails_warp_active());
     EXPECT_EQ(state._orbit.orbiters()[0].rails.sc_id, orbitsim::kInvalidSpacecraftId);
 }
 
@@ -60,14 +60,14 @@ TEST(GameplayStateTimeWarpTransition, WarpLevelClampsToBounds)
     EXPECT_EQ(state._time_warp.mode, Mode::Realtime);
 
     // Keep mode in Rails so upper-bound clamp can be asserted without fallback.
-    state._rails_warp_active = true;
+    state._orbital_physics.set_rails_warp_active_for_test(true);
     state._time_warp.mode = Mode::RailsWarp;
     state._time_warp.warp_level = TimeWarpState::kMaxWarpLevel;
 
     state.set_time_warp_level(ctx, 999);
     EXPECT_EQ(state._time_warp.warp_level, TimeWarpState::kMaxWarpLevel);
     EXPECT_EQ(state._time_warp.mode, Mode::RailsWarp);
-    EXPECT_TRUE(state._rails_warp_active);
+    EXPECT_TRUE(state._orbital_physics.rails_warp_active());
 }
 
 int main(int argc, char **argv)
