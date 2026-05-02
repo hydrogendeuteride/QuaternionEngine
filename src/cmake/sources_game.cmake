@@ -97,6 +97,7 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/prediction/streamed_chunk_assembly_builder.h
   game/states/gameplay/prediction/streamed_chunk_assembly_builder.cpp
   game/states/gameplay/prediction/gameplay_prediction_state.h
+  game/states/gameplay/prediction/prediction_host_context.h
   game/states/gameplay/prediction/prediction_system.h
   game/states/gameplay/prediction/prediction_system.cpp
   game/states/gameplay/prediction/gameplay_prediction_derived_service.h

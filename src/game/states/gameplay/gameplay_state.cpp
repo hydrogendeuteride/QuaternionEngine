@@ -21,12 +21,14 @@ namespace Game
 
     GameplayState::GameplayState()
         : _scenario_config()
+        , _prediction(std::make_unique<PredictionSystem>())
     {
     }
 
     GameplayState::GameplayState(ScenarioConfig scenario_config)
         : _scenario_preloaded(true)
         , _scenario_config(std::move(scenario_config))
+        , _prediction(std::make_unique<PredictionSystem>())
     {
     }
 
@@ -45,13 +47,7 @@ namespace Game
         _scenario_io_status_ok = true;
         _settings_io_status.clear();
         _settings_io_status_ok = true;
-        _prediction_system.reset_services();
-        _prediction.tracks.clear();
-        _prediction.groups.clear();
-        _prediction.selection.clear();
-        _prediction.frame_selection.clear();
-        _prediction.analysis_selection.clear();
-        _prediction.orbit_plot_perf = {};
+        _prediction->reset_session_state();
 
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
         {
@@ -131,14 +127,7 @@ namespace Game
         _orbitsim.reset();
         _orbiters.clear();
         _contact_log.clear();
-        _prediction.tracks.clear();
-        _prediction.groups.clear();
-        _prediction.selection.clear();
-        _prediction.frame_selection.clear();
-        _prediction.analysis_selection.clear();
-        _prediction.dirty = true;
-        _prediction_system.reset_services();
-        _prediction.orbit_plot_perf = {};
+        _prediction->reset_session_state();
         _renderer = nullptr;
         if (ctx.renderer && ctx.renderer->_context && ctx.renderer->_context->orbit_plot)
         {

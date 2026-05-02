@@ -25,8 +25,8 @@ namespace Game
 
         const bool can_refresh_from_prediction =
                 _orbitsim &&
-                _prediction.selection.active_subject.valid() &&
-                prediction_subject_is_player(_prediction.selection.active_subject);
+                _prediction->state().selection.active_subject.valid() &&
+                prediction_subject_is_player(_prediction->state().selection.active_subject);
 
         const OrbitPredictionCache *active_cache = can_refresh_from_prediction ? player_prediction_cache() : nullptr;
         const OrbitPredictionCache *stable_cache =

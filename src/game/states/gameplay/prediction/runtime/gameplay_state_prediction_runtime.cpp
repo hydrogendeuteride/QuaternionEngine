@@ -4,7 +4,6 @@
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 #include "game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.h"
-#include "game/states/gameplay/prediction/runtime/prediction_runtime_controller.h"
 
 #include <cmath>
 #include <limits>
@@ -186,20 +185,193 @@ namespace Game
             return std::min(available_window_s, preview_window_s);
         }
 
+        struct PredictionWindowPlannerInput
+        {
+            const PredictionTrackState *track{nullptr};
+            PredictionTimeContext time_ctx{};
+            ManeuverPlanWindowSettings plan_windows{};
+            double future_window_s{0.0};
+            double plan_horizon_s{0.0};
+            bool draw_future_segment{false};
+            bool draw_full_orbit{false};
+            bool with_maneuvers{false};
+            bool live_preview_active{false};
+        };
+
+        PredictionWindowPolicyResult plan_prediction_windows(const PredictionWindowPlannerInput &input)
+        {
+            const PredictionTrackState *track = input.track;
+            const PredictionTimeContext &time_ctx = input.time_ctx;
+
+            PredictionWindowPolicyResult out{};
+            out.request_window_s =
+                    std::max(0.0, input.draw_future_segment ? input.future_window_s : 0.0);
+            const double solve_margin_s = std::max(0.0, input.plan_windows.solve_margin_s);
+            const double post_node_coverage_s = OrbitPredictionTuning::kPostNodeCoverageMinS;
+            const bool supports_maneuver_windows = input.with_maneuvers && time_ctx.has_plan;
+            const double plan_horizon_s = input.plan_horizon_s;
+            const AuthoredPlanWindow authored_plan_window =
+                    supports_maneuver_windows
+                            ? resolve_authored_plan_window(time_ctx, plan_horizon_s, post_node_coverage_s)
+                            : AuthoredPlanWindow{};
+
+            if (std::isfinite(time_ctx.last_future_node_time_s) &&
+                std::isfinite(time_ctx.sim_now_s) &&
+                time_ctx.last_future_node_time_s > time_ctx.sim_now_s)
+            {
+                const double required_plan_end_s =
+                        authored_plan_window.valid
+                                ? authored_plan_window.t1_s
+                                : (time_ctx.last_future_node_time_s + post_node_coverage_s);
+                out.request_window_s = std::max(
+                        out.request_window_s,
+                        std::max(0.0, required_plan_end_s - time_ctx.sim_now_s));
+            }
+
+            if (!supports_maneuver_windows)
+            {
+                return out;
+            }
+
+            const PredictionWindowAnchor visual_anchor = select_visual_anchor(time_ctx);
+            const PredictionWindowAnchor pick_anchor = select_pick_anchor(time_ctx);
+            const PredictionWindowAnchor exact_anchor = select_exact_anchor(time_ctx);
+
+            out.visual_window_s = plan_horizon_s;
+            out.pick_window_s = plan_horizon_s;
+            out.exact_window_s = plan_horizon_s;
+            out.visual_anchor_time_s = visual_anchor.time_s;
+            out.pick_anchor_time_s = pick_anchor.time_s;
+            out.exact_anchor_time_s = exact_anchor.time_s;
+            out.visual_anchor_kind = visual_anchor.kind;
+            out.pick_anchor_kind = pick_anchor.kind;
+            out.exact_anchor_kind = exact_anchor.kind;
+            out.visual_anchor_is_future = visual_anchor.is_future;
+            out.pick_anchor_is_future = pick_anchor.is_future;
+            out.exact_anchor_is_future = exact_anchor.is_future;
+
+            if (input.live_preview_active &&
+                std::isfinite(time_ctx.selected_node_time_s) &&
+                std::isfinite(time_ctx.sim_now_s))
+            {
+                const double anchor_offset_s = std::max(0.0, time_ctx.selected_node_time_s - time_ctx.sim_now_s);
+                const double preview_exact_window_s =
+                        std::min(solve_margin_s,
+                                 std::max(OrbitPredictionTuning::kPreviewExactWindowMinS,
+                                          std::max(0.0, input.plan_windows.preview_window_s)));
+                if (preview_exact_window_s > 0.0)
+                {
+                    out.request_window_s = std::max(out.request_window_s,
+                                                    anchor_offset_s + (2.0 * preview_exact_window_s));
+                }
+                const double anchored_visual_window_s = resolve_live_preview_visual_window_s(out.request_window_s,
+                                                                                             anchor_offset_s,
+                                                                                             input.plan_windows.preview_window_s);
+                const double exact_window_s = std::max(0.0, input.plan_windows.solve_margin_s);
+
+                out.visual_window_s = anchored_visual_window_s;
+                out.pick_window_s = anchored_visual_window_s;
+                out.exact_window_s = exact_window_s;
+                out.visual_anchor_time_s = time_ctx.selected_node_time_s;
+                out.pick_anchor_time_s = time_ctx.selected_node_time_s;
+                out.exact_anchor_time_s = time_ctx.selected_node_time_s;
+                out.visual_anchor_kind = PredictionTimeAnchorKind::SelectedNode;
+                out.pick_anchor_kind = PredictionTimeAnchorKind::SelectedNode;
+                out.exact_anchor_kind = PredictionTimeAnchorKind::SelectedNode;
+                out.visual_anchor_is_future = true;
+                out.pick_anchor_is_future = true;
+                out.exact_anchor_is_future = true;
+                out.valid =
+                        out.visual_window_s > 0.0 &&
+                        out.pick_window_s > 0.0 &&
+                        out.exact_window_s > 0.0;
+                return out;
+            }
+
+            if (authored_plan_window.valid)
+            {
+                out.visual_window_start_time_s = authored_plan_window.t0_s;
+                out.visual_window_end_time_s = authored_plan_window.t1_s;
+                out.pick_window_start_time_s = authored_plan_window.t0_s;
+                out.pick_window_end_time_s = authored_plan_window.t1_s;
+            }
+
+            if (std::isfinite(visual_anchor.time_s))
+            {
+                if (!authored_plan_window.valid && std::isfinite(time_ctx.last_future_node_time_s))
+                {
+                    const double authored_plan_end_s =
+                            resolve_authored_plan_end_s(time_ctx,
+                                                        std::isfinite(time_ctx.first_future_node_time_s)
+                                                                ? time_ctx.first_future_node_time_s
+                                                                : visual_anchor.time_s,
+                                                        time_ctx.last_future_node_time_s,
+                                                        plan_horizon_s,
+                                                        post_node_coverage_s);
+                    const double authored_plan_span_s = std::max(0.0, authored_plan_end_s - visual_anchor.time_s);
+                    out.visual_window_s = std::max(out.visual_window_s, authored_plan_span_s);
+                }
+
+                if (input.draw_full_orbit)
+                {
+                    double orbit_visual_span_s = 0.0;
+                    if (track &&
+                        std::isfinite(track->cache.analysis.orbital_period_s) &&
+                        track->cache.analysis.orbital_period_s > 0.0)
+                    {
+                        orbit_visual_span_s =
+                                track->cache.analysis.orbital_period_s * OrbitPredictionTuning::kFullOrbitDrawPeriodScale;
+                    }
+                    else if (std::isfinite(time_ctx.trajectory_t1_s) && time_ctx.trajectory_t1_s > visual_anchor.time_s)
+                    {
+                        orbit_visual_span_s = time_ctx.trajectory_t1_s - visual_anchor.time_s;
+                    }
+
+                    out.visual_window_s = std::max(out.visual_window_s, orbit_visual_span_s);
+                }
+            }
+
+            if (std::isfinite(pick_anchor.time_s) &&
+                !authored_plan_window.valid &&
+                std::isfinite(time_ctx.last_future_node_time_s))
+            {
+                const double authored_plan_end_s =
+                        resolve_authored_plan_end_s(time_ctx,
+                                                    std::isfinite(time_ctx.first_future_node_time_s)
+                                                            ? time_ctx.first_future_node_time_s
+                                                            : pick_anchor.time_s,
+                                                    time_ctx.last_future_node_time_s,
+                                                    plan_horizon_s,
+                                                    post_node_coverage_s);
+                const double authored_plan_span_s = std::max(0.0, authored_plan_end_s - pick_anchor.time_s);
+                out.pick_window_s = std::max(out.pick_window_s, authored_plan_span_s);
+            }
+
+            out.valid =
+                    std::isfinite(out.visual_anchor_time_s) &&
+                    std::isfinite(out.pick_anchor_time_s) &&
+                    std::isfinite(out.exact_anchor_time_s) &&
+                    out.visual_window_s > 0.0 &&
+                    out.pick_window_s > 0.0 &&
+                    out.exact_window_s > 0.0;
+
+            return out;
+        }
+
     } // namespace
 
     void GameplayState::sync_prediction_dirty_flag()
     {
         // Collapse only visible-track rebuild demand into one cheap UI-facing flag.
         const std::vector<PredictionSubjectKey> visible_subjects = collect_visible_prediction_subjects();
-        _prediction_system.sync_visible_dirty_flag(visible_subjects);
+        _prediction->sync_visible_dirty_flag(visible_subjects);
     }
 
     void GameplayState::mark_prediction_dirty()
     {
         // Force only the active/overlay-visible tracks to rebuild on the next prediction update.
         const std::vector<PredictionSubjectKey> visible_subjects = collect_visible_prediction_subjects();
-        _prediction_system.mark_visible_tracks_dirty(visible_subjects);
+        _prediction->mark_visible_tracks_dirty(visible_subjects);
         sync_prediction_dirty_flag();
     }
 
@@ -211,24 +383,24 @@ namespace Game
                       _maneuver.plan().selected_node_id,
                       _maneuver.plan().nodes.size());
 
-        _prediction_system.invalidate_maneuver_plan_revision(revision);
+        _prediction->invalidate_maneuver_plan_revision(revision);
 
         mark_prediction_dirty();
     }
 
     void GameplayState::clear_maneuver_prediction_artifacts()
     {
-        _prediction_system.clear_maneuver_prediction_artifacts();
+        _prediction->clear_maneuver_prediction_artifacts();
     }
 
     void GameplayState::clear_prediction_runtime()
     {
-        PredictionRuntimeController::clear_runtime(_prediction);
+        _prediction->clear_runtime();
     }
 
     void GameplayState::clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects)
     {
-        PredictionRuntimeController::clear_visible_runtime(_prediction, visible_subjects);
+        _prediction->clear_visible_runtime(visible_subjects);
     }
 
     double GameplayState::prediction_display_window_s(const PredictionSubjectKey key,
@@ -452,160 +624,17 @@ namespace Game
                                                                                  const bool with_maneuvers) const
     {
         const PredictionSubjectKey key = track ? track->key : PredictionSubjectKey{};
-
-        PredictionWindowPolicyResult out{};
-        out.request_window_s =
-                std::max(0.0, _prediction.draw_future_segment ? prediction_future_window_s(key) : 0.0);
-        const double solve_margin_s = std::max(0.0, _maneuver.settings().plan_windows.solve_margin_s);
-        const double post_node_coverage_s = OrbitPredictionTuning::kPostNodeCoverageMinS;
-        const bool supports_maneuver_windows = with_maneuvers && time_ctx.has_plan;
-        const double plan_horizon_s = maneuver_plan_horizon_s();
-        const AuthoredPlanWindow authored_plan_window =
-                supports_maneuver_windows
-                        ? resolve_authored_plan_window(time_ctx, plan_horizon_s, post_node_coverage_s)
-                        : AuthoredPlanWindow{};
-
-        if (std::isfinite(time_ctx.last_future_node_time_s) &&
-            std::isfinite(time_ctx.sim_now_s) &&
-            time_ctx.last_future_node_time_s > time_ctx.sim_now_s)
-        {
-            const double required_plan_end_s =
-                    authored_plan_window.valid
-                            ? authored_plan_window.t1_s
-                            : (time_ctx.last_future_node_time_s + post_node_coverage_s);
-            out.request_window_s = std::max(
-                    out.request_window_s,
-                    std::max(0.0, required_plan_end_s - time_ctx.sim_now_s));
-        }
-
-        if (!supports_maneuver_windows)
-        {
-            return out;
-        }
-
-        const PredictionWindowAnchor visual_anchor = select_visual_anchor(time_ctx);
-        const PredictionWindowAnchor pick_anchor = select_pick_anchor(time_ctx);
-        const PredictionWindowAnchor exact_anchor = select_exact_anchor(time_ctx);
-
-        out.visual_window_s = plan_horizon_s;
-        out.pick_window_s = plan_horizon_s;
-        out.exact_window_s = plan_horizon_s;
-        out.visual_anchor_time_s = visual_anchor.time_s;
-        out.pick_anchor_time_s = pick_anchor.time_s;
-        out.exact_anchor_time_s = exact_anchor.time_s;
-        out.visual_anchor_kind = visual_anchor.kind;
-        out.pick_anchor_kind = pick_anchor.kind;
-        out.exact_anchor_kind = exact_anchor.kind;
-        out.visual_anchor_is_future = visual_anchor.is_future;
-        out.pick_anchor_is_future = pick_anchor.is_future;
-        out.exact_anchor_is_future = exact_anchor.is_future;
-
-        if (maneuver_live_preview_active(with_maneuvers) &&
-            std::isfinite(time_ctx.selected_node_time_s) &&
-            std::isfinite(time_ctx.sim_now_s))
-        {
-            const double anchor_offset_s = std::max(0.0, time_ctx.selected_node_time_s - time_ctx.sim_now_s);
-            const double preview_exact_window_s =
-                    std::min(solve_margin_s,
-                             std::max(OrbitPredictionTuning::kPreviewExactWindowMinS,
-                                      std::max(0.0, _maneuver.settings().plan_windows.preview_window_s)));
-            if (preview_exact_window_s > 0.0)
-            {
-                out.request_window_s = std::max(out.request_window_s,
-                                                anchor_offset_s + (2.0 * preview_exact_window_s));
-            }
-            const double anchored_visual_window_s = resolve_live_preview_visual_window_s(out.request_window_s,
-                                                                                         anchor_offset_s,
-                                                                                         _maneuver.settings().plan_windows.preview_window_s);
-            const double exact_window_s = std::max(0.0, _maneuver.settings().plan_windows.solve_margin_s);
-
-            out.visual_window_s = anchored_visual_window_s;
-            out.pick_window_s = anchored_visual_window_s;
-            out.exact_window_s = exact_window_s;
-            out.visual_anchor_time_s = time_ctx.selected_node_time_s;
-            out.pick_anchor_time_s = time_ctx.selected_node_time_s;
-            out.exact_anchor_time_s = time_ctx.selected_node_time_s;
-            out.visual_anchor_kind = PredictionTimeAnchorKind::SelectedNode;
-            out.pick_anchor_kind = PredictionTimeAnchorKind::SelectedNode;
-            out.exact_anchor_kind = PredictionTimeAnchorKind::SelectedNode;
-            out.visual_anchor_is_future = true;
-            out.pick_anchor_is_future = true;
-            out.exact_anchor_is_future = true;
-            out.valid =
-                    out.visual_window_s > 0.0 &&
-                    out.pick_window_s > 0.0 &&
-                    out.exact_window_s > 0.0;
-            return out;
-        }
-
-        if (authored_plan_window.valid)
-        {
-            out.visual_window_start_time_s = authored_plan_window.t0_s;
-            out.visual_window_end_time_s = authored_plan_window.t1_s;
-            out.pick_window_start_time_s = authored_plan_window.t0_s;
-            out.pick_window_end_time_s = authored_plan_window.t1_s;
-        }
-
-        if (std::isfinite(visual_anchor.time_s))
-        {
-            if (!authored_plan_window.valid && std::isfinite(time_ctx.last_future_node_time_s))
-            {
-                const double authored_plan_end_s =
-                        resolve_authored_plan_end_s(time_ctx,
-                                                    std::isfinite(time_ctx.first_future_node_time_s)
-                                                            ? time_ctx.first_future_node_time_s
-                                                            : visual_anchor.time_s,
-                                                    time_ctx.last_future_node_time_s,
-                                                    plan_horizon_s,
-                                                    post_node_coverage_s);
-                const double authored_plan_span_s = std::max(0.0, authored_plan_end_s - visual_anchor.time_s);
-                out.visual_window_s = std::max(out.visual_window_s, authored_plan_span_s);
-            }
-
-            if (_prediction.draw_full_orbit)
-            {
-                double orbit_visual_span_s = 0.0;
-                if (track &&
-                    std::isfinite(track->cache.analysis.orbital_period_s) &&
-                    track->cache.analysis.orbital_period_s > 0.0)
-                {
-                    orbit_visual_span_s =
-                            track->cache.analysis.orbital_period_s * OrbitPredictionTuning::kFullOrbitDrawPeriodScale;
-                }
-                else if (std::isfinite(time_ctx.trajectory_t1_s) && time_ctx.trajectory_t1_s > visual_anchor.time_s)
-                {
-                    orbit_visual_span_s = time_ctx.trajectory_t1_s - visual_anchor.time_s;
-                }
-
-                out.visual_window_s = std::max(out.visual_window_s, orbit_visual_span_s);
-            }
-        }
-
-        if (std::isfinite(pick_anchor.time_s) &&
-            !authored_plan_window.valid &&
-            std::isfinite(time_ctx.last_future_node_time_s))
-        {
-            const double authored_plan_end_s =
-                    resolve_authored_plan_end_s(time_ctx,
-                                                std::isfinite(time_ctx.first_future_node_time_s)
-                                                        ? time_ctx.first_future_node_time_s
-                                                        : pick_anchor.time_s,
-                                                time_ctx.last_future_node_time_s,
-                                                plan_horizon_s,
-                                                post_node_coverage_s);
-            const double authored_plan_span_s = std::max(0.0, authored_plan_end_s - pick_anchor.time_s);
-            out.pick_window_s = std::max(out.pick_window_s, authored_plan_span_s);
-        }
-
-        out.valid =
-                std::isfinite(out.visual_anchor_time_s) &&
-                std::isfinite(out.pick_anchor_time_s) &&
-                std::isfinite(out.exact_anchor_time_s) &&
-                out.visual_window_s > 0.0 &&
-                out.pick_window_s > 0.0 &&
-                out.exact_window_s > 0.0;
-
-        return out;
+        return plan_prediction_windows(PredictionWindowPlannerInput{
+                .track = track,
+                .time_ctx = time_ctx,
+                .plan_windows = _maneuver.settings().plan_windows,
+                .future_window_s = prediction_future_window_s(key),
+                .plan_horizon_s = maneuver_plan_horizon_s(),
+                .draw_future_segment = _prediction->state().draw_future_segment,
+                .draw_full_orbit = _prediction->state().draw_full_orbit,
+                .with_maneuvers = with_maneuvers,
+                .live_preview_active = maneuver_live_preview_active(with_maneuvers),
+        });
     }
 
     bool GameplayState::should_rebuild_prediction_track(const PredictionTrackState &track,
@@ -614,61 +643,21 @@ namespace Game
                                                         const bool thrusting,
                                                         const bool with_maneuvers) const
     {
-        return PredictionRuntimeController::should_rebuild_track(_prediction,
-                                                                 build_prediction_runtime_context(),
-                                                                 track,
-                                                                 now_s,
-                                                                 fixed_dt,
-                                                                 thrusting,
-                                                                 with_maneuvers);
+        return _prediction->should_rebuild_track(build_prediction_host_context(),
+                                                 track,
+                                                 now_s,
+                                                 fixed_dt,
+                                                 thrusting,
+                                                 with_maneuvers);
     }
 
     void GameplayState::update_prediction(GameStateContext &ctx, float fixed_dt)
     {
         (void) ctx;
 
-        if (!_prediction.enabled)
-        {
-            // Fully disable runtime state when the overlay is turned off.
-            clear_prediction_runtime();
-            return;
-        }
-
-        // Keep the subject list aligned with the current gameplay scene.
-        rebuild_prediction_subjects();
+        // Keep frame metadata aligned before the prediction subsystem decides what to rebuild.
         rebuild_prediction_frame_options();
         rebuild_prediction_analysis_options();
-
-        const double now_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
-        const std::vector<PredictionSubjectKey> visible_subjects = collect_visible_prediction_subjects();
-        if (!_orbitsim)
-        {
-            // Without orbit-sim there is no stable frame to predict against.
-            clear_visible_prediction_runtime(visible_subjects);
-            _prediction_system.reset_solver_service();
-            sync_prediction_dirty_flag();
-            return;
-        }
-
-        const orbitsim::MassiveBody *ref_sim = _orbitsim->world_reference_sim_body();
-        if (!ref_sim || ref_sim->id == orbitsim::kInvalidBodyId)
-        {
-            // Bail out when the reference body is not ready for a stable inertial frame.
-            clear_visible_prediction_runtime(visible_subjects);
-            _prediction_system.reset_solver_service();
-            sync_prediction_dirty_flag();
-            return;
-        }
-
-        PredictionRuntimeController::update_visible_tracks(_prediction,
-                                                           build_prediction_runtime_context(),
-                                                           visible_subjects,
-                                                           now_s,
-                                                           fixed_dt);
-
-        // Mirror the active track's last solver time into the shared debug HUD stats.
-        PredictionTrackState *active_track = active_prediction_track();
-        _prediction.orbit_plot_perf.solver_ms_last = active_track ? active_track->solver_ms_last : 0.0;
-        sync_prediction_dirty_flag();
+        _prediction->update(build_prediction_host_context(&ctx), fixed_dt);
     }
 } // namespace Game

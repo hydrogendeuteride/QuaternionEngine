@@ -245,7 +245,7 @@ namespace Game
                     PredictionDragDebugTelemetry &debug = track->drag_debug;
                     debug.drag_active = false;
                     debug.last_drag_end_tp = PredictionDragDebugTelemetry::Clock::now();
-                    _prediction_system.clear_unapplied_maneuver_drag_preview(*track);
+                    _prediction->clear_unapplied_maneuver_drag_preview(*track);
                 }
                 _maneuver.clear_gizmo_interaction();
             }
@@ -259,7 +259,7 @@ namespace Game
                     debug.last_drag_end_tp = PredictionDragDebugTelemetry::Clock::now();
                     if (!changed)
                     {
-                        _prediction_system.clear_unapplied_maneuver_drag_preview(*track);
+                        _prediction->clear_unapplied_maneuver_drag_preview(*track);
                     }
                 }
                 if (hovered_handle_idx >= 0)
@@ -278,7 +278,7 @@ namespace Game
                 {
                     if (PredictionTrackState *track = active_prediction_track())
                     {
-                        _prediction_system.await_maneuver_preview_full_refine(*track, current_sim_time_s());
+                        _prediction->await_maneuver_preview_full_refine(*track, current_sim_time_s());
                     }
                     (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
                 }

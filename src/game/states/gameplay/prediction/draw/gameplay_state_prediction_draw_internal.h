@@ -1,11 +1,12 @@
 #pragma once
 
 #include "core/engine.h"
-#include "game/states/gameplay/gameplay_state.h"
-
 #include "game/orbit/orbit_render_curve.h"
 #include "core/game_api.h"
 #include "core/orbit_plot/orbit_plot.h"
+#include "core/picking/picking_system.h"
+#include "game/states/gameplay/maneuver/gameplay_state_maneuver_types.h"
+#include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
 
 #include <cstddef>
 #include <cstdint>

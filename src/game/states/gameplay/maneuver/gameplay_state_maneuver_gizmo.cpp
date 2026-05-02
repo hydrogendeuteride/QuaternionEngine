@@ -282,8 +282,8 @@ namespace Game
         const PredictionTrackState *player_track = player_prediction_track();
         const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track);
         const orbitsim::BodyId occluder_body_id =
-                (_prediction.analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI)
-                    ? _prediction.analysis_selection.spec.fixed_body_id
+                (_prediction->state().analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI)
+                    ? _prediction->state().analysis_selection.spec.fixed_body_id
                     : ((player_track && player_cache)
                                ? resolve_prediction_analysis_body_id(*player_cache, player_track->key, analysis_time_s)
                                : orbitsim::kInvalidBodyId);
@@ -503,7 +503,7 @@ namespace Game
 
             if (PredictionTrackState *track = active_prediction_track())
             {
-                _prediction_system.mark_maneuver_preview_dirty(*track);
+                _prediction->mark_maneuver_preview_dirty(*track);
                 sync_prediction_dirty_flag();
             }
         }

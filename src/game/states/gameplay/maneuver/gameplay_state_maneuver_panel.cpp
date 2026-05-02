@@ -121,10 +121,10 @@ namespace Game
             return format_t_plus_label(to_t_plus_s(absolute_time_s));
         };
         const auto default_node_primary_body_id = [&]() -> orbitsim::BodyId {
-            if (_prediction.analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
-                _prediction.analysis_selection.spec.fixed_body_id != orbitsim::kInvalidBodyId)
+            if (_prediction->state().analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
+                _prediction->state().analysis_selection.spec.fixed_body_id != orbitsim::kInvalidBodyId)
             {
-                return _prediction.analysis_selection.spec.fixed_body_id;
+                return _prediction->state().analysis_selection.spec.fixed_body_id;
             }
 
             if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track))
@@ -224,7 +224,7 @@ namespace Game
         {
             if (!_maneuver.settings().live_preview_active)
             {
-                _prediction_system.clear_maneuver_live_preview_state();
+                _prediction->clear_maneuver_live_preview_state();
                 cancel_maneuver_node_dv_edit_preview();
             }
             (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());

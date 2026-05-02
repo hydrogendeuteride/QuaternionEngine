@@ -1,3 +1,4 @@
+#include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
@@ -31,8 +32,8 @@ namespace Game
         const uint32_t pick_group_planned = global_ctx.picking->add_line_pick_group("OrbitPlot/Planned");
 
         const std::size_t pick_max_segments =
-                static_cast<std::size_t>(std::max(1, _orbit_plot_budget.pick_max_segments));
-        const double pick_frustum_margin_ratio = std::max(0.0, _orbit_plot_budget.pick_frustum_margin_ratio);
+                static_cast<std::size_t>(std::max(1, _prediction->budget().pick_max_segments));
+        const double pick_frustum_margin_ratio = std::max(0.0, _prediction->budget().pick_frustum_margin_ratio);
         OrbitRenderCurve::PickSettings pick_settings{};
         pick_settings.frustum_margin_ratio = pick_frustum_margin_ratio;
 
@@ -61,12 +62,12 @@ namespace Game
         };
 
         const std::size_t pick_planned_reserve_target = std::min(
-                _prediction.draw_config.pick_planned_reserve_segments,
+                _prediction->state().draw_config.pick_planned_reserve_segments,
                 static_cast<std::size_t>(std::max<std::size_t>(
                         1,
                         static_cast<std::size_t>(
                                 std::llround(static_cast<double>(pick_max_segments) *
-                                             _prediction.draw_config.pick_planned_reserve_ratio)))));
+                                             _prediction->state().draw_config.pick_planned_reserve_ratio)))));
         std::size_t remaining_pick_budget = pick_max_segments;
 
         const auto build_pick_curve_cache = [&](const OrbitRenderCurve &curve,
@@ -82,10 +83,10 @@ namespace Game
                     pick_settings,
                     t_start_s,
                     t_end_s);
-            _prediction.orbit_plot_perf.pick_lod_ms_last +=
+            _prediction->state().orbit_plot_perf.pick_lod_ms_last +=
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pick_start_tp).count();
-            _prediction.orbit_plot_perf.pick_segments_before_cull += static_cast<uint32_t>(lod.segments_before_cull);
-            _prediction.orbit_plot_perf.pick_segments += static_cast<uint32_t>(lod.segments_after_cull);
+            _prediction->state().orbit_plot_perf.pick_segments_before_cull += static_cast<uint32_t>(lod.segments_before_cull);
+            _prediction->state().orbit_plot_perf.pick_segments += static_cast<uint32_t>(lod.segments_after_cull);
 
             out_segments.clear();
             out_segments.reserve(lod.segments.size());
@@ -100,10 +101,10 @@ namespace Game
             }
 
             out_cap_hit = lod.cap_hit;
-            _prediction.orbit_plot_perf.pick_cap_hit_last_frame = _prediction.orbit_plot_perf.pick_cap_hit_last_frame || out_cap_hit;
+            _prediction->state().orbit_plot_perf.pick_cap_hit_last_frame = _prediction->state().orbit_plot_perf.pick_cap_hit_last_frame || out_cap_hit;
             if (out_cap_hit)
             {
-                ++_prediction.orbit_plot_perf.pick_cap_hits_total;
+                ++_prediction->state().orbit_plot_perf.pick_cap_hits_total;
             }
             return out_segments.size();
         };
@@ -127,7 +128,7 @@ namespace Game
                                                             track_ctx.base_pick_window.t0_s,
                                                             track_ctx.base_pick_window.t1_s,
                                                             remaining_pick_budget - planned_reserve,
-                                                            _prediction.orbit_plot_perf);
+                                                            _prediction->state().orbit_plot_perf);
             }
             else
             {
@@ -182,7 +183,7 @@ namespace Game
                                                                  !track_ctx.identity_frame_transform,
                                                                  track.pick_cache.base_segments,
                                                                  cap_hit,
-                                                                 _prediction.orbit_plot_perf);
+                                                                 _prediction->state().orbit_plot_perf);
                     }
 
                     if (emitted > 0)
@@ -218,8 +219,8 @@ namespace Game
                     emitted = track.pick_cache.base_segments.size();
                     if (!rebuilt_pick_cache)
                     {
-                        _prediction.orbit_plot_perf.pick_segments_before_cull += static_cast<uint32_t>(emitted);
-                        _prediction.orbit_plot_perf.pick_segments += static_cast<uint32_t>(emitted);
+                        _prediction->state().orbit_plot_perf.pick_segments_before_cull += static_cast<uint32_t>(emitted);
+                        _prediction->state().orbit_plot_perf.pick_segments += static_cast<uint32_t>(emitted);
                     }
                     global_ctx.picking->add_line_pick_segments(
                             pick_group_base,
@@ -346,8 +347,8 @@ namespace Game
                                 ++emitted;
                             }
 
-                            _prediction.orbit_plot_perf.pick_segments_before_cull += static_cast<uint32_t>(emitted);
-                            _prediction.orbit_plot_perf.pick_segments += static_cast<uint32_t>(emitted);
+                            _prediction->state().orbit_plot_perf.pick_segments_before_cull += static_cast<uint32_t>(emitted);
+                            _prediction->state().orbit_plot_perf.pick_segments += static_cast<uint32_t>(emitted);
                             return emitted;
                         };
                 const auto append_chunk_pick_segments =
@@ -391,7 +392,7 @@ namespace Game
                                                                          false,
                                                                          chunk_segments,
                                                                          cap_hit,
-                                                                         _prediction.orbit_plot_perf);
+                                                                         _prediction->state().orbit_plot_perf);
                             }
 
                             if (emitted == 0 || chunk_segments.empty())
@@ -521,7 +522,7 @@ namespace Game
                                                                !track_ctx.identity_frame_transform,
                                                                fallback_segments,
                                                                cap_hit,
-                                                               _prediction.orbit_plot_perf);
+                                                               _prediction->state().orbit_plot_perf);
                                 track.pick_cache.planned_segments.insert(track.pick_cache.planned_segments.end(),
                                                                          fallback_segments.begin(),
                                                                          fallback_segments.end());
@@ -568,7 +569,7 @@ namespace Game
                                                    !track_ctx.identity_frame_transform,
                                                    track.pick_cache.planned_segments,
                                                    cap_hit,
-                                                   _prediction.orbit_plot_perf);
+                                                   _prediction->state().orbit_plot_perf);
                 }
 
                 if (!track.pick_cache.planned_segments.empty())
@@ -602,9 +603,9 @@ namespace Game
             {
                 if (!rebuilt_pick_cache)
                 {
-                    _prediction.orbit_plot_perf.pick_segments_before_cull +=
+                    _prediction->state().orbit_plot_perf.pick_segments_before_cull +=
                             static_cast<uint32_t>(track.pick_cache.planned_segments.size());
-                    _prediction.orbit_plot_perf.pick_segments +=
+                    _prediction->state().orbit_plot_perf.pick_segments +=
                             static_cast<uint32_t>(track.pick_cache.planned_segments.size());
                 }
                 global_ctx.picking->add_line_pick_segments(

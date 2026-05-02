@@ -1,3 +1,4 @@
+#include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 #include "game/orbit/orbit_prediction_tuning.h"
@@ -167,7 +168,7 @@ namespace Game
                                    ? &out.planned_cache->display.trajectory_segments_frame_planned
                                    : out.traj_planned_segments);
 
-        out.is_active = track.key == _prediction.selection.active_subject;
+        out.is_active = track.key == _prediction->state().selection.active_subject;
         out.active_player_track = out.is_active && prediction_subject_is_player(track.key);
         const bool with_maneuver_live_preview =
                 out.active_player_track &&
@@ -306,8 +307,8 @@ namespace Game
 
         if (out.is_active)
         {
-            _prediction.orbit_plot_perf.solver_segments_base = static_cast<uint32_t>(out.traj_base_segments->size());
-            _prediction.orbit_plot_perf.solver_segments_planned =
+            _prediction->state().orbit_plot_perf.solver_segments_base = static_cast<uint32_t>(out.traj_base_segments->size());
+            _prediction->state().orbit_plot_perf.solver_segments_planned =
                     out.traj_planned_segments
                             ? static_cast<uint32_t>(out.traj_planned_segments->size())
                             : 0u;
@@ -328,7 +329,7 @@ namespace Game
                                                     out.frame_to_world);
         out.direct_world_polyline = Draw::frame_spec_uses_direct_world_polyline(
                 out.display_cache->display.resolved_frame_spec_valid ? out.display_cache->display.resolved_frame_spec
-                                                                     : _prediction.frame_selection.spec);
+                                                                     : _prediction->state().frame_selection.spec);
 
         out.draw_ctx.orbit_plot = global_ctx.orbit_plot;
         out.draw_ctx.ref_body_world = out.ref_body_world;
@@ -341,10 +342,10 @@ namespace Game
         out.draw_ctx.viewport_height_px = std::max(1.0, static_cast<double>(global_ctx.viewport_height_px));
         out.draw_ctx.render_error_px = global_ctx.render_error_px;
         out.draw_ctx.render_max_segments =
-                static_cast<std::size_t>(std::max(1, _orbit_plot_budget.render_max_segments_cpu));
+                static_cast<std::size_t>(std::max(1, _prediction->budget().render_max_segments_cpu));
         out.draw_ctx.line_overlay_boost = out.maneuver_drag_active
                                                   ? 0.0f
-                                                  : std::clamp(_prediction.line_overlay_boost, 0.0f, 1.0f);
+                                                  : std::clamp(_prediction->state().line_overlay_boost, 0.0f, 1.0f);
 
         out.identity_frame_transform = Draw::frame_transform_is_identity(out.frame_to_world);
         out.use_base_adaptive_curve = !out.stable_cache->display.render_curve_frame.empty();
@@ -378,7 +379,7 @@ namespace Game
         }
         if (!out.maneuver_drag_active && !out.is_active)
         {
-            out.draw_ctx.line_overlay_boost = std::clamp(_prediction.line_overlay_boost * 0.35f, 0.0f, 1.0f);
+            out.draw_ctx.line_overlay_boost = std::clamp(_prediction->state().line_overlay_boost * 0.35f, 0.0f, 1.0f);
         }
         out.world_basis_draw_ctx.line_overlay_boost = out.draw_ctx.line_overlay_boost;
 

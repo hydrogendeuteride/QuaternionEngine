@@ -195,7 +195,7 @@ namespace Game
     PredictionFrameResolverContext GameplayState::build_prediction_frame_resolver_context() const
     {
         PredictionFrameResolverContext context{};
-        context.frame_selection = _prediction.frame_selection;
+        context.frame_selection = _prediction->state().frame_selection;
         context.system_center = _scenario_config.system_center;
         context.world_reference_body_world = prediction_world_reference_body_world();
         context.current_sim_time_s = _orbitsim ? _orbitsim->sim.time_s() : _fixed_time_s;
@@ -221,9 +221,9 @@ namespace Game
     PredictionFrameControllerContext GameplayState::build_prediction_frame_controller_context() const
     {
         PredictionFrameControllerContext context{};
-        context.derived_service = const_cast<OrbitPredictionDerivedService *>(&_prediction_system.derived_service());
-        context.selection = _prediction.selection;
-        context.display_frame_revision = _prediction.display_frame_revision;
+        context.derived_service = const_cast<OrbitPredictionDerivedService *>(&_prediction->derived_service());
+        context.selection = _prediction->state().selection;
+        context.display_frame_revision = _prediction->state().display_frame_revision;
         context.sim_config = _orbitsim ? _orbitsim->sim.config() : orbitsim::GameSimulation::Config{};
         context.resolve_display_frame_spec = [this](const OrbitPredictionCache &cache, const double display_time_s) {
             return resolve_prediction_display_frame_spec(cache, display_time_s);
@@ -299,16 +299,16 @@ namespace Game
             }
         }
 
-        _prediction.analysis_selection.options = std::move(options);
-        if (_prediction.analysis_selection.selected_index < 0)
+        _prediction->state().analysis_selection.options = std::move(options);
+        if (_prediction->state().analysis_selection.selected_index < 0)
         {
-            _prediction.analysis_selection.spec = {};
+            _prediction->state().analysis_selection.spec = {};
         }
 
         int selected_index = -1;
-        for (std::size_t i = 0; i < _prediction.analysis_selection.options.size(); ++i)
+        for (std::size_t i = 0; i < _prediction->state().analysis_selection.options.size(); ++i)
         {
-            if (same_analysis_spec(_prediction.analysis_selection.options[i].spec, _prediction.analysis_selection.spec))
+            if (same_analysis_spec(_prediction->state().analysis_selection.options[i].spec, _prediction->state().analysis_selection.spec))
             {
                 selected_index = static_cast<int>(i);
                 break;
@@ -317,21 +317,21 @@ namespace Game
 
         if (selected_index < 0)
         {
-            _prediction.analysis_selection.spec = {};
+            _prediction->state().analysis_selection.spec = {};
             selected_index = 0;
         }
 
-        _prediction.analysis_selection.selected_index = selected_index;
+        _prediction->state().analysis_selection.selected_index = selected_index;
     }
 
     bool GameplayState::set_prediction_analysis_spec(const PredictionAnalysisSpec &spec)
     {
-        if (same_analysis_spec(_prediction.analysis_selection.spec, spec))
+        if (same_analysis_spec(_prediction->state().analysis_selection.spec, spec))
         {
             return false;
         }
 
-        _prediction.analysis_selection.spec = spec;
+        _prediction->state().analysis_selection.spec = spec;
         refresh_all_prediction_derived_caches();
         sync_prediction_dirty_flag();
         return true;
@@ -339,13 +339,13 @@ namespace Game
 
     bool GameplayState::set_prediction_frame_spec(const orbitsim::TrajectoryFrameSpec &spec)
     {
-        if (PredictionFrameResolver::same_frame_spec(_prediction.frame_selection.spec, spec))
+        if (PredictionFrameResolver::same_frame_spec(_prediction->state().frame_selection.spec, spec))
         {
             return false;
         }
 
-        _prediction.frame_selection.spec = spec;
-        ++_prediction.display_frame_revision;
+        _prediction->state().frame_selection.spec = spec;
+        ++_prediction->state().display_frame_revision;
         refresh_all_prediction_derived_caches();
         sync_prediction_dirty_flag();
         return true;
@@ -412,18 +412,18 @@ namespace Game
             }
         }
 
-        _prediction.frame_selection.options = std::move(options);
+        _prediction->state().frame_selection.options = std::move(options);
 
-        if (_prediction.frame_selection.selected_index < 0)
+        if (_prediction->state().frame_selection.selected_index < 0)
         {
-            _prediction.frame_selection.spec = default_prediction_frame_spec();
+            _prediction->state().frame_selection.spec = default_prediction_frame_spec();
         }
 
         int selected_index = -1;
-        for (std::size_t i = 0; i < _prediction.frame_selection.options.size(); ++i)
+        for (std::size_t i = 0; i < _prediction->state().frame_selection.options.size(); ++i)
         {
-            if (PredictionFrameResolver::same_frame_spec(_prediction.frame_selection.options[i].spec,
-                                                         _prediction.frame_selection.spec))
+            if (PredictionFrameResolver::same_frame_spec(_prediction->state().frame_selection.options[i].spec,
+                                                         _prediction->state().frame_selection.spec))
             {
                 selected_index = static_cast<int>(i);
                 break;
@@ -432,11 +432,11 @@ namespace Game
 
         if (selected_index < 0)
         {
-            _prediction.frame_selection.spec = default_prediction_frame_spec();
-            for (std::size_t i = 0; i < _prediction.frame_selection.options.size(); ++i)
+            _prediction->state().frame_selection.spec = default_prediction_frame_spec();
+            for (std::size_t i = 0; i < _prediction->state().frame_selection.options.size(); ++i)
             {
-                if (PredictionFrameResolver::same_frame_spec(_prediction.frame_selection.options[i].spec,
-                                                             _prediction.frame_selection.spec))
+                if (PredictionFrameResolver::same_frame_spec(_prediction->state().frame_selection.options[i].spec,
+                                                             _prediction->state().frame_selection.spec))
                 {
                     selected_index = static_cast<int>(i);
                     break;
@@ -444,7 +444,7 @@ namespace Game
             }
         }
 
-        _prediction.frame_selection.selected_index = selected_index;
+        _prediction->state().frame_selection.selected_index = selected_index;
     }
 
     orbitsim::BodyId GameplayState::resolve_prediction_analysis_body_id(const OrbitPredictionCache &cache,
@@ -452,10 +452,10 @@ namespace Game
                                                                         const double query_time_s,
                                                                         const orbitsim::BodyId preferred_body_id) const
     {
-        if (_prediction.analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
-            _prediction.analysis_selection.spec.fixed_body_id != orbitsim::kInvalidBodyId)
+        if (_prediction->state().analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI &&
+            _prediction->state().analysis_selection.spec.fixed_body_id != orbitsim::kInvalidBodyId)
         {
-            return _prediction.analysis_selection.spec.fixed_body_id;
+            return _prediction->state().analysis_selection.spec.fixed_body_id;
         }
 
         const auto &bodies = cache.solver.resolved_massive_bodies();
@@ -507,9 +507,9 @@ namespace Game
             effective_preferred_body_id = cache.display.resolved_frame_spec.primary_body_id;
         }
         if (effective_preferred_body_id == orbitsim::kInvalidBodyId &&
-            _prediction.frame_selection.spec.primary_body_id != orbitsim::kInvalidBodyId)
+            _prediction->state().frame_selection.spec.primary_body_id != orbitsim::kInvalidBodyId)
         {
-            effective_preferred_body_id = _prediction.frame_selection.spec.primary_body_id;
+            effective_preferred_body_id = _prediction->state().frame_selection.spec.primary_body_id;
         }
 
         return select_prediction_primary_body_id(
@@ -635,8 +635,8 @@ namespace Game
     {
         rebuild_prediction_frame_options();
         rebuild_prediction_analysis_options();
-        _prediction_system.reset_derived_service();
-        for (PredictionTrackState &track : _prediction.tracks)
+        _prediction->reset_derived_service();
+        for (PredictionTrackState &track : _prediction->state().tracks)
         {
             PredictionFrameController::reset_track_derived_state(track);
             (void) request_prediction_derived_refresh(track);

@@ -564,8 +564,7 @@ TEST(GameplayPredictionManeuverTests, LifecycleReducerTransitionsPreviewStates)
 
 TEST(GameplayPredictionManeuverTests, PredictionSystemMarksManeuverPreviewDirty)
 {
-    Game::GameplayPredictionState prediction{};
-    Game::PredictionSystem system(prediction);
+    Game::PredictionSystem system{};
     Game::PredictionTrackState track{};
     track.dirty = false;
     track.request_pending = true;
@@ -579,8 +578,7 @@ TEST(GameplayPredictionManeuverTests, PredictionSystemMarksManeuverPreviewDirty)
 
 TEST(GameplayPredictionManeuverTests, PredictionSystemClearsOnlyUnappliedDragPreview)
 {
-    Game::GameplayPredictionState prediction{};
-    Game::PredictionSystem system(prediction);
+    Game::PredictionSystem system{};
     Game::PredictionTrackState track{};
     track.preview_state = Game::PredictionPreviewRuntimeState::DragPreviewPending;
     track.preview_anchor.valid = true;
@@ -617,8 +615,7 @@ TEST(GameplayPredictionManeuverTests, PredictionSystemClearsOnlyUnappliedDragPre
 
 TEST(GameplayPredictionManeuverTests, PredictionSystemClearsLivePreviewStateWithoutDroppingPlannedCaches)
 {
-    Game::GameplayPredictionState prediction{};
-    Game::PredictionSystem system(prediction);
+    Game::PredictionSystem system{};
 
     Game::PredictionTrackState track{};
     track.key = {Game::PredictionSubjectKind::Orbiter, 1};
@@ -639,12 +636,12 @@ TEST(GameplayPredictionManeuverTests, PredictionSystemClearsLivePreviewStateWith
     track.full_stream_overlay.chunk_assembly.chunks.push_back(Game::OrbitChunk{});
     track.pick_cache.base_valid = true;
     track.pick_cache.planned_valid = true;
-    prediction.tracks.push_back(track);
+    system.state().tracks.push_back(track);
 
     system.clear_maneuver_live_preview_state();
 
-    ASSERT_EQ(prediction.tracks.size(), 1u);
-    const Game::PredictionTrackState &cleared = prediction.tracks.front();
+    ASSERT_EQ(system.state().tracks.size(), 1u);
+    const Game::PredictionTrackState &cleared = system.state().tracks.front();
     EXPECT_EQ(cleared.preview_state, Game::PredictionPreviewRuntimeState::Idle);
     EXPECT_FALSE(cleared.preview_anchor.valid);
     EXPECT_FALSE(cleared.preview_overlay.chunk_assembly.valid);
@@ -662,8 +659,7 @@ TEST(GameplayPredictionManeuverTests, PredictionSystemClearsLivePreviewStateWith
 
 TEST(GameplayPredictionManeuverTests, PredictionSystemTransitionsManeuverPreviewToFullRefine)
 {
-    Game::GameplayPredictionState prediction{};
-    Game::PredictionSystem system(prediction);
+    Game::PredictionSystem system{};
     Game::PredictionTrackState track{};
     track.preview_state = Game::PredictionPreviewRuntimeState::PreviewStreaming;
 

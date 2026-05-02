@@ -14,6 +14,7 @@
 #include <cmath>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <unordered_map>
 
 namespace
@@ -62,7 +63,8 @@ namespace Game
     }
 
     GameplayState::GameplayState()
-        : _scenario_config(default_earth_moon_config())
+        : _scenario_config(default_earth_moon_config()),
+          _prediction(std::make_unique<PredictionSystem>())
     {
     }
 

@@ -1,10 +1,13 @@
 #pragma once
 
-#include "game/states/gameplay/gameplay_state.h"
+#include "game/orbit/orbit_prediction_service.h"
+#include "game/states/gameplay/maneuver/gameplay_state_maneuver_types.h"
+#include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
 #include "game/states/gameplay/prediction/runtime/prediction_track_lifecycle.h"
 
 #include <algorithm>
 #include <chrono>
+#include <vector>
 
 namespace Game::PredictionRuntimeDetail
 {

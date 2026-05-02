@@ -264,12 +264,12 @@ namespace Game
         _maneuver.reset_session();
         _reset_requested = false;
         _contact_log.clear();
-        _prediction.tracks.clear();
-        _prediction.groups.clear();
-        _prediction.selection.clear();
-        _prediction.frame_selection.clear();
-        _prediction.dirty = true;
-        _prediction_system.reset_services();
+        _prediction->state().tracks.clear();
+        _prediction->state().groups.clear();
+        _prediction->state().selection.clear();
+        _prediction->state().frame_selection.clear();
+        _prediction->state().dirty = true;
+        _prediction->reset_services();
 
         _world.clear_rebase_anchor();
         _world.clear();
@@ -1192,9 +1192,9 @@ namespace Game
         sync_player_camera_target(ctx);
         sync_player_collision_callbacks();
 
-        _prediction.selection.active_subject = PredictionSubjectKey{PredictionSubjectKind::Orbiter, target->entity.value};
-        _prediction.selection.overlay_subjects.clear();
-        _prediction.selection.selected_group_index = -1;
+        _prediction->state().selection.active_subject = PredictionSubjectKey{PredictionSubjectKind::Orbiter, target->entity.value};
+        _prediction->state().selection.overlay_subjects.clear();
+        _prediction->state().selection.selected_group_index = -1;
         _maneuver.reset_session();
         mark_prediction_dirty();
         return true;

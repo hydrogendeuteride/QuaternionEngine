@@ -48,7 +48,7 @@ namespace Game
 
         if (PredictionTrackState *track = active_prediction_track())
         {
-            _prediction_system.mark_maneuver_preview_dirty(*track);
+            _prediction->mark_maneuver_preview_dirty(*track);
             sync_prediction_dirty_flag();
         }
     }
@@ -65,7 +65,7 @@ namespace Game
 
         if (PredictionTrackState *track = active_prediction_track())
         {
-            _prediction_system.await_maneuver_preview_full_refine(*track, current_sim_time_s());
+            _prediction->await_maneuver_preview_full_refine(*track, current_sim_time_s());
         }
         (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
     }
@@ -93,7 +93,7 @@ namespace Game
 
         if (PredictionTrackState *track = active_prediction_track())
         {
-            _prediction_system.mark_maneuver_preview_dirty(*track);
+            _prediction->mark_maneuver_preview_dirty(*track);
             sync_prediction_dirty_flag();
         }
     }
@@ -110,7 +110,7 @@ namespace Game
 
         if (PredictionTrackState *track = active_prediction_track())
         {
-            _prediction_system.await_maneuver_preview_full_refine(*track, current_sim_time_s());
+            _prediction->await_maneuver_preview_full_refine(*track, current_sim_time_s());
         }
         (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
     }

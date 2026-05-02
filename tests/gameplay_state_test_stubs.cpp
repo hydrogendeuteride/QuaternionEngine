@@ -229,7 +229,6 @@ namespace Game
 
     void GameplayState::mark_prediction_dirty()
     {
-        _prediction.dirty = true;
     }
 
     void GameStateContext::quit() {}

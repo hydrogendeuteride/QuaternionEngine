@@ -4,9 +4,8 @@
 #include "game/state/game_state.h"
 #include "core/game_api.h"
 #include "game/states/gameplay/maneuver/maneuver_system.h"
-#include "game/states/gameplay/prediction/gameplay_prediction_state.h"
+#include "game/states/gameplay/prediction/prediction_host_context.h"
 #include "game/states/gameplay/prediction/prediction_system.h"
-#include "game/states/gameplay/prediction/gameplay_state_prediction_types.h"
 #include "game/states/gameplay/gameplay_settings.h"
 #include "game/input/keybinds.h"
 #include "game/states/gameplay/scenario/scenario_config.h"
@@ -94,6 +93,13 @@ namespace Game
         const char *name() const override { return "Gameplay"; }
 
     VULKAN_ENGINE_GAMEPLAY_STATE_PRIVATE:
+#if defined(VULKAN_ENGINE_GAMEPLAY_TEST_ACCESS)
+        GameplayPredictionState &prediction_for_test() { return _prediction->state(); }
+        const GameplayPredictionState &prediction_for_test() const { return _prediction->state(); }
+        PredictionSystem &prediction_system_for_test() { return *_prediction; }
+        const PredictionSystem &prediction_system_for_test() const { return *_prediction; }
+#endif
+
         // Settings and scene lifecycle
         GameplaySettings extract_settings() const;
         void apply_settings(const GameplaySettings &s);
@@ -147,6 +153,9 @@ namespace Game
         void update_formation_hold(double dt_s);
 
         // Prediction adapters
+        PredictionSubjectKey player_prediction_subject_key() const;
+        std::vector<PredictionSubjectDescriptor> build_prediction_subject_descriptors() const;
+        PredictionHostContext build_prediction_host_context(const GameStateContext *ctx = nullptr) const;
         bool get_player_world_state(WorldVec3 &out_pos_world,
                                     glm::dvec3 &out_vel_world,
                                     glm::vec3 &out_vel_local) const;
@@ -418,9 +427,7 @@ namespace Game
         bool _runtime_orbiter_rails_enabled{true};
         double _runtime_orbiter_rails_distance_m{kDefaultRuntimeOrbiterRailsDistanceM};
 
-        GameplayPredictionState _prediction{};
-        PredictionSystem _prediction_system{_prediction};
-        OrbitPlotBudgetSettings _orbit_plot_budget{};
+        std::unique_ptr<PredictionSystem> _prediction;
         ManeuverSystem _maneuver{};
 
         float _elapsed{0.0f};

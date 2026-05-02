@@ -6,11 +6,161 @@
 #include "physics/physics_world.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <utility>
 
 namespace Game
 {
+    PredictionSubjectKey GameplayState::player_prediction_subject_key() const
+    {
+        const EntityId player_eid = player_entity();
+        return player_eid.is_valid()
+                   ? PredictionSubjectKey{PredictionSubjectKind::Orbiter, player_eid.value}
+                   : PredictionSubjectKey{};
+    }
+
+    std::vector<PredictionSubjectDescriptor> GameplayState::build_prediction_subject_descriptors() const
+    {
+        std::vector<PredictionSubjectDescriptor> subjects;
+        subjects.reserve(_orbiters.size() + (_orbitsim ? _orbitsim->bodies.size() : 0u));
+
+        for (const OrbiterInfo &orbiter : _orbiters)
+        {
+            if (!orbiter.entity.is_valid())
+            {
+                continue;
+            }
+
+            PredictionSubjectKey key{};
+            key.kind = PredictionSubjectKind::Orbiter;
+            key.value = orbiter.entity.value;
+
+            subjects.push_back(PredictionSubjectDescriptor{
+                    .key = key,
+                    .label = orbiter.name,
+                    .supports_maneuvers = orbiter.is_player ||
+                                           (orbiter.formation_hold_enabled && !orbiter.formation_leader_name.empty()),
+                    .is_celestial = false,
+                    .orbit_rgb = prediction_subject_orbit_rgb(key),
+            });
+        }
+
+        if (_orbitsim)
+        {
+            const CelestialBodyInfo *ref_info = _orbitsim->world_reference_body();
+            for (const CelestialBodyInfo &body : _orbitsim->bodies)
+            {
+                if (ref_info && body.sim_id == ref_info->sim_id)
+                {
+                    continue;
+                }
+
+                PredictionSubjectKey key{};
+                key.kind = PredictionSubjectKind::Celestial;
+                key.value = static_cast<uint32_t>(body.sim_id);
+
+                subjects.push_back(PredictionSubjectDescriptor{
+                        .key = key,
+                        .label = body.name,
+                        .supports_maneuvers = false,
+                        .is_celestial = true,
+                        .orbit_rgb = prediction_subject_orbit_rgb(key),
+                });
+            }
+        }
+
+        return subjects;
+    }
+
+    PredictionHostContext GameplayState::build_prediction_host_context(const GameStateContext *ctx) const
+    {
+        PredictionHostContext host{};
+        host.orbital_scenario = _orbitsim.get();
+        host.subjects = build_prediction_subject_descriptors();
+        host.player_subject = player_prediction_subject_key();
+        host.current_sim_time_s = current_sim_time_s();
+        host.last_sim_step_dt_s = _last_sim_step_dt_s;
+        host.fixed_delta_time_s = ctx ? ctx->fixed_delta_time() : 0.0f;
+        host.interpolation_alpha = ctx ? std::clamp(ctx->interpolation_alpha(), 0.0f, 1.0f) : 0.0f;
+        host.frame_delta_time_s = ctx ? ctx->delta_time() : 0.0f;
+        host.debug_draw_enabled = _debug_draw_enabled;
+
+        host.maneuver.plan = &_maneuver.plan();
+        host.maneuver.edit_preview = &_maneuver.edit_preview();
+        host.maneuver.gizmo_interaction = &_maneuver.gizmo_interaction();
+        host.maneuver.plan_horizon = _maneuver.settings().plan_horizon;
+        host.maneuver.plan_windows = _maneuver.settings().plan_windows;
+        host.maneuver.nodes_enabled = _maneuver.settings().nodes_enabled;
+        host.maneuver.live_preview_active = maneuver_live_preview_active(true);
+        host.maneuver.edit_in_progress =
+                _maneuver.gizmo_interaction().state == ManeuverGizmoInteraction::State::DragAxis ||
+                _maneuver.edit_preview().state != ManeuverNodeEditPreview::State::Idle;
+        host.maneuver.revision = _maneuver.revision();
+        host.maneuver.signature = current_maneuver_plan_signature();
+        host.maneuver.active_preview_anchor_node_id = active_maneuver_preview_anchor_node_id();
+
+        host.reference_body_world = [this]() { return prediction_world_reference_body_world(); };
+        host.get_subject_world_state = [this](const PredictionSubjectKey key,
+                                              WorldVec3 &out_pos_world,
+                                              glm::dvec3 &out_vel_world,
+                                              glm::vec3 &out_vel_local) {
+            return get_prediction_subject_world_state(key, out_pos_world, out_vel_world, out_vel_local);
+        };
+        host.render_subject_position_world = [this](const PredictionSubjectKey key, const float alpha_f) {
+            if (key.kind == PredictionSubjectKind::Orbiter)
+            {
+                if (const Entity *entity = _world.entities().find(EntityId{key.value}))
+                {
+                    return entity->get_render_physics_center_of_mass_world(alpha_f);
+                }
+            }
+
+            WorldVec3 pos_world{0.0, 0.0, 0.0};
+            glm::dvec3 vel_world{0.0};
+            glm::vec3 vel_local{0.0f};
+            (void) get_prediction_subject_world_state(key, pos_world, vel_world, vel_local);
+            return pos_world;
+        };
+        host.future_window_s = [this](const PredictionSubjectKey key) {
+            return prediction_future_window_s(key);
+        };
+        host.required_window_s = [this](const PredictionTrackState &track,
+                                        const double now_s,
+                                        const bool with_maneuvers) {
+            return prediction_required_window_s(track, now_s, with_maneuvers);
+        };
+        host.preview_exact_window_s = [this](const PredictionTrackState &track,
+                                             const double now_s,
+                                             const bool with_maneuvers) {
+            return prediction_preview_exact_window_s(track, now_s, with_maneuvers);
+        };
+        host.refresh_preview_anchor = [this](PredictionTrackState &track,
+                                             const double now_s,
+                                             const bool with_maneuvers) {
+            refresh_prediction_preview_anchor(track, now_s, with_maneuvers);
+        };
+        host.subject_is_player = [this](const PredictionSubjectKey key) {
+            return prediction_subject_is_player(key);
+        };
+        host.subject_thrust_applied_this_tick = [this](const PredictionSubjectKey key) {
+            return prediction_subject_thrust_applied_this_tick(key);
+        };
+        host.resolve_maneuver_node_primary_body_id = [this](const ManeuverNode &node, const double query_time_s) {
+            return resolve_maneuver_node_primary_body_id(node, query_time_s);
+        };
+        host.resolve_display_frame_spec = [this](const OrbitPredictionCache &cache, const double display_time_s) {
+            return resolve_prediction_display_frame_spec(cache, display_time_s);
+        };
+        host.resolve_analysis_body_id = [this](const OrbitPredictionCache &cache,
+                                               const PredictionSubjectKey key,
+                                               const double query_time_s,
+                                               const orbitsim::BodyId preferred_body_id) {
+            return resolve_prediction_analysis_body_id(cache, key, query_time_s, preferred_body_id);
+        };
+        return host;
+    }
+
     bool GameplayState::get_player_world_state(WorldVec3 &out_pos_world,
                                                glm::dvec3 &out_vel_world,
                                                glm::vec3 &out_vel_local) const
@@ -138,165 +288,12 @@ namespace Game
 
     void GameplayState::rebuild_prediction_subjects()
     {
-        // Rebuild the subject list while preserving any reusable runtime cache/state.
-        const PredictionSubjectKey old_active = _prediction.selection.active_subject;
-        const std::vector<PredictionSubjectKey> old_overlays = _prediction.selection.overlay_subjects;
-        std::vector<PredictionTrackState> old_tracks = std::move(_prediction.tracks);
-
-        _prediction.tracks.clear();
-        _prediction.groups.clear();
-
-        const auto find_old_track = [&](PredictionSubjectKey key) -> PredictionTrackState * {
-            auto it = std::find_if(old_tracks.begin(),
-                                   old_tracks.end(),
-                                   [key](const PredictionTrackState &track) { return track.key == key; });
-            return (it != old_tracks.end()) ? &(*it) : nullptr;
-        };
-
-        // Register every live orbiter as a prediction track.
-        for (const OrbiterInfo &orbiter : _orbiters)
-        {
-            if (!orbiter.entity.is_valid())
-            {
-                continue;
-            }
-
-            PredictionSubjectKey key{};
-            key.kind = PredictionSubjectKind::Orbiter;
-            key.value = orbiter.entity.value;
-
-            PredictionTrackState track{};
-            if (PredictionTrackState *old = find_old_track(key))
-            {
-                track = std::move(*old);
-            }
-
-            track.key = key;
-            track.label = orbiter.name;
-            track.supports_maneuvers = orbiter.is_player ||
-                                      (orbiter.formation_hold_enabled && !orbiter.formation_leader_name.empty());
-            track.is_celestial = false;
-            _prediction.tracks.push_back(std::move(track));
-        }
-
-        // Add non-reference celestial bodies so overlays can compare against them.
-        if (_orbitsim)
-        {
-            const CelestialBodyInfo *ref_info = _orbitsim->world_reference_body();
-            for (const CelestialBodyInfo &body : _orbitsim->bodies)
-            {
-                if (ref_info && body.sim_id == ref_info->sim_id)
-                {
-                    continue;
-                }
-
-                PredictionSubjectKey key{};
-                key.kind = PredictionSubjectKind::Celestial;
-                key.value = static_cast<uint32_t>(body.sim_id);
-
-                PredictionTrackState track{};
-                if (PredictionTrackState *old = find_old_track(key))
-                {
-                    track = std::move(*old);
-                }
-
-                track.key = key;
-                track.label = body.name;
-                track.supports_maneuvers = false;
-                track.is_celestial = true;
-                _prediction.tracks.push_back(std::move(track));
-            }
-        }
-
-        const auto track_exists = [&](PredictionSubjectKey key) {
-            return find_prediction_track(key) != nullptr;
-        };
-
-        // Preserve the user's active subject when it still exists; otherwise fall back to the player.
-        if (track_exists(old_active))
-        {
-            _prediction.selection.active_subject = old_active;
-        }
-        else if (const PredictionTrackState *player_track = player_prediction_track())
-        {
-            _prediction.selection.active_subject = player_track->key;
-        }
-        else if (!_prediction.tracks.empty())
-        {
-            _prediction.selection.active_subject = _prediction.tracks.front().key;
-        }
-        else
-        {
-            _prediction.selection.active_subject = {};
-        }
-
-        _prediction.selection.overlay_subjects.clear();
-        _prediction.selection.overlay_subjects.reserve(old_overlays.size());
-        for (PredictionSubjectKey key : old_overlays)
-        {
-            if (!track_exists(key))
-            {
-                continue;
-            }
-
-            if (std::find(_prediction.selection.overlay_subjects.begin(),
-                          _prediction.selection.overlay_subjects.end(),
-                          key) == _prediction.selection.overlay_subjects.end())
-            {
-                _prediction.selection.overlay_subjects.push_back(key);
-            }
-        }
-
-        // There is no dedicated subject/overlay picker in the current UI yet, so keep
-        // other live prediction subjects visible by default even after narrowing
-        // prediction work to the active/overlay set.
-        if (_prediction.selection.overlay_subjects.empty())
-        {
-            for (const PredictionTrackState &track : _prediction.tracks)
-            {
-                if (track.key == _prediction.selection.active_subject)
-                {
-                    continue;
-                }
-
-                _prediction.selection.overlay_subjects.push_back(track.key);
-            }
-        }
-        _prediction.selection.selected_group_index = -1;
-
-        sync_prediction_dirty_flag();
+        _prediction->sync_subjects(build_prediction_host_context());
     }
 
     std::vector<PredictionSubjectKey> GameplayState::collect_visible_prediction_subjects() const
     {
-        // Visible prediction work is centered on the focused subject plus any explicit overlays.
-        std::vector<PredictionSubjectKey> out;
-        out.reserve(1 + _prediction.selection.overlay_subjects.size());
-
-        const auto append_visible = [&](PredictionSubjectKey key) {
-            if (!key.valid() || !find_prediction_track(key))
-            {
-                return;
-            }
-
-            if (std::find(out.begin(), out.end(), key) == out.end())
-            {
-                out.push_back(key);
-            }
-        };
-
-        append_visible(_prediction.selection.active_subject);
-        for (PredictionSubjectKey key : _prediction.selection.overlay_subjects)
-        {
-            append_visible(key);
-        }
-
-        if (out.empty() && !_prediction.tracks.empty())
-        {
-            append_visible(_prediction.tracks.front().key);
-        }
-
-        return out;
+        return _prediction->collect_visible_subjects();
     }
 
     double GameplayState::prediction_future_window_s(const PredictionSubjectKey key) const
@@ -304,10 +301,10 @@ namespace Game
         // Celestials and spacecraft use different minimum look-ahead windows.
         if (key.kind == PredictionSubjectKind::Celestial)
         {
-            return std::max(0.0, _prediction.sampling_policy.celestial_min_window_s);
+            return std::max(0.0, _prediction->state().sampling_policy.celestial_min_window_s);
         }
 
-        return std::max(0.0, _prediction.sampling_policy.orbiter_min_window_s);
+        return std::max(0.0, _prediction->state().sampling_policy.orbiter_min_window_s);
     }
 
     double GameplayState::maneuver_plan_horizon_s() const
@@ -324,84 +321,52 @@ namespace Game
 
     PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key)
     {
-        // Resolve mutable track state by stable subject key.
-        auto it = std::find_if(_prediction.tracks.begin(),
-                               _prediction.tracks.end(),
-                               [key](const PredictionTrackState &track) { return track.key == key; });
-        return (it != _prediction.tracks.end()) ? &(*it) : nullptr;
+        return _prediction->find_track(key);
     }
 
     const PredictionTrackState *GameplayState::find_prediction_track(PredictionSubjectKey key) const
     {
-        // Resolve immutable track state by stable subject key.
-        auto it = std::find_if(_prediction.tracks.begin(),
-                               _prediction.tracks.end(),
-                               [key](const PredictionTrackState &track) { return track.key == key; });
-        return (it != _prediction.tracks.end()) ? &(*it) : nullptr;
+        return _prediction->find_track(key);
     }
 
     PredictionTrackState *GameplayState::active_prediction_track()
     {
-        // Return the track currently focused by the prediction UI.
-        return find_prediction_track(_prediction.selection.active_subject);
+        return _prediction->active_track();
     }
 
     const PredictionTrackState *GameplayState::active_prediction_track() const
     {
-        // Return the track currently focused by the prediction UI.
-        return find_prediction_track(_prediction.selection.active_subject);
+        return _prediction->active_track();
     }
 
     PredictionTrackState *GameplayState::player_prediction_track()
     {
-        // Resolve the local player's prediction track if one exists.
-        const EntityId player_eid = player_entity();
-        if (!player_eid.is_valid())
-        {
-            return nullptr;
-        }
-        return find_prediction_track(PredictionSubjectKey{PredictionSubjectKind::Orbiter, player_eid.value});
+        return _prediction->player_track(player_prediction_subject_key());
     }
 
     const PredictionTrackState *GameplayState::player_prediction_track() const
     {
-        // Resolve the local player's prediction track if one exists.
-        const EntityId player_eid = player_entity();
-        if (!player_eid.is_valid())
-        {
-            return nullptr;
-        }
-        return find_prediction_track(PredictionSubjectKey{PredictionSubjectKind::Orbiter, player_eid.value});
+        return _prediction->player_track(player_prediction_subject_key());
     }
 
     OrbitPredictionCache *GameplayState::effective_prediction_cache(PredictionTrackState *track)
     {
-        if (!track)
-        {
-            return nullptr;
-        }
-        return track->cache.identity.valid ? &track->cache : nullptr;
+        return _prediction->effective_cache(track);
     }
 
     const OrbitPredictionCache *GameplayState::effective_prediction_cache(const PredictionTrackState *track) const
     {
-        if (!track)
-        {
-            return nullptr;
-        }
-        return track->cache.identity.valid ? &track->cache : nullptr;
+        return _prediction->effective_cache(track);
     }
 
     OrbitPredictionCache *GameplayState::player_prediction_cache()
     {
-        // Expose the player's cached prediction data for HUD/UI consumers.
-        return effective_prediction_cache(player_prediction_track());
+        return _prediction->player_cache(player_prediction_subject_key());
     }
 
     const OrbitPredictionCache *GameplayState::player_prediction_cache() const
     {
-        // Expose the player's cached prediction data for HUD/UI consumers.
-        return effective_prediction_cache(player_prediction_track());
+        return _prediction->player_cache(player_prediction_subject_key());
     }
 
     bool GameplayState::prediction_subject_is_player(PredictionSubjectKey key) const
