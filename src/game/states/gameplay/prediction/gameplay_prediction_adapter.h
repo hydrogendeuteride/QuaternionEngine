@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/prediction/prediction_system.h"
 #include "game/states/gameplay/prediction/prediction_frame_controller.h"
 #include "game/states/gameplay/prediction/prediction_frame_resolver.h"
 #include "game/states/gameplay/prediction/runtime/prediction_runtime_context.h"
@@ -44,6 +45,7 @@ namespace Game
 
         PredictionSubjectKey player_prediction_subject_key() const;
         std::vector<PredictionSubjectDescriptor> build_prediction_subject_descriptors() const;
+        PredictionHostContext build_prediction_host_context(const GameStateContext *ctx = nullptr) const;
         bool get_player_world_state(WorldVec3 &out_pos_world,
                                     glm::dvec3 &out_vel_world,
                                     glm::vec3 &out_vel_local) const;

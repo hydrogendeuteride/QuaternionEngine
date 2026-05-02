@@ -1,5 +1,6 @@
 #include "game/states/gameplay/prediction/prediction_system.h"
 
+#include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/orbit_helpers.h"
 #include "game/states/gameplay/prediction/runtime/prediction_invalidation_controller.h"
 #include "game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.h"
@@ -10,6 +11,28 @@
 
 namespace Game
 {
+#if defined(VULKAN_ENGINE_GAMEPLAY_TEST_ACCESS)
+    GameplayPredictionState &GameplayState::prediction_for_test()
+    {
+        return _prediction->state();
+    }
+
+    const GameplayPredictionState &GameplayState::prediction_for_test() const
+    {
+        return _prediction->state();
+    }
+
+    PredictionSystem &GameplayState::prediction_system_for_test()
+    {
+        return *_prediction;
+    }
+
+    const PredictionSystem &GameplayState::prediction_system_for_test() const
+    {
+        return *_prediction;
+    }
+#endif
+
     GameplayPredictionState &PredictionSystem::state()
     {
         return _state;

@@ -1,4 +1,5 @@
 #include "gameplay_prediction_maneuver_test_common.h"
+#include "game/states/gameplay/maneuver/maneuver_prediction_bridge.h"
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 
 namespace
@@ -1016,7 +1017,7 @@ TEST(GameplayPredictionManeuverTests, TimeEditFinishRequestsFullRefine)
     state._maneuver.edit_preview().changed = true;
     state._maneuver.edit_preview().start_time_s = 240.0;
 
-    state.finish_maneuver_node_time_edit_preview(false);
+    Game::ManeuverPredictionBridge::finish_node_time_edit_preview(state, false);
 
     ASSERT_EQ(state.prediction_for_test().tracks.size(), 1u);
     EXPECT_EQ(state.prediction_for_test().tracks.front().preview_state, Game::PredictionPreviewRuntimeState::AwaitFullRefine);

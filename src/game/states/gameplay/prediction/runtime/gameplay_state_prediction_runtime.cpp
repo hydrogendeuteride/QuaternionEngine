@@ -646,7 +646,7 @@ namespace Game
                                                                     const bool thrusting,
                                                                     const bool with_maneuvers) const
     {
-        return _prediction->should_rebuild_track(_state.build_prediction_host_context(),
+        return _prediction->should_rebuild_track(build_prediction_host_context(),
                                                  track,
                                                  now_s,
                                                  fixed_dt,
@@ -662,6 +662,6 @@ namespace Game
         GameplayPredictionAdapter prediction(*this);
         prediction.rebuild_prediction_frame_options();
         prediction.rebuild_prediction_analysis_options();
-        _prediction->update(build_prediction_host_context(&ctx), fixed_dt);
+        _prediction->update(prediction.build_prediction_host_context(&ctx), fixed_dt);
     }
 } // namespace Game

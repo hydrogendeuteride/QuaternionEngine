@@ -125,16 +125,16 @@ namespace Game
             return ManeuverPredictionBridge::compute_align_delta(state, align_ctx, cache, traj_base);
         };
         auto update_maneuver_node_time_edit_preview = [&](const int node_id, const double previous_time_s) {
-            state.update_maneuver_node_time_edit_preview(node_id, previous_time_s);
+            ManeuverPredictionBridge::update_node_time_edit_preview(state, node_id, previous_time_s);
         };
         auto finish_maneuver_node_time_edit_preview = [&](const bool changed) {
-            state.finish_maneuver_node_time_edit_preview(changed);
+            ManeuverPredictionBridge::finish_node_time_edit_preview(state, changed);
         };
         auto update_maneuver_node_dv_edit_preview = [&](const int node_id) {
-            state.update_maneuver_node_dv_edit_preview(node_id);
+            ManeuverPredictionBridge::update_node_dv_edit_preview(state, node_id);
         };
         auto finish_maneuver_node_dv_edit_preview = [&](const bool changed) {
-            state.finish_maneuver_node_dv_edit_preview(changed);
+            ManeuverPredictionBridge::finish_node_dv_edit_preview(state, changed);
         };
         auto resolve_maneuver_node_primary_body_id = [&](const ManeuverNode &node, const double query_time_s) {
             return ManeuverPredictionBridge::resolve_node_primary_body_id(state, node, query_time_s);

@@ -2,6 +2,7 @@
 
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
+#include "game/states/gameplay/maneuver/maneuver_commands.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 
 #include <algorithm>
@@ -10,6 +11,104 @@
 
 namespace Game
 {
+    void ManeuverPredictionBridge::begin_node_dv_edit_preview(GameplayState &state, const int node_id)
+    {
+        if (!state._maneuver.begin_dv_edit_preview(node_id))
+        {
+            return;
+        }
+
+        GameplayPredictionAdapter prediction(state);
+        if (PredictionTrackState *track = prediction.active_prediction_track())
+        {
+            prediction.refresh_prediction_preview_anchor(*track, state.current_sim_time_s(), true);
+        }
+    }
+
+    void ManeuverPredictionBridge::update_node_dv_edit_preview(GameplayState &state, const int node_id)
+    {
+        begin_node_dv_edit_preview(state, node_id);
+        if (!state._maneuver.mark_edit_preview_changed(ManeuverNodeEditPreview::State::EditingDv, node_id))
+        {
+            return;
+        }
+
+        GameplayPredictionAdapter prediction(state);
+        if (PredictionTrackState *track = prediction.active_prediction_track())
+        {
+            state._prediction->mark_maneuver_preview_dirty(*track);
+            prediction.sync_prediction_dirty_flag();
+        }
+    }
+
+    void ManeuverPredictionBridge::finish_node_dv_edit_preview(GameplayState &state, const bool changed)
+    {
+        const bool preview_changed =
+                state._maneuver.finish_edit_preview(ManeuverNodeEditPreview::State::EditingDv, changed);
+        if (!preview_changed)
+        {
+            return;
+        }
+
+        GameplayPredictionAdapter prediction(state);
+        if (PredictionTrackState *track = prediction.active_prediction_track())
+        {
+            state._prediction->await_maneuver_preview_full_refine(*track, state.current_sim_time_s());
+        }
+        (void) state.apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
+    }
+
+    void ManeuverPredictionBridge::begin_node_time_edit_preview(GameplayState &state,
+                                                                const int node_id,
+                                                                const double previous_time_s)
+    {
+        if (!state._maneuver.begin_time_edit_preview(node_id, previous_time_s))
+        {
+            return;
+        }
+
+        GameplayPredictionAdapter prediction(state);
+        if (PredictionTrackState *track = prediction.active_prediction_track())
+        {
+            prediction.refresh_prediction_preview_anchor(*track, state.current_sim_time_s(), true);
+        }
+    }
+
+    void ManeuverPredictionBridge::update_node_time_edit_preview(GameplayState &state,
+                                                                 const int node_id,
+                                                                 const double previous_time_s)
+    {
+        begin_node_time_edit_preview(state, node_id, previous_time_s);
+        if (!state._maneuver.mark_edit_preview_changed(ManeuverNodeEditPreview::State::EditingTime, node_id))
+        {
+            return;
+        }
+
+        GameplayPredictionAdapter prediction(state);
+        if (PredictionTrackState *track = prediction.active_prediction_track())
+        {
+            state._prediction->mark_maneuver_preview_dirty(*track);
+            prediction.sync_prediction_dirty_flag();
+        }
+    }
+
+    void ManeuverPredictionBridge::finish_node_time_edit_preview(GameplayState &state, const bool changed)
+    {
+        const bool preview_changed =
+                state._maneuver.finish_edit_preview(ManeuverNodeEditPreview::State::EditingTime, changed);
+        if (!preview_changed)
+        {
+            return;
+        }
+
+        GameplayPredictionAdapter prediction(state);
+        if (PredictionTrackState *track = prediction.active_prediction_track())
+        {
+            state._prediction->await_maneuver_preview_full_refine(*track, state.current_sim_time_s());
+        }
+        (void) state.apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
+    }
+
     orbitsim::BodyId ManeuverPredictionBridge::resolve_node_primary_body_id(const GameplayState &state,
                                                                             const ManeuverNode &node,
                                                                             const double query_time_s)

@@ -4,8 +4,6 @@
 #include "game/state/game_state.h"
 #include "core/game_api.h"
 #include "game/states/gameplay/maneuver/maneuver_system.h"
-#include "game/states/gameplay/prediction/prediction_host_context.h"
-#include "game/states/gameplay/prediction/prediction_system.h"
 #include "game/states/gameplay/gameplay_settings.h"
 #include "game/input/keybinds.h"
 #include "game/states/gameplay/scenario/scenario_config.h"
@@ -33,6 +31,8 @@ namespace Game
     class GameplayPredictionAdapter;
     class ManeuverPredictionBridge;
     class ManeuverUiController;
+    class PredictionSystem;
+    struct GameplayPredictionState;
     struct ManeuverCommand;
     struct ManeuverCommandResult;
 
@@ -76,10 +76,10 @@ namespace Game
 
     VULKAN_ENGINE_GAMEPLAY_STATE_PRIVATE:
 #if defined(VULKAN_ENGINE_GAMEPLAY_TEST_ACCESS)
-        GameplayPredictionState &prediction_for_test() { return _prediction->state(); }
-        const GameplayPredictionState &prediction_for_test() const { return _prediction->state(); }
-        PredictionSystem &prediction_system_for_test() { return *_prediction; }
-        const PredictionSystem &prediction_system_for_test() const { return *_prediction; }
+        GameplayPredictionState &prediction_for_test();
+        const GameplayPredictionState &prediction_for_test() const;
+        PredictionSystem &prediction_system_for_test();
+        const PredictionSystem &prediction_system_for_test() const;
 #endif
 
         // Settings and scene lifecycle
@@ -105,18 +105,12 @@ namespace Game
         void sync_player_collision_callbacks();
 
         // Prediction entry points
-        PredictionHostContext build_prediction_host_context(const GameStateContext *ctx = nullptr) const;
         void update_prediction(GameStateContext &ctx, float fixed_dt);
         void draw_prediction(GameStateContext &ctx);
         void mark_prediction_dirty();
         void clear_prediction_runtime();
+
         // Maneuver adapters
-        void begin_maneuver_node_dv_edit_preview(int node_id);
-        void update_maneuver_node_dv_edit_preview(int node_id);
-        void finish_maneuver_node_dv_edit_preview(bool changed);
-        void begin_maneuver_node_time_edit_preview(int node_id, double previous_time_s);
-        void update_maneuver_node_time_edit_preview(int node_id, double previous_time_s);
-        void finish_maneuver_node_time_edit_preview(bool changed);
         void draw_orbit_drag_debug_window(GameStateContext &ctx);
         void refresh_maneuver_node_runtime_cache(GameStateContext &ctx);
         void update_maneuver_nodes_time_warp(GameStateContext &ctx, float fixed_dt);

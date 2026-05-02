@@ -75,14 +75,14 @@ namespace Game
         return subjects;
     }
 
-    PredictionHostContext GameplayState::build_prediction_host_context(const GameStateContext *ctx) const
+    PredictionHostContext GameplayPredictionAdapter::build_prediction_host_context(const GameStateContext *ctx) const
     {
-        GameplayPredictionAdapter prediction(*this);
+        GameplayState *state = &_state;
 
         PredictionHostContext host{};
         host.orbital_scenario = _orbit.scenario_owner().get();
-        host.subjects = prediction.build_prediction_subject_descriptors();
-        host.player_subject = prediction.player_prediction_subject_key();
+        host.subjects = build_prediction_subject_descriptors();
+        host.player_subject = player_prediction_subject_key();
         host.current_sim_time_s = current_sim_time_s();
         host.last_sim_step_dt_s = _orbital_physics.last_sim_step_dt_s();
         host.fixed_delta_time_s = ctx ? ctx->fixed_delta_time() : 0.0f;
@@ -101,26 +101,26 @@ namespace Game
                 _maneuver.gizmo_interaction().state == ManeuverGizmoInteraction::State::DragAxis ||
                 _maneuver.edit_preview().state != ManeuverNodeEditPreview::State::Idle;
         host.maneuver.revision = _maneuver.revision();
-        host.maneuver.signature = prediction.current_maneuver_plan_signature();
+        host.maneuver.signature = current_maneuver_plan_signature();
         host.maneuver.active_preview_anchor_node_id = _maneuver.active_preview_anchor_node_id();
 
-        host.reference_body_world = [this]() {
-            return GameplayPredictionAdapter(*this).prediction_world_reference_body_world();
+        host.reference_body_world = [state]() {
+            return GameplayPredictionAdapter(*state).prediction_world_reference_body_world();
         };
-        host.get_subject_world_state = [this](const PredictionSubjectKey key,
-                                              WorldVec3 &out_pos_world,
-                                              glm::dvec3 &out_vel_world,
-                                              glm::vec3 &out_vel_local) {
-            return GameplayPredictionAdapter(*this).get_prediction_subject_world_state(
+        host.get_subject_world_state = [state](const PredictionSubjectKey key,
+                                               WorldVec3 &out_pos_world,
+                                               glm::dvec3 &out_vel_world,
+                                               glm::vec3 &out_vel_local) {
+            return GameplayPredictionAdapter(*state).get_prediction_subject_world_state(
                     key,
                     out_pos_world,
                     out_vel_world,
                     out_vel_local);
         };
-        host.render_subject_position_world = [this](const PredictionSubjectKey key, const float alpha_f) {
+        host.render_subject_position_world = [state](const PredictionSubjectKey key, const float alpha_f) {
             if (key.kind == PredictionSubjectKind::Orbiter)
             {
-                if (const Entity *entity = _world.entities().find(EntityId{key.value}))
+                if (const Entity *entity = state->_world.entities().find(EntityId{key.value}))
                 {
                     return entity->get_render_physics_center_of_mass_world(alpha_f);
                 }
@@ -129,48 +129,48 @@ namespace Game
             WorldVec3 pos_world{0.0, 0.0, 0.0};
             glm::dvec3 vel_world{0.0};
             glm::vec3 vel_local{0.0f};
-            (void) GameplayPredictionAdapter(*this).get_prediction_subject_world_state(
+            (void) GameplayPredictionAdapter(*state).get_prediction_subject_world_state(
                     key,
                     pos_world,
                     vel_world,
                     vel_local);
             return pos_world;
         };
-        host.future_window_s = [this](const PredictionSubjectKey key) {
-            return GameplayPredictionAdapter(*this).prediction_future_window_s(key);
+        host.future_window_s = [state](const PredictionSubjectKey key) {
+            return GameplayPredictionAdapter(*state).prediction_future_window_s(key);
         };
-        host.required_window_s = [this](const PredictionTrackState &track,
-                                        const double now_s,
-                                        const bool with_maneuvers) {
-            return GameplayPredictionAdapter(*this).prediction_required_window_s(track, now_s, with_maneuvers);
+        host.required_window_s = [state](const PredictionTrackState &track,
+                                         const double now_s,
+                                         const bool with_maneuvers) {
+            return GameplayPredictionAdapter(*state).prediction_required_window_s(track, now_s, with_maneuvers);
         };
-        host.preview_exact_window_s = [this](const PredictionTrackState &track,
-                                             const double now_s,
-                                             const bool with_maneuvers) {
-            return GameplayPredictionAdapter(*this).prediction_preview_exact_window_s(track, now_s, with_maneuvers);
+        host.preview_exact_window_s = [state](const PredictionTrackState &track,
+                                              const double now_s,
+                                              const bool with_maneuvers) {
+            return GameplayPredictionAdapter(*state).prediction_preview_exact_window_s(track, now_s, with_maneuvers);
         };
-        host.refresh_preview_anchor = [this](PredictionTrackState &track,
-                                             const double now_s,
-                                             const bool with_maneuvers) {
-            GameplayPredictionAdapter(*this).refresh_prediction_preview_anchor(track, now_s, with_maneuvers);
+        host.refresh_preview_anchor = [state](PredictionTrackState &track,
+                                              const double now_s,
+                                              const bool with_maneuvers) {
+            GameplayPredictionAdapter(*state).refresh_prediction_preview_anchor(track, now_s, with_maneuvers);
         };
-        host.subject_is_player = [this](const PredictionSubjectKey key) {
-            return GameplayPredictionAdapter(*this).prediction_subject_is_player(key);
+        host.subject_is_player = [state](const PredictionSubjectKey key) {
+            return GameplayPredictionAdapter(*state).prediction_subject_is_player(key);
         };
-        host.subject_thrust_applied_this_tick = [this](const PredictionSubjectKey key) {
-            return GameplayPredictionAdapter(*this).prediction_subject_thrust_applied_this_tick(key);
+        host.subject_thrust_applied_this_tick = [state](const PredictionSubjectKey key) {
+            return GameplayPredictionAdapter(*state).prediction_subject_thrust_applied_this_tick(key);
         };
-        host.resolve_maneuver_node_primary_body_id = [this](const ManeuverNode &node, const double query_time_s) {
-            return ManeuverPredictionBridge::resolve_node_primary_body_id(*this, node, query_time_s);
+        host.resolve_maneuver_node_primary_body_id = [state](const ManeuverNode &node, const double query_time_s) {
+            return ManeuverPredictionBridge::resolve_node_primary_body_id(*state, node, query_time_s);
         };
-        host.resolve_display_frame_spec = [this](const OrbitPredictionCache &cache, const double display_time_s) {
-            return GameplayPredictionAdapter(*this).resolve_prediction_display_frame_spec(cache, display_time_s);
+        host.resolve_display_frame_spec = [state](const OrbitPredictionCache &cache, const double display_time_s) {
+            return GameplayPredictionAdapter(*state).resolve_prediction_display_frame_spec(cache, display_time_s);
         };
-        host.resolve_analysis_body_id = [this](const OrbitPredictionCache &cache,
-                                               const PredictionSubjectKey key,
-                                               const double query_time_s,
-                                               const orbitsim::BodyId preferred_body_id) {
-            return GameplayPredictionAdapter(*this).resolve_prediction_analysis_body_id(
+        host.resolve_analysis_body_id = [state](const OrbitPredictionCache &cache,
+                                                const PredictionSubjectKey key,
+                                                const double query_time_s,
+                                                const orbitsim::BodyId preferred_body_id) {
+            return GameplayPredictionAdapter(*state).resolve_prediction_analysis_body_id(
                     cache,
                     key,
                     query_time_s,
@@ -306,7 +306,7 @@ namespace Game
 
     void GameplayPredictionAdapter::rebuild_prediction_subjects()
     {
-        _prediction->sync_subjects(_state.build_prediction_host_context());
+        _prediction->sync_subjects(build_prediction_host_context());
     }
 
     std::vector<PredictionSubjectKey> GameplayPredictionAdapter::collect_visible_prediction_subjects() const
