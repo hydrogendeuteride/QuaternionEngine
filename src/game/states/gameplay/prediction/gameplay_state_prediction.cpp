@@ -95,13 +95,13 @@ namespace Game
         host.maneuver.plan_horizon = _maneuver.settings().plan_horizon;
         host.maneuver.plan_windows = _maneuver.settings().plan_windows;
         host.maneuver.nodes_enabled = _maneuver.settings().nodes_enabled;
-        host.maneuver.live_preview_active = maneuver_live_preview_active(true);
+        host.maneuver.live_preview_active = _maneuver.live_preview_active(true);
         host.maneuver.edit_in_progress =
                 _maneuver.gizmo_interaction().state == ManeuverGizmoInteraction::State::DragAxis ||
                 _maneuver.edit_preview().state != ManeuverNodeEditPreview::State::Idle;
         host.maneuver.revision = _maneuver.revision();
         host.maneuver.signature = prediction.current_maneuver_plan_signature();
-        host.maneuver.active_preview_anchor_node_id = active_maneuver_preview_anchor_node_id();
+        host.maneuver.active_preview_anchor_node_id = _maneuver.active_preview_anchor_node_id();
 
         host.reference_body_world = [this]() {
             return GameplayPredictionAdapter(*this).prediction_world_reference_body_world();

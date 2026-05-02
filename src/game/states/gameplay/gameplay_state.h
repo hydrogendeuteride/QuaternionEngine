@@ -19,26 +19,18 @@
 #include <deque>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <vector>
-
-struct ImDrawList;
 
 namespace Physics
 {
     class PhysicsContext;
     class PhysicsWorld;
-    struct BodySettings;
 } // namespace Physics
-
-namespace orbitsim
-{
-    struct RotatingFrame;
-} // namespace orbitsim
 
 namespace Game
 {
     class GameplayPredictionAdapter;
+    class ManeuverUiController;
     struct ManeuverCommand;
     struct ManeuverCommandResult;
 
@@ -58,9 +50,9 @@ namespace Game
     class GameplayState : public IGameState
     {
         friend class GameplayPredictionAdapter;
+        friend class ManeuverUiController;
 
     public:
-        static constexpr double kDefaultRuntimeOrbiterRailsDistanceM = 10'000.0;
         static constexpr double kRuntimeOrbiterRailsReturnDistanceRatio = 0.85;
         // Critically-damped spring controller (exact integration, stable at any dt).
         static constexpr double kFormationHoldOmega = 0.5;          // natural frequency [rad/s]
@@ -114,13 +106,6 @@ namespace Game
         bool promote_orbiter_to_rails(OrbiterInfo &orbiter);
         bool demote_orbiter_from_rails(OrbiterInfo &orbiter);
         void sync_celestial_render_entities(GameStateContext &ctx);
-        Physics::BodyId create_orbiter_physics_body(bool render_is_gltf,
-                                                    Entity &entity,
-                                                    const Physics::BodySettings &settings,
-                                                    const WorldVec3 &position_world,
-                                                    const glm::quat &rotation,
-                                                    glm::vec3 *out_origin_offset_local = nullptr);
-        bool destroy_orbiter_physics_body(bool render_is_gltf, Entity &entity);
 
         // Orbiter adapters
         void update_rebase_anchor();
@@ -137,45 +122,21 @@ namespace Game
         void mark_prediction_dirty();
         void clear_prediction_runtime();
         // Maneuver adapters
-        void emit_maneuver_node_debug_overlay(GameStateContext &ctx);
-        bool maneuver_live_preview_active(bool with_maneuvers) const;
-        int active_maneuver_preview_anchor_node_id() const;
         void begin_maneuver_node_dv_edit_preview(int node_id);
         void update_maneuver_node_dv_edit_preview(int node_id);
         void finish_maneuver_node_dv_edit_preview(bool changed);
         void begin_maneuver_node_time_edit_preview(int node_id, double previous_time_s);
         void update_maneuver_node_time_edit_preview(int node_id, double previous_time_s);
         void finish_maneuver_node_time_edit_preview(bool changed);
-        void cancel_maneuver_node_edit_preview();
-        void cancel_maneuver_node_dv_edit_preview();
         bool build_maneuver_gizmo_view_context(const GameStateContext &ctx, ManeuverGizmoViewContext &out_view) const;
         bool begin_maneuver_axis_drag(GameStateContext &ctx, int node_id, ManeuverHandleAxis axis);
         void apply_maneuver_axis_drag(GameStateContext &ctx, ManeuverNode &node, const glm::vec2 &mouse_pos_window);
-        void build_maneuver_gizmo_markers(const ManeuverGizmoViewContext &view,
-                                          float overlay_size_px,
-                                          std::vector<ManeuverHubMarker> &out_hubs,
-                                          std::vector<ManeuverAxisMarker> &out_handles) const;
-        void draw_maneuver_gizmo_markers(ImDrawList *draw_list,
-                                         const std::vector<ManeuverHubMarker> &hubs,
-                                         const std::vector<ManeuverAxisMarker> &handles,
-                                         int hovered_hub_idx,
-                                         int hovered_handle_idx,
-                                         float hub_hit_px,
-                                         float axis_hit_px) const;
-        void draw_maneuver_gizmo_hover_tooltip(const std::vector<ManeuverAxisMarker> &handles, int hovered_handle_idx) const;
-
-        void update_maneuver_ui_config(GameStateContext &ctx);
-        void draw_maneuver_nodes_panel(GameStateContext &ctx);
-        void draw_maneuver_imgui_gizmo(GameStateContext &ctx);
         void draw_orbit_drag_debug_window(GameStateContext &ctx);
         void refresh_maneuver_node_runtime_cache(GameStateContext &ctx);
-        void clear_maneuver_gizmo_instances(GameStateContext &ctx);
         void update_maneuver_nodes_time_warp(GameStateContext &ctx, float fixed_dt);
         void update_maneuver_nodes_execution(GameStateContext &ctx);
         orbitsim::BodyId resolve_maneuver_node_primary_body_id(const ManeuverNode &node, double query_time_s) const;
         ManeuverCommandResult apply_maneuver_command(const ManeuverCommand &command);
-        void remove_maneuver_node(int node_id, int hint_index = -1);
-        void remove_maneuver_node_suffix(int node_id, int hint_index = -1);
         WorldVec3 compute_maneuver_align_delta(GameStateContext &ctx,
                                                 const OrbitPredictionCache &cache,
                                                 const std::vector<orbitsim::TrajectorySample> &traj_base);

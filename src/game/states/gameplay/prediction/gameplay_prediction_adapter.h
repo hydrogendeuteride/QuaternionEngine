@@ -217,14 +217,6 @@ namespace Game
         OrbiterInfo *find_orbiter(EntityId entity) { return _state._orbit.find_orbiter(entity); }
         const OrbiterInfo *find_orbiter(EntityId entity) const { return _state._orbit.find_orbiter(entity); }
         EntityId player_entity() const { return _state._orbit.player_entity(); }
-        bool maneuver_live_preview_active(bool with_maneuvers) const
-        {
-            return _state.maneuver_live_preview_active(with_maneuvers);
-        }
-        int active_maneuver_preview_anchor_node_id() const
-        {
-            return _state.active_maneuver_preview_anchor_node_id();
-        }
         orbitsim::BodyId resolve_maneuver_node_primary_body_id(const ManeuverNode &node, double query_time_s) const
         {
             return _state.resolve_maneuver_node_primary_body_id(node, query_time_s);

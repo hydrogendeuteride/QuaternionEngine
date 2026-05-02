@@ -23,7 +23,7 @@ This folder contains the maneuver-node editor used by `GameplayState`.
 ### Implementation Files
 
 - `gameplay_state_maneuver_nodes.cpp`
-  Core node coordination: sim-time query (`current_sim_time_s`), primary-body resolution (`resolve_maneuver_node_primary_body_id`), command side effects (`apply_maneuver_command`), node removal wrappers (`remove_maneuver_node`, `remove_maneuver_node_suffix`), and orbit-curve alignment delta (`compute_maneuver_align_delta`).
+  Core node coordination: sim-time query (`current_sim_time_s`), edit-preview prediction hooks, primary-body resolution (`resolve_maneuver_node_primary_body_id`), command side effects (`apply_maneuver_command`), and orbit-curve alignment delta (`compute_maneuver_align_delta`).
 
 - `maneuver_plan_model.*`, `maneuver_commands.*`, `maneuver_controller.*`
   Plan mutation boundary. UI and gizmo code create commands, the controller applies them to `ManeuverPlanState`, and the returned result drives prediction dirty/artifact cleanup from `GameplayState`.

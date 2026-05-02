@@ -1,4 +1,5 @@
 #include "gameplay_state.h"
+#include "orbiter_physics_bridge.h"
 #include "orbit_helpers.h"
 #include "game/component/ship_controller.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
@@ -16,7 +17,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <optional>
 #include <string>
 #include <utility>
 
@@ -130,130 +130,6 @@ namespace Game
             orbiter_def.relative_velocity = target_rel_vel - player_vel_world;
         }
     } // namespace
-
-    Physics::BodyId GameplayState::create_orbiter_physics_body(const bool render_is_gltf,
-                                                               Entity &entity,
-                                                               const Physics::BodySettings &settings_template,
-                                                               const WorldVec3 &position_world,
-                                                               const glm::quat &rotation,
-                                                               glm::vec3 *out_origin_offset_local)
-    {
-#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-        if (!_physics || !_physics_context)
-        {
-            return {};
-        }
-
-        if (out_origin_offset_local)
-        {
-            *out_origin_offset_local = glm::vec3(0.0f);
-        }
-
-        const uint64_t user_data = static_cast<uint64_t>(entity.id().value);
-
-        if (render_is_gltf)
-        {
-            if (!_renderer || !_renderer->_sceneManager || entity.render_name().empty())
-            {
-                Logger::error("[GameplayState] Cannot create glTF collider body for '{}'", entity.name());
-                return {};
-            }
-
-            (void) _renderer->_sceneManager->setGLTFInstanceTRSWorld(entity.render_name(),
-                                                                     position_world,
-                                                                     rotation,
-                                                                     entity.scale());
-
-            std::optional<float> mass_override;
-            if (settings_template.has_explicit_mass &&
-                std::isfinite(settings_template.mass) &&
-                settings_template.mass > 0.0f)
-            {
-                mass_override = settings_template.mass;
-            }
-
-            Physics::BodyId body_id = _renderer->_sceneManager->enableDynamicRootColliderBody(entity.render_name(),
-                                                                                              _physics.get(),
-                                                                                              settings_template.layer,
-                                                                                              user_data,
-                                                                                              mass_override);
-            if (!body_id.is_valid())
-            {
-                return {};
-            }
-
-            if (out_origin_offset_local)
-            {
-                glm::vec3 origin_offset_local{0.0f, 0.0f, 0.0f};
-                if (_renderer->_sceneManager->getDynamicRootColliderCenterOfMassLocal(entity.render_name(), origin_offset_local))
-                {
-                    *out_origin_offset_local = origin_offset_local;
-                }
-            }
-
-            _physics->set_gravity_scale(body_id, settings_template.gravity_scale);
-            if (settings_template.motion_type != Physics::MotionType::Dynamic)
-            {
-                (void) _physics->set_motion_type(body_id, settings_template.motion_type);
-            }
-            if (!settings_template.start_active)
-            {
-                _physics->deactivate(body_id);
-            }
-            entity.set_render_sync_mode(Entity::RenderSyncMode::Authoritative);
-            return body_id;
-        }
-
-        Physics::BodySettings settings = settings_template;
-        settings.position = world_to_local_d(position_world, _physics_context->origin_world());
-        settings.rotation = rotation;
-        settings.user_data = user_data;
-        return _physics->create_body(settings);
-#else
-        (void) render_is_gltf;
-        (void) entity;
-        (void) settings_template;
-        (void) position_world;
-        (void) rotation;
-        (void) out_origin_offset_local;
-        return {};
-#endif
-    }
-
-    bool GameplayState::destroy_orbiter_physics_body(const bool render_is_gltf, Entity &entity)
-    {
-#if defined(VULKAN_ENGINE_USE_JOLT) && VULKAN_ENGINE_USE_JOLT
-        if (!_physics || !entity.has_physics())
-        {
-            return false;
-        }
-
-        const Physics::BodyId body_id{entity.physics_body_value()};
-        bool destroyed = false;
-
-        if (render_is_gltf && _renderer && _renderer->_sceneManager && !entity.render_name().empty())
-        {
-            destroyed = _renderer->_sceneManager->disableDynamicRootColliderBody(entity.render_name());
-        }
-
-        if (!destroyed && _physics->is_body_valid(body_id))
-        {
-            _physics->destroy_body(body_id);
-            destroyed = true;
-        }
-
-        entity.clear_physics_body();
-        if (render_is_gltf)
-        {
-            entity.set_render_sync_mode(Entity::RenderSyncMode::Interpolated);
-        }
-        return destroyed;
-#else
-        (void) render_is_gltf;
-        (void) entity;
-        return false;
-#endif
-    }
 
     // ---- Scene setup ----
 
@@ -455,12 +331,19 @@ namespace Game
             if (_physics)
             {
                 glm::vec3 origin_offset_local{0.0f, 0.0f, 0.0f};
-                const Physics::BodyId body_id = create_orbiter_physics_body(render_is_gltf,
-                                                                            *ent,
-                                                                            orbiter_def.body_settings,
-                                                                            pos_world,
-                                                                            tr.rotation,
-                                                                            &origin_offset_local);
+                const OrbiterPhysicsBridgeContext bridge_ctx{
+                    .renderer = _renderer,
+                    .world = &_world,
+                    .physics = _physics.get(),
+                    .physics_context = _physics_context.get(),
+                };
+                const Physics::BodyId body_id = OrbiterPhysicsBridge::create_body(bridge_ctx,
+                                                                                  render_is_gltf,
+                                                                                  *ent,
+                                                                                  orbiter_def.body_settings,
+                                                                                  pos_world,
+                                                                                  tr.rotation,
+                                                                                  &origin_offset_local);
                 if (!body_id.is_valid() ||
                     !_world.bind_physics(ent->id(), body_id.value, false, false, origin_offset_local))
                 {

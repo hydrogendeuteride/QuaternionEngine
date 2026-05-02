@@ -422,8 +422,8 @@ namespace Game
                 PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
         const bool preview_active =
                 track.supports_maneuvers &&
-                maneuver_live_preview_active(with_maneuvers);
-        const ManeuverNode *selected = _maneuver.plan().find_node(active_maneuver_preview_anchor_node_id());
+                _maneuver.live_preview_active(with_maneuvers);
+        const ManeuverNode *selected = _maneuver.plan().find_node(_maneuver.active_preview_anchor_node_id());
 
         if (preview_active && selected && std::isfinite(selected->time_s))
         {
@@ -636,7 +636,7 @@ namespace Game
                 .draw_future_segment = _prediction->state().draw_future_segment,
                 .draw_full_orbit = _prediction->state().draw_full_orbit,
                 .with_maneuvers = with_maneuvers,
-                .live_preview_active = maneuver_live_preview_active(with_maneuvers),
+                .live_preview_active = _maneuver.live_preview_active(with_maneuvers),
         });
     }
 

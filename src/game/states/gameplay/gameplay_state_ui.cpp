@@ -3,6 +3,7 @@
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/gameplay_settings.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo_helpers.h"
+#include "game/states/gameplay/maneuver/maneuver_ui_controller.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "game/states/gameplay/scenario/scenario_loader.h"
 #include "game/component/ship_controller.h"
@@ -1047,9 +1048,9 @@ namespace Game
 
         if (_show_maneuver_nodes_panel)
         {
-            draw_maneuver_nodes_panel(ctx);
+            ManeuverUiController::draw_nodes_panel(*this, ctx);
         }
-        draw_maneuver_imgui_gizmo(ctx);
+        ManeuverUiController::draw_imgui_gizmo(*this, ctx);
         if (_show_orbit_drag_debug)
         {
             draw_orbit_drag_debug_window(ctx);

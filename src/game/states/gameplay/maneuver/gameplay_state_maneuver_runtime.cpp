@@ -231,6 +231,6 @@ namespace Game
         }
 
         // Consume the node after execution (impulse mode).
-        remove_maneuver_node(node->id);
+        (void) apply_maneuver_command(ManeuverCommand::remove_node(node->id));
     }
 } // namespace Game

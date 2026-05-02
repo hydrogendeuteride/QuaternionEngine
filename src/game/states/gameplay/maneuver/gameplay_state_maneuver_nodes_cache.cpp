@@ -86,7 +86,7 @@ namespace Game
                 .display_time_s = display_time_s,
                 .current_sim_time_s = current_sim_time_s(),
                 .align_delta = align_delta,
-                .active_preview_anchor_node_id = active_maneuver_preview_anchor_node_id(),
+                .active_preview_anchor_node_id = _maneuver.active_preview_anchor_node_id(),
                 .hold_cached_release_state = hold_cached_release_state,
                 .resolve_primary_body_id = [this](const ManeuverNode &node, const double query_time_s) {
                     return resolve_maneuver_node_primary_body_id(node, query_time_s);

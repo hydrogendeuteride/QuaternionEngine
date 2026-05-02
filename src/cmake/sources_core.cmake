@@ -9,6 +9,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   core/engine.cpp
   core/engine_ui.cpp
   core/game_api.h
+  core/render_viewport.h
+  core/render_viewport.cpp
 
   # core/input
   core/input/input_system.h

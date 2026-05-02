@@ -257,7 +257,7 @@ TEST(GameplayPredictionManeuverTests, RemovingLastManeuverNodeClearsPlannedArtif
     track.preview_overlay.chunk_assembly.chunks.push_back(Game::OrbitChunk{});
     state.prediction_for_test().tracks.push_back(track);
 
-    state.remove_maneuver_node(node.id);
+    (void) state.apply_maneuver_command(Game::ManeuverCommand::remove_node(node.id));
 
     ASSERT_TRUE(state._maneuver.plan().nodes.empty());
     ASSERT_EQ(state.prediction_for_test().tracks.size(), 1u);

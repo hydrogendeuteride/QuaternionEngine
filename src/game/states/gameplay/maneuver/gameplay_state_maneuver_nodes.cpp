@@ -18,16 +18,6 @@ namespace Game
         return _orbit.scenario_owner() ? _orbit.scenario_owner()->sim.time_s() : _fixed_time_s;
     }
 
-    bool GameplayState::maneuver_live_preview_active(const bool with_maneuvers) const
-    {
-        return _maneuver.live_preview_active(with_maneuvers);
-    }
-
-    int GameplayState::active_maneuver_preview_anchor_node_id() const
-    {
-        return _maneuver.active_preview_anchor_node_id();
-    }
-
     void GameplayState::begin_maneuver_node_dv_edit_preview(const int node_id)
     {
         if (_maneuver.begin_dv_edit_preview(node_id))
@@ -122,16 +112,6 @@ namespace Game
         (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
     }
 
-    void GameplayState::cancel_maneuver_node_edit_preview()
-    {
-        _maneuver.cancel_edit_preview();
-    }
-
-    void GameplayState::cancel_maneuver_node_dv_edit_preview()
-    {
-        cancel_maneuver_node_edit_preview();
-    }
-
     orbitsim::BodyId GameplayState::resolve_maneuver_node_primary_body_id(const ManeuverNode &node,
                                                                            const double query_time_s) const
     {
@@ -212,16 +192,6 @@ namespace Game
         }
 
         return result;
-    }
-
-    void GameplayState::remove_maneuver_node(const int node_id, const int hint_index)
-    {
-        (void) apply_maneuver_command(ManeuverCommand::remove_node(node_id, hint_index));
-    }
-
-    void GameplayState::remove_maneuver_node_suffix(const int node_id, const int hint_index)
-    {
-        (void) apply_maneuver_command(ManeuverCommand::remove_node_suffix(node_id, hint_index));
     }
 
     WorldVec3 GameplayState::compute_maneuver_align_delta(GameStateContext &ctx,

@@ -2,6 +2,7 @@
 #include "gameplay_preload_cache.h"
 #include "orbit_helpers.h"
 #include "game/states/gameplay/gameplay_settings.h"
+#include "game/states/gameplay/maneuver/maneuver_ui_controller.h"
 #include "game/states/gameplay/scenario/scenario_loader.h"
 #include "game/component/ship_controller.h"
 #include "game/states/pause_state.h"
@@ -117,7 +118,7 @@ namespace Game
             _outline_settings_saved = false;
         }
 
-        clear_maneuver_gizmo_instances(ctx);
+        _maneuver.clear_gizmo_interaction();
 
         _world.clear_rebase_anchor();
         _world.clear();
@@ -176,7 +177,7 @@ namespace Game
 
         // Draw orbit debug using the same interpolation alpha as rendering to avoid visual offset.
         draw_prediction(ctx);
-        emit_maneuver_node_debug_overlay(ctx);
+        ManeuverUiController::emit_node_debug_overlay(*this, ctx);
     }
 
     void GameplayState::on_fixed_update(GameStateContext &ctx, float fixed_dt)

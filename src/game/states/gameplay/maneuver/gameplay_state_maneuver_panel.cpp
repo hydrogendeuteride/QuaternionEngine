@@ -3,6 +3,7 @@
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo_helpers.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 #include "game/states/gameplay/maneuver/maneuver_commands.h"
+#include "game/states/gameplay/maneuver/maneuver_ui_controller.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 
 #include "core/engine.h"
@@ -99,8 +100,52 @@ namespace Game
         }
     } // namespace
 
-    void GameplayState::draw_maneuver_nodes_panel(GameStateContext &ctx)
+    void ManeuverUiController::draw_nodes_panel(GameplayState &state, GameStateContext &ctx)
     {
+        auto &_maneuver = state._maneuver;
+        auto &_prediction = state._prediction;
+        auto &_orbit = state._orbit;
+        auto &_show_maneuver_nodes_panel = state._show_maneuver_nodes_panel;
+        auto current_sim_time_s = [&]() {
+            return state.current_sim_time_s();
+        };
+        auto clear_gizmo_interaction = [&]() {
+            _maneuver.clear_gizmo_interaction();
+        };
+        auto cancel_edit_preview = [&]() {
+            _maneuver.cancel_edit_preview();
+        };
+        auto apply_maneuver_command = [&](const ManeuverCommand &command) {
+            return state.apply_maneuver_command(command);
+        };
+        auto build_maneuver_gizmo_view_context = [&](const GameStateContext &view_ctx,
+                                                     ManeuverGizmoViewContext &out_view) {
+            return state.build_maneuver_gizmo_view_context(view_ctx, out_view);
+        };
+        auto compute_maneuver_align_delta = [&](GameStateContext &align_ctx,
+                                                const OrbitPredictionCache &cache,
+                                                const std::vector<orbitsim::TrajectorySample> &traj_base) {
+            return state.compute_maneuver_align_delta(align_ctx, cache, traj_base);
+        };
+        auto update_maneuver_node_time_edit_preview = [&](const int node_id, const double previous_time_s) {
+            state.update_maneuver_node_time_edit_preview(node_id, previous_time_s);
+        };
+        auto finish_maneuver_node_time_edit_preview = [&](const bool changed) {
+            state.finish_maneuver_node_time_edit_preview(changed);
+        };
+        auto update_maneuver_node_dv_edit_preview = [&](const int node_id) {
+            state.update_maneuver_node_dv_edit_preview(node_id);
+        };
+        auto finish_maneuver_node_dv_edit_preview = [&](const bool changed) {
+            state.finish_maneuver_node_dv_edit_preview(changed);
+        };
+        auto resolve_maneuver_node_primary_body_id = [&](const ManeuverNode &node, const double query_time_s) {
+            return state.resolve_maneuver_node_primary_body_id(node, query_time_s);
+        };
+        auto remove_node_suffix = [&](const int node_id, const int hint_index) {
+            (void) state.apply_maneuver_command(ManeuverCommand::remove_node_suffix(node_id, hint_index));
+        };
+
         // Main editor window for the maneuver plan: creation, selection, timeline editing, and execution controls.
         const ImGuiViewport *viewport = ImGui::GetMainViewport();
         if (!viewport)
@@ -109,7 +154,7 @@ namespace Game
         }
 
         const double now_s = current_sim_time_s();
-        GameplayPredictionAdapter prediction(*this);
+        GameplayPredictionAdapter prediction(state);
         const PredictionTrackState *player_track = prediction.player_prediction_track();
         const PredictionSubjectKey time_key = player_track ? player_track->key : PredictionSubjectKey{};
         const PredictionTimeContext time_ctx = prediction.build_prediction_time_context(time_key, now_s);
@@ -166,9 +211,9 @@ namespace Game
         {
             if (!_maneuver.settings().nodes_enabled)
             {
-                clear_maneuver_gizmo_instances(ctx);
+                clear_gizmo_interaction();
                 _maneuver.clear_gizmo_interaction();
-                cancel_maneuver_node_dv_edit_preview();
+                cancel_edit_preview();
                 prediction.clear_maneuver_prediction_artifacts();
             }
             (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
@@ -202,8 +247,8 @@ namespace Game
         {
             _maneuver.runtime().disarm_execute_node();
             _maneuver.clear_gizmo_interaction();
-            cancel_maneuver_node_dv_edit_preview();
-            clear_maneuver_gizmo_instances(ctx);
+            cancel_edit_preview();
+            clear_gizmo_interaction();
             (void) apply_maneuver_command(ManeuverCommand::clear_plan());
         }
 
@@ -227,7 +272,7 @@ namespace Game
             if (!_maneuver.settings().live_preview_active)
             {
                 _prediction->clear_maneuver_live_preview_state();
-                cancel_maneuver_node_dv_edit_preview();
+                cancel_edit_preview();
             }
             (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
         }
@@ -846,7 +891,7 @@ namespace Game
                 needs_sort = false;
             }
             const int del_idx = find_node_index(del_id);
-            remove_maneuver_node_suffix(del_id, del_idx);
+            remove_node_suffix(del_id, del_idx);
             ImGui::EndChild();
             ImGui::End();
             return;

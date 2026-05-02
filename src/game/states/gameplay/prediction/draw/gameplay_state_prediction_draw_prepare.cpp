@@ -177,7 +177,7 @@ namespace Game
                 _maneuver.settings().nodes_enabled &&
                 !_maneuver.plan().nodes.empty();
         out.active_maneuver_track = with_maneuver_live_preview;
-        const bool live_preview_active = maneuver_live_preview_active(with_maneuver_live_preview);
+        const bool live_preview_active = _maneuver.live_preview_active(with_maneuver_live_preview);
         out.maneuver_drag_active =
                 out.active_player_track &&
                 live_preview_active;
@@ -222,7 +222,7 @@ namespace Game
                 if (!std::isfinite(cutoff_s) && out.active_player_track)
                 {
                     if (const ManeuverNode *anchor_node =
-                                _maneuver.plan().find_node(active_maneuver_preview_anchor_node_id()))
+                                _maneuver.plan().find_node(_maneuver.active_preview_anchor_node_id()))
                     {
                         cutoff_s = anchor_node->time_s;
                     }

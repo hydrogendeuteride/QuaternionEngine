@@ -97,32 +97,6 @@ namespace Game
 
     void GameplayState::handle_time_warp_input(GameStateContext &ctx) { (void) ctx; }
 
-    Physics::BodyId GameplayState::create_orbiter_physics_body(const bool render_is_gltf,
-                                                               Entity &entity,
-                                                               const Physics::BodySettings &settings,
-                                                               const WorldVec3 &position_world,
-                                                               const glm::quat &rotation,
-                                                               glm::vec3 *out_origin_offset_local)
-    {
-        (void) render_is_gltf;
-        (void) entity;
-        (void) settings;
-        (void) position_world;
-        (void) rotation;
-        if (out_origin_offset_local)
-        {
-            *out_origin_offset_local = glm::vec3(0.0f);
-        }
-        return {};
-    }
-
-    bool GameplayState::destroy_orbiter_physics_body(const bool render_is_gltf, Entity &entity)
-    {
-        (void) render_is_gltf;
-        (void) entity;
-        return false;
-    }
-
     ComponentContext GameplayState::build_component_context(GameStateContext &ctx, float alpha)
     {
         ComponentContext comp_ctx{};
