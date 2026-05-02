@@ -10,6 +10,7 @@
 #include "core/game_api.h"
 #include "core/engine.h"
 #include "core/input/input_system.h"
+#include "core/picking/picking_system.h"
 #include "core/render_viewport.h"
 
 #include "imgui.h"
@@ -47,6 +48,59 @@ namespace Game
 
         _maneuver.settings().ui_config.effective_scale = _maneuver.settings().ui_config.ui_scale * std::max(dpi_scale, display_dpi / _maneuver.settings().ui_config.base_dpi);
         _maneuver.settings().ui_config.effective_scale = std::clamp(_maneuver.settings().ui_config.effective_scale, 0.5f, 4.0f);
+    }
+
+    void ManeuverUiController::open_nodes_panel_from_orbit_pick_release(GameplayState &state, GameStateContext &ctx)
+    {
+        auto &_maneuver = state._maneuver;
+        auto &_show_maneuver_nodes_panel = state._show_maneuver_nodes_panel;
+
+        const auto is_maneuver_orbit_pick = [&](const PickingSystem::PickInfo &pick) -> bool {
+            const bool allow_base_pick = _maneuver.plan().nodes.empty();
+            const bool allow_planned_pick = !_maneuver.plan().nodes.empty();
+            return pick.valid &&
+                   pick.kind == PickingSystem::PickInfo::Kind::Line &&
+                   ((allow_base_pick && pick.ownerName == "OrbitPlot/Base") ||
+                    (allow_planned_pick && pick.ownerName == "OrbitPlot/Planned"));
+        };
+
+        const auto orbit_pick_matches_mouse_release = [&](const PickingSystem::PickInfo &pick) -> bool {
+            if (!ctx.input || !is_maneuver_orbit_pick(pick))
+            {
+                return false;
+            }
+
+            ManeuverGizmoViewContext view{};
+            glm::vec2 pick_screen{0.0f, 0.0f};
+            double pick_depth_m = 0.0;
+            if (!build_gizmo_view_context(state, ctx, view) ||
+                !Gizmo::project_maneuver_gizmo_point(view, pick.worldPos, pick_screen, pick_depth_m))
+            {
+                return false;
+            }
+
+            const glm::vec2 mouse_pos = ctx.input->mouse_position();
+            const float dx = mouse_pos.x - pick_screen.x;
+            const float dy = mouse_pos.y - pick_screen.y;
+            constexpr float kOrbitPickActivateRadiusPx = 24.0f;
+            return (dx * dx + dy * dy) <= (kOrbitPickActivateRadiusPx * kOrbitPickActivateRadiusPx);
+        };
+
+        if (!_show_maneuver_nodes_panel &&
+            ctx.input &&
+            ctx.input->mouse_released(MouseButton::Left) &&
+            !ImGui::GetIO().WantCaptureMouse &&
+            ctx.renderer)
+        {
+            if (PickingSystem *picking = ctx.renderer->picking())
+            {
+                const PickingSystem::PickInfo &pick = picking->last_pick();
+                if (orbit_pick_matches_mouse_release(pick))
+                {
+                    _show_maneuver_nodes_panel = true;
+                }
+            }
+        }
     }
 
     void ManeuverUiController::draw_gizmo_markers(const GameplayState &state,
@@ -160,10 +214,6 @@ namespace Game
         auto &_maneuver = state._maneuver;
         auto &_show_maneuver_nodes_panel = state._show_maneuver_nodes_panel;
         auto &_prediction = state._prediction;
-        auto build_maneuver_gizmo_view_context = [&](const GameStateContext &view_ctx,
-                                                     ManeuverGizmoViewContext &out_view) {
-            return state.build_maneuver_gizmo_view_context(view_ctx, out_view);
-        };
         auto build_gizmo_markers = [&](const ManeuverGizmoViewContext &view,
                                        const float overlay_size_px,
                                        std::vector<ManeuverHubMarker> &out_hubs,
@@ -179,18 +229,8 @@ namespace Game
         auto apply_maneuver_command = [&](const ManeuverCommand &command) {
             return state.apply_maneuver_command(command);
         };
-        auto begin_maneuver_axis_drag = [&](GameStateContext &drag_ctx,
-                                            const int node_id,
-                                            const ManeuverHandleAxis axis) {
-            return state.begin_maneuver_axis_drag(drag_ctx, node_id, axis);
-        };
         auto refresh_maneuver_node_runtime_cache = [&](GameStateContext &refresh_ctx) {
             state.refresh_maneuver_node_runtime_cache(refresh_ctx);
-        };
-        auto apply_maneuver_axis_drag = [&](GameStateContext &drag_ctx,
-                                            ManeuverNode &node,
-                                            const glm::vec2 &mouse_pos_window) {
-            state.apply_maneuver_axis_drag(drag_ctx, node, mouse_pos_window);
         };
         auto current_sim_time_s = [&]() {
             return state.current_sim_time_s();
@@ -211,7 +251,7 @@ namespace Game
         update_ui_config(state, ctx);
 
         ManeuverGizmoViewContext view{};
-        if (!build_maneuver_gizmo_view_context(ctx, view))
+        if (!build_gizmo_view_context(state, ctx, view))
         {
             return;
         }
@@ -261,7 +301,7 @@ namespace Game
                 _show_maneuver_nodes_panel = true;
                 (void) apply_maneuver_command(ManeuverCommand::select_node(handles[hovered_handle_idx].node_id));
                 refresh_after_interaction =
-                        begin_maneuver_axis_drag(ctx, handles[hovered_handle_idx].node_id, handles[hovered_handle_idx].axis);
+                        begin_axis_drag(state, ctx, handles[hovered_handle_idx].node_id, handles[hovered_handle_idx].axis);
             }
             else if (hovered_hub_idx >= 0)
             {
@@ -322,7 +362,7 @@ namespace Game
             }
             else
             {
-                apply_maneuver_axis_drag(ctx, *node, mouse_pos);
+                apply_axis_drag(state, ctx, *node, mouse_pos);
                 refresh_after_interaction = true;
             }
         }

@@ -31,6 +31,7 @@ namespace Physics
 namespace Game
 {
     class GameplayPredictionAdapter;
+    class ManeuverPredictionBridge;
     class ManeuverUiController;
     struct ManeuverCommand;
     struct ManeuverCommandResult;
@@ -51,6 +52,7 @@ namespace Game
     class GameplayState : public IGameState
     {
         friend class GameplayPredictionAdapter;
+        friend class ManeuverPredictionBridge;
         friend class ManeuverUiController;
 
     public:
@@ -115,18 +117,11 @@ namespace Game
         void begin_maneuver_node_time_edit_preview(int node_id, double previous_time_s);
         void update_maneuver_node_time_edit_preview(int node_id, double previous_time_s);
         void finish_maneuver_node_time_edit_preview(bool changed);
-        bool build_maneuver_gizmo_view_context(const GameStateContext &ctx, ManeuverGizmoViewContext &out_view) const;
-        bool begin_maneuver_axis_drag(GameStateContext &ctx, int node_id, ManeuverHandleAxis axis);
-        void apply_maneuver_axis_drag(GameStateContext &ctx, ManeuverNode &node, const glm::vec2 &mouse_pos_window);
         void draw_orbit_drag_debug_window(GameStateContext &ctx);
         void refresh_maneuver_node_runtime_cache(GameStateContext &ctx);
         void update_maneuver_nodes_time_warp(GameStateContext &ctx, float fixed_dt);
         void update_maneuver_nodes_execution(GameStateContext &ctx);
-        orbitsim::BodyId resolve_maneuver_node_primary_body_id(const ManeuverNode &node, double query_time_s) const;
         ManeuverCommandResult apply_maneuver_command(const ManeuverCommand &command);
-        WorldVec3 compute_maneuver_align_delta(GameStateContext &ctx,
-                                                const OrbitPredictionCache &cache,
-                                                const std::vector<orbitsim::TrajectorySample> &traj_base);
 
         // Owned state
         GameWorld _world;

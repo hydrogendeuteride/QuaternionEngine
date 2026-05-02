@@ -215,16 +215,6 @@ namespace Game
         OrbiterInfo *find_orbiter(EntityId entity) { return _state._orbit.find_orbiter(entity); }
         const OrbiterInfo *find_orbiter(EntityId entity) const { return _state._orbit.find_orbiter(entity); }
         EntityId player_entity() const { return _state._orbit.player_entity(); }
-        orbitsim::BodyId resolve_maneuver_node_primary_body_id(const ManeuverNode &node, double query_time_s) const
-        {
-            return _state.resolve_maneuver_node_primary_body_id(node, query_time_s);
-        }
-        WorldVec3 compute_maneuver_align_delta(GameStateContext &ctx,
-                                               const OrbitPredictionCache &cache,
-                                               const std::vector<orbitsim::TrajectorySample> &traj_base)
-        {
-            return _state.compute_maneuver_align_delta(ctx, cache, traj_base);
-        }
 
         GameplayState &_state;
         OrbitalRuntimeSystem &_orbit;

@@ -3,6 +3,7 @@
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo_helpers.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 #include "game/states/gameplay/maneuver/maneuver_commands.h"
+#include "game/states/gameplay/maneuver/maneuver_prediction_bridge.h"
 #include "game/states/gameplay/maneuver/maneuver_ui_controller.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 
@@ -118,14 +119,10 @@ namespace Game
         auto apply_maneuver_command = [&](const ManeuverCommand &command) {
             return state.apply_maneuver_command(command);
         };
-        auto build_maneuver_gizmo_view_context = [&](const GameStateContext &view_ctx,
-                                                     ManeuverGizmoViewContext &out_view) {
-            return state.build_maneuver_gizmo_view_context(view_ctx, out_view);
-        };
         auto compute_maneuver_align_delta = [&](GameStateContext &align_ctx,
-                                                const OrbitPredictionCache &cache,
-                                                const std::vector<orbitsim::TrajectorySample> &traj_base) {
-            return state.compute_maneuver_align_delta(align_ctx, cache, traj_base);
+                                                 const OrbitPredictionCache &cache,
+                                                 const std::vector<orbitsim::TrajectorySample> &traj_base) {
+            return ManeuverPredictionBridge::compute_align_delta(state, align_ctx, cache, traj_base);
         };
         auto update_maneuver_node_time_edit_preview = [&](const int node_id, const double previous_time_s) {
             state.update_maneuver_node_time_edit_preview(node_id, previous_time_s);
@@ -140,7 +137,7 @@ namespace Game
             state.finish_maneuver_node_dv_edit_preview(changed);
         };
         auto resolve_maneuver_node_primary_body_id = [&](const ManeuverNode &node, const double query_time_s) {
-            return state.resolve_maneuver_node_primary_body_id(node, query_time_s);
+            return ManeuverPredictionBridge::resolve_node_primary_body_id(state, node, query_time_s);
         };
         auto remove_node_suffix = [&](const int node_id, const int hint_index) {
             (void) state.apply_maneuver_command(ManeuverCommand::remove_node_suffix(node_id, hint_index));
@@ -572,7 +569,7 @@ namespace Game
             ManeuverGizmoViewContext overlay_view{};
             glm::vec2 overlay_screen{0.0f, 0.0f};
             double overlay_depth_m = 0.0;
-            if (!build_maneuver_gizmo_view_context(ctx, overlay_view) ||
+            if (!build_gizmo_view_context(state, ctx, overlay_view) ||
                 !Gizmo::project_maneuver_gizmo_point(overlay_view, overlay_world, overlay_screen, overlay_depth_m))
             {
                 return;

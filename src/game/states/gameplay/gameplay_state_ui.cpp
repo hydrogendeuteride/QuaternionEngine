@@ -1004,52 +1004,7 @@ namespace Game
             ImGui::End();
         }
 
-        const auto is_maneuver_orbit_pick = [&](const PickingSystem::PickInfo &pick) -> bool {
-            const bool allow_base_pick = _maneuver.plan().nodes.empty();
-            const bool allow_planned_pick = !_maneuver.plan().nodes.empty();
-            return pick.valid &&
-                   pick.kind == PickingSystem::PickInfo::Kind::Line &&
-                   ((allow_base_pick && pick.ownerName == "OrbitPlot/Base") ||
-                    (allow_planned_pick && pick.ownerName == "OrbitPlot/Planned"));
-        };
-
-        const auto orbit_pick_matches_mouse_release = [&](const PickingSystem::PickInfo &pick) -> bool {
-            if (!ctx.input || !is_maneuver_orbit_pick(pick))
-            {
-                return false;
-            }
-
-            ManeuverGizmoViewContext view{};
-            glm::vec2 pick_screen{0.0f, 0.0f};
-            double pick_depth_m = 0.0;
-            if (!build_maneuver_gizmo_view_context(ctx, view) ||
-                !Gizmo::project_maneuver_gizmo_point(view, pick.worldPos, pick_screen, pick_depth_m))
-            {
-                return false;
-            }
-
-            const glm::vec2 mouse_pos = ctx.input->mouse_position();
-            const float dx = mouse_pos.x - pick_screen.x;
-            const float dy = mouse_pos.y - pick_screen.y;
-            constexpr float kOrbitPickActivateRadiusPx = 24.0f;
-            return (dx * dx + dy * dy) <= (kOrbitPickActivateRadiusPx * kOrbitPickActivateRadiusPx);
-        };
-
-        if (!_show_maneuver_nodes_panel &&
-            ctx.input &&
-            ctx.input->mouse_released(MouseButton::Left) &&
-            !ImGui::GetIO().WantCaptureMouse &&
-            ctx.renderer)
-        {
-            if (PickingSystem *picking = ctx.renderer->picking())
-            {
-                const PickingSystem::PickInfo &pick = picking->last_pick();
-                if (orbit_pick_matches_mouse_release(pick))
-                {
-                    _show_maneuver_nodes_panel = true;
-                }
-            }
-        }
+        ManeuverUiController::open_nodes_panel_from_orbit_pick_release(*this, ctx);
 
         if (_show_maneuver_nodes_panel)
         {

@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
+#include "game/states/gameplay/maneuver/maneuver_prediction_bridge.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "physics/physics_context.h"
 #include "physics/physics_world.h"
@@ -97,7 +98,8 @@ namespace Game
 
         glm::dvec3 r_rel_m(0.0);
         glm::dvec3 v_rel_mps = ship_vel_world;
-        const orbitsim::BodyId primary_body_id = resolve_maneuver_node_primary_body_id(*node, now_s);
+        const orbitsim::BodyId primary_body_id =
+                ManeuverPredictionBridge::resolve_node_primary_body_id(*this, *node, now_s);
         if (_orbit.scenario_owner() && primary_body_id != orbitsim::kInvalidBodyId)
         {
             const orbitsim::MassiveBody *world_ref_sim = _orbit.scenario_owner()->world_reference_sim_body();

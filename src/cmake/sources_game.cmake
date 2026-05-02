@@ -153,6 +153,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/maneuver/maneuver_controller.cpp
   game/states/gameplay/maneuver/maneuver_gizmo_controller.h
   game/states/gameplay/maneuver/maneuver_gizmo_controller.cpp
+  game/states/gameplay/maneuver/maneuver_prediction_bridge.h
+  game/states/gameplay/maneuver/maneuver_prediction_bridge.cpp
   game/states/gameplay/maneuver/maneuver_ui_controller.h
   game/states/gameplay/maneuver/maneuver_system.h
   game/states/gameplay/maneuver/maneuver_system.cpp

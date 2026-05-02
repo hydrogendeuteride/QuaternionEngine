@@ -15,10 +15,22 @@ namespace Game
     {
     public:
         static void emit_node_debug_overlay(GameplayState &state, GameStateContext &ctx);
+        static void open_nodes_panel_from_orbit_pick_release(GameplayState &state, GameStateContext &ctx);
         static void draw_nodes_panel(GameplayState &state, GameStateContext &ctx);
         static void draw_imgui_gizmo(GameplayState &state, GameStateContext &ctx);
 
     private:
+        static bool build_gizmo_view_context(const GameplayState &state,
+                                             const GameStateContext &ctx,
+                                             ManeuverGizmoViewContext &out_view);
+        static bool begin_axis_drag(GameplayState &state,
+                                    GameStateContext &ctx,
+                                    int node_id,
+                                    ManeuverHandleAxis axis);
+        static void apply_axis_drag(GameplayState &state,
+                                    GameStateContext &ctx,
+                                    ManeuverNode &node,
+                                    const glm::vec2 &mouse_pos_window);
         static void update_ui_config(GameplayState &state, GameStateContext &ctx);
         static void draw_gizmo_markers(const GameplayState &state,
                                        ImDrawList *draw_list,

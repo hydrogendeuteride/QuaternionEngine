@@ -1,4 +1,5 @@
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/maneuver/maneuver_prediction_bridge.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 
 #include "game/component/ship_controller.h"
@@ -160,7 +161,7 @@ namespace Game
             return GameplayPredictionAdapter(*this).prediction_subject_thrust_applied_this_tick(key);
         };
         host.resolve_maneuver_node_primary_body_id = [this](const ManeuverNode &node, const double query_time_s) {
-            return resolve_maneuver_node_primary_body_id(node, query_time_s);
+            return ManeuverPredictionBridge::resolve_node_primary_body_id(*this, node, query_time_s);
         };
         host.resolve_display_frame_spec = [this](const OrbitPredictionCache &cache, const double display_time_s) {
             return GameplayPredictionAdapter(*this).resolve_prediction_display_frame_spec(cache, display_time_s);

@@ -1,4 +1,5 @@
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/maneuver/maneuver_prediction_bridge.h"
 #include "game/states/gameplay/maneuver/maneuver_runtime_cache_builder.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
@@ -66,7 +67,7 @@ namespace Game
             if (std::isfinite(now_s) && t1 > t0)
             {
                 display_time_s = std::clamp(now_s, t0, t1);
-                align_delta = compute_maneuver_align_delta(ctx, *active_cache, traj_base);
+                align_delta = ManeuverPredictionBridge::compute_align_delta(*this, ctx, *active_cache, traj_base);
                 frame_context = prediction.build_prediction_frame_resolver_context();
             }
             else
@@ -91,7 +92,7 @@ namespace Game
                 .active_preview_anchor_node_id = _maneuver.active_preview_anchor_node_id(),
                 .hold_cached_release_state = hold_cached_release_state,
                 .resolve_primary_body_id = [this](const ManeuverNode &node, const double query_time_s) {
-                    return resolve_maneuver_node_primary_body_id(node, query_time_s);
+                    return ManeuverPredictionBridge::resolve_node_primary_body_id(*this, node, query_time_s);
                 },
         };
         (void) ManeuverRuntimeCacheBuilder::rebuild(input);
