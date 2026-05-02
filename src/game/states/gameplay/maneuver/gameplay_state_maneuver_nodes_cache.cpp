@@ -1,5 +1,6 @@
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/states/gameplay/maneuver/maneuver_runtime_cache_builder.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include <algorithm>
@@ -10,7 +11,8 @@ namespace Game
 {
     void GameplayState::refresh_maneuver_node_runtime_cache(GameStateContext &ctx)
     {
-        const PredictionTrackState *player_track = player_prediction_track();
+        GameplayPredictionAdapter prediction(*this);
+        const PredictionTrackState *player_track = prediction.player_prediction_track();
         const bool interaction_idle =
                 _maneuver.gizmo_interaction().state != ManeuverGizmoInteraction::State::DragAxis;
         const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
@@ -26,9 +28,9 @@ namespace Game
         const bool can_refresh_from_prediction =
                 _orbitsim &&
                 _prediction->state().selection.active_subject.valid() &&
-                prediction_subject_is_player(_prediction->state().selection.active_subject);
+                prediction.prediction_subject_is_player(_prediction->state().selection.active_subject);
 
-        const OrbitPredictionCache *active_cache = can_refresh_from_prediction ? player_prediction_cache() : nullptr;
+        const OrbitPredictionCache *active_cache = can_refresh_from_prediction ? prediction.player_prediction_cache() : nullptr;
         const OrbitPredictionCache *stable_cache =
                 can_refresh_from_prediction
                     ? ((player_track &&
@@ -63,7 +65,7 @@ namespace Game
             {
                 display_time_s = std::clamp(now_s, t0, t1);
                 align_delta = compute_maneuver_align_delta(ctx, *active_cache, traj_base);
-                frame_context = build_prediction_frame_resolver_context();
+                frame_context = prediction.build_prediction_frame_resolver_context();
             }
             else
             {

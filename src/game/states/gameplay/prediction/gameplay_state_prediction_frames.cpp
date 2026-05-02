@@ -1,4 +1,5 @@
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "game/states/gameplay/prediction/prediction_frame_controller.h"
 #include "game/states/gameplay/prediction/prediction_frame_resolver.h"
 #include "game/states/gameplay/prediction/prediction_trajectory_sampler.h"
@@ -22,7 +23,7 @@ namespace Game
         }
     } // namespace
 
-    const CelestialBodyInfo *GameplayState::find_celestial_body_info(const orbitsim::BodyId body_id) const
+    const CelestialBodyInfo *GameplayPredictionAdapter::find_celestial_body_info(const orbitsim::BodyId body_id) const
     {
         if (!_orbitsim || body_id == orbitsim::kInvalidBodyId)
         {
@@ -40,18 +41,18 @@ namespace Game
         return nullptr;
     }
 
-    const orbitsim::MassiveBody *GameplayState::find_massive_body(const std::vector<orbitsim::MassiveBody> &bodies,
+    const orbitsim::MassiveBody *GameplayPredictionAdapter::find_massive_body(const std::vector<orbitsim::MassiveBody> &bodies,
                                                                   const orbitsim::BodyId body_id) const
     {
         return PredictionFrameResolver::find_massive_body(bodies, body_id);
     }
 
-    bool GameplayState::prediction_frame_is_lagrange_sensitive(const orbitsim::TrajectoryFrameSpec &spec) const
+    bool GameplayPredictionAdapter::prediction_frame_is_lagrange_sensitive(const orbitsim::TrajectoryFrameSpec &spec) const
     {
         return PredictionFrameResolver::is_lagrange_sensitive(spec);
     }
 
-    double GameplayState::resolve_prediction_display_reference_time_s(const OrbitPredictionCache &cache,
+    double GameplayPredictionAdapter::resolve_prediction_display_reference_time_s(const OrbitPredictionCache &cache,
                                                                       const double display_time_s) const
     {
         return PredictionFrameResolver::resolve_display_reference_time_s(
@@ -60,7 +61,7 @@ namespace Game
                 display_time_s);
     }
 
-    orbitsim::BodyId GameplayState::select_prediction_primary_body_id(const std::vector<orbitsim::MassiveBody> &bodies,
+    orbitsim::BodyId GameplayPredictionAdapter::select_prediction_primary_body_id(const std::vector<orbitsim::MassiveBody> &bodies,
                                                                       const OrbitPredictionCache *cache,
                                                                       const orbitsim::Vec3 &query_pos_m,
                                                                       const double query_time_s,
@@ -75,7 +76,7 @@ namespace Game
                 preferred_body_id);
     }
 
-    WorldVec3 GameplayState::prediction_body_world_position(const orbitsim::BodyId body_id,
+    WorldVec3 GameplayPredictionAdapter::prediction_body_world_position(const orbitsim::BodyId body_id,
                                                             const OrbitPredictionCache *cache,
                                                             double query_time_s) const
     {
@@ -160,14 +161,14 @@ namespace Game
         return world_ref_world + WorldVec3(glm::dvec3(body_state.position_m) - world_ref_position_m);
     }
 
-    bool GameplayState::sample_prediction_inertial_state(const std::vector<orbitsim::TrajectorySample> &trajectory,
+    bool GameplayPredictionAdapter::sample_prediction_inertial_state(const std::vector<orbitsim::TrajectorySample> &trajectory,
         const double query_time_s,
         orbitsim::State &out_state) const
     {
         return PredictionTrajectorySampler::sample_inertial_state(trajectory, query_time_s, out_state);
     }
 
-    orbitsim::SpacecraftStateLookup GameplayState::build_prediction_player_lookup() const
+    orbitsim::SpacecraftStateLookup GameplayPredictionAdapter::build_prediction_player_lookup() const
     {
         const OrbitPredictionCache *player_cache = effective_prediction_cache(player_prediction_track());
         if (!player_cache)
@@ -192,7 +193,7 @@ namespace Game
         return PredictionTrajectorySampler::build_player_lookup(*trajectory_segments);
     }
 
-    PredictionFrameResolverContext GameplayState::build_prediction_frame_resolver_context() const
+    PredictionFrameResolverContext GameplayPredictionAdapter::build_prediction_frame_resolver_context() const
     {
         PredictionFrameResolverContext context{};
         context.frame_selection = _prediction->state().frame_selection;
@@ -218,7 +219,7 @@ namespace Game
         return context;
     }
 
-    PredictionFrameControllerContext GameplayState::build_prediction_frame_controller_context() const
+    PredictionFrameControllerContext GameplayPredictionAdapter::build_prediction_frame_controller_context() const
     {
         PredictionFrameControllerContext context{};
         context.derived_service = const_cast<OrbitPredictionDerivedService *>(&_prediction->derived_service());
@@ -255,7 +256,7 @@ namespace Game
         return context;
     }
 
-    orbitsim::TrajectoryFrameSpec GameplayState::resolve_prediction_display_frame_spec(const OrbitPredictionCache &cache,
+    orbitsim::TrajectoryFrameSpec GameplayPredictionAdapter::resolve_prediction_display_frame_spec(const OrbitPredictionCache &cache,
                                                                                        double display_time_s) const
     {
         return PredictionFrameResolver::resolve_display_frame_spec(
@@ -264,7 +265,7 @@ namespace Game
                 display_time_s);
     }
 
-    orbitsim::TrajectoryFrameSpec GameplayState::default_prediction_frame_spec() const
+    orbitsim::TrajectoryFrameSpec GameplayPredictionAdapter::default_prediction_frame_spec() const
     {
         if (_orbitsim)
         {
@@ -277,7 +278,7 @@ namespace Game
         return orbitsim::TrajectoryFrameSpec::inertial();
     }
 
-    void GameplayState::rebuild_prediction_analysis_options()
+    void GameplayPredictionAdapter::rebuild_prediction_analysis_options()
     {
         std::vector<PredictionAnalysisOption> options;
         options.push_back(PredictionAnalysisOption{
@@ -324,7 +325,7 @@ namespace Game
         _prediction->state().analysis_selection.selected_index = selected_index;
     }
 
-    bool GameplayState::set_prediction_analysis_spec(const PredictionAnalysisSpec &spec)
+    bool GameplayPredictionAdapter::set_prediction_analysis_spec(const PredictionAnalysisSpec &spec)
     {
         if (same_analysis_spec(_prediction->state().analysis_selection.spec, spec))
         {
@@ -337,7 +338,7 @@ namespace Game
         return true;
     }
 
-    bool GameplayState::set_prediction_frame_spec(const orbitsim::TrajectoryFrameSpec &spec)
+    bool GameplayPredictionAdapter::set_prediction_frame_spec(const orbitsim::TrajectoryFrameSpec &spec)
     {
         if (PredictionFrameResolver::same_frame_spec(_prediction->state().frame_selection.spec, spec))
         {
@@ -351,7 +352,7 @@ namespace Game
         return true;
     }
 
-    void GameplayState::rebuild_prediction_frame_options()
+    void GameplayPredictionAdapter::rebuild_prediction_frame_options()
     {
         std::vector<PredictionFrameOption> options;
         options.push_back(PredictionFrameOption{
@@ -447,7 +448,7 @@ namespace Game
         _prediction->state().frame_selection.selected_index = selected_index;
     }
 
-    orbitsim::BodyId GameplayState::resolve_prediction_analysis_body_id(const OrbitPredictionCache &cache,
+    orbitsim::BodyId GameplayPredictionAdapter::resolve_prediction_analysis_body_id(const OrbitPredictionCache &cache,
                                                                         const PredictionSubjectKey key,
                                                                         const double query_time_s,
                                                                         const orbitsim::BodyId preferred_body_id) const
@@ -520,7 +521,7 @@ namespace Game
                 effective_preferred_body_id);
     }
 
-    bool GameplayState::build_prediction_display_frame(const OrbitPredictionCache &cache,
+    bool GameplayPredictionAdapter::build_prediction_display_frame(const OrbitPredictionCache &cache,
                                                        orbitsim::RotatingFrame &out_frame,
                                                        double display_time_s) const
     {
@@ -531,7 +532,7 @@ namespace Game
                 display_time_s);
     }
 
-    bool GameplayState::build_prediction_display_transform(const OrbitPredictionCache &cache,
+    bool GameplayPredictionAdapter::build_prediction_display_transform(const OrbitPredictionCache &cache,
                                                            WorldVec3 &out_origin_world,
                                                            glm::dmat3 &out_frame_to_world,
                                                            double display_time_s) const
@@ -544,7 +545,7 @@ namespace Game
                 display_time_s);
     }
 
-    WorldVec3 GameplayState::prediction_world_reference_body_world() const
+    WorldVec3 GameplayPredictionAdapter::prediction_world_reference_body_world() const
     {
         if (!_orbitsim)
         {
@@ -563,7 +564,7 @@ namespace Game
         return _scenario_config.system_center;
     }
 
-    WorldVec3 GameplayState::prediction_sample_position_world(const OrbitPredictionCache &cache,
+    WorldVec3 GameplayPredictionAdapter::prediction_sample_position_world(const OrbitPredictionCache &cache,
                                                               const orbitsim::TrajectorySample &sample,
                                                               double display_time_s) const
     {
@@ -574,7 +575,7 @@ namespace Game
                 display_time_s);
     }
 
-    WorldVec3 GameplayState::prediction_sample_hermite_world(const OrbitPredictionCache &cache,
+    WorldVec3 GameplayPredictionAdapter::prediction_sample_hermite_world(const OrbitPredictionCache &cache,
                                                              const orbitsim::TrajectorySample &a,
                                                              const orbitsim::TrajectorySample &b,
                                                              const double t_s,
@@ -589,7 +590,7 @@ namespace Game
                 display_time_s);
     }
 
-    WorldVec3 GameplayState::prediction_frame_origin_world(const OrbitPredictionCache &cache,
+    WorldVec3 GameplayPredictionAdapter::prediction_frame_origin_world(const OrbitPredictionCache &cache,
                                                            double display_time_s) const
     {
         return PredictionFrameResolver::frame_origin_world(
@@ -598,14 +599,14 @@ namespace Game
                 display_time_s);
     }
 
-    void GameplayState::mark_prediction_derived_request_submitted(
+    void GameplayPredictionAdapter::mark_prediction_derived_request_submitted(
             PredictionTrackState &track,
             const OrbitPredictionDerivedService::Request &request)
     {
         PredictionFrameController::mark_derived_request_submitted(track, request);
     }
 
-    bool GameplayState::request_prediction_derived_refresh(PredictionTrackState &track, double display_time_s)
+    bool GameplayPredictionAdapter::request_prediction_derived_refresh(PredictionTrackState &track, double display_time_s)
     {
         return PredictionFrameController::request_derived_refresh(
                 build_prediction_frame_controller_context(),
@@ -613,7 +614,7 @@ namespace Game
                 display_time_s);
     }
 
-    bool GameplayState::prediction_track_has_current_derived_cache(const PredictionTrackState &track,
+    bool GameplayPredictionAdapter::prediction_track_has_current_derived_cache(const PredictionTrackState &track,
                                                                    double display_time_s) const
     {
         return PredictionFrameController::has_current_derived_cache(
@@ -622,7 +623,7 @@ namespace Game
                 display_time_s);
     }
 
-    void GameplayState::refresh_prediction_derived_cache(PredictionTrackState &track,
+    void GameplayPredictionAdapter::refresh_prediction_derived_cache(PredictionTrackState &track,
                                                          double display_time_s)
     {
         PredictionFrameController::refresh_derived_cache(
@@ -631,7 +632,7 @@ namespace Game
                 display_time_s);
     }
 
-    void GameplayState::refresh_all_prediction_derived_caches()
+    void GameplayPredictionAdapter::refresh_all_prediction_derived_caches()
     {
         rebuild_prediction_frame_options();
         rebuild_prediction_analysis_options();
@@ -643,7 +644,7 @@ namespace Game
         }
     }
 
-    WorldVec3 GameplayState::prediction_reference_body_world() const
+    WorldVec3 GameplayPredictionAdapter::prediction_reference_body_world() const
     {
         return prediction_world_reference_body_world();
     }

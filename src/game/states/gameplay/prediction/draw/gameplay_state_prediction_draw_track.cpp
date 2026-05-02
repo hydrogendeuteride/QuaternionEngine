@@ -1,4 +1,5 @@
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 #include "game/orbit/orbit_prediction_tuning.h"
@@ -15,7 +16,7 @@ namespace Game
         constexpr double kPlannedAdaptiveSelectionErrorScale = 0.05;
     }
 
-    void GameplayState::draw_orbit_prediction_track_windows(Draw::PredictionTrackDrawContext &track_ctx)
+    void GameplayPredictionAdapter::draw_orbit_prediction_track_windows(Draw::PredictionTrackDrawContext &track_ctx)
     {
         OrbitPredictionCache &stable_cache = *track_ctx.stable_cache;
         OrbitPredictionCache &planned_cache = *track_ctx.planned_cache;

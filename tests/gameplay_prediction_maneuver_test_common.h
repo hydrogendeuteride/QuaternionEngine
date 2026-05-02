@@ -7,6 +7,7 @@
 #endif
 #include "game/states/gameplay/gameplay_state.h"
 #include "game/orbit/orbit_prediction_tuning.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 #include "game/states/gameplay/prediction/runtime/prediction_request_factory.h"
 
@@ -91,7 +92,7 @@ namespace
                                           bool *out_preview_request_active = nullptr)
     {
         const Game::PredictionOrbiterRequestBuildResult result =
-                Game::PredictionRequestFactory::build_orbiter_request(state.build_prediction_runtime_context(),
+                Game::PredictionRequestFactory::build_orbiter_request(Game::GameplayPredictionAdapter(state).build_prediction_runtime_context(),
                                                                       track,
                                                                       subject_pos_world,
                                                                       subject_vel_world,
@@ -115,7 +116,7 @@ namespace
                                                  orbitsim::State &out_state)
     {
         return Game::PredictionRequestFactory::resolve_preview_anchor_state(
-                state.build_prediction_runtime_context(),
+                Game::GameplayPredictionAdapter(state).build_prediction_runtime_context(),
                 track,
                 out_state);
     }

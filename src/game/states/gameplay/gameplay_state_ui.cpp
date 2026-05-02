@@ -3,6 +3,7 @@
 #include "game/orbit/orbit_prediction_tuning.h"
 #include "game/states/gameplay/gameplay_settings.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo_helpers.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "game/states/gameplay/scenario/scenario_loader.h"
 #include "game/component/ship_controller.h"
 #include "core/engine.h"
@@ -225,6 +226,8 @@ namespace Game
 
     void GameplayState::on_draw_ui(GameStateContext &ctx)
     {
+        GameplayPredictionAdapter prediction(*this);
+
         if (ImGui::BeginMainMenuBar())
         {
             if (ImGui::BeginMenu("View"))
@@ -475,7 +478,7 @@ namespace Game
                                     WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
                                     glm::dvec3 ship_vel_world(0.0);
                                     glm::vec3 ship_vel_local_f(0.0f);
-                                    if (get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
+                                    if (prediction.get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
                                     {
                                         ImGui::Text("Speed(world): %.2f m/s", glm::length(ship_vel_world));
                                     }
@@ -555,14 +558,14 @@ namespace Game
                 {
                     OrbitPlotSystem *orbit_plot =
                             (ctx.renderer && ctx.renderer->_context) ? ctx.renderer->_context->orbit_plot : nullptr;
-                    rebuild_prediction_subjects();
-                    rebuild_prediction_frame_options();
-                    rebuild_prediction_analysis_options();
+                    prediction.rebuild_prediction_subjects();
+                    prediction.rebuild_prediction_frame_options();
+                    prediction.rebuild_prediction_analysis_options();
 
                     // --- Key orbital info (always visible) ---
-                    const PredictionTrackState *active_prediction = active_prediction_track();
+                    const PredictionTrackState *active_prediction = prediction.active_prediction_track();
                     std::string active_prediction_label = active_prediction
-                                                                ? prediction_subject_label(active_prediction->key)
+                                                                ? prediction.prediction_subject_label(active_prediction->key)
                                                                 : std::string("None");
                     ImGui::Text("Focused subject: %s", active_prediction_label.c_str());
 
@@ -585,7 +588,7 @@ namespace Game
                                     option.spec.target_spacecraft_id == _prediction->state().frame_selection.spec.target_spacecraft_id;
                             if (ImGui::Selectable(option.label.c_str(), selected))
                             {
-                                (void) set_prediction_frame_spec(option.spec);
+                                (void) prediction.set_prediction_frame_spec(option.spec);
                             }
                             if (selected)
                             {
@@ -613,7 +616,7 @@ namespace Game
                                     option.spec.fixed_body_id == _prediction->state().analysis_selection.spec.fixed_body_id;
                             if (ImGui::Selectable(option.label.c_str(), selected))
                             {
-                                (void) set_prediction_analysis_spec(option.spec);
+                                (void) prediction.set_prediction_analysis_spec(option.spec);
                             }
                             if (selected)
                             {
@@ -628,16 +631,16 @@ namespace Game
                     glm::dvec3 subject_vel_world(0.0);
                     glm::vec3 subject_vel_local_f(0.0f);
 
-                    active_prediction = active_prediction_track();
+                    active_prediction = prediction.active_prediction_track();
                     active_prediction_label = active_prediction
-                                                  ? prediction_subject_label(active_prediction->key)
+                                                  ? prediction.prediction_subject_label(active_prediction->key)
                                                   : std::string("None");
                     const bool have_subject =
                             active_prediction &&
-                            get_prediction_subject_world_state(active_prediction->key,
-                                                               subject_pos_world,
-                                                               subject_vel_world,
-                                                               subject_vel_local_f);
+                            prediction.get_prediction_subject_world_state(active_prediction->key,
+                                                                          subject_pos_world,
+                                                                          subject_vel_world,
+                                                                          subject_vel_local_f);
                     if (!have_subject)
                     {
                         ImGui::TextUnformatted("Prediction subject state unavailable.");
@@ -685,7 +688,7 @@ namespace Game
                         const EntityId player_eid = player_entity();
                         if (_physics && _physics_context && player_eid.is_valid() &&
                             active_prediction &&
-                            prediction_subject_is_player(active_prediction->key))
+                            prediction.prediction_subject_is_player(active_prediction->key))
                         {
                             const glm::dvec3 v_origin_world = _physics_context->velocity_origin_world();
                             ImGui::Text("v_origin: %.1f, %.1f, %.1f m/s", v_origin_world.x, v_origin_world.y,
@@ -849,7 +852,7 @@ namespace Game
                     {
                     const OrbitPlotSystem::Stats &plot_stats = orbit_plot->stats();
                     const OrbitPlotPerfStats &perf = _prediction->state().orbit_plot_perf;
-                    const PredictionTrackState *active_track = active_prediction_track();
+                    const PredictionTrackState *active_track = prediction.active_prediction_track();
                     const double upload_mib =
                             static_cast<double>(plot_stats.upload_bytes_last_frame) / (1024.0 * 1024.0);
                     const double budget_mib =
@@ -1062,6 +1065,8 @@ namespace Game
             return;
         }
 
+        GameplayPredictionAdapter prediction(*this);
+
         const ImGuiViewport *viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(
                 ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - 440.0f, viewport->WorkPos.y + 16.0f),
@@ -1074,7 +1079,7 @@ namespace Game
             return;
         }
 
-        const PredictionTrackState *active_track = active_prediction_track();
+        const PredictionTrackState *active_track = prediction.active_prediction_track();
         if (!active_track)
         {
             ImGui::TextUnformatted("No active prediction track.");
@@ -1084,7 +1089,7 @@ namespace Game
 
         const PredictionDragDebugTelemetry &debug = active_track->drag_debug;
         const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
-        const std::string subject_label = prediction_subject_label(active_track->key);
+        const std::string subject_label = prediction.prediction_subject_label(active_track->key);
         const char *gizmo_state = "Idle";
         switch (_maneuver.gizmo_interaction().state)
         {

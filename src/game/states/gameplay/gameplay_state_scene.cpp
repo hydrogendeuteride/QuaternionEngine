@@ -1,6 +1,7 @@
 #include "gameplay_state.h"
 #include "orbit_helpers.h"
 #include "game/component/ship_controller.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "core/engine.h"
 #include "core/game_api.h"
 #include "core/util/logger.h"
@@ -543,7 +544,7 @@ namespace Game
             _orbiters.push_back(std::move(info));
         }
 
-        rebuild_prediction_subjects();
+        GameplayPredictionAdapter(*this).rebuild_prediction_subjects();
 
         // Configure explicit rebase anchor and camera target.
         {

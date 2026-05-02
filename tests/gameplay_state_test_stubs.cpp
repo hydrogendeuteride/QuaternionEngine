@@ -4,6 +4,7 @@
 // debug-draw overloads that are not compiled into this test target but are required for linkage.
 
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "core/game_api.h"
 #include "core/input/input_system.h"
 #include "game/component/ship_controller.h"
@@ -187,10 +188,10 @@ namespace Game
         return nullptr;
     }
 
-    bool GameplayState::get_orbiter_world_state(const OrbiterInfo &orbiter,
-                                                WorldVec3 &out_pos_world,
-                                                glm::dvec3 &out_vel_world,
-                                                glm::vec3 &out_vel_local) const
+    bool GameplayPredictionAdapter::get_orbiter_world_state(const OrbiterInfo &orbiter,
+                                                            WorldVec3 &out_pos_world,
+                                                            glm::dvec3 &out_vel_world,
+                                                            glm::vec3 &out_vel_local) const
     {
         (void) orbiter;
         out_pos_world = WorldVec3(0.0, 0.0, 0.0);

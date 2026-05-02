@@ -24,7 +24,7 @@ TEST(GameplayPredictionManeuverTests, CompletedSolverResultClearsSolverPendingAn
     ref.state = orbitsim::make_state(glm::dvec3(0.0), glm::dvec3(0.0));
     result.massive_bodies.push_back(ref);
 
-    state.apply_completed_prediction_result(std::move(result));
+    Game::GameplayPredictionAdapter(state).apply_completed_prediction_result(std::move(result));
 
     ASSERT_EQ(state.prediction_for_test().tracks.size(), 1u);
     EXPECT_FALSE(state.prediction_for_test().tracks.front().request_pending);
@@ -59,7 +59,7 @@ TEST(GameplayPredictionManeuverTests, OlderSolverResultCanStillQueueDerivedWorkW
     ref.state = orbitsim::make_state(glm::dvec3(0.0), glm::dvec3(0.0));
     result.massive_bodies.push_back(ref);
 
-    state.apply_completed_prediction_result(std::move(result));
+    Game::GameplayPredictionAdapter(state).apply_completed_prediction_result(std::move(result));
 
     ASSERT_EQ(state.prediction_for_test().tracks.size(), 1u);
     EXPECT_TRUE(state.prediction_for_test().tracks.front().derived_request_pending);
@@ -95,7 +95,7 @@ TEST(GameplayPredictionManeuverTests, PreviewStreamingSolverResultMarksPreviewSt
     ref.state = orbitsim::make_state(glm::dvec3(0.0), glm::dvec3(0.0));
     result.massive_bodies.push_back(ref);
 
-    state.apply_completed_prediction_result(std::move(result));
+    Game::GameplayPredictionAdapter(state).apply_completed_prediction_result(std::move(result));
 
     ASSERT_EQ(state.prediction_for_test().tracks.size(), 1u);
     EXPECT_EQ(state.prediction_for_test().tracks.front().preview_state,
@@ -130,7 +130,7 @@ TEST(GameplayPredictionManeuverTests, StaleManeuverPlanSolverResultIsDroppedAndR
     result.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(60.0, 7'100'000.0)};
     result.trajectory_segments_inertial = {make_segment(0.0, 60.0, 7'000'000.0, 7'100'000.0)};
 
-    state.apply_completed_prediction_result(std::move(result));
+    Game::GameplayPredictionAdapter(state).apply_completed_prediction_result(std::move(result));
 
     ASSERT_EQ(state.prediction_for_test().tracks.size(), 1u);
     const Game::PredictionTrackState &updated_track = state.prediction_for_test().tracks.front();
@@ -154,7 +154,7 @@ TEST(GameplayPredictionManeuverTests, MarkManeuverPlanDirtyUnblocksPendingManeuv
     track.invalidated_while_pending = true;
     state.prediction_for_test().tracks.push_back(track);
 
-    state.mark_maneuver_plan_dirty();
+    Game::GameplayPredictionAdapter(state).mark_maneuver_plan_dirty();
 
     ASSERT_EQ(state.prediction_for_test().tracks.size(), 1u);
     const Game::PredictionTrackState &updated_track = state.prediction_for_test().tracks.front();
@@ -205,7 +205,7 @@ TEST(GameplayPredictionManeuverTests, ClearManeuverPredictionArtifactsDropsPlann
     track.invalidated_while_pending = true;
     state.prediction_for_test().tracks.push_back(track);
 
-    state.clear_maneuver_prediction_artifacts();
+    Game::GameplayPredictionAdapter(state).clear_maneuver_prediction_artifacts();
 
     ASSERT_EQ(state.prediction_for_test().tracks.size(), 1u);
     const Game::PredictionTrackState &cleared = state.prediction_for_test().tracks.front();

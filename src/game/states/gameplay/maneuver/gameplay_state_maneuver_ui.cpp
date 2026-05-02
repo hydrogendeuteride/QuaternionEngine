@@ -3,6 +3,7 @@
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo_helpers.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 #include "game/states/gameplay/maneuver/maneuver_commands.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 
 #include "core/game_api.h"
 #include "core/engine.h"
@@ -240,7 +241,7 @@ namespace Game
             ManeuverNode *node = _maneuver.plan().find_node(_maneuver.gizmo_interaction().node_id);
             if (!node || !node->gizmo_valid)
             {
-                if (PredictionTrackState *track = active_prediction_track())
+                if (PredictionTrackState *track = GameplayPredictionAdapter(*this).active_prediction_track())
                 {
                     PredictionDragDebugTelemetry &debug = track->drag_debug;
                     debug.drag_active = false;
@@ -252,7 +253,7 @@ namespace Game
             else if (!ctx.input->mouse_down(MouseButton::Left))
             {
                 const bool changed = _maneuver.gizmo_interaction().applied_delta;
-                if (PredictionTrackState *track = active_prediction_track())
+                if (PredictionTrackState *track = GameplayPredictionAdapter(*this).active_prediction_track())
                 {
                     PredictionDragDebugTelemetry &debug = track->drag_debug;
                     debug.drag_active = false;
@@ -276,7 +277,7 @@ namespace Game
 
                 if (changed)
                 {
-                    if (PredictionTrackState *track = active_prediction_track())
+                    if (PredictionTrackState *track = GameplayPredictionAdapter(*this).active_prediction_track())
                     {
                         _prediction->await_maneuver_preview_full_refine(*track, current_sim_time_s());
                     }

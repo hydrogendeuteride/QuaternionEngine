@@ -117,8 +117,8 @@ TEST(GameplayPredictionManeuverTests, PredictionFutureWindowClampsNegativeValues
     const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
     const Game::PredictionSubjectKey celestial_key{Game::PredictionSubjectKind::Celestial, 2};
 
-    EXPECT_DOUBLE_EQ(state.prediction_future_window_s(orbiter_key), 0.0);
-    EXPECT_DOUBLE_EQ(state.prediction_future_window_s(celestial_key), 0.0);
+    EXPECT_DOUBLE_EQ(Game::GameplayPredictionAdapter(state).prediction_future_window_s(orbiter_key), 0.0);
+    EXPECT_DOUBLE_EQ(Game::GameplayPredictionAdapter(state).prediction_future_window_s(celestial_key), 0.0);
 }
 
 TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowAnchorsPlanHorizonAtFirstFutureNode)
@@ -139,7 +139,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowAnchorsPlanHorizon
     state._maneuver.plan().nodes.push_back(second);
 
     const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
-    const double required_window_s = state.prediction_required_window_s(orbiter_key, 100.0, true);
+    const double required_window_s = Game::GameplayPredictionAdapter(state).prediction_required_window_s(orbiter_key, 100.0, true);
     // The active solve anchors at the first future node, then adds the plan horizon and solve margin.
     EXPECT_DOUBLE_EQ(required_window_s, 650.0);
 }
@@ -158,7 +158,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowDoesNotAddLargeSol
     state._maneuver.plan().nodes.push_back(node);
 
     const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
-    const double required_window_s = state.prediction_required_window_s(orbiter_key, 100.0, true);
+    const double required_window_s = Game::GameplayPredictionAdapter(state).prediction_required_window_s(orbiter_key, 100.0, true);
     EXPECT_DOUBLE_EQ(required_window_s, 650.0);
 }
 
@@ -295,9 +295,9 @@ TEST(GameplayPredictionManeuverTests, ShortCurrentCacheRebuildsToConfiguredPlanH
     track.supports_maneuvers = true;
     track.cache = make_prediction_cache(17u, 23.8, 623.8, 7'000'000.0, 7'300'000.0);
 
-    const double required_window_s = state.prediction_required_window_s(track, 23.8, true);
+    const double required_window_s = Game::GameplayPredictionAdapter(state).prediction_required_window_s(track, 23.8, true);
     EXPECT_DOUBLE_EQ(required_window_s, 60'348.448);
-    EXPECT_TRUE(state.should_rebuild_prediction_track(track, 23.8, 1.0f / 60.0f, false, true));
+    EXPECT_TRUE(Game::GameplayPredictionAdapter(state).should_rebuild_prediction_track(track, 23.8, 1.0f / 60.0f, false, true));
 }
 
 TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowExtendsPastFarFutureManeuverNode)
@@ -313,7 +313,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowExtendsPastFarFutu
     state._maneuver.plan().nodes.push_back(far_node);
 
     const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
-    const double required_window_s = state.prediction_required_window_s(orbiter_key, 100.0, true);
+    const double required_window_s = Game::GameplayPredictionAdapter(state).prediction_required_window_s(orbiter_key, 100.0, true);
     EXPECT_DOUBLE_EQ(required_window_s, 50'500.0);
 }
 
@@ -331,7 +331,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowUsesNodeAnchoredPl
     state._maneuver.plan().nodes.push_back(node);
 
     const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
-    const double required_window_s = state.prediction_required_window_s(orbiter_key, 0.0, true);
+    const double required_window_s = Game::GameplayPredictionAdapter(state).prediction_required_window_s(orbiter_key, 0.0, true);
     EXPECT_DOUBLE_EQ(required_window_s, 121'000.0);
 }
 
@@ -351,7 +351,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowKeepsDisplayedHori
     state._maneuver.plan().nodes.push_back(selected);
 
     const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
-    const double required_window_s = state.prediction_required_window_s(orbiter_key, 100.0, true);
+    const double required_window_s = Game::GameplayPredictionAdapter(state).prediction_required_window_s(orbiter_key, 100.0, true);
     EXPECT_DOUBLE_EQ(required_window_s, 50'000.0);
 }
 
@@ -370,7 +370,7 @@ TEST(GameplayPredictionManeuverTests, PredictionRequiredWindowUsesConfiguredPlan
     state._maneuver.plan().nodes.push_back(node);
 
     const Game::PredictionSubjectKey orbiter_key{Game::PredictionSubjectKind::Orbiter, 1};
-    const double required_window_s = state.prediction_required_window_s(orbiter_key, 23.8, true);
+    const double required_window_s = Game::GameplayPredictionAdapter(state).prediction_required_window_s(orbiter_key, 23.8, true);
     EXPECT_DOUBLE_EQ(required_window_s, 60'348.448);
 }
 
@@ -396,14 +396,14 @@ TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheSeparatesPatchWindowFrom
     track.supports_maneuvers = true;
     track.cache.identity.generation_id = 42;
 
-    state.refresh_prediction_preview_anchor(track, 100.0, true);
+    Game::GameplayPredictionAdapter(state).refresh_prediction_preview_anchor(track, 100.0, true);
 
     ASSERT_TRUE(track.preview_anchor.valid);
     EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::EnterDrag);
     EXPECT_EQ(track.preview_anchor.anchor_node_id, far_node.id);
     EXPECT_DOUBLE_EQ(track.preview_anchor.anchor_time_s, 50'000.0);
-    EXPECT_DOUBLE_EQ(state.prediction_display_window_s(track.key, 100.0, true), 180.0);
-    EXPECT_DOUBLE_EQ(state.prediction_preview_exact_window_s(track, 100.0, true), 180.0);
+    EXPECT_DOUBLE_EQ(Game::GameplayPredictionAdapter(state).prediction_display_window_s(track.key, 100.0, true), 180.0);
+    EXPECT_DOUBLE_EQ(Game::GameplayPredictionAdapter(state).prediction_preview_exact_window_s(track, 100.0, true), 180.0);
     EXPECT_DOUBLE_EQ(track.preview_anchor.request_window_s, 50'500.0);
     EXPECT_DOUBLE_EQ(track.preview_anchor.visual_window_s, 180.0);
     EXPECT_DOUBLE_EQ(track.preview_anchor.exact_window_s, 300.0);
@@ -431,7 +431,7 @@ TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheClampsVisualWindowToPrev
     track.key = state.prediction_for_test().selection.active_subject;
     track.supports_maneuvers = true;
 
-    state.refresh_prediction_preview_anchor(track, 100.0, true);
+    Game::GameplayPredictionAdapter(state).refresh_prediction_preview_anchor(track, 100.0, true);
 
     ASSERT_TRUE(track.preview_anchor.valid);
     EXPECT_DOUBLE_EQ(track.preview_anchor.visual_window_s, 180.0);
@@ -464,7 +464,7 @@ TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheCanReenterDragFromStable
     track.dirty = false;
     track.preview_state = Game::PredictionPreviewRuntimeState::Idle;
 
-    state.refresh_prediction_preview_anchor(track, 100.0, true);
+    Game::GameplayPredictionAdapter(state).refresh_prediction_preview_anchor(track, 100.0, true);
 
     EXPECT_TRUE(track.preview_anchor.valid);
     EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::EnterDrag);
@@ -489,13 +489,13 @@ TEST(GameplayPredictionManeuverTests, PreviewAnchorCacheTransitionsToAwaitFullRe
     track.key = state.prediction_for_test().selection.active_subject;
     track.supports_maneuvers = true;
 
-    state.refresh_prediction_preview_anchor(track, 100.0, true);
+    Game::GameplayPredictionAdapter(state).refresh_prediction_preview_anchor(track, 100.0, true);
     ASSERT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::EnterDrag);
 
     track.preview_state = Game::PredictionPreviewRuntimeState::PreviewStreaming;
     state._maneuver.settings().live_preview_active = false;
     state._maneuver.gizmo_interaction().state = Game::ManeuverGizmoInteraction::State::Idle;
-    state.refresh_prediction_preview_anchor(track, 101.0, true);
+    Game::GameplayPredictionAdapter(state).refresh_prediction_preview_anchor(track, 101.0, true);
 
     EXPECT_EQ(track.preview_state, Game::PredictionPreviewRuntimeState::AwaitFullRefine);
     EXPECT_TRUE(track.preview_anchor.valid);
@@ -522,9 +522,9 @@ TEST(GameplayPredictionManeuverTests, RequestOrbiterPredictionTracksPreviewReque
     Game::PredictionTrackState track{};
     track.key = state.prediction_for_test().selection.active_subject;
     track.supports_maneuvers = true;
-    state.refresh_prediction_preview_anchor(track, 100.0, true);
+    Game::GameplayPredictionAdapter(state).refresh_prediction_preview_anchor(track, 100.0, true);
 
-    const bool requested = state.request_orbiter_prediction_async(track,
+    const bool requested = Game::GameplayPredictionAdapter(state).request_orbiter_prediction_async(track,
                                                                   WorldVec3(7'000'000.0, 0.0, 0.0),
                                                                   glm::dvec3(0.0, 7'500.0, 0.0),
                                                                   100.0,
@@ -1103,7 +1103,7 @@ TEST(GameplayPredictionManeuverTests, DrawContextUsesAuthoritativePlannedPrefixD
     node.dv_rtn_mps = glm::dvec3(0.0, 5.0, 0.0);
     state._maneuver.plan().selected_node_id = node.id;
     state._maneuver.plan().nodes.push_back(node);
-    const uint64_t old_plan_signature = state.current_maneuver_plan_signature();
+    const uint64_t old_plan_signature = Game::GameplayPredictionAdapter(state).current_maneuver_plan_signature();
     state._maneuver.plan().nodes.front().dv_rtn_mps = glm::dvec3(0.0, 12.0, 0.0);
 
     Game::PredictionTrackState track{};
@@ -1129,7 +1129,7 @@ TEST(GameplayPredictionManeuverTests, DrawContextUsesAuthoritativePlannedPrefixD
     track.authoritative_cache.identity.maneuver_plan_signature = old_plan_signature;
 
     Game::PredictionDrawDetail::PredictionTrackDrawContext draw_ctx{};
-    ASSERT_TRUE(state.build_orbit_prediction_track_draw_context(
+    ASSERT_TRUE(Game::GameplayPredictionAdapter(state).build_orbit_prediction_track_draw_context(
             track,
             make_draw_global_context(100.0),
             draw_ctx));
@@ -1158,7 +1158,7 @@ TEST(GameplayPredictionManeuverTests, DrawContextLimitsTimeEditStalePrefixToEarl
     node.time_s = 240.0;
     state._maneuver.plan().selected_node_id = node.id;
     state._maneuver.plan().nodes.push_back(node);
-    const uint64_t old_plan_signature = state.current_maneuver_plan_signature();
+    const uint64_t old_plan_signature = Game::GameplayPredictionAdapter(state).current_maneuver_plan_signature();
     state._maneuver.plan().nodes.front().time_s = 300.0;
 
     Game::PredictionTrackState track{};
@@ -1186,7 +1186,7 @@ TEST(GameplayPredictionManeuverTests, DrawContextLimitsTimeEditStalePrefixToEarl
     track.authoritative_cache.identity.maneuver_plan_signature = old_plan_signature;
 
     Game::PredictionDrawDetail::PredictionTrackDrawContext draw_ctx{};
-    ASSERT_TRUE(state.build_orbit_prediction_track_draw_context(
+    ASSERT_TRUE(Game::GameplayPredictionAdapter(state).build_orbit_prediction_track_draw_context(
             track,
             make_draw_global_context(100.0),
             draw_ctx));
@@ -1212,7 +1212,7 @@ TEST(GameplayPredictionManeuverTests, DrawContextKeepsAuthoritativePlannedPrefix
     node.dv_rtn_mps = glm::dvec3(0.0, 5.0, 0.0);
     state._maneuver.plan().selected_node_id = node.id;
     state._maneuver.plan().nodes.push_back(node);
-    const uint64_t old_plan_signature = state.current_maneuver_plan_signature();
+    const uint64_t old_plan_signature = Game::GameplayPredictionAdapter(state).current_maneuver_plan_signature();
     state._maneuver.plan().nodes.front().dv_rtn_mps = glm::dvec3(0.0, 12.0, 0.0);
 
     Game::PredictionTrackState track{};
@@ -1234,7 +1234,7 @@ TEST(GameplayPredictionManeuverTests, DrawContextKeepsAuthoritativePlannedPrefix
     track.authoritative_cache.identity.maneuver_plan_signature = old_plan_signature;
 
     Game::PredictionDrawDetail::PredictionTrackDrawContext draw_ctx{};
-    ASSERT_TRUE(state.build_orbit_prediction_track_draw_context(
+    ASSERT_TRUE(Game::GameplayPredictionAdapter(state).build_orbit_prediction_track_draw_context(
             track,
             make_draw_global_context(100.0),
             draw_ctx));
@@ -1267,7 +1267,7 @@ TEST(GameplayPredictionManeuverTests, DrawTrackUsesFullStreamOverlayForActiveMan
     node.dv_rtn_mps = glm::dvec3(0.0, 5.0, 0.0);
     state._maneuver.plan().selected_node_id = node.id;
     state._maneuver.plan().nodes.push_back(node);
-    const uint64_t old_plan_signature = state.current_maneuver_plan_signature();
+    const uint64_t old_plan_signature = Game::GameplayPredictionAdapter(state).current_maneuver_plan_signature();
     state._maneuver.plan().nodes.front().dv_rtn_mps = glm::dvec3(0.0, 12.0, 0.0);
 
     Game::PredictionTrackState track{};
@@ -1300,8 +1300,8 @@ TEST(GameplayPredictionManeuverTests, DrawTrackUsesFullStreamOverlayForActiveMan
     global_ctx.orbit_plot = &plot;
 
     Game::PredictionDrawDetail::PredictionTrackDrawContext draw_ctx{};
-    ASSERT_TRUE(state.build_orbit_prediction_track_draw_context(track, global_ctx, draw_ctx));
-    state.draw_orbit_prediction_track_windows(draw_ctx);
+    ASSERT_TRUE(Game::GameplayPredictionAdapter(state).build_orbit_prediction_track_draw_context(track, global_ctx, draw_ctx));
+    Game::GameplayPredictionAdapter(state).draw_orbit_prediction_track_windows(draw_ctx);
 
     EXPECT_EQ(state.prediction_for_test().orbit_plot_perf.planned_chunk_count, 1u);
     EXPECT_EQ(state.prediction_for_test().orbit_plot_perf.planned_chunks_drawn, 1u);
@@ -1326,7 +1326,7 @@ TEST(GameplayPredictionManeuverTests, DrawTrackUsesStalePrefixWhenAwaitingFullRe
     node.dv_rtn_mps = glm::dvec3(0.0, 5.0, 0.0);
     state._maneuver.plan().selected_node_id = node.id;
     state._maneuver.plan().nodes.push_back(node);
-    const uint64_t old_plan_signature = state.current_maneuver_plan_signature();
+    const uint64_t old_plan_signature = Game::GameplayPredictionAdapter(state).current_maneuver_plan_signature();
     state._maneuver.plan().nodes.front().dv_rtn_mps = glm::dvec3(0.0, 12.0, 0.0);
 
     Game::PredictionTrackState track{};
@@ -1351,12 +1351,12 @@ TEST(GameplayPredictionManeuverTests, DrawTrackUsesStalePrefixWhenAwaitingFullRe
     global_ctx.orbit_plot = &plot;
 
     Game::PredictionDrawDetail::PredictionTrackDrawContext draw_ctx{};
-    ASSERT_TRUE(state.build_orbit_prediction_track_draw_context(track, global_ctx, draw_ctx));
+    ASSERT_TRUE(Game::GameplayPredictionAdapter(state).build_orbit_prediction_track_draw_context(track, global_ctx, draw_ctx));
     ASSERT_EQ(draw_ctx.stale_planned_cache, &track.authoritative_cache);
     ASSERT_TRUE(draw_ctx.stale_planned_cache_drawable);
 
     draw_ctx.direct_world_polyline = true;
-    state.draw_orbit_prediction_track_windows(draw_ctx);
+    Game::GameplayPredictionAdapter(state).draw_orbit_prediction_track_windows(draw_ctx);
 
     EXPECT_GT(plot.stats().pending_line_count, 0u);
 
@@ -1556,7 +1556,7 @@ TEST(GameplayPredictionManeuverTests, ShouldRebuildPredictionTrackWhenCoverageFa
     track.cache.solver.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(60.0, 7'050'000.0)};
     track.cache.solver.trajectory_segments_inertial = {make_segment(0.0, 60.0, 7'000'000.0, 7'050'000.0)};
 
-    EXPECT_TRUE(state.should_rebuild_prediction_track(track, 10.0, 0.016f, false, false));
+    EXPECT_TRUE(Game::GameplayPredictionAdapter(state).should_rebuild_prediction_track(track, 10.0, 0.016f, false, false));
 }
 
 TEST(GameplayPredictionManeuverTests, ShouldRebuildPredictionTrackWhenManeuverCoverageFallsShortOutsideLivePreview)
@@ -1579,7 +1579,7 @@ TEST(GameplayPredictionManeuverTests, ShouldRebuildPredictionTrackWhenManeuverCo
     track.cache.solver.trajectory_inertial = {make_sample(0.0, 7'000'000.0), make_sample(60.0, 7'050'000.0)};
     track.cache.solver.trajectory_segments_inertial = {make_segment(0.0, 60.0, 7'000'000.0, 7'050'000.0)};
 
-    EXPECT_TRUE(state.should_rebuild_prediction_track(track, 10.0, 0.016f, false, true));
+    EXPECT_TRUE(Game::GameplayPredictionAdapter(state).should_rebuild_prediction_track(track, 10.0, 0.016f, false, true));
 }
 
 TEST(GameplayPredictionManeuverTests, AwaitFullRefineWaitsForPendingWork)
@@ -1594,10 +1594,10 @@ TEST(GameplayPredictionManeuverTests, AwaitFullRefineWaitsForPendingWork)
     track.dirty = false;
     track.derived_request_pending = true;
 
-    EXPECT_FALSE(state.should_rebuild_prediction_track(track, 10.0, 0.016f, false, false));
+    EXPECT_FALSE(Game::GameplayPredictionAdapter(state).should_rebuild_prediction_track(track, 10.0, 0.016f, false, false));
 
     track.derived_request_pending = false;
-    EXPECT_TRUE(state.should_rebuild_prediction_track(track, 10.0, 0.016f, false, false));
+    EXPECT_TRUE(Game::GameplayPredictionAdapter(state).should_rebuild_prediction_track(track, 10.0, 0.016f, false, false));
 }
 
 TEST(GameplayPredictionManeuverTests, PendingInvalidationAloneDoesNotForceImmediateRebuild)
@@ -1612,5 +1612,5 @@ TEST(GameplayPredictionManeuverTests, PendingInvalidationAloneDoesNotForceImmedi
     track.request_pending = true;
     track.invalidated_while_pending = true;
 
-    EXPECT_FALSE(state.should_rebuild_prediction_track(track, 10.0, 0.016f, false, false));
+    EXPECT_FALSE(Game::GameplayPredictionAdapter(state).should_rebuild_prediction_track(track, 10.0, 0.016f, false, false));
 }

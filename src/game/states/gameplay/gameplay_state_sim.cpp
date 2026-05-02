@@ -3,6 +3,7 @@
 #include "core/game_api.h"
 #include "core/input/input_system.h"
 #include "game/component/ship_controller.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "orbitsim/coordinate_frames.hpp"
 #include "orbitsim/frame_utils.hpp"
 #include "physics/physics_context.h"
@@ -415,7 +416,7 @@ namespace Game
         WorldVec3 pos_world{0.0};
         glm::dvec3 vel_world{0.0};
         glm::vec3 vel_local{0.0f};
-        if (!get_orbiter_world_state(orbiter, pos_world, vel_world, vel_local))
+        if (!GameplayPredictionAdapter(*this).get_orbiter_world_state(orbiter, pos_world, vel_world, vel_local))
         {
             return false;
         }

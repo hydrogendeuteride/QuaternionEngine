@@ -1,4 +1,5 @@
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 #include "game/orbit/orbit_prediction_tuning.h"
@@ -92,7 +93,7 @@ namespace Game
         }
     }
 
-    bool GameplayState::build_orbit_prediction_track_draw_context(
+    bool GameplayPredictionAdapter::build_orbit_prediction_track_draw_context(
             PredictionTrackState &track,
             const Draw::PredictionGlobalDrawContext &global_ctx,
             Draw::PredictionTrackDrawContext &out)

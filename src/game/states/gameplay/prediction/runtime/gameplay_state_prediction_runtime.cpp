@@ -1,4 +1,5 @@
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 
 #include "core/util/logger.h"
 #include "game/orbit/orbit_prediction_tuning.h"
@@ -360,7 +361,7 @@ namespace Game
 
     } // namespace
 
-    void GameplayState::sync_prediction_dirty_flag()
+    void GameplayPredictionAdapter::sync_prediction_dirty_flag()
     {
         // Collapse only visible-track rebuild demand into one cheap UI-facing flag.
         const std::vector<PredictionSubjectKey> visible_subjects = collect_visible_prediction_subjects();
@@ -370,12 +371,13 @@ namespace Game
     void GameplayState::mark_prediction_dirty()
     {
         // Force only the active/overlay-visible tracks to rebuild on the next prediction update.
-        const std::vector<PredictionSubjectKey> visible_subjects = collect_visible_prediction_subjects();
+        GameplayPredictionAdapter prediction(*this);
+        const std::vector<PredictionSubjectKey> visible_subjects = prediction.collect_visible_prediction_subjects();
         _prediction->mark_visible_tracks_dirty(visible_subjects);
-        sync_prediction_dirty_flag();
+        prediction.sync_prediction_dirty_flag();
     }
 
-    void GameplayState::mark_maneuver_plan_dirty()
+    void GameplayPredictionAdapter::mark_maneuver_plan_dirty()
     {
         const uint64_t revision = _maneuver.increment_revision();
         Logger::debug("Maneuver plan dirty: revision={} selected_node={} node_count={}",
@@ -385,10 +387,10 @@ namespace Game
 
         _prediction->invalidate_maneuver_plan_revision(revision);
 
-        mark_prediction_dirty();
+        _state.mark_prediction_dirty();
     }
 
-    void GameplayState::clear_maneuver_prediction_artifacts()
+    void GameplayPredictionAdapter::clear_maneuver_prediction_artifacts()
     {
         _prediction->clear_maneuver_prediction_artifacts();
     }
@@ -398,23 +400,23 @@ namespace Game
         _prediction->clear_runtime();
     }
 
-    void GameplayState::clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects)
+    void GameplayPredictionAdapter::clear_visible_prediction_runtime(const std::vector<PredictionSubjectKey> &visible_subjects)
     {
         _prediction->clear_visible_runtime(visible_subjects);
     }
 
-    double GameplayState::prediction_display_window_s(const PredictionSubjectKey key,
-                                                      const double now_s,
-                                                      const bool with_maneuvers) const
+    double GameplayPredictionAdapter::prediction_display_window_s(const PredictionSubjectKey key,
+                                                                  const double now_s,
+                                                                  const bool with_maneuvers) const
     {
         const PredictionTimeContext time_ctx = build_prediction_time_context(key, now_s);
         const PredictionWindowPolicyResult policy = resolve_prediction_window_policy(find_prediction_track(key), time_ctx, with_maneuvers);
         return policy.valid ? policy.visual_window_s : policy.request_window_s;
     }
 
-    void GameplayState::refresh_prediction_preview_anchor(PredictionTrackState &track,
-                                                          const double now_s,
-                                                          const bool with_maneuvers) const
+    void GameplayPredictionAdapter::refresh_prediction_preview_anchor(PredictionTrackState &track,
+                                                                      const double now_s,
+                                                                      const bool with_maneuvers) const
     {
         const PredictionRuntimeDetail::PredictionTrackLifecycleSnapshot lifecycle =
                 PredictionRuntimeDetail::describe_prediction_track_lifecycle(track);
@@ -459,9 +461,9 @@ namespace Game
         }
     }
 
-    double GameplayState::prediction_preview_exact_window_s(const PredictionTrackState &track,
-                                                            const double /*now_s*/,
-                                                            const bool /*with_maneuvers*/) const
+    double GameplayPredictionAdapter::prediction_preview_exact_window_s(const PredictionTrackState &track,
+                                                                        const double /*now_s*/,
+                                                                        const bool /*with_maneuvers*/) const
     {
         const double configured_exact_window_s = std::max(0.0, _maneuver.settings().plan_windows.solve_margin_s);
         double preview_exact_cap_s = std::max(OrbitPredictionTuning::kPreviewExactWindowMinS,
@@ -478,9 +480,9 @@ namespace Game
         return std::min(configured_exact_window_s, preview_exact_cap_s);
     }
 
-    double GameplayState::prediction_planned_exact_window_s(const PredictionTrackState &track,
-                                                            const double now_s,
-                                                            const bool with_maneuvers) const
+    double GameplayPredictionAdapter::prediction_planned_exact_window_s(const PredictionTrackState &track,
+                                                                        const double now_s,
+                                                                        const bool with_maneuvers) const
     {
         const PredictionTimeContext time_ctx = build_prediction_time_context(track.key, now_s);
         const PredictionWindowPolicyResult policy = resolve_prediction_window_policy(&track, time_ctx, with_maneuvers);
@@ -489,7 +491,7 @@ namespace Game
 
     // Request building can observe a shorter time context than the authored maneuver
     // plan draw path, so recompute the live plan horizon directly from the nodes here.
-    double GameplayState::prediction_authored_plan_request_window_s(const double now_s) const
+    double GameplayPredictionAdapter::prediction_authored_plan_request_window_s(const double now_s) const
     {
         if (!_maneuver.settings().nodes_enabled ||
             _maneuver.plan().nodes.empty() ||
@@ -537,9 +539,9 @@ namespace Game
         return std::max(0.0, request_end_s - now_s);
     }
 
-    double GameplayState::prediction_required_window_s(const PredictionTrackState &track,
-                                                       const double now_s,
-                                                       const bool with_maneuvers) const
+    double GameplayPredictionAdapter::prediction_required_window_s(const PredictionTrackState &track,
+                                                                   const double now_s,
+                                                                   const bool with_maneuvers) const
     {
         const PredictionTimeContext time_ctx = build_prediction_time_context(track.key, now_s);
         PredictionWindowPolicyResult policy = resolve_prediction_window_policy(&track, time_ctx, with_maneuvers);
@@ -553,9 +555,9 @@ namespace Game
         return policy.request_window_s;
     }
 
-    double GameplayState::prediction_required_window_s(const PredictionSubjectKey key,
-                                                       const double now_s,
-                                                       const bool with_maneuvers) const
+    double GameplayPredictionAdapter::prediction_required_window_s(const PredictionSubjectKey key,
+                                                                   const double now_s,
+                                                                   const bool with_maneuvers) const
     {
         if (const PredictionTrackState *track = find_prediction_track(key))
         {
@@ -573,10 +575,10 @@ namespace Game
         return policy.request_window_s;
     }
 
-    PredictionTimeContext GameplayState::build_prediction_time_context(const PredictionSubjectKey /*key*/,
-                                                                       const double sim_now_s,
-                                                                       const double trajectory_t0_s,
-                                                                       const double trajectory_t1_s) const
+    PredictionTimeContext GameplayPredictionAdapter::build_prediction_time_context(const PredictionSubjectKey /*key*/,
+                                                                                   const double sim_now_s,
+                                                                                   const double trajectory_t0_s,
+                                                                                   const double trajectory_t1_s) const
     {
         // key is unused now but reserved for per-subject node filtering (e.g. multi-ship plans).
 
@@ -619,9 +621,10 @@ namespace Game
         return out;
     }
 
-    PredictionWindowPolicyResult GameplayState::resolve_prediction_window_policy(const PredictionTrackState *track,
-                                                                                 const PredictionTimeContext &time_ctx,
-                                                                                 const bool with_maneuvers) const
+    PredictionWindowPolicyResult GameplayPredictionAdapter::resolve_prediction_window_policy(
+            const PredictionTrackState *track,
+            const PredictionTimeContext &time_ctx,
+            const bool with_maneuvers) const
     {
         const PredictionSubjectKey key = track ? track->key : PredictionSubjectKey{};
         return plan_prediction_windows(PredictionWindowPlannerInput{
@@ -637,13 +640,13 @@ namespace Game
         });
     }
 
-    bool GameplayState::should_rebuild_prediction_track(const PredictionTrackState &track,
-                                                        const double now_s,
-                                                        const float fixed_dt,
-                                                        const bool thrusting,
-                                                        const bool with_maneuvers) const
+    bool GameplayPredictionAdapter::should_rebuild_prediction_track(const PredictionTrackState &track,
+                                                                    const double now_s,
+                                                                    const float fixed_dt,
+                                                                    const bool thrusting,
+                                                                    const bool with_maneuvers) const
     {
-        return _prediction->should_rebuild_track(build_prediction_host_context(),
+        return _prediction->should_rebuild_track(_state.build_prediction_host_context(),
                                                  track,
                                                  now_s,
                                                  fixed_dt,
@@ -656,8 +659,9 @@ namespace Game
         (void) ctx;
 
         // Keep frame metadata aligned before the prediction subsystem decides what to rebuild.
-        rebuild_prediction_frame_options();
-        rebuild_prediction_analysis_options();
+        GameplayPredictionAdapter prediction(*this);
+        prediction.rebuild_prediction_frame_options();
+        prediction.rebuild_prediction_analysis_options();
         _prediction->update(build_prediction_host_context(&ctx), fixed_dt);
     }
 } // namespace Game

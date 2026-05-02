@@ -1,4 +1,5 @@
 #include "game/states/gameplay/gameplay_state.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 
 #include <algorithm>
@@ -8,7 +9,7 @@ namespace Game
 {
     namespace Draw = PredictionDrawDetail;
 
-    bool GameplayState::build_orbit_prediction_global_draw_context(
+    bool GameplayPredictionAdapter::build_orbit_prediction_global_draw_context(
             GameStateContext &ctx,
             Draw::PredictionGlobalDrawContext &out)
     {
@@ -82,7 +83,7 @@ namespace Game
     }
 
     // Build per-frame orbit visuals, pick data, and debug overlays from the latest prediction cache.
-    void GameplayState::emit_orbit_prediction_debug(GameStateContext &ctx)
+    void GameplayPredictionAdapter::emit_orbit_prediction_debug(GameStateContext &ctx)
     {
         Draw::PredictionGlobalDrawContext global_ctx{};
         if (!build_orbit_prediction_global_draw_context(ctx, global_ctx))
@@ -136,5 +137,12 @@ namespace Game
                                         _prediction->state().draw_config.palette.velocity_ray);
             }
         }
+    }
+
+    void GameplayState::draw_prediction(GameStateContext &ctx)
+    {
+        GameplayPredictionAdapter prediction(*this);
+        prediction.poll_completed_prediction_results();
+        prediction.emit_orbit_prediction_debug(ctx);
     }
 } // namespace Game

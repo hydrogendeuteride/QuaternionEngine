@@ -3,6 +3,7 @@
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo_helpers.h"
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 #include "game/states/gameplay/maneuver/maneuver_commands.h"
+#include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 
 #include "core/engine.h"
 
@@ -108,9 +109,10 @@ namespace Game
         }
 
         const double now_s = current_sim_time_s();
-        const PredictionTrackState *player_track = player_prediction_track();
+        GameplayPredictionAdapter prediction(*this);
+        const PredictionTrackState *player_track = prediction.player_prediction_track();
         const PredictionSubjectKey time_key = player_track ? player_track->key : PredictionSubjectKey{};
-        const PredictionTimeContext time_ctx = build_prediction_time_context(time_key, now_s);
+        const PredictionTimeContext time_ctx = prediction.build_prediction_time_context(time_key, now_s);
         const auto to_t_plus_s = [&time_ctx](const double absolute_time_s) {
             return absolute_time_s - time_ctx.sim_now_s;
         };
@@ -127,13 +129,13 @@ namespace Game
                 return _prediction->state().analysis_selection.spec.fixed_body_id;
             }
 
-            if (const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track))
+            if (const OrbitPredictionCache *player_cache = prediction.effective_prediction_cache(player_track))
             {
                 if (!player_cache->solver.resolved_trajectory_inertial().empty())
                 {
-                    return resolve_prediction_analysis_body_id(*player_cache,
-                                                               player_track->key,
-                                                               now_s);
+                    return prediction.resolve_prediction_analysis_body_id(*player_cache,
+                                                                          player_track->key,
+                                                                          now_s);
                 }
             }
 
@@ -167,7 +169,7 @@ namespace Game
                 clear_maneuver_gizmo_instances(ctx);
                 _maneuver.clear_gizmo_interaction();
                 cancel_maneuver_node_dv_edit_preview();
-                clear_maneuver_prediction_artifacts();
+                prediction.clear_maneuver_prediction_artifacts();
             }
             (void) apply_maneuver_command(ManeuverCommand::mark_plan_dirty());
         }
@@ -233,7 +235,7 @@ namespace Game
         if (player_track)
         {
             const bool has_plan = _maneuver.settings().nodes_enabled && !_maneuver.plan().nodes.empty();
-            const uint64_t current_plan_signature = has_plan ? current_maneuver_plan_signature() : 0u;
+            const uint64_t current_plan_signature = has_plan ? prediction.current_maneuver_plan_signature() : 0u;
             const auto cache_has_ready_current_plan = [&](const OrbitPredictionCache &cache) {
                 return has_plan &&
                        cache.identity.valid &&
@@ -466,7 +468,7 @@ namespace Game
                 return pick.worldPos;
             }
 
-            const OrbitPredictionCache *cache = player_prediction_cache();
+            const OrbitPredictionCache *cache = prediction.player_prediction_cache();
             if (!cache || !cache->identity.valid)
             {
                 return pick.worldPos;
@@ -504,9 +506,9 @@ namespace Game
             }
 
             WorldVec3 pos = (i_hi > 0)
-                                ? prediction_sample_hermite_world(*cache, traj[i_hi - 1], traj[i_hi],
-                                                                  pick.time_s, display_time_s)
-                                : prediction_sample_position_world(*cache, traj.front(), display_time_s);
+                                ? prediction.prediction_sample_hermite_world(*cache, traj[i_hi - 1], traj[i_hi],
+                                                                             pick.time_s, display_time_s)
+                                : prediction.prediction_sample_position_world(*cache, traj.front(), display_time_s);
 
             // Apply the same ship-to-prediction alignment delta used by the gizmo runtime cache.
             pos += compute_maneuver_align_delta(ctx, *cache, cache->display.trajectory_frame);
@@ -908,15 +910,15 @@ namespace Game
                         dv_display.z);
         }
 
-        const OrbitPredictionCache *player_cache = effective_prediction_cache(player_track);
+        const OrbitPredictionCache *player_cache = prediction.effective_prediction_cache(player_track);
         const orbitsim::BodyId analysis_body_id = player_cache
-                                                      ? resolve_prediction_analysis_body_id(*player_cache,
-                                                                                            player_track->key,
-                                                                                            sel->time_s)
+                                                      ? prediction.resolve_prediction_analysis_body_id(*player_cache,
+                                                                                                      player_track->key,
+                                                                                                      sel->time_s)
                                                       : default_node_primary_body_id();
         const orbitsim::BodyId effective_primary_body_id =
                 resolve_maneuver_node_primary_body_id(*sel, sel->time_s);
-        if (const CelestialBodyInfo *primary_body = find_celestial_body_info(effective_primary_body_id))
+        if (const CelestialBodyInfo *primary_body = prediction.find_celestial_body_info(effective_primary_body_id))
         {
             ImGui::Text("Primary body: %s%s",
                         primary_body->name.c_str(),
@@ -931,7 +933,7 @@ namespace Game
                     ManeuverCommand::set_node_primary_body(sel->id, auto_primary, primary_body_id));
         }
 
-        if (const CelestialBodyInfo *analysis_body = find_celestial_body_info(analysis_body_id))
+        if (const CelestialBodyInfo *analysis_body = prediction.find_celestial_body_info(analysis_body_id))
         {
             ImGui::Text("Analysis body: %s", analysis_body->name.c_str());
             if (ImGui::Button("Use Analysis Body"))

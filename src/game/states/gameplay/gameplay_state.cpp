@@ -173,12 +173,10 @@ namespace Game
         _world.entities().update_components(comp_ctx, dt);
         _world.entities().sync_to_render(*ctx.api, alpha);
 
-        poll_completed_prediction_results();
-
         refresh_maneuver_node_runtime_cache(ctx);
 
         // Draw orbit debug using the same interpolation alpha as rendering to avoid visual offset.
-        emit_orbit_prediction_debug(ctx);
+        draw_prediction(ctx);
         emit_maneuver_node_debug_overlay(ctx);
     }
 
