@@ -214,7 +214,7 @@ namespace Game
             }
             else
             {
-                _maneuver.gizmo_interaction() = {};
+                _maneuver.clear_gizmo_interaction();
             }
         }
 
@@ -247,7 +247,7 @@ namespace Game
                     debug.last_drag_end_tp = PredictionDragDebugTelemetry::Clock::now();
                     _prediction_system.clear_unapplied_maneuver_drag_preview(*track);
                 }
-                _maneuver.gizmo_interaction() = {};
+                _maneuver.clear_gizmo_interaction();
             }
             else if (!ctx.input->mouse_down(MouseButton::Left))
             {
@@ -271,7 +271,7 @@ namespace Game
                 }
                 else
                 {
-                    _maneuver.gizmo_interaction() = {};
+                    _maneuver.clear_gizmo_interaction();
                 }
 
                 if (changed)

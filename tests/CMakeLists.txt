@@ -217,6 +217,30 @@ target_link_libraries(gameplay_time_warp_transition_tests PRIVATE
 
 add_test(NAME gameplay_time_warp_transition_tests COMMAND gameplay_time_warp_transition_tests)
 
+add_executable(maneuver_system_tests
+  maneuver_system_tests.cpp
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/maneuver_plan_model.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/maneuver_commands.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/maneuver_controller.cpp"
+  "${PROJECT_SOURCE_DIR}/src/game/states/gameplay/maneuver/maneuver_system.cpp"
+)
+
+set_property(TARGET maneuver_system_tests PROPERTY CXX_STANDARD 20)
+
+target_include_directories(maneuver_system_tests PRIVATE
+  "${PROJECT_SOURCE_DIR}/src"
+  "${PROJECT_SOURCE_DIR}/third_party/vma"
+  "${PROJECT_SOURCE_DIR}/third_party/taskflow/3rd-party"
+)
+
+target_link_libraries(maneuver_system_tests PRIVATE
+  gtest
+  glm
+  orbitsim
+)
+
+add_test(NAME maneuver_system_tests COMMAND maneuver_system_tests)
+
 add_executable(gameplay_prediction_maneuver_tests
   gameplay_prediction_maneuver_runtime_window_tests.cpp
   gameplay_prediction_maneuver_lifecycle_tests.cpp

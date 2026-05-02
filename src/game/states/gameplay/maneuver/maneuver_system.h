@@ -58,6 +58,13 @@ namespace Game
         void set_revision(uint64_t revision);
         ManeuverCommandResult apply_command(const ManeuverCommand &command);
 
+        void clear_gizmo_interaction();
+        void cancel_edit_preview();
+        bool begin_dv_edit_preview(int node_id);
+        bool begin_time_edit_preview(int node_id, double previous_time_s);
+        bool mark_edit_preview_changed(ManeuverNodeEditPreview::State state, int node_id);
+        bool finish_edit_preview(ManeuverNodeEditPreview::State state, bool changed);
+
         [[nodiscard]] bool live_preview_active(bool with_maneuvers) const;
         [[nodiscard]] int active_preview_anchor_node_id() const;
         [[nodiscard]] uint64_t plan_signature(double plan_horizon_s) const;

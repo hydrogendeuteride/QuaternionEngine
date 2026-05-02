@@ -165,7 +165,7 @@ namespace Game
             if (!_maneuver.settings().nodes_enabled)
             {
                 clear_maneuver_gizmo_instances(ctx);
-                _maneuver.gizmo_interaction() = {};
+                _maneuver.clear_gizmo_interaction();
                 cancel_maneuver_node_dv_edit_preview();
                 clear_maneuver_prediction_artifacts();
             }
@@ -198,9 +198,8 @@ namespace Game
         ImGui::SameLine();
         if (ImGui::Button("Clear") && !_maneuver.plan().nodes.empty())
         {
-            _maneuver.runtime().execute_node_armed = false;
-            _maneuver.runtime().execute_node_id = -1;
-            _maneuver.gizmo_interaction() = {};
+            _maneuver.runtime().disarm_execute_node();
+            _maneuver.clear_gizmo_interaction();
             cancel_maneuver_node_dv_edit_preview();
             clear_maneuver_gizmo_instances(ctx);
             (void) apply_maneuver_command(ManeuverCommand::clear_plan());
@@ -373,7 +372,7 @@ namespace Game
                 if (ImGui::Button(label, ImVec2(btn_w, btn_h)))
                 {
                     _maneuver.settings().gizmo_basis_mode = ManeuverColors::kBasisModes[bi];
-                    _maneuver.gizmo_interaction() = {};
+                    _maneuver.clear_gizmo_interaction();
                 }
                 ImGui::PopStyleColor(3);
 

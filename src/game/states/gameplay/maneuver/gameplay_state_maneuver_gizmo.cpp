@@ -197,7 +197,7 @@ namespace Game
     void GameplayState::clear_maneuver_gizmo_instances(GameStateContext &ctx)
     {
         (void) ctx;
-        _maneuver.gizmo_interaction() = {};
+        _maneuver.clear_gizmo_interaction();
     }
 
     bool GameplayState::build_maneuver_gizmo_view_context(const GameStateContext &ctx,
@@ -430,7 +430,7 @@ namespace Game
                 _maneuver.gizmo_interaction().drag_basis_n_world);
         if (!axis_result.valid)
         {
-            _maneuver.gizmo_interaction() = {};
+            _maneuver.clear_gizmo_interaction();
             return;
         }
         const glm::dvec3 &axis_dir_world = axis_result.axis_dir_world;

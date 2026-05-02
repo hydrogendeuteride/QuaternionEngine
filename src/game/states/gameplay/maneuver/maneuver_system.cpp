@@ -158,6 +158,80 @@ namespace Game
         return result;
     }
 
+    void ManeuverSystem::clear_gizmo_interaction()
+    {
+        _gizmo_interaction = {};
+    }
+
+    void ManeuverSystem::cancel_edit_preview()
+    {
+        _edit_preview = {};
+    }
+
+    bool ManeuverSystem::begin_dv_edit_preview(const int node_id)
+    {
+        if (!_plan.find_node(node_id))
+        {
+            cancel_edit_preview();
+            return false;
+        }
+
+        if (_edit_preview.state == ManeuverNodeEditPreview::State::EditingDv &&
+            _edit_preview.node_id == node_id)
+        {
+            return false;
+        }
+
+        _edit_preview = {};
+        _edit_preview.state = ManeuverNodeEditPreview::State::EditingDv;
+        _edit_preview.node_id = node_id;
+        return true;
+    }
+
+    bool ManeuverSystem::begin_time_edit_preview(const int node_id, const double previous_time_s)
+    {
+        const ManeuverNode *node = _plan.find_node(node_id);
+        if (!node)
+        {
+            cancel_edit_preview();
+            return false;
+        }
+
+        if (_edit_preview.state == ManeuverNodeEditPreview::State::EditingTime &&
+            _edit_preview.node_id == node_id)
+        {
+            return false;
+        }
+
+        _edit_preview = {};
+        _edit_preview.state = ManeuverNodeEditPreview::State::EditingTime;
+        _edit_preview.node_id = node_id;
+        _edit_preview.start_time_s = std::isfinite(previous_time_s) ? previous_time_s : node->time_s;
+        return true;
+    }
+
+    bool ManeuverSystem::mark_edit_preview_changed(const ManeuverNodeEditPreview::State state, const int node_id)
+    {
+        if (_edit_preview.state != state || _edit_preview.node_id != node_id)
+        {
+            return false;
+        }
+
+        _edit_preview.changed = true;
+        return true;
+    }
+
+    bool ManeuverSystem::finish_edit_preview(const ManeuverNodeEditPreview::State state, const bool changed)
+    {
+        const bool active = _edit_preview.state == state;
+        const bool preview_changed = changed || (active && _edit_preview.changed);
+        if (active)
+        {
+            _edit_preview = {};
+        }
+        return preview_changed;
+    }
+
     bool ManeuverSystem::live_preview_active(const bool with_maneuvers) const
     {
         if (!with_maneuvers || !_settings.live_preview_active)

@@ -74,8 +74,7 @@ namespace Game
         ManeuverNode *node = _maneuver.plan().find_node(_maneuver.runtime().execute_node_id);
         if (!node)
         {
-            _maneuver.runtime().execute_node_armed = false;
-            _maneuver.runtime().execute_node_id = -1;
+            _maneuver.runtime().disarm_execute_node();
             return;
         }
 
