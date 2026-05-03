@@ -4,6 +4,9 @@
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 #include "game/states/gameplay/maneuver/maneuver_commands.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
+#include "game/states/gameplay/prediction/prediction_frame_context_builder.h"
+#include "game/states/gameplay/prediction/prediction_host_context_builder.h"
+#include "game/states/gameplay/prediction/runtime/prediction_window_context_builder.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,10 +21,10 @@ namespace Game
             return;
         }
 
-        GameplayPredictionAdapter prediction(state);
-        if (PredictionTrackState *track = prediction.active_prediction_track())
+        if (PredictionTrackState *track = state._prediction->active_track())
         {
-            prediction.refresh_prediction_preview_anchor(*track, state.current_sim_time_s(), true);
+            PredictionWindowContextBuilder(GameplayPredictionAdapter::build_context(state))
+                    .refresh_preview_anchor(*track, state.current_sim_time_s(), true);
         }
     }
 
@@ -33,11 +36,10 @@ namespace Game
             return;
         }
 
-        GameplayPredictionAdapter prediction(state);
-        if (PredictionTrackState *track = prediction.active_prediction_track())
+        if (PredictionTrackState *track = state._prediction->active_track())
         {
             state._prediction->mark_maneuver_preview_dirty(*track);
-            prediction.sync_prediction_dirty_flag();
+            state._prediction->sync_visible_dirty_flag(state._prediction->collect_visible_subjects());
         }
     }
 
@@ -50,8 +52,7 @@ namespace Game
             return;
         }
 
-        GameplayPredictionAdapter prediction(state);
-        if (PredictionTrackState *track = prediction.active_prediction_track())
+        if (PredictionTrackState *track = state._prediction->active_track())
         {
             state._prediction->await_maneuver_preview_full_refine(*track, state.current_sim_time_s());
         }
@@ -67,10 +68,10 @@ namespace Game
             return;
         }
 
-        GameplayPredictionAdapter prediction(state);
-        if (PredictionTrackState *track = prediction.active_prediction_track())
+        if (PredictionTrackState *track = state._prediction->active_track())
         {
-            prediction.refresh_prediction_preview_anchor(*track, state.current_sim_time_s(), true);
+            PredictionWindowContextBuilder(GameplayPredictionAdapter::build_context(state))
+                    .refresh_preview_anchor(*track, state.current_sim_time_s(), true);
         }
     }
 
@@ -84,11 +85,10 @@ namespace Game
             return;
         }
 
-        GameplayPredictionAdapter prediction(state);
-        if (PredictionTrackState *track = prediction.active_prediction_track())
+        if (PredictionTrackState *track = state._prediction->active_track())
         {
             state._prediction->mark_maneuver_preview_dirty(*track);
-            prediction.sync_prediction_dirty_flag();
+            state._prediction->sync_visible_dirty_flag(state._prediction->collect_visible_subjects());
         }
     }
 
@@ -101,8 +101,7 @@ namespace Game
             return;
         }
 
-        GameplayPredictionAdapter prediction(state);
-        if (PredictionTrackState *track = prediction.active_prediction_track())
+        if (PredictionTrackState *track = state._prediction->active_track())
         {
             state._prediction->await_maneuver_preview_full_refine(*track, state.current_sim_time_s());
         }
@@ -118,9 +117,16 @@ namespace Game
             return node.primary_body_id;
         }
 
-        GameplayPredictionAdapter prediction(state);
-        const PredictionTrackState *player_track = prediction.player_prediction_track();
-        if (const OrbitPredictionCache *player_cache = prediction.effective_prediction_cache(player_track))
+        const PredictionSubjectKey player_subject =
+                PredictionHostContextBuilder(GameplayPredictionAdapter::build_context(state))
+                        .make_subject_state_provider()
+                        .player_subject_key();
+        const PredictionTrackState *player_track =
+                state._prediction ? state._prediction->player_track(player_subject) : nullptr;
+        const OrbitPredictionCache *player_cache =
+                state._prediction ? state._prediction->effective_cache(player_track) : nullptr;
+        PredictionFrameContextBuilder prediction_frame(GameplayPredictionAdapter::build_context(state));
+        if (player_cache)
         {
             const OrbitPredictionCache &cache = *player_cache;
             const auto &traj =
@@ -131,12 +137,12 @@ namespace Game
 
             orbitsim::State sc_state{};
             if (!traj.empty() &&
-                prediction.sample_prediction_inertial_state(traj, query_time_s, sc_state) &&
+                prediction_frame.sample_prediction_inertial_state(traj, query_time_s, sc_state) &&
                 !bodies.empty())
             {
                 const orbitsim::BodyId preferred_body_id =
                         node.primary_body_auto ? orbitsim::kInvalidBodyId : node.primary_body_id;
-                const orbitsim::BodyId primary_body_id = prediction.select_prediction_primary_body_id(
+                const orbitsim::BodyId primary_body_id = prediction_frame.select_prediction_primary_body_id(
                         bodies,
                         &cache,
                         sc_state.position_m,
@@ -151,7 +157,7 @@ namespace Game
             if (!cache.solver.resolved_trajectory_inertial().empty())
             {
                 const orbitsim::BodyId analysis_body_id =
-                        prediction.resolve_prediction_analysis_body_id(cache, player_track->key, query_time_s, node.primary_body_id);
+                        prediction_frame.resolve_prediction_analysis_body_id(cache, player_track->key, query_time_s, node.primary_body_id);
                 if (analysis_body_id != orbitsim::kInvalidBodyId)
                 {
                     return analysis_body_id;
@@ -211,7 +217,12 @@ namespace Game
         WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 ship_vel_world(0.0);
         glm::vec3 ship_vel_local_f(0.0f);
-        if (!prediction.get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
+        if (!PredictionHostContextBuilder(GameplayPredictionAdapter::build_context(state))
+                     .make_subject_state_provider()
+                     .get_player_world_state(
+                    ship_pos_world,
+                    ship_vel_world,
+                    ship_vel_local_f))
         {
             return WorldVec3(0.0, 0.0, 0.0);
         }

@@ -1,4 +1,5 @@
 #include "gameplay_state.h"
+#include "gameplay_orbital_context.h"
 
 #include <algorithm>
 
@@ -15,7 +16,22 @@ namespace Game
         _time_warp.warp_level = clamped;
         _time_warp.mode = _time_warp.mode_for_level(clamped);
 
-        OrbitalPhysicsSystem::Context orbital_physics = build_orbital_physics_context();
+        OrbitalPhysicsSystem::Context orbital_physics =
+                GameplayOrbitalContextBuilder(GameplayOrbitalContextInputs{
+                        .renderer = _renderer,
+                        .world = _world,
+                        .orbit = _orbit,
+                        .physics = _physics.get(),
+                        .physics_context = _physics_context.get(),
+                        .scenario_config = _scenario_config,
+                        .keybinds = &_keybinds,
+                        .ui_capture_keyboard = [this](const GameStateContext &frame_ctx) {
+                            return ui_capture_keyboard(frame_ctx);
+                        },
+                        .mark_prediction_dirty = [this]() {
+                            mark_prediction_dirty();
+                        },
+                }).build();
 
         if (old_mode == TimeWarpState::Mode::RailsWarp && _time_warp.mode != TimeWarpState::Mode::RailsWarp)
         {

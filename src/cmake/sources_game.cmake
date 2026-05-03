@@ -72,6 +72,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/gameplay_state.cpp
   game/states/gameplay/gameplay_preload_cache.h
   game/states/gameplay/gameplay_preload_cache.cpp
+  game/states/gameplay/gameplay_orbital_context.h
+  game/states/gameplay/gameplay_orbital_context.cpp
   game/states/gameplay/gameplay_state_ui.cpp
   game/states/gameplay/gameplay_state_scene.cpp
   game/states/gameplay/gameplay_state_sim.cpp
@@ -85,18 +87,23 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/orbit_runtime_types.h
   game/states/gameplay/orbiter_physics_bridge.h
   game/states/gameplay/orbiter_physics_bridge.cpp
+  game/states/gameplay/orbiter_world_state_provider.h
+  game/states/gameplay/orbiter_world_state_provider.cpp
   game/states/gameplay/orbital_runtime_system.h
   game/states/gameplay/orbital_runtime_system.cpp
   game/states/gameplay/orbital_physics_system.h
   game/states/gameplay/orbital_physics_system.cpp
   game/states/gameplay/time_warp_state.h
   game/states/gameplay/prediction/gameplay_state_prediction_types.h
+  game/states/gameplay/prediction/gameplay_prediction_context.h
   game/states/gameplay/prediction/gameplay_prediction_cache_internal.h
   game/states/gameplay/prediction/gameplay_prediction_cache_internal.cpp
   game/states/gameplay/prediction/prediction_trajectory_sampler.h
   game/states/gameplay/prediction/prediction_trajectory_sampler.cpp
   game/states/gameplay/prediction/prediction_frame_resolver.h
   game/states/gameplay/prediction/prediction_frame_resolver.cpp
+  game/states/gameplay/prediction/prediction_frame_context_builder.h
+  game/states/gameplay/prediction/prediction_frame_context_builder.cpp
   game/states/gameplay/prediction/prediction_frame_controller.h
   game/states/gameplay/prediction/prediction_frame_controller.cpp
   game/states/gameplay/prediction/prediction_frame_cache_builder.h
@@ -107,6 +114,8 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/prediction/streamed_chunk_assembly_builder.cpp
   game/states/gameplay/prediction/gameplay_prediction_state.h
   game/states/gameplay/prediction/prediction_host_context.h
+  game/states/gameplay/prediction/prediction_host_context_builder.h
+  game/states/gameplay/prediction/prediction_host_context_builder.cpp
   game/states/gameplay/prediction/prediction_subject_state_provider.h
   game/states/gameplay/prediction/prediction_subject_state_provider.cpp
   game/states/gameplay/prediction/prediction_system.h
@@ -120,6 +129,9 @@ list(APPEND VULKAN_ENGINE_SOURCES
   game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.h
   game/states/gameplay/prediction/runtime/prediction_lifecycle_reducer.cpp
   game/states/gameplay/prediction/runtime/prediction_runtime_context.h
+  game/states/gameplay/prediction/runtime/prediction_window_policy.h
+  game/states/gameplay/prediction/runtime/prediction_window_context_builder.h
+  game/states/gameplay/prediction/runtime/prediction_window_context_builder.cpp
   game/states/gameplay/prediction/runtime/prediction_request_factory.h
   game/states/gameplay/prediction/runtime/prediction_request_factory.cpp
   game/states/gameplay/prediction/runtime/prediction_invalidation_controller.h

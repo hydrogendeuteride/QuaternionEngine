@@ -33,11 +33,6 @@ namespace Game
 
     void GameplayState::setup_scene(GameStateContext &ctx) { (void) ctx; }
     void GameplayState::setup_environment(GameStateContext &ctx) { (void) ctx; }
-    void GameplayState::init_orbitsim(WorldVec3 &player_pos_world, glm::dvec3 &player_vel_world)
-    {
-        (void) player_pos_world;
-        (void) player_vel_world;
-    }
 
     void GameplayState::reset_time_warp_state()
     {
@@ -47,6 +42,11 @@ namespace Game
     }
 
     void GameplayState::handle_time_warp_input(GameStateContext &ctx) { (void) ctx; }
+    bool GameplayState::ui_capture_keyboard(const GameStateContext &ctx) const
+    {
+        (void) ctx;
+        return false;
+    }
 
     ComponentContext GameplayState::build_component_context(GameStateContext &ctx, float alpha)
     {
@@ -58,37 +58,6 @@ namespace Game
         comp_ctx.ui_capture_keyboard = false;
         comp_ctx.interpolation_alpha = alpha;
         return comp_ctx;
-    }
-
-    OrbitalPhysicsSystem::Context GameplayState::build_orbital_physics_context()
-    {
-        return OrbitalPhysicsSystem::Context{
-            .renderer = _renderer,
-            .world = _world,
-            .orbit = _orbit,
-            .physics = _physics.get(),
-            .physics_context = _physics_context.get(),
-            .scenario_config = _scenario_config,
-            .keybinds = &_keybinds,
-            .orbiter_world_state_sampler =
-                    [](const OrbiterInfo &sample_orbiter,
-                       WorldVec3 &out_pos_world,
-                       glm::dvec3 &out_vel_world,
-                       glm::vec3 &out_vel_local) {
-                        (void) sample_orbiter;
-                        out_pos_world = WorldVec3(0.0, 0.0, 0.0);
-                        out_vel_world = glm::dvec3(0.0);
-                        out_vel_local = glm::vec3(0.0f);
-                        return false;
-                    },
-            .ui_capture_keyboard = [](const GameStateContext &frame_ctx) {
-                (void) frame_ctx;
-                return false;
-            },
-            .mark_prediction_dirty = [this]() {
-                mark_prediction_dirty();
-            },
-        };
     }
 
     bool GameplayPredictionAdapter::get_orbiter_world_state(const OrbiterInfo &orbiter,

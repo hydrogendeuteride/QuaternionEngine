@@ -1,4 +1,5 @@
 #include "gameplay_state.h"
+#include "gameplay_orbital_context.h"
 #include "orbiter_physics_bridge.h"
 #include "orbit_helpers.h"
 #include "game/component/ship_controller.h"
@@ -23,8 +24,6 @@
 namespace Game
 {
     using detail::contact_event_type_name;
-    using detail::circular_orbit_relative_state_xz;
-    using detail::two_body_circular_barycentric_xz;
 
     namespace
     {
@@ -189,7 +188,7 @@ namespace Game
         // Initialize orbital simulation from config
         WorldVec3 player_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 player_vel_world(0.0);
-        init_orbitsim(player_pos_world, player_vel_world);
+        _orbit.initialize_scenario(_scenario_config, player_pos_world, player_vel_world);
 
         setup_environment(ctx);
 
@@ -598,130 +597,6 @@ namespace Game
         }
     }
 
-    void GameplayState::init_orbitsim(WorldVec3 &player_pos_world, glm::dvec3 &player_vel_world)
-    {
-        const auto &cfg = _scenario_config;
-        if (cfg.celestials.empty())
-        {
-            return;
-        }
-
-        auto scenario = std::make_unique<OrbitalScenario>();
-
-        const double speed_scale = std::max(0.0, cfg.speed_scale);
-
-        orbitsim::GameSimulation::Config sim_cfg;
-        sim_cfg.gravitational_constant = orbitsim::kGravitationalConstant_SI * speed_scale * speed_scale;
-        sim_cfg.softening_length_m = 0.0;
-        sim_cfg.enable_events = false;
-
-        scenario->sim = orbitsim::GameSimulation(sim_cfg);
-        scenario->world_reference_body_index = 0;
-
-        // Create all massive bodies in the simulation
-        const auto &ref_def = cfg.celestials[0];
-
-        orbitsim::MassiveBody ref_body{};
-        ref_body.mass_kg = ref_def.mass_kg;
-        ref_body.radius_m = ref_def.radius_m;
-        ref_body.atmosphere_top_height_m = ref_def.atmosphere_top_m;
-        ref_body.terrain_max_height_m = ref_def.terrain_max_m;
-        ref_body.soi_radius_m = ref_def.soi_radius_m;
-
-        // For multiple celestials, set up barycentric states via two-body pairs
-        // relative to the reference body.
-        std::vector<orbitsim::MassiveBody> sim_bodies;
-        sim_bodies.push_back(ref_body);
-
-        for (size_t i = 1; i < cfg.celestials.size(); ++i)
-        {
-            const auto &cdef = cfg.celestials[i];
-
-            orbitsim::MassiveBody body{};
-            body.mass_kg = cdef.mass_kg;
-            body.radius_m = cdef.radius_m;
-            body.atmosphere_top_height_m = cdef.atmosphere_top_m;
-            body.terrain_max_height_m = cdef.terrain_max_m;
-            body.soi_radius_m = cdef.soi_radius_m;
-            sim_bodies.push_back(body);
-        }
-
-        // Initialize states: for each satellite, compute two-body barycentric orbit with reference
-        if (sim_bodies.size() >= 2)
-        {
-            // For simplicity, use pairwise two-body initialization with the reference body.
-            // Each satellite is placed relative to the reference body using barycentric states.
-            // When there are multiple satellites, each pair (ref, satellite_i) is handled independently.
-            for (size_t i = 1; i < sim_bodies.size(); ++i)
-            {
-                const double sep_m = std::max(ref_def.radius_m * 2.0, cfg.celestials[i].orbit_distance_m);
-                const auto bary_init = two_body_circular_barycentric_xz(
-                        sim_cfg.gravitational_constant,
-                        sim_bodies[0].mass_kg, sim_bodies[i].mass_kg,
-                        sep_m, 0.0);
-
-                // Accumulate barycentric offset onto reference body (for multi-satellite systems
-                // this is approximate, but good enough for initialization)
-                sim_bodies[0].state.position_m += bary_init.state_a.position_m;
-                sim_bodies[0].state.velocity_mps += bary_init.state_a.velocity_mps;
-                sim_bodies[i].state = bary_init.state_b;
-            }
-        }
-
-        // Register all bodies in the simulation and build CelestialBodyInfo list
-        bool all_valid = true;
-        for (size_t i = 0; i < sim_bodies.size(); ++i)
-        {
-            const auto handle = scenario->sim.create_body(sim_bodies[i]);
-            if (!handle.valid())
-            {
-                all_valid = false;
-                break;
-            }
-
-            CelestialBodyInfo info{};
-            info.sim_id = handle.id;
-            info.name = cfg.celestials[i].name;
-            info.radius_m = cfg.celestials[i].radius_m;
-            info.mass_kg = cfg.celestials[i].mass_kg;
-            info.has_terrain = cfg.celestials[i].has_terrain;
-            scenario->bodies.push_back(std::move(info));
-        }
-
-        if (!all_valid || scenario->bodies.empty())
-        {
-            _orbit.set_scenario(std::move(scenario));
-            return;
-        }
-
-        // Compute player initial orbit around reference body
-        const CelestialBodyInfo *ref_info = scenario->world_reference_body();
-        const orbitsim::MassiveBody *ref_sim = scenario->world_reference_sim_body();
-        if (ref_info && ref_sim)
-        {
-            // Find player orbiter def to get orbit altitude
-            double player_altitude_m = 400'000.0;
-            for (const auto &odef : cfg.orbiters)
-            {
-                if (odef.is_player)
-                {
-                    player_altitude_m = odef.orbit_altitude_m;
-                    break;
-                }
-            }
-
-            const double orbit_radius_m = ref_info->radius_m + player_altitude_m;
-            const detail::OrbitRelativeState ship_rel =
-                    circular_orbit_relative_state_xz(sim_cfg.gravitational_constant, ref_info->mass_kg,
-                                                     std::max(1.0, orbit_radius_m), 0.0);
-
-            player_pos_world = cfg.system_center + WorldVec3(ship_rel.position_m);
-            player_vel_world = glm::dvec3(ship_rel.velocity_mps);
-        }
-
-        _orbit.set_scenario(std::move(scenario));
-    }
-
     void GameplayState::update_rebase_anchor()
     {
         const EntityId next_anchor = _orbit.select_rebase_anchor_entity();
@@ -902,7 +777,23 @@ namespace Game
 
         if (!_orbital_physics.rails_warp_active() && target->rails.active())
         {
-            (void) _orbital_physics.demote_orbiter_from_rails(build_orbital_physics_context(), *target);
+            (void) _orbital_physics.demote_orbiter_from_rails(
+                    GameplayOrbitalContextBuilder(GameplayOrbitalContextInputs{
+                            .renderer = _renderer,
+                            .world = _world,
+                            .orbit = _orbit,
+                            .physics = _physics.get(),
+                            .physics_context = _physics_context.get(),
+                            .scenario_config = _scenario_config,
+                            .keybinds = &_keybinds,
+                            .ui_capture_keyboard = [this](const GameStateContext &frame_ctx) {
+                                return ui_capture_keyboard(frame_ctx);
+                            },
+                            .mark_prediction_dirty = [this]() {
+                                mark_prediction_dirty();
+                            },
+                    }).build(),
+                    *target);
         }
 
         for (auto &orbiter : _orbit.orbiters())

@@ -2,6 +2,8 @@
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_util.h"
 #include "game/states/gameplay/maneuver/maneuver_prediction_bridge.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
+#include "game/states/gameplay/prediction/prediction_frame_context_builder.h"
+#include "game/states/gameplay/prediction/prediction_host_context_builder.h"
 #include "physics/physics_context.h"
 #include "physics/physics_world.h"
 
@@ -80,7 +82,9 @@ namespace Game
             return;
         }
 
-        GameplayPredictionAdapter prediction(*this);
+        PredictionSubjectStateProvider subjects =
+                PredictionHostContextBuilder(GameplayPredictionAdapter::build_context(*this)).make_subject_state_provider();
+        PredictionFrameContextBuilder prediction_frame(GameplayPredictionAdapter::build_context(*this));
 
         const double now_s = current_sim_time_s();
         if (!std::isfinite(now_s) || now_s + 1e-4 < node->time_s)
@@ -91,7 +95,7 @@ namespace Game
         WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
         glm::dvec3 ship_vel_world(0.0);
         glm::vec3 ship_vel_local_f(0.0f);
-        if (!prediction.get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
+        if (!subjects.get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
         {
             return;
         }
@@ -107,19 +111,19 @@ namespace Game
             if (world_ref_sim && primary_body)
             {
                 const WorldVec3 primary_world =
-                        prediction.prediction_world_reference_body_world() +
+                        prediction_frame.prediction_world_reference_body_world() +
                         WorldVec3(primary_body->state.position_m - world_ref_sim->state.position_m);
                 r_rel_m = glm::dvec3(ship_pos_world - primary_world);
                 v_rel_mps = ship_vel_world - (primary_body->state.velocity_mps - world_ref_sim->state.velocity_mps);
             }
             else
             {
-                r_rel_m = glm::dvec3(ship_pos_world - prediction.prediction_world_reference_body_world());
+                r_rel_m = glm::dvec3(ship_pos_world - prediction_frame.prediction_world_reference_body_world());
             }
         }
         else
         {
-            r_rel_m = glm::dvec3(ship_pos_world - prediction.prediction_world_reference_body_world());
+            r_rel_m = glm::dvec3(ship_pos_world - prediction_frame.prediction_world_reference_body_world());
         }
 
         const orbitsim::RtnFrame f = compute_maneuver_frame(r_rel_m, v_rel_mps);

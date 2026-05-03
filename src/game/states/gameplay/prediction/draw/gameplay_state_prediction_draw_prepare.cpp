@@ -2,6 +2,7 @@
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
 #include "game/states/gameplay/prediction/draw/gameplay_state_prediction_draw_internal.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
+#include "game/states/gameplay/prediction/runtime/prediction_window_context_builder.h"
 #include "game/orbit/orbit_prediction_tuning.h"
 
 #include <algorithm>
@@ -149,7 +150,7 @@ namespace Game
         out.subject_pos_world = out.subject_pos_world_state;
         if (track.key.kind == PredictionSubjectKind::Orbiter)
         {
-            if (const Entity *entity = _world.entities().find(EntityId{track.key.value}))
+            if (const Entity *entity = _state._world.entities().find(EntityId{track.key.value}))
             {
                 out.subject_pos_world = entity->get_render_physics_center_of_mass_world(global_ctx.alpha_f);
             }
@@ -169,15 +170,16 @@ namespace Game
                                    ? &out.planned_cache->display.trajectory_segments_frame_planned
                                    : out.traj_planned_segments);
 
-        out.is_active = track.key == _prediction->state().selection.active_subject;
+        out.is_active = track.key == _state._prediction->state().selection.active_subject;
         out.active_player_track = out.is_active && prediction_subject_is_player(track.key);
+        const PredictionWindowContextBuilder window_context(context());
         const bool with_maneuver_live_preview =
                 out.active_player_track &&
                 prediction_subject_supports_maneuvers(track.key) &&
-                _maneuver.settings().nodes_enabled &&
-                !_maneuver.plan().nodes.empty();
+                _state._maneuver.settings().nodes_enabled &&
+                !_state._maneuver.plan().nodes.empty();
         out.active_maneuver_track = with_maneuver_live_preview;
-        const bool live_preview_active = _maneuver.live_preview_active(with_maneuver_live_preview);
+        const bool live_preview_active = _state._maneuver.live_preview_active(with_maneuver_live_preview);
         out.maneuver_drag_active =
                 out.active_player_track &&
                 live_preview_active;
@@ -192,7 +194,7 @@ namespace Game
                 with_maneuver_live_preview &&
                 out.planned_cache &&
                 out.planned_cache->identity.maneuver_plan_signature_valid &&
-                out.planned_cache->identity.maneuver_plan_signature == current_maneuver_plan_signature();
+                out.planned_cache->identity.maneuver_plan_signature == window_context.current_maneuver_plan_signature();
         out.planned_cache_current = planned_cache_current;
         out.planned_cache_drawable = planned_cache_current &&
                                       out.planned_cache &&
@@ -201,17 +203,17 @@ namespace Game
         {
             const auto resolve_stale_prefix_cutoff_s = [&]() {
                 double cutoff_s = std::numeric_limits<double>::quiet_NaN();
-                if (_maneuver.edit_preview().state == ManeuverNodeEditPreview::State::EditingTime)
+                if (_state._maneuver.edit_preview().state == ManeuverNodeEditPreview::State::EditingTime)
                 {
                     if (const ManeuverNode *edit_node =
-                                _maneuver.plan().find_node(_maneuver.edit_preview().node_id))
+                                _state._maneuver.plan().find_node(_state._maneuver.edit_preview().node_id))
                     {
                         cutoff_s = edit_node->time_s;
-                        if (std::isfinite(_maneuver.edit_preview().start_time_s))
+                        if (std::isfinite(_state._maneuver.edit_preview().start_time_s))
                         {
                             cutoff_s = std::isfinite(cutoff_s)
-                                               ? std::min(cutoff_s, _maneuver.edit_preview().start_time_s)
-                                               : _maneuver.edit_preview().start_time_s;
+                                               ? std::min(cutoff_s, _state._maneuver.edit_preview().start_time_s)
+                                               : _state._maneuver.edit_preview().start_time_s;
                         }
                     }
                     return cutoff_s;
@@ -222,7 +224,7 @@ namespace Game
                 if (!std::isfinite(cutoff_s) && out.active_player_track)
                 {
                     if (const ManeuverNode *anchor_node =
-                                _maneuver.plan().find_node(_maneuver.active_preview_anchor_node_id()))
+                                _state._maneuver.plan().find_node(_state._maneuver.active_preview_anchor_node_id()))
                     {
                         cutoff_s = anchor_node->time_s;
                     }
@@ -231,7 +233,7 @@ namespace Game
                     (live_preview_active || lifecycle.preview_state != PredictionPreviewRuntimeState::Idle))
                 {
                     if (const ManeuverNode *selected_node =
-                                _maneuver.plan().find_node(_maneuver.plan().selected_node_id))
+                                _state._maneuver.plan().find_node(_state._maneuver.plan().selected_node_id))
                     {
                         cutoff_s = selected_node->time_s;
                     }
@@ -308,8 +310,8 @@ namespace Game
 
         if (out.is_active)
         {
-            _prediction->state().orbit_plot_perf.solver_segments_base = static_cast<uint32_t>(out.traj_base_segments->size());
-            _prediction->state().orbit_plot_perf.solver_segments_planned =
+            _state._prediction->state().orbit_plot_perf.solver_segments_base = static_cast<uint32_t>(out.traj_base_segments->size());
+            _state._prediction->state().orbit_plot_perf.solver_segments_planned =
                     out.traj_planned_segments
                             ? static_cast<uint32_t>(out.traj_planned_segments->size())
                             : 0u;
@@ -330,7 +332,7 @@ namespace Game
                                                     out.frame_to_world);
         out.direct_world_polyline = Draw::frame_spec_uses_direct_world_polyline(
                 out.display_cache->display.resolved_frame_spec_valid ? out.display_cache->display.resolved_frame_spec
-                                                                     : _prediction->state().frame_selection.spec);
+                                                                     : _state._prediction->state().frame_selection.spec);
 
         out.draw_ctx.orbit_plot = global_ctx.orbit_plot;
         out.draw_ctx.ref_body_world = out.ref_body_world;
@@ -343,10 +345,10 @@ namespace Game
         out.draw_ctx.viewport_height_px = std::max(1.0, static_cast<double>(global_ctx.viewport_height_px));
         out.draw_ctx.render_error_px = global_ctx.render_error_px;
         out.draw_ctx.render_max_segments =
-                static_cast<std::size_t>(std::max(1, _prediction->budget().render_max_segments_cpu));
+                static_cast<std::size_t>(std::max(1, _state._prediction->budget().render_max_segments_cpu));
         out.draw_ctx.line_overlay_boost = out.maneuver_drag_active
                                                   ? 0.0f
-                                                  : std::clamp(_prediction->state().line_overlay_boost, 0.0f, 1.0f);
+                                                  : std::clamp(_state._prediction->state().line_overlay_boost, 0.0f, 1.0f);
 
         out.identity_frame_transform = Draw::frame_transform_is_identity(out.frame_to_world);
         out.use_base_adaptive_curve = !out.stable_cache->display.render_curve_frame.empty();
@@ -380,11 +382,11 @@ namespace Game
         }
         if (!out.maneuver_drag_active && !out.is_active)
         {
-            out.draw_ctx.line_overlay_boost = std::clamp(_prediction->state().line_overlay_boost * 0.35f, 0.0f, 1.0f);
+            out.draw_ctx.line_overlay_boost = std::clamp(_state._prediction->state().line_overlay_boost * 0.35f, 0.0f, 1.0f);
         }
         out.world_basis_draw_ctx.line_overlay_boost = out.draw_ctx.line_overlay_boost;
 
-        out.future_window_s = prediction_future_window_s(track.key);
+        out.future_window_s = window_context.future_window_s(track.key);
         const OrbitPredictionCache *planned_window_source = planned_window_source_cache(out);
 
         if (out.planned_window_segments && !out.planned_window_segments->empty() &&
@@ -394,11 +396,11 @@ namespace Game
             const double planned_segments_t1_s =
                     out.planned_window_segments->back().t0_s + out.planned_window_segments->back().dt_s;
             const PredictionTimeContext time_ctx =
-                    build_prediction_time_context(track.key, out.now_s, planned_segments_t0_s, planned_segments_t1_s);
-            out.planned_window_policy = resolve_prediction_window_policy(&track, time_ctx, true);
+                    window_context.build_time_context(track.key, out.now_s, planned_segments_t0_s, planned_segments_t1_s);
+            out.planned_window_policy = window_context.resolve_policy(&track, time_ctx, true);
             if (out.active_player_track)
             {
-                const PredictionTimeContext authored_plan_ctx = build_prediction_time_context(track.key, out.now_s);
+                const PredictionTimeContext authored_plan_ctx = window_context.build_time_context(track.key, out.now_s);
                 if (authored_plan_ctx.has_plan &&
                     (std::isfinite(authored_plan_ctx.first_relevant_node_time_s) ||
                      std::isfinite(authored_plan_ctx.first_future_node_time_s)))
@@ -413,7 +415,7 @@ namespace Game
                                     : authored_plan_start_s;
                     const double authored_plan_end_s =
                             std::isfinite(authored_plan_start_s) && std::isfinite(authored_plan_tail_anchor_s)
-                                    ? std::max(authored_plan_start_s + maneuver_plan_horizon_s(),
+                                    ? std::max(authored_plan_start_s + window_context.maneuver_plan_horizon_s(),
                                                authored_plan_tail_anchor_s +
                                                        OrbitPredictionTuning::kPostNodeCoverageMinS)
                                     : std::numeric_limits<double>::quiet_NaN();

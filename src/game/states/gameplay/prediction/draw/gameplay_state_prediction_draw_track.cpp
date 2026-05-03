@@ -28,8 +28,8 @@ namespace Game
                 return;
             }
             Draw::draw_orbit_window(track_ctx.identity_frame_transform ? track_ctx.draw_ctx : track_ctx.world_basis_draw_ctx,
-                                    _prediction->state().draw_config,
-                                    _prediction->state().orbit_plot_perf,
+                                    _state._prediction->state().draw_config,
+                                    _state._prediction->state().orbit_plot_perf,
                                     track_ctx.identity_frame_transform ? *track_ctx.traj_base_segments
                                                                        : Draw::base_segments_world_basis(track_ctx),
                                     split_t0_s,
@@ -78,8 +78,8 @@ namespace Game
                 if (!anchor_window_valid)
                 {
                     Draw::draw_adaptive_curve_window(track_ctx.draw_ctx,
-                                                     _prediction->state().draw_config,
-                                                     _prediction->state().orbit_plot_perf,
+                                                     _state._prediction->state().draw_config,
+                                                     _state._prediction->state().orbit_plot_perf,
                                                      stable_cache.display.render_curve_frame,
                                                      split_t0_s,
                                                      split_t1_s,
@@ -91,8 +91,8 @@ namespace Game
                 if (anchor_t0_s > split_t0_s)
                 {
                     Draw::draw_adaptive_curve_window(track_ctx.draw_ctx,
-                                                     _prediction->state().draw_config,
-                                                     _prediction->state().orbit_plot_perf,
+                                                     _state._prediction->state().draw_config,
+                                                     _state._prediction->state().orbit_plot_perf,
                                                      stable_cache.display.render_curve_frame,
                                                      split_t0_s,
                                                      anchor_t0_s,
@@ -105,8 +105,8 @@ namespace Game
                 if (split_t1_s > anchor_t1_s)
                 {
                     Draw::draw_adaptive_curve_window(track_ctx.draw_ctx,
-                                                     _prediction->state().draw_config,
-                                                     _prediction->state().orbit_plot_perf,
+                                                     _state._prediction->state().draw_config,
+                                                     _state._prediction->state().orbit_plot_perf,
                                                      stable_cache.display.render_curve_frame,
                                                      anchor_t1_s,
                                                      split_t1_s,
@@ -153,7 +153,7 @@ namespace Game
                                                             const double window_t0_s,
                                                             const double window_t1_s) {
             std::vector<double> anchors;
-            anchors.reserve(cache.solver.maneuver_previews.size() + _maneuver.plan().nodes.size() + 4u);
+            anchors.reserve(cache.solver.maneuver_previews.size() + _state._maneuver.plan().nodes.size() + 4u);
             const auto push_anchor_time = [&](const double t_s, const bool allow_endpoint) {
                 if (!std::isfinite(t_s))
                 {
@@ -183,7 +183,7 @@ namespace Game
                     push_anchor_time(preview.t_s, false);
                 }
             }
-            for (const ManeuverNode &node : _maneuver.plan().nodes)
+            for (const ManeuverNode &node : _state._maneuver.plan().nodes)
             {
                 push_anchor_time(node.time_s, false);
             }
@@ -226,13 +226,13 @@ namespace Game
                 return;
             }
             const bool dashed =
-                    _prediction->state().draw_config.draw_planned_as_dashed &&
+                    _state._prediction->state().draw_config.draw_planned_as_dashed &&
                     !force_solid &&
                     !track_ctx.maneuver_drag_active;
             if (track_ctx.direct_world_polyline)
             {
                 Draw::draw_polyline_window(track_ctx.draw_ctx,
-                                           _prediction->state().draw_config,
+                                           _state._prediction->state().draw_config,
                                            cache.display.trajectory_frame_planned,
                                            window_t0_s,
                                            clipped_window_t1_s,
@@ -247,8 +247,8 @@ namespace Game
                 const std::vector<double> anchors =
                         collect_planned_curve_anchor_times(cache, window_t0_s, clipped_window_t1_s);
                 Draw::draw_adaptive_curve_window(track_ctx.draw_ctx,
-                                                  _prediction->state().draw_config,
-                                                  _prediction->state().orbit_plot_perf,
+                                                  _state._prediction->state().draw_config,
+                                                  _state._prediction->state().orbit_plot_perf,
                                                   cache.display.render_curve_frame_planned,
                                                  window_t0_s,
                                                  clipped_window_t1_s,
@@ -260,8 +260,8 @@ namespace Game
             }
 
             Draw::draw_orbit_window(track_ctx.identity_frame_transform ? track_ctx.draw_ctx : track_ctx.world_basis_draw_ctx,
-                                    _prediction->state().draw_config,
-                                    _prediction->state().orbit_plot_perf,
+                                    _state._prediction->state().draw_config,
+                                    _state._prediction->state().orbit_plot_perf,
                                     track_ctx.identity_frame_transform
                                             ? cache.display.trajectory_segments_frame_planned
                                             : Draw::planned_segments_world_basis(track_ctx, cache.display),
@@ -292,14 +292,14 @@ namespace Game
                 return false;
             }
             const bool dashed =
-                    _prediction->state().draw_config.draw_planned_as_dashed &&
+                    _state._prediction->state().draw_config.draw_planned_as_dashed &&
                     !force_solid &&
                     !track_ctx.maneuver_drag_active;
 
             if (track_ctx.direct_world_polyline && chunk.frame_samples.size() >= 2)
             {
                 Draw::draw_polyline_window(track_ctx.draw_ctx,
-                                           _prediction->state().draw_config,
+                                           _state._prediction->state().draw_config,
                                            chunk.frame_samples,
                                            window_t0_s,
                                            window_t1_s,
@@ -311,8 +311,8 @@ namespace Game
             if (!chunk.render_curve.empty())
             {
                 Draw::draw_adaptive_curve_window(track_ctx.draw_ctx,
-                                                 _prediction->state().draw_config,
-                                                 _prediction->state().orbit_plot_perf,
+                                                 _state._prediction->state().draw_config,
+                                                 _state._prediction->state().orbit_plot_perf,
                                                  chunk.render_curve,
                                                  window_t0_s,
                                                  window_t1_s,
@@ -329,8 +329,8 @@ namespace Game
             }
 
             Draw::draw_orbit_window(track_ctx.draw_ctx,
-                                    _prediction->state().draw_config,
-                                    _prediction->state().orbit_plot_perf,
+                                    _state._prediction->state().draw_config,
+                                    _state._prediction->state().orbit_plot_perf,
                                     chunk.frame_segments,
                                     window_t0_s,
                                     window_t1_s,
@@ -404,18 +404,18 @@ namespace Game
                 (overlay_layers.active_maneuver_track &&
                  track_ctx.planned_window_segments && !track_ctx.planned_window_segments->empty())
                         ? Draw::build_planned_draw_window(*track_ctx.planned_window_segments,
-                                                          _prediction->state().draw_config,
+                                                          _state._prediction->state().draw_config,
                                                           track_ctx.planned_window_policy)
                         : preview_anchor_window();
         track_ctx.planned_pick_window =
                 (overlay_layers.active_maneuver_track &&
                  track_ctx.planned_window_segments && !track_ctx.planned_window_segments->empty())
                         ? Draw::build_planned_pick_window(*track_ctx.planned_window_segments,
-                                                          _prediction->state().draw_config,
+                                                          _state._prediction->state().draw_config,
                                                           track_ctx.planned_window_policy)
                         : preview_anchor_pick_window();
 
-        if (_prediction->state().draw_full_orbit)
+        if (_state._prediction->state().draw_full_orbit)
         {
             double t_full_end = track_ctx.t1_s;
             if (stable_cache.analysis.orbital_period_s > 0.0 &&
@@ -433,7 +433,7 @@ namespace Game
             if (track_ctx.direct_world_polyline)
             {
                 Draw::draw_polyline_window(track_ctx.draw_ctx,
-                                           _prediction->state().draw_config,
+                                           _state._prediction->state().draw_config,
                                            *track_ctx.traj_base,
                                            t_full_start,
                                            t_full_end,
@@ -445,7 +445,7 @@ namespace Game
                 draw_cpu_base_window(t_full_start, t_full_end, track_ctx.track_color_full);
             }
 
-            if (track_ctx.is_active && !_prediction->state().draw_future_segment && t_full_end > t_full_start)
+            if (track_ctx.is_active && !_state._prediction->state().draw_future_segment && t_full_end > t_full_start)
             {
                 track_ctx.base_pick_window.valid = true;
                 track_ctx.base_pick_window.t0_s = t_full_start;
@@ -453,7 +453,7 @@ namespace Game
             }
         }
 
-        if (_prediction->state().draw_future_segment)
+        if (_state._prediction->state().draw_future_segment)
         {
             const double t_end =
                     (track_ctx.future_window_s > 0.0) ? std::min(track_ctx.now_s + track_ctx.future_window_s, track_ctx.t1_s)
@@ -462,7 +462,7 @@ namespace Game
             if (track_ctx.direct_world_polyline)
             {
                 Draw::draw_polyline_window(track_ctx.draw_ctx,
-                                           _prediction->state().draw_config,
+                                           _state._prediction->state().draw_config,
                                            *track_ctx.traj_base,
                                            track_ctx.now_s,
                                            t_end,
@@ -484,20 +484,20 @@ namespace Game
 
         if (track_ctx.active_player_track)
         {
-            _prediction->state().orbit_plot_perf.planned_window_valid = track_ctx.planned_draw_window.valid;
-            _prediction->state().orbit_plot_perf.planned_window_now_s = track_ctx.now_s;
-            _prediction->state().orbit_plot_perf.planned_window_anchor_s = track_ctx.planned_draw_window.anchor_time_s;
-            _prediction->state().orbit_plot_perf.planned_window_t_start = track_ctx.planned_draw_window.t0_s;
-            _prediction->state().orbit_plot_perf.planned_window_t_end = track_ctx.planned_draw_window.t1_s;
-            _prediction->state().orbit_plot_perf.planned_window_t0p =
+            _state._prediction->state().orbit_plot_perf.planned_window_valid = track_ctx.planned_draw_window.valid;
+            _state._prediction->state().orbit_plot_perf.planned_window_now_s = track_ctx.now_s;
+            _state._prediction->state().orbit_plot_perf.planned_window_anchor_s = track_ctx.planned_draw_window.anchor_time_s;
+            _state._prediction->state().orbit_plot_perf.planned_window_t_start = track_ctx.planned_draw_window.t0_s;
+            _state._prediction->state().orbit_plot_perf.planned_window_t_end = track_ctx.planned_draw_window.t1_s;
+            _state._prediction->state().orbit_plot_perf.planned_window_t0p =
                     (track_ctx.traj_planned_segments && !track_ctx.traj_planned_segments->empty())
                             ? track_ctx.traj_planned_segments->front().t0_s
                             : 0.0;
-            _prediction->state().orbit_plot_perf.planned_chunk_count = 0;
-            _prediction->state().orbit_plot_perf.planned_chunks_drawn = 0;
-            _prediction->state().orbit_plot_perf.planned_chunk_enqueue_ms_last = 0.0;
-            _prediction->state().orbit_plot_perf.planned_fallback_range_count = 0;
-            _prediction->state().orbit_plot_perf.planned_fallback_draw_ms_last = 0.0;
+            _state._prediction->state().orbit_plot_perf.planned_chunk_count = 0;
+            _state._prediction->state().orbit_plot_perf.planned_chunks_drawn = 0;
+            _state._prediction->state().orbit_plot_perf.planned_chunk_enqueue_ms_last = 0.0;
+            _state._prediction->state().orbit_plot_perf.planned_fallback_range_count = 0;
+            _state._prediction->state().orbit_plot_perf.planned_fallback_draw_ms_last = 0.0;
         }
 
         if (!track_ctx.planned_draw_window.valid)
@@ -531,7 +531,7 @@ namespace Game
                     const glm::vec4 &color,
                     const std::vector<std::pair<double, double>> *masked_ranges,
                     std::vector<std::pair<double, double>> &out_drawn_ranges) {
-                    _prediction->state().orbit_plot_perf.planned_chunk_count += static_cast<uint32_t>(assembly.chunks.size());
+                    _state._prediction->state().orbit_plot_perf.planned_chunk_count += static_cast<uint32_t>(assembly.chunks.size());
                     for (const OrbitChunk &chunk : assembly.chunks)
                     {
                         if (!std::isfinite(chunk.t0_s) || !std::isfinite(chunk.t1_s))
@@ -575,7 +575,7 @@ namespace Game
 
                         if (drew_chunk)
                         {
-                            ++_prediction->state().orbit_plot_perf.planned_chunks_drawn;
+                            ++_state._prediction->state().orbit_plot_perf.planned_chunks_drawn;
                         }
                     }
                 };
@@ -594,7 +594,7 @@ namespace Game
                             Draw::compute_uncovered_ranges(planned_window_t0_s,
                                                            planned_window_t1_s,
                                                            covered_ranges);
-                    _prediction->state().orbit_plot_perf.planned_fallback_range_count =
+                    _state._prediction->state().orbit_plot_perf.planned_fallback_range_count =
                             static_cast<uint32_t>(uncovered_ranges.size());
                     for (const auto &[range_t0_s, range_t1_s] : uncovered_ranges)
                     {
@@ -761,7 +761,7 @@ namespace Game
         std::vector<std::pair<double, double>> covered_ranges;
         covered_ranges.reserve(preview_assembly.chunks.size());
         double first_preview_t0_s = std::numeric_limits<double>::quiet_NaN();
-        _prediction->state().orbit_plot_perf.planned_chunk_count += static_cast<uint32_t>(preview_assembly.chunks.size());
+        _state._prediction->state().orbit_plot_perf.planned_chunk_count += static_cast<uint32_t>(preview_assembly.chunks.size());
         for (const OrbitChunk &chunk : preview_assembly.chunks)
         {
             const double clipped_t0_s = std::max(planned_window_t0_s, chunk.t0_s);
@@ -784,7 +784,7 @@ namespace Game
             first_preview_t0_s = std::isfinite(first_preview_t0_s)
                                          ? std::min(first_preview_t0_s, clipped_t0_s)
                                          : clipped_t0_s;
-            ++_prediction->state().orbit_plot_perf.planned_chunks_drawn;
+            ++_state._prediction->state().orbit_plot_perf.planned_chunks_drawn;
         }
 
         if (full_stream_assembly)
@@ -807,7 +807,7 @@ namespace Game
 
         const std::vector<std::pair<double, double>> uncovered_ranges =
                 Draw::compute_uncovered_ranges(planned_window_t0_s, planned_window_t1_s, covered_ranges);
-        _prediction->state().orbit_plot_perf.planned_fallback_range_count = static_cast<uint32_t>(uncovered_ranges.size());
+        _state._prediction->state().orbit_plot_perf.planned_fallback_range_count = static_cast<uint32_t>(uncovered_ranges.size());
         const double drag_prefix_cutoff_s =
                 track_ctx.maneuver_drag_active && std::isfinite(track_ctx.planned_draw_window.anchor_time_s)
                         ? track_ctx.planned_draw_window.anchor_time_s

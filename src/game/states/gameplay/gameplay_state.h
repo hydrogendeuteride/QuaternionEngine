@@ -87,15 +87,14 @@ namespace Game
         void apply_settings(const GameplaySettings &s);
         void setup_scene(GameStateContext &ctx);
         void setup_environment(GameStateContext &ctx);
-        void init_orbitsim(WorldVec3 &player_pos_world, glm::dvec3 &player_vel_world);
 
         // Simulation and time warp
         double current_sim_time_s() const;
-        OrbitalPhysicsSystem::Context build_orbital_physics_context();
         ComponentContext build_component_context(GameStateContext &ctx, float alpha = 0.0f);
         void reset_time_warp_state();
         void handle_time_warp_input(GameStateContext &ctx);
         void set_time_warp_level(GameStateContext &ctx, int level);
+        bool ui_capture_keyboard(const GameStateContext &ctx) const;
 
         // Orbiter adapters
         void update_rebase_anchor();

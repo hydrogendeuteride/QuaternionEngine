@@ -6,6 +6,8 @@
 #include "game/states/gameplay/maneuver/maneuver_prediction_bridge.h"
 #include "game/states/gameplay/maneuver/maneuver_ui_controller.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
+#include "game/states/gameplay/prediction/prediction_frame_context_builder.h"
+#include "game/states/gameplay/prediction/runtime/prediction_window_context_builder.h"
 
 #include "core/engine.h"
 
@@ -152,9 +154,12 @@ namespace Game
 
         const double now_s = current_sim_time_s();
         GameplayPredictionAdapter prediction(state);
+        const GameplayPredictionContext prediction_context = prediction.context();
+        PredictionFrameContextBuilder prediction_frame(prediction_context);
+        PredictionWindowContextBuilder prediction_window(prediction_context);
         const PredictionTrackState *player_track = prediction.player_prediction_track();
         const PredictionSubjectKey time_key = player_track ? player_track->key : PredictionSubjectKey{};
-        const PredictionTimeContext time_ctx = prediction.build_prediction_time_context(time_key, now_s);
+        const PredictionTimeContext time_ctx = prediction_window.build_time_context(time_key, now_s);
         const auto to_t_plus_s = [&time_ctx](const double absolute_time_s) {
             return absolute_time_s - time_ctx.sim_now_s;
         };
@@ -175,9 +180,9 @@ namespace Game
             {
                 if (!player_cache->solver.resolved_trajectory_inertial().empty())
                 {
-                    return prediction.resolve_prediction_analysis_body_id(*player_cache,
-                                                                          player_track->key,
-                                                                          now_s);
+                    return prediction_frame.resolve_prediction_analysis_body_id(*player_cache,
+                                                                                player_track->key,
+                                                                                now_s);
                 }
             }
 
@@ -277,7 +282,7 @@ namespace Game
         if (player_track)
         {
             const bool has_plan = _maneuver.settings().nodes_enabled && !_maneuver.plan().nodes.empty();
-            const uint64_t current_plan_signature = has_plan ? prediction.current_maneuver_plan_signature() : 0u;
+            const uint64_t current_plan_signature = has_plan ? prediction_window.current_maneuver_plan_signature() : 0u;
             const auto cache_has_ready_current_plan = [&](const OrbitPredictionCache &cache) {
                 return has_plan &&
                        cache.identity.valid &&
@@ -954,13 +959,13 @@ namespace Game
 
         const OrbitPredictionCache *player_cache = prediction.effective_prediction_cache(player_track);
         const orbitsim::BodyId analysis_body_id = player_cache
-                                                      ? prediction.resolve_prediction_analysis_body_id(*player_cache,
-                                                                                                      player_track->key,
-                                                                                                      sel->time_s)
+                                                      ? prediction_frame.resolve_prediction_analysis_body_id(*player_cache,
+                                                                                                            player_track->key,
+                                                                                                            sel->time_s)
                                                       : default_node_primary_body_id();
         const orbitsim::BodyId effective_primary_body_id =
                 resolve_maneuver_node_primary_body_id(*sel, sel->time_s);
-        if (const CelestialBodyInfo *primary_body = prediction.find_celestial_body_info(effective_primary_body_id))
+        if (const CelestialBodyInfo *primary_body = prediction_frame.find_celestial_body_info(effective_primary_body_id))
         {
             ImGui::Text("Primary body: %s%s",
                         primary_body->name.c_str(),
@@ -975,7 +980,7 @@ namespace Game
                     ManeuverCommand::set_node_primary_body(sel->id, auto_primary, primary_body_id));
         }
 
-        if (const CelestialBodyInfo *analysis_body = prediction.find_celestial_body_info(analysis_body_id))
+        if (const CelestialBodyInfo *analysis_body = prediction_frame.find_celestial_body_info(analysis_body_id))
         {
             ImGui::Text("Analysis body: %s", analysis_body->name.c_str());
             if (ImGui::Button("Use Analysis Body"))

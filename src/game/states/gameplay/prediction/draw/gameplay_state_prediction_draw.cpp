@@ -15,9 +15,9 @@ namespace Game
     {
         out.picking = (ctx.renderer != nullptr) ? ctx.renderer->picking() : nullptr;
         out.orbit_plot = (ctx.renderer && ctx.renderer->_context) ? ctx.renderer->_context->orbit_plot : nullptr;
-        Draw::reset_orbit_plot_state(out.picking, out.orbit_plot, _prediction->state().orbit_plot_perf, _prediction->state().enabled);
+        Draw::reset_orbit_plot_state(out.picking, out.orbit_plot, _state._prediction->state().orbit_plot_perf, _state._prediction->state().enabled);
 
-        if (!_prediction->state().enabled || !ctx.api || !_orbit.scenario_owner())
+        if (!_state._prediction->state().enabled || !ctx.api || !_state._orbit.scenario_owner())
         {
             return false;
         }
@@ -28,8 +28,8 @@ namespace Game
         }
 
         out.alpha_f = std::clamp(ctx.interpolation_alpha(), 0.0f, 1.0f);
-        out.display_time_s = Draw::compute_prediction_display_time_s(_orbit.scenario_owner()->sim.time_s(),
-                                                                     _orbital_physics.last_sim_step_dt_s(),
+        out.display_time_s = Draw::compute_prediction_display_time_s(_state._orbit.scenario_owner()->sim.time_s(),
+                                                                     _state._orbital_physics.last_sim_step_dt_s(),
                                                                      ctx.fixed_delta_time(),
                                                                      out.alpha_f);
         if (!std::isfinite(out.display_time_s))
@@ -40,9 +40,9 @@ namespace Game
         // DebugDrawSystem prunes commands during begin_frame, so keep velocity rays
         // alive slightly longer than the current dt.
         out.ttl_s = std::clamp(ctx.delta_time(), 0.0f, 0.1f) + 0.002f;
-        out.line_alpha_scale = std::clamp(_prediction->state().line_alpha_scale, 0.1f, 8.0f);
+        out.line_alpha_scale = std::clamp(_state._prediction->state().line_alpha_scale, 0.1f, 8.0f);
         out.color_orbit_plan =
-                Draw::scale_line_color(_prediction->state().draw_config.palette.orbit_planned, out.line_alpha_scale);
+                Draw::scale_line_color(_state._prediction->state().draw_config.palette.orbit_planned, out.line_alpha_scale);
 
         out.camera_world = ctx.api->get_camera_position_d();
         float camera_fov_deg = 70.0f;
@@ -71,8 +71,8 @@ namespace Game
         }
 
         out.render_error_px =
-                (std::isfinite(_prediction->budget().render_error_px) && _prediction->budget().render_error_px > 0.0)
-                        ? _prediction->budget().render_error_px
+                (std::isfinite(_state._prediction->budget().render_error_px) && _state._prediction->budget().render_error_px > 0.0)
+                        ? _state._prediction->budget().render_error_px
                         : 0.75;
         if (out.orbit_plot)
         {
@@ -92,7 +92,7 @@ namespace Game
         }
 
         std::vector<PredictionTrackState *> visible_tracks;
-        visible_tracks.reserve(1 + _prediction->state().selection.overlay_subjects.size());
+        visible_tracks.reserve(1 + _state._prediction->state().selection.overlay_subjects.size());
         for (PredictionSubjectKey key : collect_visible_prediction_subjects())
         {
             if (PredictionTrackState *track = find_prediction_track(key))
@@ -126,15 +126,15 @@ namespace Game
             }
 
             if (track_ctx.is_active &&
-                _prediction->state().draw_velocity_ray &&
-                _debug_draw_enabled &&
+                _state._prediction->state().draw_velocity_ray &&
+                _state._debug_draw_enabled &&
                 track_ctx.track->key.kind == PredictionSubjectKind::Orbiter)
             {
                 Draw::emit_velocity_ray(ctx.api,
                                         track_ctx.subject_pos_world,
                                         track_ctx.subject_vel_world,
                                         global_ctx.ttl_s,
-                                        _prediction->state().draw_config.palette.velocity_ray);
+                                        _state._prediction->state().draw_config.palette.velocity_ray);
             }
         }
     }

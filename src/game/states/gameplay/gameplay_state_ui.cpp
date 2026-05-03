@@ -5,6 +5,7 @@
 #include "game/states/gameplay/maneuver/gameplay_state_maneuver_gizmo_helpers.h"
 #include "game/states/gameplay/maneuver/maneuver_ui_controller.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
+#include "game/states/gameplay/prediction/prediction_host_context_builder.h"
 #include "game/states/gameplay/scenario/scenario_loader.h"
 #include "game/component/ship_controller.h"
 #include "core/engine.h"
@@ -228,6 +229,8 @@ namespace Game
     void GameplayState::on_draw_ui(GameStateContext &ctx)
     {
         GameplayPredictionAdapter prediction(*this);
+        PredictionSubjectStateProvider prediction_subjects =
+                PredictionHostContextBuilder(prediction.context()).make_subject_state_provider();
 
         if (ImGui::BeginMainMenuBar())
         {
@@ -485,7 +488,9 @@ namespace Game
                                     WorldVec3 ship_pos_world{0.0, 0.0, 0.0};
                                     glm::dvec3 ship_vel_world(0.0);
                                     glm::vec3 ship_vel_local_f(0.0f);
-                                    if (prediction.get_player_world_state(ship_pos_world, ship_vel_world, ship_vel_local_f))
+                                    if (prediction_subjects.get_player_world_state(ship_pos_world,
+                                                                                   ship_vel_world,
+                                                                                   ship_vel_local_f))
                                     {
                                         ImGui::Text("Speed(world): %.2f m/s", glm::length(ship_vel_world));
                                     }
@@ -644,10 +649,10 @@ namespace Game
                                                   : std::string("None");
                     const bool have_subject =
                             active_prediction &&
-                            prediction.get_prediction_subject_world_state(active_prediction->key,
-                                                                          subject_pos_world,
-                                                                          subject_vel_world,
-                                                                          subject_vel_local_f);
+                            prediction_subjects.get_subject_world_state(active_prediction->key,
+                                                                        subject_pos_world,
+                                                                        subject_vel_world,
+                                                                        subject_vel_local_f);
                     if (!have_subject)
                     {
                         ImGui::TextUnformatted("Prediction subject state unavailable.");

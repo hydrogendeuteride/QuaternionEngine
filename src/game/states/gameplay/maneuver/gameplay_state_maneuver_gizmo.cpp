@@ -4,7 +4,9 @@
 #include "game/states/gameplay/maneuver/maneuver_commands.h"
 #include "game/states/gameplay/maneuver/maneuver_ui_controller.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
+#include "game/states/gameplay/prediction/prediction_frame_context_builder.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
+#include "game/states/gameplay/prediction/runtime/prediction_window_context_builder.h"
 
 #include "core/engine.h"
 #include "core/input/input_system.h"
@@ -136,19 +138,23 @@ namespace Game
         }
 
         const double analysis_time_s = state.current_sim_time_s();
-        GameplayPredictionAdapter prediction(state);
-        const PredictionTrackState *player_track = prediction.player_prediction_track();
-        const OrbitPredictionCache *player_cache = prediction.effective_prediction_cache(player_track);
+        const GameplayPredictionContext prediction_context = GameplayPredictionAdapter::build_context(state);
+        PredictionFrameContextBuilder prediction_frame(prediction_context);
+        const PredictionTrackState *player_track = prediction_frame.player_prediction_track();
+        const OrbitPredictionCache *player_cache = prediction_frame.effective_prediction_cache(player_track);
         const orbitsim::BodyId occluder_body_id =
                 (state._prediction->state().analysis_selection.spec.mode == PredictionAnalysisMode::FixedBodyBCI)
                     ? state._prediction->state().analysis_selection.spec.fixed_body_id
                     : ((player_track && player_cache)
-                               ? prediction.resolve_prediction_analysis_body_id(*player_cache, player_track->key, analysis_time_s)
+                               ? prediction_frame.resolve_prediction_analysis_body_id(*player_cache, player_track->key, analysis_time_s)
                                : orbitsim::kInvalidBodyId);
-        const CelestialBodyInfo *ref_info = prediction.find_celestial_body_info(occluder_body_id);
+        const CelestialBodyInfo *ref_info = prediction_frame.find_celestial_body_info(occluder_body_id);
         out_view.depth_occluder_valid = ref_info && std::isfinite(ref_info->radius_m) && ref_info->radius_m > 0.0;
         out_view.depth_occluder_center = out_view.depth_occluder_valid
-                                             ? prediction.prediction_body_world_position(occluder_body_id, player_cache, analysis_time_s)
+                                             ? prediction_frame.prediction_body_world_position(
+                                                       occluder_body_id,
+                                                       player_cache,
+                                                       analysis_time_s)
                                              : WorldVec3(0.0, 0.0, 0.0);
         out_view.depth_occluder_radius = out_view.depth_occluder_valid ? ref_info->radius_m : 0.0;
         return true;
@@ -200,10 +206,10 @@ namespace Game
         {
             return false;
         }
-        GameplayPredictionAdapter prediction(state);
-        if (PredictionTrackState *track = prediction.active_prediction_track())
+        if (PredictionTrackState *track = state._prediction->active_track())
         {
-            prediction.refresh_prediction_preview_anchor(*track, state.current_sim_time_s(), true);
+            PredictionWindowContextBuilder(GameplayPredictionAdapter::build_context(state))
+                    .refresh_preview_anchor(*track, state.current_sim_time_s(), true);
 
             PredictionDragDebugTelemetry &debug = track->drag_debug;
             const auto now_tp = PredictionDragDebugTelemetry::Clock::now();
@@ -258,16 +264,14 @@ namespace Game
             node.total_dv_mps = ManeuverUtil::safe_length(node.dv_rtn_mps);
             state._maneuver.gizmo_interaction().applied_delta = true;
 
-            GameplayPredictionAdapter prediction(state);
-            if (PredictionTrackState *track = prediction.active_prediction_track())
+            if (PredictionTrackState *track = state._prediction->active_track())
             {
                 state._prediction->mark_maneuver_preview_dirty(*track);
-                prediction.sync_prediction_dirty_flag();
+                state._prediction->sync_visible_dirty_flag(state._prediction->collect_visible_subjects());
             }
         }
 
-        GameplayPredictionAdapter prediction(state);
-        if (PredictionTrackState *track = prediction.active_prediction_track())
+        if (PredictionTrackState *track = state._prediction->active_track())
         {
             PredictionDragDebugTelemetry &debug = track->drag_debug;
             const auto drag_apply_end_tp = PredictionDragDebugTelemetry::Clock::now();

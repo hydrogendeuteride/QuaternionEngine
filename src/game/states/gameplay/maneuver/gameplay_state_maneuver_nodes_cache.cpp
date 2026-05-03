@@ -2,6 +2,7 @@
 #include "game/states/gameplay/maneuver/maneuver_prediction_bridge.h"
 #include "game/states/gameplay/maneuver/maneuver_runtime_cache_builder.h"
 #include "game/states/gameplay/prediction/gameplay_prediction_adapter.h"
+#include "game/states/gameplay/prediction/prediction_frame_context_builder.h"
 #include "game/states/gameplay/prediction/runtime/gameplay_state_prediction_runtime_internal.h"
 
 #include <algorithm>
@@ -68,7 +69,8 @@ namespace Game
             {
                 display_time_s = std::clamp(now_s, t0, t1);
                 align_delta = ManeuverPredictionBridge::compute_align_delta(*this, ctx, *active_cache, traj_base);
-                frame_context = prediction.build_prediction_frame_resolver_context();
+                frame_context = PredictionFrameContextBuilder(GameplayPredictionAdapter::build_context(*this))
+                                        .build_prediction_frame_resolver_context();
             }
             else
             {

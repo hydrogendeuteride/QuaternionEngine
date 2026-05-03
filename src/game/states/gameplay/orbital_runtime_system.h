@@ -8,6 +8,8 @@
 
 namespace Game
 {
+    struct ScenarioConfig;
+
     class OrbitalRuntimeSystem
     {
     public:
@@ -21,6 +23,9 @@ namespace Game
         [[nodiscard]] OrbitalScenario *scenario() { return _scenario.get(); }
         [[nodiscard]] const OrbitalScenario *scenario() const { return _scenario.get(); }
         void set_scenario(std::unique_ptr<OrbitalScenario> scenario);
+        void initialize_scenario(const ScenarioConfig &config,
+                                 WorldVec3 &player_pos_world,
+                                 glm::dvec3 &player_vel_world);
 
         [[nodiscard]] bool &runtime_orbiter_rails_enabled() { return _runtime_orbiter_rails_enabled; }
         [[nodiscard]] bool runtime_orbiter_rails_enabled() const { return _runtime_orbiter_rails_enabled; }
