@@ -30,6 +30,8 @@ namespace Game
     // ── Constants ──────────────────────────────────────────────────────────────
     constexpr double kEphemerisDurationEpsilonS = 1.0e-6;
     constexpr double kEphemerisDtEpsilonS = 1.0e-9;
+    constexpr double kPlannedChunkBoundaryEpsilonS = 1.0e-9;
+    constexpr uint64_t kPlannedCacheHashSeed = 0xcbf29ce484222325ULL;
     constexpr std::size_t kMaxCachedEphemerides = 64;
 
     using CancelCheck = std::function<bool()>;
@@ -478,9 +480,63 @@ namespace Game
         bool reused_from_cache{false};
     };
 
+    struct PlannedChunkAttemptRequest
+    {
+        OrbitPredictionService::PredictionChunkPlan chunk{};
+        OrbitPredictionService::PredictionChunkPlan effective_chunk{};
+        bool split_chunk{false};
+        bool include_chunk_end_impulse{false};
+        uint64_t baseline_generation_id{0};
+        uint64_t frame_independent_generation{0};
+        orbitsim::State start_state{};
+    };
+
     // ── Planned trajectory helpers (orbit_prediction_service_planned.cpp) ────
+    void accumulate_planned_stage_diagnostics(
+            OrbitPredictionService::AdaptiveStageDiagnostics &dst,
+            const OrbitPredictionService::AdaptiveStageDiagnostics &src,
+            double &dt_sum_s,
+            bool &has_dt);
+    void append_planned_chunk_samples(std::vector<orbitsim::TrajectorySample> &dst,
+                                      std::vector<orbitsim::TrajectorySample> src);
+
+    uint64_t planned_baseline_generation_hash(const OrbitPredictionService::Request &request,
+                                              double start_time_s,
+                                              const orbitsim::State &start_state);
+    uint64_t planned_solver_context_hash(const OrbitPredictionService::Request &request,
+                                         const std::vector<orbitsim::MassiveBody> &massive_bodies);
+    void accumulate_planned_maneuver_cache_hash(
+            uint64_t &seed,
+            const OrbitPredictionService::ManeuverImpulse &impulse);
+    OrbitPredictionService::PlannedChunkCacheKey make_planned_chunk_cache_key(
+            const OrbitPredictionService::Request &request,
+            const OrbitPredictionService::PredictionChunkPlan &chunk,
+            OrbitPredictionService::PredictionProfileId profile_id,
+            uint64_t baseline_generation_id,
+            uint64_t frame_independent_generation,
+            uint64_t upstream_maneuver_hash);
+
+    bool planned_maneuver_impulse_input_is_valid(
+            const OrbitPredictionService::ManeuverImpulse &src);
+    void record_planned_maneuver_apply_failure(
+            OrbitPredictionService::AdaptiveStageDiagnostics &diagnostics,
+            int node_id);
+    bool apply_planned_maneuver_impulse_to_spacecraft(
+            orbitsim::Spacecraft &spacecraft,
+            const OrbitPredictionService::ManeuverImpulse &src,
+            const std::vector<orbitsim::MassiveBody> &massive_bodies,
+            const orbitsim::CelestialEphemeris &ephemeris,
+            double softening_length_m,
+            std::vector<OrbitPredictionService::ManeuverNodePreview> *out_previews,
+            std::vector<PlannedSegmentBoundaryState> *out_boundaries,
+            OrbitPredictionService::AdaptiveStageDiagnostics &diagnostics);
+
     void append_planned_chunk_packet(PlannedSolveOutput &planned, PlannedChunkPacket packet);
     void apply_planned_range_summary(PlannedSolveOutput &planned, const PlannedSolveRangeSummary &summary);
+
+    ChunkAttemptOutput solve_planned_chunk_attempt(
+            PlannedTrajectoryContext &ctx,
+            const PlannedChunkAttemptRequest &request);
 
     OrbitPredictionService::PublishedChunk make_published_chunk(
             const PlannedChunkPacket &packet,
